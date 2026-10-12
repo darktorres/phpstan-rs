@@ -335,6 +335,9 @@ function valid_site(ReflectionParameter $param): ?Closure
         'mb_ereg_replace_callback' => [3 => static fn (): null => null],
         'strtr' => [1 => static fn (): array => ['a' => 'b']],
         'fopen' => [1 => 'r'],
+        'stream_copy_to_stream' => [0 => static fn (): mixed => fopen('php://memory', 'r+'), 1 => static fn (): mixed => fopen('php://memory', 'r+')],
+        'sodium_crypto_secretstream_xchacha20poly1305_push' => [0 => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0]],
+        'array_multisort' => [0 => static fn (): array => [3, 1, 2]],
         // A no-op command and no descriptors: proc_open starts a process whatever it is given.
         'proc_open' => [0 => 'true', 1 => static fn (): array => []],
         'zip_entry_close' => [0 => static fn (): mixed => zip_entry_sample()],
@@ -422,7 +425,7 @@ function arguments(array $params, int $at, mixed $probe): array
         }
         if ($i === $at) {
             $args[$i] = $probe;
-        } elseif ($listen && admits($param->getType(), 'string')) {
+        } elseif ($listen && declares_string($param)) {
             $args[$i] = Seen::$probeUrl;
             $listen = false;
         } else {
@@ -430,6 +433,23 @@ function arguments(array $params, int $at, mixed $probe): array
         }
     }
     return $args;
+}
+
+/** Whether a parameter is declared as a string: `string`, or a union with it (an untyped parameter is not). */
+function declares_string(ReflectionParameter $param): bool
+{
+    $type = $param->getType();
+    if ($type instanceof ReflectionNamedType) {
+        return $type->getName() === 'string';
+    }
+    if ($type instanceof ReflectionUnionType) {
+        foreach ($type->getTypes() as $member) {
+            if ($member instanceof ReflectionNamedType && $member->getName() === 'string') {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /** Where a probe is: its parameter's position, and `[]` for the elements of an array. */
