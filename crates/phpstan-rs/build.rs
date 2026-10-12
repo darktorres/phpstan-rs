@@ -42,11 +42,13 @@ struct Table {
     held_wrappers: BTreeMap<String, Vec<String>>,
     /// The positions at which a function keeps none of a callable it is given.
     releases: BTreeMap<String, Vec<u32>>,
+    /// The builtins that run code the table cannot name whatever their arguments.
+    unnamed: Vec<String>,
 }
 
 /// Reads the table, failing on a line that is not
 /// `builtin<TAB>place<TAB>kind<TAB>detail`, lowercased: `probed` with no
-/// place or detail; `calls` or `releases` with no detail; `method` or
+/// place or detail; `unnamed` with neither; `calls` or `releases` with no detail; `method` or
 /// `wrapper` with one; a place an argument's position, `[]` after it for its elements,
 /// and `new:` before it for one the object was made with, or `by:<method>:`
 /// for one another method of the class was given, on a method.
@@ -74,6 +76,13 @@ fn read_table(path: &Path) -> Table {
             table.probed.push(builtin.to_owned());
             continue;
         }
+        if kind == "unnamed" {
+            if !place.is_empty() || !detail.is_empty() {
+                fail("an unnamed line has no place or detail");
+            }
+            table.unnamed.push(builtin.to_owned());
+            continue;
+        }
         if kind == "releases" {
             let Ok(at) = place.parse::<u32>() else {
                 fail("a releases line's place is an argument's position");
@@ -94,7 +103,7 @@ fn read_table(path: &Path) -> Table {
             "wrapper" if !detail.is_empty() => format!("BuiltinRun::Wrapper({detail:?})"),
             "calls" => fail("a calls line has no detail"),
             "method" | "wrapper" => fail("a method or wrapper line names its method"),
-            _ => fail("the kind is probed, calls, method, wrapper or releases"),
+            _ => fail("the kind is probed, unnamed, calls, method, wrapper or releases"),
         };
         let (held, at) = match place.strip_prefix("new:") {
             Some(at) => (true, at),
@@ -134,7 +143,7 @@ fn read_table(path: &Path) -> Table {
             .or_default()
             .push((at, elements, run));
     }
-    for names in [&mut table.probed, &mut table.holding] {
+    for names in [&mut table.probed, &mut table.holding, &mut table.unnamed] {
         names.sort_unstable();
         names.dedup();
     }
@@ -165,6 +174,10 @@ fn write_table(table: &Table, out: &Path) {
             );
         }
         let _ = writeln!(code, "]),");
+    }
+    let _ = writeln!(code, "];\nstatic UNNAMED: &[&str] = &[");
+    for name in &table.unnamed {
+        let _ = writeln!(code, "    {name:?},");
     }
     let _ = writeln!(code, "];\nstatic HOLDING: &[&str] = &[");
     for name in &table.holding {

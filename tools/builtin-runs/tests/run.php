@@ -89,7 +89,7 @@ foreach (file($committed, FILE_IGNORE_NEW_LINES) as $line) {
     if (!preg_match('/^(new:|by:[a-z0-9_]+:)?\d+(\[\])?$|^$/', $place)) {
         $bad[] = "place: $line";
     }
-    if (!in_array($kind, ['probed', 'calls', 'method', 'wrapper', 'releases'], true)) {
+    if (!in_array($kind, ['probed', 'unnamed', 'calls', 'method', 'wrapper', 'releases'], true)) {
         $bad[] = "kind: $line";
     }
 }

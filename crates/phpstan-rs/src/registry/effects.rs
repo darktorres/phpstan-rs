@@ -932,6 +932,13 @@ mod builtin_runs {
             .is_ok_and(|found| RELEASES[found].1.contains(&at))
     }
 
+    /// Whether the builtin (lowercased) runs code the table cannot name
+    /// whatever its arguments: a user class's method, reached through an
+    /// argument whose kind has no row.
+    pub(super) fn unnamed(name: &str) -> bool {
+        UNNAMED.binary_search(&name).is_ok()
+    }
+
     /// Whether the method (`class::method`, lowercased) ran a callable or
     /// an object's method its object was made with, or given by another
     /// method.
@@ -2256,6 +2263,7 @@ impl Registry {
         builtin_runs::holding(&name)
             || !builtin_runs::held_wrappers(&name).is_empty()
             || !builtin_runs::runs(&name).is_empty()
+            || builtin_runs::unnamed(&name)
             || takes_code
     }
 
@@ -3431,6 +3439,12 @@ impl Reach<'_> {
     ) -> Option<Arc<BuiltinBase>> {
         let registry = self.registry;
         let entry = registry.builtin_entry(key);
+        // What a builtin runs through code the table cannot name is not known.
+        if let Some(name) = &entry {
+            if builtin_runs::unnamed(name) {
+                return None;
+            }
+        }
         // A stub no run of PHP has seen runs what its parameters let it run.
         let runs: Arc<[(Position, BuiltinRun)]> = match &entry {
             Some(name) => builtin_runs::runs(name).into(),
