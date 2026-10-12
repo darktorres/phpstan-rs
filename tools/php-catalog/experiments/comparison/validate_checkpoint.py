@@ -133,49 +133,47 @@ def local_links():
     return check('local report links', not broken, f'broken: {broken}')
 
 
-ROW_TITLE = re.compile(r'^- \*\*(R\d+\.\d+) — (.*?)\*\*')
+ENTRY_TITLE = re.compile(r'^(?:- \*\*(R\d+\.\d+) — (.*?)\*\*|### (F\d+\.\d+) — (.*))')
 ACCEPTANCE_VALUES = ('accepted', 'not accepted')
 
 
-def r_rows(ledger):
-    """Read each R row's title and the lines that state its acceptance. The acceptance line
-    must directly follow the title; Scope and Remainder may follow it. A row whose acceptance
-    line is missing or has another value has no acceptance and is not accepted."""
+def ledger_entries(ledger):
+    """Read each F heading and R row, with the lines that state its acceptance. The acceptance
+    line must directly follow the title; Scope and Remainder may follow it. An entry whose
+    acceptance line is missing or has another value has no acceptance and is not accepted."""
     lines = ledger.splitlines()
-    rows = []
+    entries = []
     for index, line in enumerate(lines):
-        match = ROW_TITLE.match(line)
+        match = ENTRY_TITLE.match(line)
         if not match:
             continue
-        row = {'id': match.group(1), 'status': match.group(2), 'acceptance': None,
-               'scope': None, 'remainder': None}
-        if index + 1 < len(lines) and lines[index + 1].startswith('  Acceptance: '):
-            value = lines[index + 1][len('  Acceptance: '):].strip()
+        if match.group(1):
+            entry_id, status = match.group(1), match.group(2)
+        else:
+            entry_id, status = match.group(3), match.group(4)
+        entry = {'id': entry_id, 'status': status, 'acceptance': None, 'scope': None, 'remainder': None}
+        following = lines[index + 1:index + 4]
+        if following and following[0].strip().startswith('Acceptance: '):
+            value = following[0].strip()[len('Acceptance: '):]
             if value in ACCEPTANCE_VALUES:
-                row['acceptance'] = value
-        for text in lines[index + 2:index + 4]:
-            for key, prefix in (('scope', '  Scope: '), ('remainder', '  Remainder: ')):
-                if text.startswith(prefix):
-                    row[key] = text[len(prefix):].strip()
-        rows.append(row)
-    return rows
+                entry['acceptance'] = value
+        for text in following[1:]:
+            for key, prefix in (('scope', 'Scope: '), ('remainder', 'Remainder: ')):
+                if text.strip().startswith(prefix):
+                    entry[key] = text.strip()[len(prefix):].strip()
+        entries.append(entry)
+    return entries
 
 
 def semantic_acceptance(ledger):
-    headings = re.findall(r'^### (F\d+\.\d+) — (Open|Partial|Deferred)', ledger, re.M)
-    rows = r_rows(ledger)
-    open_rows = [{'id': row['id'], 'status': row['status'], 'acceptance': row['acceptance'] or 'unclassified'}
-                 for row in rows if row['acceptance'] != 'accepted']
-    scoped = [{'id': row['id'], 'scope': row['scope'], 'remainder': row['remainder']}
-              for row in rows if row['acceptance'] == 'accepted' and row['scope']]
-    if not headings and not open_rows:
+    entries = ledger_entries(ledger)
+    open_entries = [{'id': e['id'], 'status': e['status'], 'acceptance': e['acceptance'] or 'unclassified'}
+                    for e in entries if e['acceptance'] != 'accepted']
+    scoped = [{'id': e['id'], 'scope': e['scope'], 'remainder': e['remainder']}
+              for e in entries if e['acceptance'] == 'accepted' and e['scope']]
+    if not open_entries:
         return {'status': 'accepted', 'scoped': scoped}
-    return {
-        'status': 'OPEN',
-        'headings': [{'id': name, 'state': state} for name, state in headings],
-        'rows': open_rows,
-        'scoped': scoped,
-    }
+    return {'status': 'OPEN', 'open': open_entries, 'scoped': scoped}
 
 
 def main(argv=None):

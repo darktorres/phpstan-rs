@@ -13,6 +13,7 @@ means the required evidence has not been produced or reviewed;
 **deferred** means the work belongs to a later plan phase.
 
 ### F00.1 — Partial: Specify observable traces, assumptions, abstract order, and return-refinement rules
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Contract defines observable projections, trace order, host obligations, and return/exception distinctions. Review: `PHP_SEMANTICS_CATALOG_CONTRACT.md` now specifies observable projections, ordering, abstract order, assumption obligations, and return/exception refinement. `Evaluation` still returns projected exits/states/results and a replay certificate rather than an explicit trace set. Host implementations must preserve whatever ordered observations a closed projection needs. An independent adversarial review is recorded; its findings remain unresolved, so this is a working draft, not accepted semantics. See [F00 review](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md).
 
@@ -23,6 +24,7 @@ means the required evidence has not been produced or reviewed;
   The contract defines host concretization (`gammaV`/`gammaS`) and conditional simulation obligations for entry tuples, event transfers, predicates, joins/widening, exits, and projections; narrows the evaluator claim to a host-relative post-fixpoint; and disclaims a PHP-soundness theorem and full trace-prefix coverage. It defines absent result IDs as undefined and rejects joins where a result exists on only one path. Evidence is provenance, not trust; trusted validators and cross-namespace support need pinned roots and validation. Tests cover initial-state retention through transfer and exit, joins/widening, dependency projections, and completion kinds. `widening_preserves_the_transferred_lower_bound_and_reflects_precision` checks that the transferred lower bound survives widening; it explicitly does not claim upper-bound preservation. Claude's independent re-review confirmed the semantic argument and allowed R00.2 to close as a definition after this scope correction. Cleanup's fatal, suspension, and native-unwind paths still violate the normative rule (RV-1); they remain open under R01.5 and are outside this subtask's implementation-conformance claim.
 
 ### F00.2 — Partial: Reject invalid trace compositions with counterexamples
+Acceptance: not accepted
 
 **Status note (review, 2026-10-09):** downgraded from Complete. The fatal and native-unwind counterexample row has no cleanup-path evidence, and the evaluator accepts those compositions (RV-1 in the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#review-record-2026-10-09)).
 
@@ -33,6 +35,7 @@ means the required evidence has not been produced or reviewed;
   The [evaluation report's R00.4 accounting](PHP_SEMANTICS_CATALOG_EVALUATION.md#r004-cbmc-property-accounting-and-enforcement) maps all 93 valid-run properties, all 94 invalid-run properties, and both low-budget properties by exact ID, category, and contract relation; it marks every result C-model-only and classifies `main.assertion.11` and `main.unwind.0` as expected negative controls. `campaign.py` verifies the pinned CBMC binary, C source and reference digests, complete normalized property records (identity, status, description, source location, and trace), summary, and command exit; ten Python regressions pass. All three locked CBMC 6.6.0 commands passed through `EnforcedRunner` and yielded the expected 93/94/2 properties and exit codes 0/10/10 under resource enforcement. This closes only the accounting/enforcement task; it does not prove PHP or Rust evaluator semantics.
 
 ### F00.3 — Partial: Validate host transfer functions against PHP source behavior
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Narrow weak `strlen` parser/cast source checks, runtime callback sentinel, strict/weak and Stringable fixtures exist. Review: The `strlen` builder checks selected `zend_API.c` parser gates, the `__toString` dispatch source, LLVM data-flow, and positive runtime sentinels in locked profiles. Strict/weak fixtures cover the tested behavior. The evidence does not validate every host transfer, callback mutation, thrown outcome, release/destructor effect, or unsupported PHP behavior. General source-to-host audit and callback effect/throw modeling remain open; see [F00 review](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md).
 
@@ -43,6 +46,7 @@ means the required evidence has not been produced or reviewed;
   The [evaluation report's R00.3 matrix](PHP_SEMANTICS_CATALOG_EVALUATION.md#r003-source-to-host-matrix-php-854-strlen) covers weak/strict parsing, casts, Stringable dispatch, callback mutation/throw, release, unknown behavior, and the direct `ZEND_STRLEN` opcode path as well as `zif_strlen`. Each row distinguishes the PHP source fact, the actual host/artifact transfer, assumptions, observed positive/negative/contradictory cases, affected state/result/exit components, and what remains open. It closes the audit deliverable, not semantic conformance: R02.4 now supplies selected source-to-artifact evidence for the compiler-emitted opcode, while transfer semantics and unsupported outcomes remain open; callback effects/exits and release remain open under R05.2/R02.5; unsupported host behavior remains open under R04.1. R01.6 now validates the reviewed graph dependency rules and requires declared unknown-event domains to stay open.
 
 ### F00.4 — Partial: Specify distinct, validated assumption identities
+Acceptance: not accepted
 
 **Status note (review, 2026-10-09):** downgraded from Complete. The contract specifies typed assumption records. The code has no assumption records and no applicability check, and it accepts non-empty assumption vectors (RV-4). The title's "validated" is not met.
 
@@ -50,13 +54,15 @@ means the required evidence has not been produced or reviewed;
 
 
 ### F00.5 — Complete: Review the contract and assumptions (author review, 2026-10-12)
+Acceptance: accepted
 
-**Reviewed evidence and current disposition:** A review is recorded in the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#review-record-2026-10-09); its findings remain unresolved or unaccepted, so this item stays Open. The review occurred after F01 and later checker/native work had begun, so those results remain provisional under the ledger's gate order until the findings receive dispositions.
+**Reviewed evidence and current disposition:** The contract review is recorded in the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#review-record-2026-10-09). Its findings are dispositioned in the review record's [2026-10-12 section](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#dispositions-for-rv-25-and-contract-points-c-3-to-c-6-2026-10-12), which covers the points still open after the earlier passes. The author's review of 2026-10-12 accepts this item. The review occurred after F01 and later checker/native work had begun; those results are accepted under their own rows.
 
 - **R00.1 — Complete** (depends on: none)
   Acceptance: accepted
-  Review obtained and recorded 2026-10-09 by a reviewer: a Claude session. The maintainer reports that the ledger was being worked by Codex, so the reviewer is independent of that work. See the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#review-record-2026-10-09). Its reviewer role, findings and dispositions are recorded there. Findings still open pending disposition/acceptance: RV-1, RV-2, RV-4 to RV-13, RV-16 to RV-19, and contract points C-1 to C-6. RV-2's implementation remediation is recorded complete under R01.4 but remains awaiting independent acceptance. RV-3 is decided as defensible; RV-14 and RV-15 are fixed. Resolving or accepting these findings is tracked under F00 closure, not this row.
+  Review obtained and recorded 2026-10-09 by a reviewer: a Claude session. The maintainer reports that the ledger was being worked by Codex, so the reviewer is independent of that work. See the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#review-record-2026-10-09). Its reviewer role, findings and dispositions are recorded there. The dispositions of these findings, and of RV-25 and contract points C-3 to C-6, are recorded in the review record's 2026-10-12 section. RV-3 is decided as defensible; RV-14 and RV-15 are fixed.
 ### F01.1 — Partial: Implement versioned graph, evidence, assumption, and domain-coverage schema
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Canonical digests, explicit coverage/dependencies, evidence and assumption validation, JSON round trips, combined evidence/assumption cycle rejection (R01.2), catalog-entry release-range validation (R01.3), dependency semantics for `NotApplicable` (R01.4), graph-derived mandatory dependencies for the reviewed transfer slice (R01.6), deployment-pinned assumption validation (R01.7), and noncanonical-order rejection (R01.8) have implementation and tests. Independent acceptance of R01.8 remains pending. Review of the producing commit found that `EvidenceRecord::id` hashed raw dependency and assumption vector order while semantically unordered permutations were accepted; `CatalogManifest::canonical_digest` also hashed producer order without validating it. R01.8 closes these by rejecting noncanonical vectors before catalog/manifest use.
 
@@ -91,6 +97,7 @@ means the required evidence has not been produced or reviewed;
   Validation: `cargo test -p phpstan-rs-semantics --all-targets` passes (109 library tests and 5 builder-example tests; 0 ignored); `cargo check --workspace`, `cargo fmt --check -p phpstan-rs-semantics`, and `git diff --check` pass.
 
 ### F01.2 — Partial: Implement evaluator control flow and exceptional continuations
+Acceptance: not accepted
 
 **Status note (review, 2026-10-09; remediation recorded below):** downgraded from Complete because cleanup `Return` or `Throw` replaced pending fatal, suspension, or native unwind (RV-1). R01.5 now rejects unsupported abrupt replacement cells and tests the completion matrix. F01.2 remains Partial until the independent acceptance gate in F00.5 is resolved.
 
@@ -98,11 +105,13 @@ means the required evidence has not been produced or reviewed;
 
 
 ### F01.3 — Complete: Validate post-fixpoint certificates and reject incomplete graph behavior
+Acceptance: accepted
 
 **Reviewed evidence and current disposition:** Graph-bound replay checks transfer candidates, exits, and coverage; partial result definitions and missing/duplicate invocation coverage fail closed. Review: Certificates bind a graph digest and replay transfer candidates, successors, exits, and coverage; tests reject dropped results/pending outcomes, missing successors/exits, graph changes, and falsely closed coverage. The certificate trusts the supplied host's transfer semantics. Conservative extra stored exits are allowed, so the validator establishes a post-fixpoint over that host, not PHP correctness or a native-IR post-fixpoint. None for the implemented validation contract.
 
 
 ### F01.4 — Partial: Validate reference contracts with broader branch/callback cases
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Callback result/write/throw order, state-sensitive predicates, joins, cleanup, and second-callback branch selection are covered. Review: Callback result/write order, result-selected second callback, state-sensitive predicates, branch joins, callback throws, cleanup, and normal/throw state separation have fixtures. These are substantial reference-contract examples, but not a matrix reviewed by a party other than the author, nor exhaustive; F00.5 remains open. Independent contract review remains F00-dependent; broaden combinations after review.
 
@@ -112,6 +121,7 @@ means the required evidence has not been produced or reviewed;
   Validation: `cargo test -p phpstan-rs-semantics` passes (90 passed, 1 pre-existing ignored); `cargo check --workspace`, `cargo fmt --check -p phpstan-rs-semantics`, and `git diff --check` pass. Workspace-wide `cargo fmt --all -- --check` reports pre-existing formatting differences in unrelated crates, so no unrelated formatting was retained.
 
 ### F01.5 — Open: Calibrate a production semantic host
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** A narrow PHP host and PhpFlow/value fixtures exist. Review: A PHP-specific host and value/reference fixtures exist, including havoc for unknown callbacks and open coverage. It is still a narrow host, not a source-calibrated production semantic domain. In particular, the graph's `Stringable` invocation has open callback effects and exceptions. Replace toy/narrow transfers with calibrated, source-validated domains (depends on F00 and F02).
 
@@ -123,6 +133,7 @@ means the required evidence has not been produced or reviewed;
   Validation: all 9 catalog-builder tests (including source/output/opcode/scope mutation checks), all 110 semantics tests, all 1,206 PHPStan library tests (one ignored), and the embedded-catalog certificate/evidence regression pass. The weak and strict runtime fixtures reproduce their checked-in artifacts byte-for-byte on both PHP profiles; outputs agree between profiles (SHA-256 `8c842c119b0e95205e77444bf1781ea8d7ecfa12edc487b8ad89a37e9803c8c0` weak; `fb700cd3f42668be8372b3cfc361d795167e25be2b5af673dd4e70f4a6b6856f` strict). The catalog artifact matches the builder output; formatting and diff checks pass. This closes only R04.1's bounded host-calibration deliverable; F01.5 remains open for general production-host calibration, and independent acceptance is pending.
 
 ### F02.1 — Partial: Lock PHP 8.5.4 source, compiler, build, and linked artifacts
+Acceptance: not accepted
 
 **Status note (review, 2026-10-09; remediation validated 2026-10-10):** downgraded from Complete after the review found stale `run.py` and `runtime.php` source hashes (RV-19). This remediation preserves the old runtime fixture under its historical filename and adds source/manifest digest enforcement to replay. The root lock now matches `run.py`, both runtime fixtures, and the checked link manifest; the source-lock and fixture/output regression tests pass. F02.1 remains Partial because the linked PHP bitcode is unavailable for an actual replay and the profile scope remains narrow.
 
@@ -130,11 +141,13 @@ means the required evidence has not been produced or reviewed;
 
 
 ### F02.2 — Complete: Inventory the linked `zif_strlen` LLVM instructions and trace the Return demand
+Acceptance: accepted
 
 **Reviewed evidence and current disposition:** All 241 instructions are accounted for; builder checks opcode counts/call targets and the field-to-return path. Review: The linked `zif_strlen` inventory accounts for 241 instructions (storage/layout/scalar/call/branch/return families), checks unknown opcodes and missing return, and traces the selected string-length field to the return payload. It is accounting plus a narrow demand witness; it does not interpret all instructions. Inventory is accounting evidence, not interpretation of all operations.
 
 
 ### F02.3 — Partial: Compare source, LLVM, and compiler representations
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Source/layout/helper and LLVM witness checks support the narrow Return/Diagnostic slices; Clang/GCC/CIR campaigns are recorded. Review: The AST/CFG, LLVM, GCC GIMPLE, and CIR campaigns expose representation behavior and counterexamples, including Clang CFG exceptional cleanup loss and poor CIR coverage. R02.2 implements a bounded structural correspondence for the selected `zif_strlen` normal path; it is not a general semantic adapter or broad transfer comparison. Broader native correspondence and useful closed summaries remain open.
 
@@ -144,6 +157,7 @@ means the required evidence has not been produced or reviewed;
   Validation: the recorder regenerated archived Clang/GCC outputs and measurements from the preserved PHP 8.5.4 campaign; the builder regenerated the checked correspondence successfully and a second generation is byte-identical; all 21 focused campaign/provenance/replay tests pass, including path, digest, archive mutation, and malformed-run cases. The broader PHPStan and semantics suites also pass (1,234 and 112 tests respectively), along with formatting and diff checks.
 
 ### F02.4 — Partial: Establish implicit-operation and normal/CALL behavior
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Paired weak/strict runtime witnesses and a 13-sentinel Hybrid/CALL comparison exist; Stringable invocation has pinned source/runtime evidence, independently replayed against the preserved historical fixture bytes. The 13-sentinel witness now names `runtime-hybrid-call-13.php`, restored from the locked PHP source commit, while `tailcall-call-reference-8.5.4.json` pins the current 16-sentinel `runtime.php`. The SVF evaluator checks the fixture selected by its witness and both paired outputs. Matching sentinels do not establish equivalence for unobserved inputs; callback writes/throws and other implicit operations remain only partly connected to modeled graph behavior. Expand beyond tested `strlen` scenarios and connect modeled operations to native behavior.
 
@@ -153,6 +167,7 @@ means the required evidence has not been produced or reviewed;
   Validation: all 21 focused campaign/provenance/replay Python tests pass; the Hybrid/CALL output artifacts match their locked digests. The live source and link-manifest locks match the checked files.
 
 ### F02.5 — Open: Interpret the wider native `strlen` behavior
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Return and null diagnostic slices are represented; the 241-op inventory fails closed on unknown operations. R02.3 adds source-linked scalar/cast/release facts, an observed possible callback PHP throw, and distinct open `NativeUnwind` coverage. R02.4 now binds selected compiler/VM source facts to paired direct-opcode dumps and runtime cases, but does not model those VM transfers; independent acceptance is pending. The graph still leaves strict/parser error transfers, release/destructor consequences, and fatal/native-unwind/suspension outcomes open. Remaining acceptance work is split across R02.5–R02.7 below; callback effects and ordered exception consumption remain under R05.2.
 
@@ -182,11 +197,13 @@ means the required evidence has not been produced or reviewed;
   Native unwind has no source/runtime witness for this PHP C boundary and remains explicitly Open; no `NativeUnwind` exit is fabricated from fatal bailout. The checker still does not carry an ordered heap-state delta or destructor effects from the graph, nor model caller cleanup/resumption. Those integration gaps depend on R05.2 and remain open. Independent acceptance is pending.
 
 ### F03.1 — Complete: Measure whole-profile SVF resource behavior
+Acceptance: accepted
 
 **Reviewed evidence and current disposition:** Stock and compact full-link runs and resource measurements are recorded. Review: Stock SVF and the compact-layout adaptation each hit the enforced 10 GiB cgroup limit on the linked minimal PHP CLI workload. This rules out those configurations as mandatory whole-link prerequisites. Each candidate had one enforcing attempt; neither result evaluates an alternative solver. These measurements reject full-profile SVF as a mandatory prerequisite; they do not establish a replacement solver.
 
 
 ### F03.2 — Partial: Probe demand summaries, Zend layout/dispatch, and fallback cases
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Reduced SVF layout/dispatch probes, copy/initializer regressions, and the empty Stringable-target counterexample are recorded. Review: Reduced probes cover Zend layout/dispatch, absent external writes, copy/initializer cases, and the empty Stringable-target fallback counterexample. The capsule lacks object construction/handler initialization, so an empty target is explicitly incomplete evidence. Broader source-derived demand summaries are not implemented. Generalize beyond the reduced capsule and add demand-oriented source-derived summaries.
 
@@ -200,6 +217,7 @@ means the required evidence has not been produced or reviewed;
   The SVF replay derives the PHP commit from `results/lock.json`, requires the linked-module manifest to name the same commit, checks that manifest against a digest in the root lock, and rejects bitcode whose digest differs from the linked module bound by that manifest. It also verifies every source digest in the root lock and selects the exact runtime fixture named by its witness. Tests cover changed source, linked bitcode, manifest commit, unavailable bitcode, and fixture bytes; all 21 focused Python tests pass. Live source and link-manifest lock checks pass. The actual replay remains open because the pinned linked bitcode is not available in this environment; independent acceptance is also pending.
 
 ### F03.3 — Open: Integrate coverage-aware pointer reuse and fallback tracking
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Existing PTA fallback flags and target-report limitations are documented; empty-target fallback regression is preserved. Review: Existing PTA internals track `data` and `anything` fallback flags, and the regression preserves a dangerous empty-target example. The analysis remains private to `php-catalog` and emits text; there is no machine-readable catalog adapter, per-target completeness contract, or production integration. A known target set cannot be treated as exhaustive when fallback is present. No machine-readable adapter, per-target completeness contract, or production integration exists.
 
@@ -209,6 +227,7 @@ means the required evidence has not been produced or reviewed;
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 ### F03.4 — Open: Validate native summary post-fixpoints
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Semantic graph certificates validate graph evaluation. Review: The semantic graph certificate replays the graph evaluator, not imported native IR summaries. Native summary validation and missing-write/growth regressions at that boundary do not exist. Add independent validation for native IR summaries and missing-write/growth regressions.
 
@@ -218,11 +237,13 @@ means the required evidence has not been produced or reviewed;
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 ### F04.1 — Complete: Implement the minimum PHP value/reference product fixtures
+Acceptance: accepted
 
 **Reviewed evidence and current disposition:** Copy arrays, nested references, object identity, alias rebinding/unset, and normal/throw callback state are tested. Review: The value store and PhpFlow tests cover array-copy isolation, nested references, object identity, alias rebinding/unset, reference cells, and callback mutation across normal/throw/cleanup paths. These fixtures meet the stated minimum gate; they do not constitute full PHP value semantics. Minimum Phase F fixture requirement is met.
 
 
 ### F04.2 — Deferred: Expand PHP value semantics and syntax-to-flow lowering
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Current value state and PhpFlow operations provide a seed. Review: Broader key coercion, object properties, and syntax-to-flow lowering remain later-plan work. The current ledger correctly keeps this separate from the minimum Phase F fixture result. Broader key coercion, object properties, and syntax-to-flow lowering belong to C22.
 
@@ -232,16 +253,19 @@ means the required evidence has not been produced or reviewed;
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 ### F05.1 — Partial: Select catalog behavior across exact and uncertain target scenarios
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Exact/partial target selection and exact/minor patch fixtures exist; uncertain remainders stay uncovered. Review: Exact patch selection, minor ranges, correlated scenarios, and uncovered/Maybe remainders are tested. The checker adapter leaves platform facts unknown; SAPI, build, extension, and configuration applicability are not in the selected profile. Include platform, SAPI, build, extension, and configuration profile facts in applicability.
 
 
 ### F05.2 — Complete: Load and validate the exact 8.5.4 `strlen` artifact in the checker
+Acceptance: accepted
 
 **Reviewed evidence and current disposition:** Embedded JSON is validated; evaluator certificate is replayed before consuming Return/Diagnostic results. Review: The checker loads the embedded artifact through manifest validation, replays its certificate, and consumes its narrow Return/Diagnostic projection. Locked regeneration is byte-identical. This is not a general artifact/profile pipeline. None for this exact narrow slice.
 
 
 ### F05.3 — Partial: Route argument checks and null diagnostics through shared catalog evaluation
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Return and exact-target null Diagnostic share a memoized evaluation; weak/strict routing fixtures pass. Review: Argument checks, return inference, and the exact-target null deprecation share a memoized graph evaluation; weak/strict and version-boundary fixtures exercise it. Broader source-derived diagnostics and ranges outside exact coverage still use legacy behavior. Generalize source-derived rules; ranges outside exact catalog coverage still use legacy diagnostic behavior.
 
@@ -251,6 +275,7 @@ means the required evidence has not been produced or reviewed;
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 ### F05.4 — Partial: Route implicit `Stringable` invocation/effect from the graph
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Graph contains a weak-mode predicate plus `Invoke(__toString, argument 0)` with pinned source/runtime evidence. The checker consumes graph invocation facts, bounded same-file callback property writes, literal callback-result validation, and PHP-throw string-argument invalidation; it also applies bounded temporary-release/destructor write and PHP-throw effects. The catalog bridge preserves the normal result when abrupt outcomes are possible. It still does not model general heap-state deltas, exact exception identity, destructor output/re-entry, or fatal, suspension, and native-unwind cleanup. R05.2.1 resolves formal-argument slots and covers named arguments after unpacking, one unpack, and multiple unpack sources. R05.2.2–R05.2.4 implement bounded transfers with conservative fallback; broader behavior and independent acceptance remain open.
 
@@ -305,6 +330,9 @@ means the required evidence has not been produced or reviewed;
   Original scope: Hoist the side-effecting `debug_assert!` calls in `registry/resolve.rs` (lines 459 and 1602, from commits `32fb0a32` and `d28d22a1`) so that the call runs in every profile and only the check is debug-only. Acceptance: the gate-profile library and fixture runs show no failures from this cause (RV-14).
 
 ### F05.5 — Complete for current catalog consumers: Prevent duplicate legacy application for covered calls
+Acceptance: accepted
+Scope: current catalog consumers
+Remainder: F05.6
 
 **Reviewed evidence and current disposition:** The checker currently has one live semantic-catalog dispatch: the `strlen` consumer in `catalog_builtin_return_type`. R05.3 audits its return inference, argument diagnostics, and call-effect application for direct and exact-name dynamic calls. Catalog invocation facts select covered callback/destructor operations; after applying those effects, `forget_what_a_call_may_change` returns without applying the legacy builtin-run effect a second time. Exact dynamic names use the built-in argument checker; ambiguous callables stay on the generic path, and uncovered profiles retain legacy effects. The direct/dynamic diagnostic, branch-effect, ambiguous-callable, and uncovered-target regressions pass. This closes F05.5 for every catalog consumer currently present; a future catalog consumer must receive the same ownership audit before being considered covered.
 
@@ -321,6 +349,7 @@ means the required evidence has not been produced or reviewed;
     Added `exact_dynamic_strlen_preserves_argument_diagnostics_once`: the direct-call control and exact-name dynamic call each produce exactly one `argument.type` diagnostic for `strlen([])`, and their diagnostic messages match. The focused `catalog_object_argument` group also passes, including its ambiguous-callable conservative-fallback and uncovered-target controls: 18 passed, 1 ignored. `cargo fmt --all -- --check` and `git diff --check` pass.
 
 ### F05.6 — Open: Validate full target profile and uncovered behavior end to end
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** The entry now requires PHP 8.5.4, Linux, x86-64, CLI, non-ZTS, and non-debug, matching the locked runtime witness. The checker accepts an exact configured profile; absent facts remain unknown, produce Maybe applicability, and retain an uncovered remainder. An architecture mismatch remains uncovered. Full build/compiler, extension, and INI applicability and broader covered/uncovered behavior have not been validated end to end; keep this parent task Open.
 
@@ -332,6 +361,7 @@ means the required evidence has not been produced or reviewed;
   Validation: all 9 catalog-builder tests pass; the session-load, canonical-identity, and embedded target-selection regressions pass; the full PHPStan library suite passes (1,211 passed, 1 ignored); regenerated catalog JSON matches the checked-in artifact byte-for-byte; formatting and diff checks pass.
 
 ### F05.7 — Open: Resolve the full fixture-suite failures found during evaluation
+Acceptance: not accepted
 
 **Status note (second review, 2026-10-09):** the cause was side-effecting `debug_assert!` calls in `registry/resolve.rs`, which dropped `@method` and `@mixin` members in release-profile builds (RV-14, R05.9, now Complete). The gate-profile and debug library suites both pass (RV-15 fixed, R05.6). F05.7 stays Open until the full optimized fixture suite is rerun (R05.7).
 
@@ -352,16 +382,19 @@ means the required evidence has not been produced or reviewed;
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 ### F06.1 — Partial: Compare candidate producers and compiler routes
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Clang/GCC/CIR campaigns and prior comparative evidence are recorded; LLVM plus source metadata is the initial producer choice. Review: Comparative work evaluates LLVM plus Clang metadata, AST/CFG, GCC GIMPLE, CIR, Clang analysis interfaces, SVF, and bounded alternatives. LLVM plus metadata is a reasoned initial producer choice; systematic semantic coverage and evidence from useful closed summaries remain absent. Revisit with evidence from a useful closed production summary. Same-slice comparison is tracked under F06.3/R06.1.
 
 
 ### F06.2 — Complete: Establish full-profile SVF resource feasibility
+Acceptance: accepted
 
 **Reviewed evidence and current disposition:** Stock/layout-only SVF resource failures are measured on the minimal CLI link. Review: The measured stock and compact-layout SVF whole-link attempts fail the configured 10 GiB gate on the minimal CLI profile. This rejects those configurations as mandatory whole-profile prerequisites; it does not reject every pointer-assistance use or establish a replacement. This rules out that configuration as a mandatory whole-profile prerequisite, not all pointer-service assistance.
 
 
 ### F06.3 — Open: Compare regional and audited pointer-service alternatives on the same slice
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Reduced SVF probe supplies a fallback counterexample. Review: Reduced SVF probes show fallback and target-coverage problems, but there is no same-slice comparison of adapted pointer reuse against the regional candidate on a useful closed PHP summary. Build an adapted, coverage-aware comparison against a regional candidate on identical input and demand.
 
@@ -371,6 +404,7 @@ means the required evidence has not been produced or reviewed;
   Not yet evidenced as complete; see parent F task for the audited implementation state.
 
 ### F06.4 — Open: Measure graph growth, memory, runtime, and checker cost
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** No calibrated same-slice cost report is recorded. Review: Compiler/import and pointer-prerequisite resource measurements exist. There is no calibrated same-slice report for graph/region growth, artifact size, checker evaluation/runtime, memory, and maintenance cost across candidate solvers. Measure reproducibly and compare alternatives; include artifact size and checker evaluation costs.
 
@@ -384,6 +418,7 @@ means the required evidence has not been produced or reviewed;
   The campaign now waits for a completed enforcing-worker record, fails closed if the cgroup disappears before its exit/resource proof is published, and has delayed-worker and failed-step regressions. Pointer queries and builds must succeed or match an explicit negative-control status; both stages publish completion manifests binding unique step names, expected exit codes, and the measurements digest. The finishing-stage marker is revalidated against its measurements and CIR outcome classification before it is accepted. CIR compiler rejections are recorded as unsupported outcomes with stderr digests; successful CIR imports bind the emitted artifact digest. Unexpected failures block completion. `finish_campaign.py` accepts explicit PHP source/binary and stock-DVF paths rather than assuming scratch-root locations. All 21 focused campaign/provenance/replay tests pass. The full resource campaign was not rerun; this task remains open for end-to-end execution and independent acceptance.
 
 ### F06.5 — Open: Calibrate defaults and record final producer/solver decision
+Acceptance: not accepted
 
 **Reviewed evidence and current disposition:** Initial producer preference is documented; solver acceptance remains provisional. Review: The initial producer preference is documented, but final producer/solver acceptance and calibrated defaults depend on useful closed summaries and same-slice precision/cost evidence. The plan's §§2.3, 6–7 need a final evidence-based update after that comparison. Needs useful closed summaries, same-slice precision/cost evidence, and updated plan §§2.3, 6–7.
 

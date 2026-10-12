@@ -44,109 +44,67 @@
   ],
   "semantic_acceptance": {
     "status": "OPEN",
-    "headings": [
+    "open": [
       {
         "id": "F00.1",
-        "state": "Partial"
+        "status": "Partial: Specify observable traces, assumptions, abstract order, and return-refinement rules",
+        "acceptance": "not accepted"
       },
       {
         "id": "F00.2",
-        "state": "Partial"
+        "status": "Partial: Reject invalid trace compositions with counterexamples",
+        "acceptance": "not accepted"
       },
       {
         "id": "F00.3",
-        "state": "Partial"
+        "status": "Partial: Validate host transfer functions against PHP source behavior",
+        "acceptance": "not accepted"
       },
       {
         "id": "F00.4",
-        "state": "Partial"
+        "status": "Partial: Specify distinct, validated assumption identities",
+        "acceptance": "not accepted"
       },
       {
         "id": "F01.1",
-        "state": "Partial"
+        "status": "Partial: Implement versioned graph, evidence, assumption, and domain-coverage schema",
+        "acceptance": "not accepted"
       },
       {
         "id": "F01.2",
-        "state": "Partial"
+        "status": "Partial: Implement evaluator control flow and exceptional continuations",
+        "acceptance": "not accepted"
       },
       {
         "id": "F01.4",
-        "state": "Partial"
+        "status": "Partial: Validate reference contracts with broader branch/callback cases",
+        "acceptance": "not accepted"
       },
       {
         "id": "F01.5",
-        "state": "Open"
+        "status": "Open: Calibrate a production semantic host",
+        "acceptance": "not accepted"
       },
       {
         "id": "F02.1",
-        "state": "Partial"
+        "status": "Partial: Lock PHP 8.5.4 source, compiler, build, and linked artifacts",
+        "acceptance": "not accepted"
       },
       {
         "id": "F02.3",
-        "state": "Partial"
+        "status": "Partial: Compare source, LLVM, and compiler representations",
+        "acceptance": "not accepted"
       },
       {
         "id": "F02.4",
-        "state": "Partial"
+        "status": "Partial: Establish implicit-operation and normal/CALL behavior",
+        "acceptance": "not accepted"
       },
       {
         "id": "F02.5",
-        "state": "Open"
+        "status": "Open: Interpret the wider native `strlen` behavior",
+        "acceptance": "not accepted"
       },
-      {
-        "id": "F03.2",
-        "state": "Partial"
-      },
-      {
-        "id": "F03.3",
-        "state": "Open"
-      },
-      {
-        "id": "F03.4",
-        "state": "Open"
-      },
-      {
-        "id": "F04.2",
-        "state": "Deferred"
-      },
-      {
-        "id": "F05.1",
-        "state": "Partial"
-      },
-      {
-        "id": "F05.3",
-        "state": "Partial"
-      },
-      {
-        "id": "F05.4",
-        "state": "Partial"
-      },
-      {
-        "id": "F05.6",
-        "state": "Open"
-      },
-      {
-        "id": "F05.7",
-        "state": "Open"
-      },
-      {
-        "id": "F06.1",
-        "state": "Partial"
-      },
-      {
-        "id": "F06.3",
-        "state": "Open"
-      },
-      {
-        "id": "F06.4",
-        "state": "Open"
-      },
-      {
-        "id": "F06.5",
-        "state": "Open"
-      }
-    ],
-    "rows": [
       {
         "id": "R02.3",
         "status": "Partial: selected source-linked evidence only; broader acceptance open",
@@ -163,6 +121,11 @@
         "acceptance": "not accepted"
       },
       {
+        "id": "F03.2",
+        "status": "Partial: Probe demand summaries, Zend layout/dispatch, and fallback cases",
+        "acceptance": "not accepted"
+      },
+      {
         "id": "R03.1",
         "status": "Open",
         "acceptance": "not accepted"
@@ -173,8 +136,18 @@
         "acceptance": "not accepted"
       },
       {
+        "id": "F03.3",
+        "status": "Open: Integrate coverage-aware pointer reuse and fallback tracking",
+        "acceptance": "not accepted"
+      },
+      {
         "id": "R03.2",
         "status": "Open",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "F03.4",
+        "status": "Open: Validate native summary post-fixpoints",
         "acceptance": "not accepted"
       },
       {
@@ -183,8 +156,23 @@
         "acceptance": "not accepted"
       },
       {
+        "id": "F04.2",
+        "status": "Deferred: Expand PHP value semantics and syntax-to-flow lowering",
+        "acceptance": "not accepted"
+      },
+      {
         "id": "R22.1",
         "status": "Deferred",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "F05.1",
+        "status": "Partial: Select catalog behavior across exact and uncertain target scenarios",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "F05.3",
+        "status": "Partial: Route argument checks and null diagnostics through shared catalog evaluation",
         "acceptance": "not accepted"
       },
       {
@@ -193,8 +181,23 @@
         "acceptance": "not accepted"
       },
       {
+        "id": "F05.4",
+        "status": "Partial: Route implicit `Stringable` invocation/effect from the graph",
+        "acceptance": "not accepted"
+      },
+      {
         "id": "R05.2",
         "status": "Implementation partial; acceptance open",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "F05.6",
+        "status": "Open: Validate full target profile and uncovered behavior end to end",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "F05.7",
+        "status": "Open: Resolve the full fixture-suite failures found during evaluation",
         "acceptance": "not accepted"
       },
       {
@@ -208,8 +211,23 @@
         "acceptance": "not accepted"
       },
       {
+        "id": "F06.1",
+        "status": "Partial: Compare candidate producers and compiler routes",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "F06.3",
+        "status": "Open: Compare regional and audited pointer-service alternatives on the same slice",
+        "acceptance": "not accepted"
+      },
+      {
         "id": "R06.1",
         "status": "Open",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "F06.4",
+        "status": "Open: Measure graph growth, memory, runtime, and checker cost",
         "acceptance": "not accepted"
       },
       {
@@ -220,6 +238,11 @@
       {
         "id": "R06.4",
         "status": "Open",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "F06.5",
+        "status": "Open: Calibrate defaults and record final producer/solver decision",
         "acceptance": "not accepted"
       },
       {
@@ -243,6 +266,11 @@
         "id": "R04.1",
         "scope": "the selected slice",
         "remainder": "F01.5"
+      },
+      {
+        "id": "F05.5",
+        "scope": "current catalog consumers",
+        "remainder": "F05.6"
       },
       {
         "id": "R05.3",
