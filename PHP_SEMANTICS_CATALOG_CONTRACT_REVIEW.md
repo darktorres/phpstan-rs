@@ -1329,7 +1329,10 @@ acceptance remains OPEN: that is a review judgement, not a computed check.
 Acceptance of catalog work is by the author's review of the cited evidence. An independent
 review is not required. Rows that were pending only an acceptance are recorded in the ledger
 as author-accepted (2026-10-12). Semantic acceptance is closed only when every ledger heading
-is Complete; the checkpoint lists the headings still Open, Partial or Deferred.
+is Complete and every R row is accepted. A row is accepted when its status records
+`author-accepted`, or a completed implementation with no open-ended words (open, remains,
+pending, partial, deferred). `checkpoint-validation.json` lists each heading and row that is
+not accepted, and `validate_checkpoint.py` derives the list from the ledger.
 
 ## Semantic review by the author (2026-10-12)
 
@@ -1356,9 +1359,8 @@ What was checked:
 
 What remains open for the semantic gate:
 - The PHP-source validation of the host transfers (F00.3).
-- The ledger headings that are not Complete, which `checkpoint-validation.json` lists by
-  name. The R-rows are outside that list, and R05.2 and R05.7 on the callback and fixture
-  coverage are among those still open.
+- The ledger headings and R rows that are not accepted, which `checkpoint-validation.json`
+  lists by name, including R05.2 and R05.7 on the callback and fixture coverage.
 
 Verdict of the author: the evidence chain is consistent and reproduces, and the `strlen`
 slice agrees with its inventory. The semantic acceptance is open because of the ledger headings listed in

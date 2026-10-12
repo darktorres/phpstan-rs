@@ -82,8 +82,8 @@ State as of 2026-10-12, `master` at `e32fd95d`.
    F01.1, F01.2, F01.4; (3) R05.2 and R05.7, then F05.7's fixture failures;
    (4) the native work, F02.1, F02.3-F02.5, F03.2-F03.4; (5) F01.5 and F05.6;
    (6) the solver decision, F06.1, F06.3-F06.5. F04.2 is deferred to C22.
-   Open: the semantic gate reads only the F headings; the R rows, which carry
-   their own dependencies, are not checked (`validate_checkpoint.py`).
+   The semantic gate reads the F headings and the R rows; the checkpoint lists
+   what is not accepted (`checkpoint-validation.json`).
 4. **Then pop back, in this order:** level 3 (140 open review tasks, and steps
    19 and 21 of the stage A/B fix plan, `~/.claude/plans/peppy-drifting-coral.md`),
    then level 2 (the crate split from Stage C on), then level 1 (the lanes).
