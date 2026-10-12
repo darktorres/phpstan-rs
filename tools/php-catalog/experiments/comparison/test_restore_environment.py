@@ -40,6 +40,9 @@ class RestoreVerifyOnlyTests(unittest.TestCase):
 class CanaryTests(unittest.TestCase):
     def test_a_manifest_digest_that_the_toolchain_does_not_reproduce_stops_the_canary(self):
         import json as _json
+        root = Path.home() / ".cache/php-catalog-evaluation/root"
+        if not (root / "php-cli" / "php-src" / "sapi" / "cli" / "php").is_file():
+            self.skipTest("the restored tree is not present")
         real = _json.loads((HERE / "results" / "evaluation" / "link-manifest.json").read_text())
         emitted = [o for o in real["objects"] if o.get("imported") and o.get("module_sha256")][:2]
         with tempfile.TemporaryDirectory() as temporary:
@@ -47,7 +50,6 @@ class CanaryTests(unittest.TestCase):
             for record in emitted:
                 record["module_sha256"] = "0" * 64
             tampered.write_text(_json.dumps({"objects": emitted}))
-            root = Path.home() / ".cache/php-catalog-evaluation/root"
             with self.assertRaisesRegex(RESTORE.RestoreError, "differs from its manifest digest"):
                 RESTORE.canary(root, units=2, manifest_path=tampered)
 
