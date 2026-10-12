@@ -1203,7 +1203,7 @@ RV-29 has four checker-level fixtures beside
 
 - `strlen_catalog_stringable_throw_catch_narrowing`: `is_string`, `!== null` and an
   int-range narrowing survive into a `catch`; a result variable keeps its pre-call value
-  in the catch; the catch sees the union of the invoked and `TypeError` routes, and a
+  in the catch; the catch sees the union of the invoked and `TypeError` routes; and a
   callback write to a property is visible there.
 - `strlen_catalog_stringable_normal_path_keeps_narrowing`: on the normal path after a
   non-throwing `strlen`, narrowing is kept, the result is `int<0, max>`, and the callback
@@ -1220,14 +1220,39 @@ Mutation check on `checker/expr.rs`:
 
 - Disabling the invoked-route `record_throw_state` fails two of the new fixtures.
 - Disabling string-argument invalidation on the throw path fails one.
-- Disabling the without-invocation `record_throw_state` fails none. For every catalog
-  input the fixtures reach, the invoked route's state already contains the
-  without-invocation state: invalidation only widens a property, and both routes start
-  from the same pre-call state. The catch's type came out the same with and without the
-  record (`string|null`). A fixture cannot distinguish the two, so this record is not
-  claimed as covered by a fixture. Making it observable would change the checker's
-  semantics, which this item does not do.
+- Disabling the without-invocation `record_throw_state` fails none. The plan required every
+  mutation to fail a new fixture before commit; this one does not, and the commit went in
+  with that deviation recorded here.
 
-With the record disabled, a `string|array` argument and an `object` argument (both able to
-throw a `TypeError` without invoking a callback) still reached the `catch` with the state
-that was asserted, so neither isolates a catch reached only by the without-invocation route.
+Why that mutation is equivalent for this checker: the invoked-route state is seeded from
+the same pre-call state as the without-invocation state, and the callback transfers
+applied to it (`forget_operation_may_change_except`, `forget_what_an_operation_may_change`
+in `checker/call_effects.rs`) only forget facts. A forgotten fact is wider, so the invoked
+state contains the without-invocation state and the join is unchanged. A probe of the
+fixture run confirmed the premise: every call that reaches the without-invocation record
+also has an invoked route (`(true, [0])`, 2 calls; no `(true, [])`, 0 calls). Two
+inputs that can throw without invoking a callback (`string|array`, `object`) were tried
+with the record disabled; the catch still received the asserted state. Those runs were
+not probed for the route each call took, so the single-route case is not established
+for them. The argument depends on the transfers only forgetting facts; a future transfer
+that narrows a fact would need the record again, and a fixture would then be needed.
+
+The ledger has no row for this item, so no ledger row was changed.
+
+## RV-27 remediation (2026-10-11)
+
+The correspondence builder maps recorded command paths to their location under the lock's
+`recorded_root` and compares them relative to it, so the source and emitted-IR checks no
+longer need the source at the recorded path. `results/lock.json` pins the digest of each of
+the artifact's 15 inputs under `representation_correspondence_inputs` (the source included),
+and the builder verifies them before parsing. `regenerate_correspondence.py` supplies the
+checked-in evidence as defaults; its output is byte-identical to
+`results/evaluation/strlen-representation-correspondence.json`.
+
+Tests in `test_representation_output_binding.py` cover the root mapping and its escape
+refusal, a wrong recorded root, a tampered input, two archives with swapped contents, an
+archive standing in for another recorded output, and the byte-for-byte regeneration (skipped
+only when the locked source is absent). All 42 `cmp` tests pass.
+
+This is not yet the path-free rerun: the producer archives still record the old root, and
+the regeneration is run against the checked-in archives. The rerun is a separate step.
