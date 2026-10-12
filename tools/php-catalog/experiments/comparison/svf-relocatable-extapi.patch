@@ -1,0 +1,43 @@
+diff --git a/svf-llvm/CMakeLists.txt b/svf-llvm/CMakeLists.txt
+index f871648d..dbd23852 100644
+--- a/svf-llvm/CMakeLists.txt
++++ b/svf-llvm/CMakeLists.txt
+@@ -144,7 +144,8 @@ endif()
+ 
+ add_custom_command(
+   OUTPUT ${SVF_BUILD_EXTAPI_BC}
+-  COMMAND ${LLVM_CLANG} -w -S -c ${EXTAPI_PIC_FLAG} -std=gnu11 -emit-llvm -o ${SVF_BUILD_EXTAPI_BC} ${EXTAPI_SRC}
++  COMMAND ${LLVM_CLANG} -w -S -c ${EXTAPI_PIC_FLAG} -std=gnu11 -emit-llvm -o ${SVF_BUILD_EXTAPI_BC} lib/extapi.c
++  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+   COMMENT "Generating extapi.bc LLVM bitcode file..."
+   MAIN_DEPENDENCY ${EXTAPI_SRC}
+   DEPENDS ${EXTAPI_SRC}
+diff --git a/svf/lib/Util/ExtAPI.cpp b/svf/lib/Util/ExtAPI.cpp
+index 1b374ea9..18cce82c 100644
+--- a/svf/lib/Util/ExtAPI.cpp
++++ b/svf/lib/Util/ExtAPI.cpp
+@@ -113,7 +113,6 @@ std::string ExtAPI::getExtBcPath()
+     // Try to locate extapi.bc in the following order:
+     // 1. If setExtBcPath() has been called, use that path.
+     // 2. If the command line argument -extapi=path/to/extapi.bc is provided, use that path.
+-    // 3. If SVF is being developed and used directly from a build directory, try the build dir (SVF_BUILD_DIR).
+     // 4. If the SVF_DIR environment variable is set, try $SVF_DIR with the standard relative path.
+     // 5. If installed via npm, use `npm root` and append the standard relative path.
+     // 6. As a last resort, use the directory of the loaded libSVFCore.so (or .dylib) and append extapi.bc.
+@@ -134,16 +133,6 @@ std::string ExtAPI::getExtBcPath()
+         candidatePaths.push_back(Options::ExtAPIPath());
+     }
+ 
+-    // 3. SVF developer: try build directory (SVF_BUILD_DIR)
+-    if (setExtBcPath(SVF_BUILD_DIR "/lib/extapi.bc"))
+-    {
+-        return extBcPath;
+-    }
+-    else
+-    {
+-        candidatePaths.push_back(SVF_BUILD_DIR "/lib/extapi.bc");
+-    }
+-
+     // 4. Use $SVF_DIR environment variable + standard relative path
+     if (setExtBcPath(getFilePath("SVF_DIR")))
+     {
