@@ -163,7 +163,12 @@ function valid_value(?ReflectionType $type): ?Closure
     }
     $values ??= [
         'xmlwriter' => static fn (): XMLWriter => xmlwriter_open_memory(),
-        'xmlparser' => static fn (): XMLParser => xml_parser_create(),
+        // A parser whose handlers are methods of an object: xml_set_object is what the handler setters require.
+        'xmlparser' => static function (): XMLParser {
+            $parser = xml_parser_create();
+            xml_set_object($parser, new stdClass());
+            return $parser;
+        },
         // Not connected: a call on it fails for want of a connection, which the table records as a gap.
         'mysqli' => static fn (): mysqli => new mysqli(),
         'socket' => static fn (): Socket => socket_create(AF_UNIX, SOCK_STREAM, 0),
@@ -231,6 +236,33 @@ function valid_value(?ReflectionType $type): ?Closure
         'sysvsharedmemory' => static fn (): SysvSharedMemory => shm_attach(0x5151, 64),
     ];
     return $values[strtolower($type->getName())] ?? null;
+}
+
+/** A document loaded from XML, as a DOM document. */
+function dom_document_sample(string $xml): DOMDocument
+{
+    $document = new DOMDocument();
+    $document->loadXML($xml);
+    return $document;
+}
+
+/** An object with lazy initialisation, as a ReflectionClass of stdClass makes. */
+function lazy_object_sample(): object
+{
+    return (new ReflectionClass(stdClass::class))->newLazyGhost(static function (): void {});
+}
+
+/** One end of a connected socket pair: a socket that select can wait on. */
+function socket_pair_sample(): Socket
+{
+    socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $pair);
+    return $pair[0];
+}
+
+/** One end of a connected stream pair: a stream that stream_select can wait on. */
+function stream_pair_sample(): mixed
+{
+    return stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP)[0];
 }
 
 /** A stream context whose notification callback is a recording callable. */
@@ -360,6 +392,9 @@ function named_value(ReflectionParameter $param): ?Closure
     if (str_starts_with($function, 'image') && $name === 'file') {
         return static fn (): string => sys_get_temp_dir() . '/rec-' . getmypid() . '.png';
     }
+    if (in_array($class, ['splfileobject', 'spltempfileobject'], true) && $name === 'context') {
+        return static fn (): mixed => stream_context_create();
+    }
     // A database file of SQLite3 is in memory; a directory of the directory iterators is the temporary one.
     if ($class === 'sqlite3' && $name === 'filename') {
         return static fn (): string => ':memory:';
@@ -394,6 +429,18 @@ function named_value(ReflectionParameter $param): ?Closure
         ['json_validate', 'flags'] => static fn (): int => 0,
         ['extract', 'prefix'] => static fn (): string => 'p',
         ['popen', 'mode'] => static fn (): string => 'r',
+        ['transformtoxml', 'document'], ['transformtouri', 'document'], ['transformtodoc', 'document'] => static fn (): DOMDocument => dom_document_sample('<a/>'),
+        ['importstylesheet', 'stylesheet'] => static fn (): DOMDocument => dom_document_sample('<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/"><xsl:copy-of select="."/></xsl:template></xsl:stylesheet>'),
+        ['getattribute', 'name'] => static fn (): int => PDO::ATTR_DRIVER_NAME,
+        ['getlazyinitializer', 'object'], ['initializelazyobject', 'object'], ['isuninitializedlazyobject', 'object'], ['marklazyobjectasinitialized', 'object'] => static fn (): object => lazy_object_sample(),
+        ['socket_select', 'read'], ['socket_select', 'write'], ['socket_select', 'except'] => static fn (): array => [socket_pair_sample()],
+        ['stream_select', 'read'], ['stream_select', 'write'], ['stream_select', 'except'] => static fn (): array => [stream_pair_sample()],
+        // The callbacks form takes a callable first: a handler that records nothing.
+        ['session_set_save_handler', 'open'] => static fn (): Closure => static fn (): bool => true,
+        ['session_start', 'options'] => static fn (): array => ['cache_limiter' => 'nocache'],
+        ['openfile', 'context'] => static fn (): mixed => stream_context_create(),
+        ['openfile', 'mode'] => static fn (): string => 'r',
+        ['transformtodoc', 'returnclass'] => static fn (): string => 'DOMDocument',
         ['substr_count', 'offset'] => static fn (): int => 0,
         ['resetaslazyghost', 'object'], ['resetaslazyproxy', 'object'] => static fn (): object => new stdClass(),
         ['simplexml_import_dom', 'class_name'], ['simplexml_load_string', 'class_name'], ['simplexml_load_file', 'class_name'] => static fn (): string => 'SimpleXMLElement',
@@ -845,7 +892,7 @@ function valid_site(ReflectionParameter $param): ?Closure
         // Callables that record nothing: a recording one would be attributed to whichever probe is running.
         'array_udiff_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0, static fn (): int => 0]],
         'array_uintersect_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0, static fn (): int => 0]],
-        'session_set_save_handler' => [0 => static fn (): mixed => static fn (): int => 0],
+        'session_set_save_handler' => [1 => static fn (): mixed => static fn (): int => 0],
         'stream_copy_to_stream' => [0 => static fn (): mixed => fopen('php://memory', 'r+'), 1 => static fn (): mixed => fopen('php://memory', 'r+')],
         'sodium_crypto_secretstream_xchacha20poly1305_push' => [0 => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0]],
         'array_multisort' => [0 => static fn (): array => [2, 1]],
