@@ -28,6 +28,9 @@ class ResourceGateTests(unittest.TestCase):
         self.assertTrue(CAMPAIGN.step_passed(gate_record(143)))
         self.assertTrue(CAMPAIGN.step_passed(gate_record(137)))
 
+    def test_the_observed_wrapper_exit_247_passes_with_kernel_proof(self):
+        self.assertTrue(CAMPAIGN.step_passed(gate_record(247)))
+
     def test_an_oom_exit_without_kernel_proof_fails(self):
         self.assertFalse(CAMPAIGN.step_passed(gate_record(143, kernel_oom=False)))
         self.assertFalse(CAMPAIGN.step_passed(gate_record(143, kernel_oom=None)))
@@ -61,7 +64,7 @@ class ExpectedOutcomeTests(unittest.TestCase):
     def test_the_table_names_the_resource_gate_with_its_reviewed_codes(self):
         outcome = CAMPAIGN.expected_outcome("whole-compact-dda")
         self.assertEqual(outcome["kind"], "resource_gate_oom")
-        self.assertEqual(outcome["exit_codes"], [137, 143])
+        self.assertEqual(outcome["exit_codes"], [137, 143, 247])
 
 
 if __name__ == "__main__":

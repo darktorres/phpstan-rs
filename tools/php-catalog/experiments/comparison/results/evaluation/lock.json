@@ -195,11 +195,12 @@
       "kind": "resource_gate_oom",
       "exit_codes": [
         137,
-        143
+        143,
+        247
       ],
       "min_oom_kills": 1,
       "peak_slack_bytes": 268435456,
-      "reason": "the compact analysis is measured against the 10 GiB aggregate cgroup; exit 137 or 143 is the finding only with kernel OOM proof"
+      "reason": "the analysis is measured against the 10 GiB aggregate cgroup. The exit code is the wrapper's report of the kernel kill: GNU time reports 247 for the enforcing wrapper, and 137 or 143 under other wrappers. The gate holds only with kernel OOM proof: kernel_oom_kill, oom_kill of at least 1, and a peak within peak_slack_bytes of the cap."
     }
   }
 }
