@@ -6,7 +6,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from run import HERE, Runner, digest
+from run import HERE, Runner, digest, svf_command
 
 
 def main():
@@ -38,7 +38,7 @@ def main():
             '-fno-discard-value-names', '-S', '-emit-llvm', '-DPAYLOAD_BYTES=' + str(size), HERE / 'dispatch.c', '-o', ir])
         aux.run(name + '-ir', [probe, 'ir', entries, ir])
         aux.run(name + '-promote', ['opt-21', '-passes=mem2reg', ir, '-o', bc])
-        aux.run(name + '-dda', [svf / 'dvf', '-dfs', '-query=funptr', '-stat', '-print-query-pts', bc])
+        aux.run(name + '-dda', svf_command(svf / 'dvf', '-dfs', '-query=funptr', '-stat', '-print-query-pts', bc))
     external = Runner(root / 'external-comparison')
     impl, linked = external.output / 'impl.bc', external.output / 'linked.bc'
     external.run('impl-emit', ['clang-21', '-O0', '-Xclang', '-disable-O0-optnone', '-g',
@@ -46,7 +46,7 @@ def main():
     external.run('external-link', ['llvm-link-21', args.results / 'external-promoted.bc', impl, '-o', linked])
     for name, flags, source in [('missing-with-blackhole', ['-blk'], args.results / 'external-promoted.bc'),
                                 ('complete-source', [], linked)]:
-        external.run(name, [svf / 'dvf', '-dfs', '-query=funptr', '-stat', '-print-query-pts', *flags, source])
+        external.run(name, svf_command(svf / 'dvf', '-dfs', '-query=funptr', '-stat', '-print-query-pts', *flags, source))
     header = Runner(root / 'headers')
     native = header.output / 'unit.c'
     include = header.output / 'layout.h'

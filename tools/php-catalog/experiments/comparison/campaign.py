@@ -11,7 +11,7 @@ import subprocess
 import time
 
 from evaluation import EnforcedRunner
-from run import HERE, digest
+from run import HERE, REPOSITORY_ROOT, digest, svf_command
 
 
 CBMC_EXPECTATIONS = {
@@ -223,8 +223,9 @@ def run_cbmc_campaign(cache, runner):
         for name, _, _ in cbmc_runs
     }
     for name, source, flags in cbmc_runs:
+        # The reviewed transcripts were recorded from the checkout root; the working directory is part of their digest.
         runner.run(name, [cbmc, HERE/source, '--unwinding-assertions', '--bounds-check', '--pointer-check',
-            '--json-ui', *flags], timeout=300, env=environment)
+            '--json-ui', *flags], cwd=REPOSITORY_ROOT, timeout=300, env=environment)
         actual = json.loads((runner.output / (name + '.out')).read_text())
         exit_code = runner.measurements[-1]['exit_code']
         validate_cbmc_run(name, actual, references[name], exit_code)
@@ -324,7 +325,7 @@ def pointer_cases(original, compact, promoted_module, runner):
         require_success(runner.run(fixture+'-promote', ['opt-21', '-passes=mem2reg', bc, '-o', promoted]), fixture+'-promote')
         for name, binary in [('stock', original/'bin/dvf'), ('compact', compact)]:
             step = fixture+'-'+name
-            require_success(runner.run(step, [binary, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted]), step)
+            require_success(runner.run(step, svf_command(binary, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted)), step)
     for size in [64, 65536, 16777216, 67108864, 268435456]:
         bc = runner.output / ('growth-'+str(size)+'.bc')
         require_success(runner.run('growth-'+str(size)+'-emit', ['clang-21', '-O0', '-g', '-Xclang', '-disable-O0-optnone',
@@ -332,9 +333,9 @@ def pointer_cases(original, compact, promoted_module, runner):
         promoted = runner.output / ('growth-'+str(size)+'-promoted.bc')
         require_success(runner.run('growth-'+str(size)+'-promote', ['opt-21', '-passes=mem2reg', bc, '-o', promoted]), 'growth-'+str(size)+'-promote')
         step = 'growth-'+str(size)+'-compact'
-        require_success(runner.run(step, [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted]), step)
-    run_resource_gate(runner, 'whole-compact-dda', [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts',
-        promoted_module], timeout=1800)
+        require_success(runner.run(step, svf_command(compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted)), step)
+    run_resource_gate(runner, 'whole-compact-dda', svf_command(compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts',
+        promoted_module), timeout=1800)
 
 
 def publish_completion(runner):

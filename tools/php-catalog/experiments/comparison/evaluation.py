@@ -9,7 +9,7 @@ import shlex
 import subprocess
 import sys
 
-from run import HERE, Runner, digest, recorded
+from run import HERE, Runner, digest, recorded, svf_command
 
 REPOSITORY = HERE.parents[3]
 
@@ -132,8 +132,8 @@ def whole_link(args):
             if args.svf:
                 promoted = runner.output / 'php-cli-promoted.bc'
                 if runner.run('whole-promote', ['opt-21', '-passes=mem2reg', whole, '-o', promoted], timeout=600):
-                    runner.run('whole-svf-dda', [args.svf.resolve() / 'dvf', '-dfs', '-query=funptr', '-stat',
-                        '-print-query-pts', promoted], timeout=args.analysis_timeout)
+                    runner.run('whole-svf-dda', svf_command(args.svf.resolve() / 'dvf', '-dfs', '-query=funptr', '-stat',
+                        '-print-query-pts', promoted), timeout=args.analysis_timeout)
     (runner.output / 'link-manifest.json').write_text(json.dumps(recorded(manifest), indent=2) + '\n')
 
 

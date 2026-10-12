@@ -25,6 +25,17 @@ CACHE_ROOT = Path.home() / '.cache' / 'php-catalog-evaluation'
 PLACEHOLDERS = (('<cache>', CACHE_ROOT), ('<repo>', REPOSITORY_ROOT))
 
 
+def svf_command(tool, *arguments):
+    """An SVF tool with the extapi.bc of its own build named explicitly.
+
+    The path-free build has no default module location, so every analysis names it:
+    the module sits beside the bin directory (build/bin/tool, build/lib/extapi.bc).
+    """
+    tool = Path(tool)
+    extapi = tool.resolve().parents[1] / 'lib' / 'extapi.bc'
+    return [tool, f'-extapi={extapi}', *arguments]
+
+
 def record_text(value):
     text = str(value)
     for token, root in PLACEHOLDERS:
@@ -246,7 +257,7 @@ def main():
                 executable = svf / ('wpa' if kind == 'andersen' else 'dvf')
                 if executable.exists():
                     runner.run(unit + '-svf-' + kind,
-                               [executable, *flags, promoted], timeout=180, env=environment)
+                               svf_command(executable, *flags, promoted), timeout=180, env=environment)
     (runner.output / 'representations.json').write_text(json.dumps(summaries, indent=2) + '\n')
     versions = {}
     for tool in ['clang-21', 'llvm-config-21', 'gcc', 'php']:

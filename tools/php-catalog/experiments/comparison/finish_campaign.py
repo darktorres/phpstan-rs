@@ -10,7 +10,7 @@ import time
 
 from evaluation import EnforcedRunner, recipes
 from campaign import expected_outcome, step_passed
-from run import HERE, digest
+from run import HERE, digest, svf_command
 
 
 def require_success(success, name):
@@ -53,9 +53,10 @@ def finish_expected_exit_codes(measurements, cir_results):
     return expected
 
 
-def validate_campaign_completion(cache):
-    measurements_path = cache / 'campaign/measurements.json'
-    marker_path = cache / 'campaign/completed.json'
+def validate_campaign_completion(cache, campaign=None):
+    campaign = Path(campaign) if campaign is not None else cache / 'campaign'
+    measurements_path = campaign / 'measurements.json'
+    marker_path = campaign / 'completed.json'
     measurements = json.loads(measurements_path.read_text())
     marker = json.loads(marker_path.read_text())
     names = [record['name'] for record in measurements]
@@ -212,10 +213,12 @@ def main():
     parser.add_argument('--php-binary',type=Path)
     parser.add_argument('--php-source',type=Path)
     parser.add_argument('--stock-dvf',type=Path)
+    parser.add_argument('--campaign',type=Path,help='the campaign output directory (default: CACHE/campaign)')
     args=parser.parse_args();cache=args.cache.resolve()
-    ready=cache/'campaign/completed.json'
+    campaign=args.campaign.resolve() if args.campaign else cache/'campaign'
+    ready=campaign/'completed.json'
     while not ready.exists():time.sleep(1)
-    validate_campaign_completion(cache)
+    validate_campaign_completion(cache, campaign)
     runner=EnforcedRunner(cache/('finish' if args.stage=='all' else 'finish-'+args.stage))
     if args.stage=='gcc':
         gcc_profile(cache,runner)
@@ -232,16 +235,16 @@ def main():
     stock_dvf = args.stock_dvf.resolve()
     if not php_binary.is_file() or not stock_dvf.is_file() or not (php_source/'Zend/zend_API.c').is_file():
         parser.error('the supplied PHP source tree and measured binaries must exist')
-    require_success(runner.run('binary-retry', [cache/'python/bin/python', HERE/'binary_cases.py', '--fixture', cache/'campaign/layout-clang-21',
+    require_success(runner.run('binary-retry', [cache/'python/bin/python', HERE/'binary_cases.py', '--fixture', campaign/'layout-clang-21',
         '--php', php_binary, '--output', runner.output/'binary-results.json'], timeout=300), 'binary-retry')
     for candidate, binary in [('stock',stock_dvf),
-                              ('compact',cache/'campaign/dvf-compact')]:
+                              ('compact',cache/'compact-svf/svf-build/bin/dvf')]:
         for name, flags in [('constants',['-model-consts=true']),
                             ('arrays',['-model-arrays=true']),
                             ('constants-arrays',['-model-consts=true','-model-arrays=true'])]:
             step='layout-'+candidate+'-'+name
-            require_success(runner.run(step, [binary,'-dfs','-query=funptr','-stat','-print-query-pts',
-                *flags,cache/'campaign/layout_cases-promoted.bc']), step)
+            require_success(runner.run(step, svf_command(binary,'-dfs','-query=funptr','-stat','-print-query-pts',
+                *flags,campaign/'layout_cases-promoted.bc')), step)
     instrumented(cache,runner,php_source)
     gcc_profile(cache,runner)
     cir_profile(cache,runner,php_source)

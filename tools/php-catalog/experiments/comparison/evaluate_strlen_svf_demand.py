@@ -18,7 +18,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
 sys.path.insert(0, str(HERE))
-from run import Runner  # noqa: E402
+from run import Runner, svf_command  # noqa: E402
 
 
 FUNCTIONS = [
@@ -226,14 +226,14 @@ def main() -> None:
         summaries: dict[str, dict[str, object]] = {}
         for mode, extra in modes.items():
             name = "svf-" + mode
-            if not runner.run(name, [dvf, "-dfs", *extra, "-query=funptr", "-stat",
-                                     "-print-query-pts", capsule_path], timeout=180):
+            if not runner.run(name, svf_command(dvf, "-dfs", *extra, "-query=funptr", "-stat",
+                                                "-print-query-pts", capsule_path), timeout=180):
                 raise RuntimeError(f"SVF query failed in mode {mode}")
             output = (args.output / f"{name}.out").read_text(errors="replace")
             summaries[mode] = parse_dvf_result(output)
         expanded_name = "svf-expanded-default"
-        if not runner.run(expanded_name, [dvf, "-dfs", "-query=funptr", "-stat",
-                                          "-print-query-pts", expanded_path], timeout=180):
+        if not runner.run(expanded_name, svf_command(dvf, "-dfs", "-query=funptr", "-stat",
+                                                     "-print-query-pts", expanded_path), timeout=180):
             raise RuntimeError("SVF query failed with the standard-handler global included")
         expanded_output = (args.output / f"{expanded_name}.out").read_text(errors="replace")
         summaries["expanded_with_std_handlers"] = parse_dvf_result(expanded_output)
