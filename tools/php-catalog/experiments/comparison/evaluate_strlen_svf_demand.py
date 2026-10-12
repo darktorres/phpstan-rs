@@ -7,13 +7,13 @@ requires the consumer to keep that result open.
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
@@ -207,7 +207,11 @@ def main() -> None:
         raise ValueError("current runtime callback fixture lacks the witnessed sentinel")
     validate_linked_source_identity(args.linked_bitcode, source_lock, link_manifest, link_manifest_path)
 
-    with tempfile.TemporaryDirectory(prefix="strlen-svf-capsules-") as temp_dir:
+    # The capsules are evidence: they are kept under the output directory, so the records name them
+    # by a stable path rather than a random temporary name.
+    capsule_root = args.output / "capsules"
+    capsule_root.mkdir(parents=True, exist_ok=True)
+    with contextlib.nullcontext(capsule_root) as temp_dir:
         capsule_path = Path(temp_dir) / "strlen-native-demand.bc"
         expanded_path = Path(temp_dir) / "strlen-native-demand-std.bc"
         capsule = extract_capsule(args.linked_bitcode, capsule_path, args.llvm_extract,
