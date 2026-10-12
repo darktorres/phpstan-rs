@@ -16,7 +16,7 @@
     "checks.py": "46abada3906fbfd3b1286e073780d1ee7807a4adf5e4a139ad79ef1dacf96109",
     "dispatch.c": "620e7b0c27bb13de24762d50ba7c52bc653667423eace1d198f99e51b867ea97",
     "native_probe.cpp": "0e86ee084689b5f4c3366c598784baa18e59b93ceb0bfbe7a597083311c6c759",
-    "run.py": "5a0fbcc5f6acbd7d3d5739285be3b126bd1ff9337b0ddd73798c31164c2fd3b4",
+    "run.py": "8d082308a0dbc545651668821db8383b8d7bef4250ed5959cc07702a5b41c004",
     "cleanup_runtime.cpp": "655bd03194e30e9980a9f66d649a351c65ec6c09fee8259da0ee53b54b856541",
     "cleanup.cpp": "3e346ddb906205cd64506bd98e1a232d6ecfa8d6abdc6a1453150342534777d6",
     "platform.c": "b316602c2af8976c72257ea0bbccfe02669eaf167ba223094e949245026c06f7",
@@ -35,7 +35,7 @@
   "resource_acceptance": "Observed peaks; kernel-enforced aggregate 10 GiB acceptance remains OPEN",
   "coverage": "Native representation and pointer prerequisites; no closed PHP BehaviorGraph or full Phase F completion",
   "runtime_fixture_scope": "hybrid-call-8.5.4.json uses runtime-hybrid-call-13.php; runtime.php current 16-sentinel evidence is separately pinned by tailcall-call-reference-8.5.4.json",
-  "link_manifest_sha256": "ceabcef099fc9189b2a61061a85687961aa0670ff70ad06627d6da4b9e225d77",
+  "link_manifest_sha256": "589c9a3318f5f8adaa800829ba60bac2eebe5d8a3a77c34c38cbc40081f86bb6",
   "recorded_root": "/tmp/php-catalog-comparison",
   "representation_correspondence_inputs": {
     "campaign_inputs": "95626baaaf5bc6627b93acb3f7d94b723de23fb5b5a1a54d1fab72f8f2c9d30f",
@@ -59,7 +59,7 @@
     "bin/wpa": "cbab61507d30ae25e4d02b54481afcdf942bce1f430d1f65ca3b3c8606d5b3f1"
   },
   "svf_relocatable_patch_sha256": "c984c1e928e58ec2100517f832843f4cc0116dc05d0ffb204d20058a50a648e1",
-  "php_cli_sha256": "373a40c22fef3e0864f6a6b61df631af3065cbbdbafb0daeb536c024d6c6eb6d",
+  "php_cli_sha256": "23250df2186ac1f9c7b5323a3518f9f466cdf5b248cca04448ea73c7dd005386",
   "php_fixed_time_header_sha256": "10c976349a063f02b37ac44817f24ab2a5fd0dfa075ad0e878d66334f7ed448a",
   "superseded_pins": {
     "svf_extapi_sha256": {
@@ -73,7 +73,29 @@
     "link_manifest_sha256": {
       "value": "42cce39683efc9854bf0708fcf741689e29d2b2858152f3475ceea2dd2402324",
       "reason": "the manifest of the link made from the absolute-path php tree, before the relative-source and prefix-map link"
+    },
+    "php_cli_sha256": {
+      "value": "373a40c22fef3e0864f6a6b61df631af3065cbbdbafb0daeb536c024d6c6eb6d",
+      "reason": "built with the warning from the fixed-time header, so configure lacked three attribute macros"
+    },
+    "php_call_cli_sha256": {
+      "value": "c09cc82f1c22783888d65ec513d8d7c0541d988c33796d045a41fc67a3268129",
+      "reason": "same configuration fault as the php CLI"
+    },
+    "compiler_versions.php_build": {
+      "value": "PHP 8.5.4 (cli) (built: Jan 01 2000 00:00:00) (NTS)",
+      "reason": "replaced with the rebuilt php CLI identity"
+    },
+    "link_manifest_sha256_config_fault": {
+      "value": "ceabcef099fc9189b2a61061a85687961aa0670ff70ad06627d6da4b9e225d77",
+      "reason": "linked from the php build with the configure fault"
+    },
+    "source_sha256_run_py_before_producer_fix": {
+      "value": {
+        "run.py": "5a0fbcc5f6ac"
+      },
+      "reason": "run.py changed in the producer fixes (recipe match by resolved path, tree-relative sources)"
     }
   },
-  "php_call_cli_sha256": "c09cc82f1c22783888d65ec513d8d7c0541d988c33796d045a41fc67a3268129"
+  "php_call_cli_sha256": "bb4aabfef575d223db59cc6dc75c3d8138debb2324702df016d9465a75adbf57"
 }
