@@ -214,6 +214,9 @@ function valid_value(?ReflectionType $type): ?Closure
         'intlgregoriancalendar' => static fn (): IntlGregorianCalendar => IntlGregorianCalendar::createInstance('UTC', 'en'),
         'ds\\map' => static fn (): Ds\Map => new Ds\Map(),
         'sqlite3' => static fn (): SQLite3 => new SQLite3(':memory:'),
+        // Connected to the PostgreSQL server the scan starts inside its sandbox, on a Unix socket.
+        'pgsql\\connection' => static fn (): PgSql\Connection => pg_connect('host=/tmp port=5432 user=postgres dbname=postgres'),
+        'pgsql\\result' => static fn (): PgSql\Result => pg_query(pg_connect('host=/tmp port=5432 user=postgres dbname=postgres'), 'SELECT 1'),
         'imagickkernel' => static fn (): ImagickKernel => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         'traversable' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
         'domelement' => static function (): DOMElement {
@@ -394,6 +397,10 @@ function named_value(ReflectionParameter $param): ?Closure
     }
     if (in_array($class, ['splfileobject', 'spltempfileobject'], true) && $name === 'context') {
         return static fn (): mixed => stream_context_create();
+    }
+    // A PostgreSQL function takes its connection first, from the server the scan starts.
+    if (str_starts_with($function, 'pg_') && $name === 'connection') {
+        return static fn (): PgSql\Connection => pg_connect('host=/tmp port=5432 user=postgres dbname=postgres');
     }
     // A database file of SQLite3 is in memory; a directory of the directory iterators is the temporary one.
     if ($class === 'sqlite3' && $name === 'filename') {

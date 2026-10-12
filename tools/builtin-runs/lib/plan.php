@@ -114,6 +114,12 @@ function recipe(string $class): ?Closure
         'ds\\map' => static fn (): object => new Ds\Map(['a' => 1, 'b' => 2]),
         'finfo' => static fn (): object => new finfo(FILEINFO_MIME_TYPE),
         'fiber' => static fn (): object => new Fiber(static fn (): int => 1),
+        // Connected to the Redis server the scan starts inside its sandbox, on a Unix socket.
+        'redis' => static function (): object {
+            $redis = new Redis();
+            $redis->connect('/tmp/redis.sock');
+            return $redis;
+        },
         'splobjectstorage' => static function (): object {
             $storage = new SplObjectStorage();
             $storage->attach(new stdClass());
