@@ -1229,12 +1229,6 @@ reflectionclass::isuninitializedlazyobject	0	value	threw:TypeError:ReflectionCla
 reflectionclass::marklazyobjectasinitialized	0	value	threw:TypeError:ReflectionClass::markLazyObjectAsInitialized(): Argument #1 ($object) must be of type stdClass, RecordingObject given
 reflectionclass::newinstance	0	value	threw:ReflectionException:Class stdClass does not have a constructor, so you cannot pass any constructor arguments
 reflectionclass::newinstanceargs	0	value	threw:ReflectionException:Class stdClass does not have a constructor, so you cannot pass any constructor arguments
-reflectionclass::newlazyghost	1	value	threw:ReflectionException:ReflectionClass::newLazyGhost(): Argument #2 ($options) contains invalid flags
-reflectionclass::newlazyproxy	1	value	threw:ReflectionException:ReflectionClass::newLazyProxy(): Argument #2 ($options) contains invalid flags
-reflectionclass::resetaslazyghost	0	value	threw:TypeError:ReflectionClass::resetAsLazyGhost(): Argument #1 ($object) must be of type stdClass, RecordingObject given
-reflectionclass::resetaslazyghost	2	value	threw:ReflectionException:ReflectionClass::resetAsLazyGhost(): Argument #3 ($options) contains invalid flags
-reflectionclass::resetaslazyproxy	0	value	threw:TypeError:ReflectionClass::resetAsLazyProxy(): Argument #1 ($object) must be of type stdClass, RecordingObject given
-reflectionclass::resetaslazyproxy	2	value	threw:ReflectionException:ReflectionClass::resetAsLazyProxy(): Argument #3 ($options) contains invalid flags
 reflectionclass::setstaticpropertyvalue	0	value	threw:ReflectionException:Class stdClass does not have a property named rec://probe
 reflectionclass::setstaticpropertyvalue	1	value	threw:ReflectionException:Class stdClass does not have a property named x
 reflectionclassconstant::__construct	0	file-or-font	threw:ReflectionException:Constant RecordingObject::x does not exist
@@ -1269,10 +1263,6 @@ sessionhandler::open	1	session	threw:Error:Session is not active
 sessionhandler::read	0	session	threw:Error:Session is not active
 sessionhandler::write	0	session	threw:Error:Session is not active
 sessionhandler::write	1	session	threw:Error:Session is not active
-simplexml_import_dom	0	value	threw:TypeError:simplexml_import_dom(): Argument #1 ($node) must be a valid XML node
-simplexml_import_dom	1	class-name	threw:TypeError:simplexml_import_dom(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
-simplexml_load_file	1	class-name	threw:TypeError:simplexml_load_file(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
-simplexml_load_string	1	class-name	threw:TypeError:simplexml_load_string(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
 socket_select	0	value	threw:TypeError:socket_select(): Argument #1 ($read) must only have elements of type Socket, RecordingObject given
 socket_select	1	value	threw:TypeError:socket_select(): Argument #2 ($write) must only have elements of type Socket, RecordingObject given
 socket_select	2	value	threw:TypeError:socket_select(): Argument #3 ($except) must only have elements of type Socket, RecordingObject given
@@ -1320,7 +1310,6 @@ stream_select	4	state	threw:ValueError:No stream arrays were passed
 stream_wrapper_register	0	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
 stream_wrapper_register	1	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, rec://probe given
 stream_wrapper_register	2	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
-substr_count	3	value	threw:ValueError:substr_count(): Argument #4 ($length) must be contained in argument #1 ($haystack)
 uconverter::__construct	0	value	threw:IntlException:UConverter::__construct(): returned error 4: U_FILE_ACCESS_ERROR
 uconverter::__construct	1	value	threw:IntlException:UConverter::__construct(): returned error 4: U_FILE_ACCESS_ERROR
 uri\rfc3986\uri::__construct	0	state	threw:ReflectionException:Class Uri\Rfc3986\Uri is an internal class marked as final that cannot be instantiated without invoking its constructor
