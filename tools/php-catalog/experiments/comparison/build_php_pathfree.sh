@@ -9,6 +9,8 @@
 #   not modified). DEPS_PREFIX is the usr/ directory of the extracted bison and re2c.
 #
 # __FILE__ is mapped to a relative path, and __DATE__/__TIME__ are fixed, so the
+# binary depends on the source and the flags only. The warning that undefining the builtins
+# prints is silenced: configure's attribute checks read any warning as a failed test.
 # binary depends on the source and the flags only. `php -v` therefore reports a
 # fixed build time; the real build time is not recorded.
 set -euo pipefail
@@ -28,7 +30,7 @@ if [ "${4:-}" = CALL ]; then
   export php_cv_preserve_none=no
 fi
 CC=${PHP_CC:-clang-21} CXX=${PHP_CXX:-clang++-21} \
-CFLAGS="-O0 -g -ffile-prefix-map=$ROOT=. -include $HERE/php-fixed-time.h" \
+CFLAGS="-O0 -g -ffile-prefix-map=$ROOT=. -Wno-builtin-macro-redefined -include $HERE/php-fixed-time.h" \
   ./configure --disable-all --disable-cgi --disable-phpdbg --without-pear \
   --enable-cli --enable-session
 if [ "${4:-}" = CALL ]; then
