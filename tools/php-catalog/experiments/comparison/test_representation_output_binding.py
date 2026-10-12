@@ -11,6 +11,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+from run import record_text  # noqa: E402
 SCRIPT = Path(__file__).with_name("build_strlen_representation_correspondence.py")
 SPEC = importlib.util.spec_from_file_location("strlen_correspondence", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -39,11 +40,11 @@ class RepresentationOutputBindingTests(unittest.TestCase):
             RECORDER.record_outputs(measurements, capture, [("producer", artifact, archive)])
 
             [record] = json.loads(measurements.read_text())
-            self.assertEqual(record["stdout_capture_path"], str((capture / "producer.out").resolve()))
-            self.assertEqual(record["stdout_archive_path"], str((archive.parent / "producer.out").resolve()))
+            self.assertEqual(record["stdout_capture_path"], record_text((capture / "producer.out").resolve()))
+            self.assertEqual(record["stdout_archive_path"], record_text((archive.parent / "producer.out").resolve()))
             self.assertEqual(record["stdout_sha256"], BUILDER.sha(capture / "producer.out"))
             self.assertEqual(record["output_artifacts"], [{
-                "path": str(artifact.resolve()), "archive_path": str(archive.resolve()),
+                "path": record_text(artifact.resolve()), "archive_path": record_text(archive.resolve()),
                 "sha256": BUILDER.sha(archive),
             }])
             self.assertEqual(

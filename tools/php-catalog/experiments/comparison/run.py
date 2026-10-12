@@ -18,6 +18,38 @@ import time
 
 HERE = Path(__file__).resolve().parent
 LIMIT = 10 * 1024**3
+REPOSITORY_ROOT = HERE.parents[3]
+CACHE_ROOT = Path.home() / '.cache' / 'php-catalog-evaluation'
+# Records name the evaluation cache and the checkout by these placeholders, so a record
+# made under one location reads the same under another; each reader resolves them.
+PLACEHOLDERS = (('<cache>', CACHE_ROOT), ('<repo>', REPOSITORY_ROOT))
+
+
+def record_text(value):
+    text = str(value)
+    for token, root in PLACEHOLDERS:
+        prefix = str(root)
+        if text == prefix or text.startswith(prefix + '/'):
+            return token + text[len(prefix):]
+    return text
+
+
+def resolve_record(value):
+    text = str(value)
+    for token, root in PLACEHOLDERS:
+        if text == token or text.startswith(token + '/'):
+            return str(root) + text[len(token):]
+    return text
+
+
+def recorded(value):
+    if isinstance(value, dict):
+        return {key: recorded(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [recorded(item) for item in value]
+    if isinstance(value, (str, Path)):
+        return record_text(value)
+    return value
 
 
 def digest(path):
@@ -83,11 +115,11 @@ class Runner:
             for line in timing.read_text().splitlines():
                 if line.startswith('{'):
                     measured = json.loads(line)
-        record = dict(name=name, command=list(map(str, command)), cwd=str(cwd or Path.cwd()),
+        record = dict(name=name, command=[record_text(x) for x in command], cwd=record_text(cwd or Path.cwd()),
                       elapsed_seconds=round(time.monotonic() - start, 4),
                       sampled_group_peak_bytes=sampled_peak,
-                      stdout_path=str(stdout.resolve()), stdout_sha256=digest(stdout),
-                      stderr_path=str(stderr.resolve()), stderr_sha256=digest(stderr),
+                      stdout_path=record_text(stdout.resolve()), stdout_sha256=digest(stdout),
+                      stderr_path=record_text(stderr.resolve()), stderr_sha256=digest(stderr),
                       exit_code=process.returncode, stopped=stopped, **measured)
         self.measurements.append(record)
         (self.output / 'measurements.json').write_text(json.dumps(self.measurements, indent=2) + '\n')

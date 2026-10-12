@@ -9,7 +9,9 @@ import shlex
 import subprocess
 import sys
 
-from run import HERE, Runner, digest
+from run import HERE, Runner, digest, recorded
+
+REPOSITORY = HERE.parents[3]
 
 
 class EnforcedRunner(Runner):
@@ -24,7 +26,7 @@ class EnforcedRunner(Runner):
             sys.executable, HERE / 'worker.py', proof, *map(str, command)],
             cwd=cwd, timeout=timeout, env=env)
         record = self.measurements[-1]
-        record['job_command'] = list(map(str, command))
+        record['job_command'] = recorded(list(map(str, command)))
         if proof.exists():
             record['resource_proof'] = json.loads(proof.read_text())
         else:
@@ -56,11 +58,11 @@ def recipes(php):
             continue
         command = words[compiler:]
         if '-c' in command:
-            source = Path(command[command.index('-c') + 1])
-            if not source.is_absolute():
-                source = php / source
+            # The source keeps the spelling make used, so the bitcode names it relative to the tree.
+            source_arg = command[command.index('-c') + 1]
             target = Path(command[command.index('-o') + 1])
-            compilations[str(target)] = dict(source=str(source), command=command)
+            source = Path(source_arg) if Path(source_arg).is_absolute() else php / source_arg
+            compilations[str(target)] = dict(source=str(source), source_arg=source_arg, command=command)
             if target.suffix == '.lo':
                 compilations[str(target.with_suffix('.o'))] = compilations[str(target)]
         elif 'sapi/cli/php' in command:
@@ -80,7 +82,11 @@ def whole_link(args):
     php = args.php.resolve()
     runner = EnforcedRunner(args.output)
     compiles, linked, link = recipes(php)
-    manifest = dict(php_commit=subprocess.check_output(['git', '-C', str(php), 'rev-parse', 'HEAD'], text=True).strip(),
+    locked = json.loads((HERE / 'results' / 'lock.json').read_text())['php_commit']
+    head = subprocess.check_output(['git', '-C', str(php), 'rev-parse', 'HEAD'], text=True).strip()
+    if head != locked:
+        raise RuntimeError(f'php tree is at {head}, not the locked {locked}')
+    manifest = dict(php_commit=head,
                     link_command=link, external_link_flags=[x for x in link if x.startswith('-l')],
                     objects=[], scope='Actual minimal NTS CLI link; external libraries remain declared boundaries')
     modules = []
@@ -97,14 +103,17 @@ def whole_link(args):
         flags = recipe['command'][1:recipe['command'].index('-c')]
         # Baseline is O0. Keep semantic frontend flags, replace debug verbosity only.
         flags = [x for x in flags if not x.startswith('-O') and x != '-g']
+        # Build-time prefix maps name the build root; these name this tree and this repository.
+        flags = [x for x in flags if not x.startswith(('-ffile-prefix-map=', '-fdebug-prefix-map='))]
+        flags += [f'-ffile-prefix-map={php}=.', f'-ffile-prefix-map={REPOSITORY}=.']
         command = ['clang-21', '-O0', '-gline-tables-only', '-Xclang', '-disable-O0-optnone',
-                   '-emit-llvm', '-c', *flags, source, '-o', bc]
+                   '-emit-llvm', '-c', *flags, recipe['source_arg'], '-o', bc]
         passed = runner.run(name + '-emit', command, cwd=php, timeout=600)
         record = dict(object=target, source=str(source), source_sha256=digest(source),
                       native_compile_command=recipe['command'], bitcode_command=list(map(str, command)),
                       imported=passed, module_sha256=digest(bc) if passed else None)
         manifest['objects'].append(record)
-        (runner.output / 'link-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+        (runner.output / 'link-manifest.json').write_text(json.dumps(recorded(manifest), indent=2) + '\n')
         if not passed:
             continue
         modules.append(bc)
@@ -125,7 +134,7 @@ def whole_link(args):
                 if runner.run('whole-promote', ['opt-21', '-passes=mem2reg', whole, '-o', promoted], timeout=600):
                     runner.run('whole-svf-dda', [args.svf.resolve() / 'dvf', '-dfs', '-query=funptr', '-stat',
                         '-print-query-pts', promoted], timeout=args.analysis_timeout)
-    (runner.output / 'link-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    (runner.output / 'link-manifest.json').write_text(json.dumps(recorded(manifest), indent=2) + '\n')
 
 
 def main():

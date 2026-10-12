@@ -8,6 +8,8 @@ import posixpath
 from pathlib import Path
 import re
 
+from run import resolve_record
+
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -25,7 +27,7 @@ HERE = Path(__file__).resolve().parent
 def portable(path):
     """A path reduced to the part under tools/php-catalog/, so that recorded
     paths from another checkout compare equal to this checkout's paths."""
-    text = str(path)
+    text = resolve_record(path)
     if text.startswith('/') and CHECKOUT_MARKER in text:
         return text[text.index(CHECKOUT_MARKER) + 1:]
     return text
@@ -37,7 +39,7 @@ def same_path(recorded, actual):
 
 def local_path(recorded):
     """The file a recorded path names in this checkout."""
-    text = str(recorded)
+    text = resolve_record(recorded)
     if text.startswith('/') and CHECKOUT_MARKER in text:
         return REPOSITORY / portable(text)
     return Path(text)

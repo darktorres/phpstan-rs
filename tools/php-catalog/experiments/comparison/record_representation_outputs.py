@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import shutil
 
+from run import record_text
+
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -31,16 +33,16 @@ def record_outputs(measurements_path, capture_root, bindings):
         captured_stdout = (capture_root / (run_name + ".out")).resolve()
         if not captured_stdout.is_file():
             raise ValueError(f"{run_name}: captured stdout is missing: {captured_stdout}")
-        record["stdout_capture_path"] = str(captured_stdout)
+        record["stdout_capture_path"] = record_text(captured_stdout)
         record["stdout_capture_sha256"] = sha(captured_stdout)
         stdout_archive = archive.parent / (run_name + ".out")
         shutil.copyfile(captured_stdout, stdout_archive)
-        record["stdout_archive_path"] = str(stdout_archive.resolve())
+        record["stdout_archive_path"] = record_text(stdout_archive.resolve())
         record["stdout_sha256"] = sha(stdout_archive)
         outputs = record.setdefault("output_artifacts", [])
-        if any(output.get("path") == str(path) for output in outputs):
+        if any(output.get("path") == record_text(path) for output in outputs):
             raise ValueError(f"{run_name}: duplicate output artifact binding: {path}")
-        outputs.append({"path": str(path), "archive_path": str(archive), "sha256": sha(archive)})
+        outputs.append({"path": record_text(path), "archive_path": record_text(archive), "sha256": sha(archive)})
     measurements_path.write_text(json.dumps(measurements, indent=2) + "\n")
 
 
