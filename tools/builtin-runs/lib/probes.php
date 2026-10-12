@@ -118,7 +118,12 @@ function probes_for(ReflectionParameter $param): array
         $probes[] = ['url', static fn () => 'rec://probe'];
     }
     // A class the parameter takes has a valid value (a DOM document, a SimpleXML element): that is a probe too.
-    $valid = $type instanceof ReflectionNamedType && !$type->isBuiltin() ? valid_value($type) : null;
+    $valid = null;
+    foreach ($type instanceof ReflectionUnionType ? $type->getTypes() : [$type] as $member) {
+        if ($member instanceof ReflectionNamedType && !$member->isBuiltin() && ($valid = valid_value($member)) !== null) {
+            break;
+        }
+    }
     if ($valid !== null) {
         $probes[] = ['valid', $valid];
     }
@@ -201,6 +206,7 @@ function valid_value(?ReflectionType $type): ?Closure
         'opensslasymmetrickey' => static fn (): OpenSSLAsymmetricKey => openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]),
         'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
         'simplexmlelement' => static fn (): SimpleXMLElement => new SimpleXMLElement('<a><b/></a>'),
+        'intlgregoriancalendar' => static fn (): IntlGregorianCalendar => IntlGregorianCalendar::createInstance('UTC', 'en'),
         'domelement' => static function (): DOMElement {
             $document = new DOMDocument();
             $document->loadXML('<a/>');
@@ -300,7 +306,7 @@ function zip_entry_sample(): mixed
  */
 function known_parameter_value(ReflectionParameter $param): ?Closure
 {
-    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? pdo_value($param) ?? xml_value($param);
+    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? pdo_value($param) ?? xml_value($param) ?? named_value($param);
 }
 
 /** The valid value of a bcmath parameter: a number string, a modulus that is not zero, or a scale. */
@@ -316,6 +322,36 @@ function bcmath_value(ReflectionParameter $param): ?Closure
         'exponent' => static fn (): string => '2',
         'modulus' => static fn (): string => '3',
         'scale' => static fn (): int => 0,
+        default => null,
+    };
+}
+
+/** The valid value of a parameter that a function checks by name: a CSV character, an option array, a mode, a process. */
+function named_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction()->getName();
+    $name = $param->getName();
+    if (in_array($name, ['separator', 'enclosure', 'escape'], true) && in_array($function, ['str_getcsv', 'fgetcsv', 'fputcsv', 'setcsvcontrol', 'splfileobject::fgetcsv', 'splfileobject::fputcsv', 'splfileobject::setcsvcontrol'], true)) {
+        return match ($name) {
+            'separator' => static fn (): string => ',',
+            'enclosure' => static fn (): string => '"',
+            default => static fn (): string => '\\',
+        };
+    }
+    return match ([$function, $name]) {
+        ['str_increment', 'string'] => static fn (): string => 'a',
+        ['str_decrement', 'string'] => static fn (): string => 'b',
+        ['stream_context_create', 'options'], ['stream_context_get_default', 'options'], ['stream_context_set_default', 'options'], ['stream_context_set_options', 'options'] => static fn (): array => ['http' => ['method' => 'GET']],
+        ['locale_lookup', 'languageTag'] => static fn (): array => ['en'],
+        ['locale_compose', 'subtags'] => static fn (): array => ['language' => 'en'],
+        ['intlcal_create_instance', 'timezone'], ['intlcal_set_time_zone', 'timezone'] => static fn (): string => 'UTC',
+        ['openssl_seal', 'public_key'] => static fn (): array => [openssl_pkey_get_details(openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]))['key']],
+        ['shmop_open', 'mode'] => static fn (): string => 'c',
+        ['socket_addrinfo_lookup', 'hints'] => static fn (): array => ['ai_socktype' => SOCK_STREAM],
+        ['preg_replace_callback_array', 'pattern'] => static fn (): array => ['/a/' => static fn (): string => 'x'],
+        ['proc_close', 'process'], ['proc_get_status', 'process'], ['proc_terminate', 'process'] => static function (): mixed {
+            return proc_open('true', [], $pipes);
+        },
         default => null,
     };
 }
@@ -376,7 +412,9 @@ function pdo_value(ReflectionParameter $param): ?Closure
 /** The valid value of an openssl key parameter: a PEM private or public key of a generated RSA pair. */
 function openssl_value(ReflectionParameter $param): ?Closure
 {
-    if (!str_starts_with($param->getDeclaringFunction()->getName(), 'openssl_')) {
+    // A parameter typed as a key object, or as an array of keys, takes that value instead of a PEM string.
+    $type = (string) $param->getType();
+    if (!str_starts_with($param->getDeclaringFunction()->getName(), 'openssl_') || str_contains($type, 'OpenSSLAsymmetricKey') || str_contains($type, 'array')) {
         return null;
     }
     return match ($param->getName()) {
