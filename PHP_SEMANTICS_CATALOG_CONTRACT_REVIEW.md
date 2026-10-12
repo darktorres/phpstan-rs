@@ -1332,7 +1332,10 @@ as author-accepted (2026-10-12). Semantic acceptance is closed only when every l
 is Complete and every R row is accepted. A row is accepted when its status records
 `author-accepted`, or a completed implementation with no open-ended words (open, remains,
 pending, partial, deferred). `checkpoint-validation.json` lists each heading and row that is
-not accepted, and `validate_checkpoint.py` derives the list from the ledger.
+not accepted, and `validate_checkpoint.py` derives the list from the ledger. A row that
+closes for a narrower scope than its topic says so in its status, and names the row that
+owns the rest (R00.2 closes as a definition with conformance under R01.5, as the review
+records).
 
 ## Semantic review by the author (2026-10-12)
 
