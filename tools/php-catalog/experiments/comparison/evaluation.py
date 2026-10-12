@@ -22,7 +22,7 @@ class EnforcedRunner(Runner):
     def run(self, name, command, cwd=None, timeout=180, env=None):
         proof = self.output / (name + '.cgroup.json')
         result = super().run(name, ['systemd-run', '--user', '--scope', '--quiet',
-            '-p', 'MemoryMax=10737418240', '-p', 'MemorySwapMax=0',
+            '-p', 'MemoryMax=10737418240', '-p', 'MemorySwapMax=0', '-p', 'OOMPolicy=continue',
             sys.executable, HERE / 'worker.py', proof, *map(str, command)],
             cwd=cwd, timeout=timeout, env=env)
         record = self.measurements[-1]
