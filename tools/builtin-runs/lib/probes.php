@@ -171,6 +171,7 @@ function valid_value(?ReflectionType $type): ?Closure
         'imagickpixel' => static fn (): ImagickPixel => new ImagickPixel('white'),
         // Valid for every function that takes the type, so they are type defaults.
         'iterator' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
+        'datetimezone' => static fn (): DateTimeZone => new DateTimeZone('UTC'),
         'curlsharehandle' => static fn (): CurlShareHandle => curl_share_init(),
         'opensslasymmetrickey' => static fn (): OpenSSLAsymmetricKey => openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]),
         'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
@@ -207,6 +208,18 @@ function valid_site(ReflectionParameter $param): ?Closure
         'deflate_init' => [0 => static fn (): int => ZLIB_ENCODING_RAW],
         'domdocument::registernodeclass' => [0 => 'DOMElement', 1 => static fn (): null => null],
         'imageaffinematrixget' => [0 => static fn (): int => IMG_AFFINE_TRANSLATE, 1 => static fn (): array => ['x' => 1, 'y' => 1]],
+        'imagecolormatch' => [1 => static function (): GdImage {
+            $palette = imagecreate(1, 1);
+            imagecolorallocate($palette, 255, 255, 255);
+            return $palette;
+        }],
+        'imageaffine' => [1 => static fn (): array => [1, 0, 0, 1, 0, 0]],
+        'imageconvolution' => [1 => static fn (): array => [[1, 1, 1], [1, 1, 1], [1, 1, 1]]],
+        'imagecrop' => [1 => static fn (): array => ['x' => 0, 'y' => 0, 'width' => 1, 'height' => 1]],
+        'imagefilledpolygon' => [1 => static fn (): array => [0, 0, 1, 0, 0, 1], 2 => 3],
+        'curl_setopt_array' => [1 => static fn (): array => [CURLOPT_FOLLOWLOCATION => true]],
+        'datefmt_set_timezone' => [1 => 'UTC'],
+        'intlcal_set_time_zone' => [1 => 'UTC'],
         'xsltprocessor::transformtouri' => [0 => static function (): DOMDocument {
             $document = new DOMDocument();
             $document->loadXML('<a/>');
