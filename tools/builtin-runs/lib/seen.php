@@ -14,6 +14,10 @@ final class Seen
     // Set once the call returns: what runs after it (a destructor, a stream
     // closed as it goes) is no part of it.
     public static bool $done = false;
+    // The stream context of the context probe, and the URL of the listener it
+    // reads from: the first string argument of that call is the URL.
+    public static mixed $probeContext = null;
+    public static ?string $probeUrl = null;
 
     public static function add(string $kind, string $detail = ''): void
     {

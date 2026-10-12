@@ -203,7 +203,35 @@ function recording_context(): mixed
 {
     $context = stream_context_create();
     stream_context_set_params($context, ['notification' => recording_callable()]);
+    Seen::$probeContext = $context;
+    Seen::$probeUrl = listener_url();
     return $context;
+}
+
+/**
+ * The URL of a listener on the loopback interface, which a forked process serves
+ * with one HTTP response: a stream the notification callback of a context hears.
+ * The process ends with SIGKILL, so the shutdown code of the child it came from
+ * does not run in it.
+ */
+function listener_url(): string
+{
+    $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
+    if ($server === false) {
+        return 'http://127.0.0.1:1/';
+    }
+    $port = (int) substr(strrchr((string) stream_socket_get_name($server, false), ':'), 1);
+    if (pcntl_fork() === 0) {
+        $connection = @stream_socket_accept($server, 2);
+        if ($connection !== false) {
+            fread($connection, 4096);
+            fwrite($connection, "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok");
+            fclose($connection);
+        }
+        posix_kill(getmypid(), SIGKILL);
+    }
+    fclose($server);
+    return "http://127.0.0.1:$port/";
 }
 
 /** A stream holding a 1x1 PNG, for the functions that read an image from a file handle. */
@@ -306,6 +334,7 @@ function valid_site(ReflectionParameter $param): ?Closure
         'stream_context_set_options' => [0 => static fn (): mixed => stream_context_create(), 1 => static fn (): array => ['http' => ['method' => 'GET']]],
         'mb_ereg_replace_callback' => [3 => static fn (): null => null],
         'strtr' => [1 => static fn (): array => ['a' => 'b']],
+        'fopen' => [1 => 'r'],
         // A no-op command and no descriptors: proc_open starts a process whatever it is given.
         'proc_open' => [0 => 'true', 1 => static fn (): array => []],
         'zip_entry_close' => [0 => static fn (): mixed => zip_entry_sample()],
@@ -385,11 +414,20 @@ function plain_value(ReflectionParameter $param): mixed
 function arguments(array $params, int $at, mixed $probe): array
 {
     $args = [];
+    // The context probe's call reads the listener: its first string argument is the URL.
+    $listen = Seen::$probeUrl !== null && $probe === Seen::$probeContext;
     foreach ($params as $i => $param) {
         if ($i > $at && $param->isOptional()) {
             break;
         }
-        $args[$i] = $i === $at ? $probe : plain_value($param);
+        if ($i === $at) {
+            $args[$i] = $probe;
+        } elseif ($listen && admits($param->getType(), 'string')) {
+            $args[$i] = Seen::$probeUrl;
+            $listen = false;
+        } else {
+            $args[$i] = plain_value($param);
+        }
     }
     return $args;
 }
