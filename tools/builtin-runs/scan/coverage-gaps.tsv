@@ -1,0 +1,1623 @@
+builtin	position	reason	first_message
+array_diff_uassoc	0	arity	threw:ArgumentCountError:array_diff_uassoc() expects at least 2 arguments, 1 given
+array_diff_ukey	0	arity	threw:ArgumentCountError:array_diff_ukey() expects at least 2 arguments, 1 given
+array_intersect_uassoc	0	arity	threw:ArgumentCountError:array_intersect_uassoc() expects at least 2 arguments, 1 given
+array_intersect_ukey	0	arity	threw:ArgumentCountError:array_intersect_ukey() expects at least 2 arguments, 1 given
+array_udiff	0	arity	threw:ArgumentCountError:array_udiff() expects at least 2 arguments, 1 given
+array_udiff_assoc	0	arity	threw:ArgumentCountError:array_udiff_assoc() expects at least 2 arguments, 1 given
+array_udiff_uassoc	1	arity	threw:ArgumentCountError:array_udiff_uassoc() expects at least 3 arguments, 2 given
+array_uintersect	0	arity	threw:ArgumentCountError:array_uintersect() expects at least 2 arguments, 1 given
+array_uintersect_assoc	0	arity	threw:ArgumentCountError:array_uintersect_assoc() expects at least 2 arguments, 1 given
+array_uintersect_uassoc	1	arity	threw:ArgumentCountError:array_uintersect_uassoc() expects at least 3 arguments, 2 given
+arrayiterator::__unserialize	0	serialised	threw:UnexpectedValueException:Incomplete or ill-typed serialization data
+arrayiterator::seek	0	receiver	threw:OutOfBoundsException:Seek position 1 is out of range
+arrayiterator::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
+arrayobject::__construct	2	class-name	threw:TypeError:ArrayObject::__construct(): Argument #3 ($iteratorClass) must be a class name derived from ArrayIterator, rec://probe given
+arrayobject::__unserialize	0	serialised	threw:UnexpectedValueException:Incomplete or ill-typed serialization data
+arrayobject::setiteratorclass	0	class-name	threw:TypeError:ArrayObject::setIteratorClass(): Argument #1 ($iteratorClass) must be a class name derived from ArrayIterator, rec://probe given
+arrayobject::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
+base_convert	0	value	threw:ValueError:base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)
+base_convert	1	value	threw:ValueError:base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)
+base_convert	2	value	threw:ValueError:base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)
+bcmath\number::__unserialize	0	serialised	threw:Exception:Invalid serialization data for BcMath\Number object
+cachingiterator::__construct	0	value	threw:BadMethodCallException:CachingIterator::getIterator() must be called exactly once per instance
+cachingiterator::__construct	1	value	threw:BadMethodCallException:CachingIterator::getIterator() must be called exactly once per instance
+cachingiterator::offsetset	1	value	threw:BadMethodCallException:CachingIterator does not use a full cache (see CachingIterator::__construct)
+callbackfilteriterator::__construct	0	value	threw:BadMethodCallException:CallbackFilterIterator::getIterator() must be called exactly once per instance
+callbackfilteriterator::__construct	1	value	threw:BadMethodCallException:CallbackFilterIterator::getIterator() must be called exactly once per instance
+checkdnsrr	1	value	threw:ValueError:checkdnsrr(): Argument #2 ($type) must be a valid DNS record type
+class_implements	1	value	threw:TypeError:class_implements(): Argument #1 ($object_or_class) must be of type object|string, int given
+class_parents	1	value	threw:TypeError:class_parents(): Argument #1 ($object_or_class) must be of type object|string, int given
+class_uses	1	value	threw:TypeError:class_uses(): Argument #1 ($object_or_class) must be of type object|string, int given
+closedir	0	value	threw:TypeError:closedir(): Argument #1 ($dir_handle) must be of type resource or null, Closure given
+compact	0	value	threw:Error:Cannot call compact() dynamically
+compact	1	value	threw:Error:Cannot call compact() dynamically
+constant	0	value	threw:Error:Undefined constant "rec://probe"
+curl_setopt_array	1	value	threw:ValueError:curl_setopt_array(): Argument #2 ($options) must contain only valid cURL options
+curl_share_init_persistent	0	value	threw:TypeError:curl_share_init_persistent(): Argument #1 ($share_options) must contain only int values, RecordingObject given
+datefmt_create	0	value	threw:ValueError:datefmt_create(): Argument #1 ($locale) "rec://probe" is invalid
+datetime::__construct	0	value	threw:DateMalformedStringException:Failed to parse time string (rec://probe) at position 0 (r): The timezone could not be found in the database
+datetime::__unserialize	0	serialised	threw:Error:Invalid serialization data for DateTime object
+datetime::modify	0	value	threw:DateMalformedStringException:DateTime::modify(): Failed to parse time string (rec://probe) at position 0 (r): The timezone could not be found in the datab
+datetimeimmutable::__construct	0	value	threw:DateMalformedStringException:Failed to parse time string (rec://probe) at position 0 (r): The timezone could not be found in the database
+datetimeimmutable::__unserialize	0	serialised	threw:Error:Invalid serialization data for DateTimeImmutable object
+datetimeimmutable::modify	0	value	threw:DateMalformedStringException:DateTimeImmutable::modify(): Failed to parse time string (rec://probe) at position 0 (r): The timezone could not be found in 
+datetimezone::__construct	0	value	threw:DateInvalidTimeZoneException:DateTimeZone::__construct(): Unknown or bad timezone (rec://probe)
+datetimezone::__unserialize	0	serialised	threw:Error:Invalid serialization data for DateTimeZone object
+decimal\decimal::__construct	0	value	threw:BadMethodCallException:Decimal objects are immutable
+decimal\decimal::__construct	1	value	threw:BadMethodCallException:Decimal objects are immutable
+deprecated::__construct	0	value	threw:Error:Cannot modify readonly property Deprecated::$message
+deprecated::__construct	1	value	threw:Error:Cannot modify readonly property Deprecated::$message
+directoryiterator::__construct	0	receiver	threw:Error:Directory object is already initialized
+dns_check_record	1	value	threw:ValueError:dns_check_record(): Argument #2 ($type) must be a valid DNS record type
+dom\implementation::createdocument	1	value	threw:DOMException:Invalid Character Error
+dom\implementation::createdocumenttype	0	value	threw:DOMException:Namespace Error
+dom\import_simplexml	0	value	threw:TypeError:Dom\import_simplexml(): Argument #1 ($node) is not a valid node type
+dom_import_simplexml	0	value	threw:TypeError:dom_import_simplexml(): Argument #1 ($node) is not a valid node type
+domattr::__construct	0	value	threw:DOMException:Invalid Character Error
+domdocument::createattribute	0	value	threw:DOMException:Invalid Character Error
+domdocument::createelement	0	value	threw:DOMException:Invalid Character Error
+domdocument::createelementns	1	value	threw:DOMException:Namespace Error
+domdocument::createentityreference	0	value	threw:DOMException:Invalid Character Error
+domdocument::createprocessinginstruction	0	value	threw:DOMException:Invalid Character Error
+domdocument::importnode	1	value	threw:TypeError:DOMDocument::importNode(): Argument #1 ($node) must be of type DOMNode, stdClass given
+domdocument::registernodeclass	0	class-name	threw:TypeError:DOMDocument::registerNodeClass(): Argument #1 ($baseClass) must be a class name derived from DOMNode, rec://probe given
+domdocument::registernodeclass	1	class-name	threw:TypeError:DOMDocument::registerNodeClass(): Argument #2 ($extendedClass) must be a valid class name or null, rec://probe given
+domdocumentfragment::appendxml	0	value	threw:DOMException:No Modification Allowed Error
+domelement::__construct	0	value	threw:DOMException:Invalid Character Error
+domelement::insertadjacentelement	0	value	threw:TypeError:DOMElement::insertAdjacentElement(): Argument #2 ($element) must be of type DOMElement, stdClass given
+domelement::insertadjacenttext	0	value	threw:DOMException:Syntax Error
+domelement::insertadjacenttext	1	value	threw:DOMException:Syntax Error
+domelement::setattribute	0	value	threw:DOMException:Invalid Character Error
+domelement::setattributens	1	value	threw:DOMException:Namespace Error
+domelement::setidattribute	0	value	threw:DOMException:Not Found Error
+domelement::setidattribute	1	value	threw:DOMException:Not Found Error
+domelement::setidattributenode	1	value	threw:TypeError:DOMElement::setIdAttributeNode(): Argument #1 ($attr) must be of type DOMAttr, stdClass given
+domelement::setidattributens	0	value	threw:DOMException:Not Found Error
+domelement::setidattributens	1	value	threw:DOMException:Not Found Error
+domelement::setidattributens	2	value	threw:DOMException:Not Found Error
+domelement::toggleattribute	0	value	threw:DOMException:Invalid Character Error
+domentityreference::__construct	0	value	threw:DOMException:Invalid Character Error
+domimplementation::createdocument	1	value	threw:DOMException:Namespace Error
+domnode::c14n	2	value	threw:ValueError:DOMNode::C14N(): Argument #3 ($xpath) must have a "query" key
+domnode::c14nfile	3	value	threw:ValueError:DOMNode::C14NFile(): Argument #4 ($xpath) must have a "query" key
+domprocessinginstruction::__construct	0	value	threw:DOMException:Invalid Character Error
+ds\map::skip	0	receiver	threw:OutOfRangeException:Index out of range: 1
+ds\map::union	0	value	threw:TypeError:Ds\Map::union(): Argument #1 ($map) must be of type Ds\Map, Closure given
+ds\queue::offsetexists	0	value	threw:Error:Array access by key is not supported
+ds\queue::offsetget	0	value	threw:Error:Array access by key is not supported
+ds\queue::offsetset	0	value	threw:Error:Array access by key is not supported
+ds\queue::offsetset	1	value	threw:Error:Array access by key is not supported
+ds\queue::offsetunset	0	value	threw:Error:Array access by key is not supported
+ds\set::offsetexists	0	value	threw:Error:Array access by key is not supported
+ds\set::offsetset	0	value	threw:Error:Array access by key is not supported
+ds\set::offsetset	1	value	threw:Error:Array access by key is not supported
+ds\set::offsetunset	0	value	threw:Error:Array access by key is not supported
+ds\stack::offsetexists	0	value	threw:Error:Array access by key is not supported
+ds\stack::offsetget	0	value	threw:Error:Array access by key is not supported
+ds\stack::offsetset	0	value	threw:Error:Array access by key is not supported
+ds\stack::offsetset	1	value	threw:Error:Array access by key is not supported
+ds\stack::offsetunset	0	value	threw:Error:Array access by key is not supported
+easter_date	0	value	threw:ValueError:easter_date(): Argument #1 ($year) must be a year after 1970 (inclusive)
+easter_date	1	value	threw:ValueError:easter_date(): Argument #1 ($year) must be a year after 1970 (inclusive)
+extract	0	value	threw:Error:Cannot call extract() dynamically
+extract	1	value	threw:Error:Cannot call extract() dynamically
+extract	2	value	threw:ValueError:extract(): Argument #3 ($prefix) must be a valid identifier
+fgetcsv	2	value	threw:ValueError:fgetcsv(): Argument #3 ($separator) must be a single character
+fgetcsv	3	value	threw:ValueError:fgetcsv(): Argument #4 ($enclosure) must be a single character
+fgetcsv	4	value	threw:ValueError:fgetcsv(): Argument #5 ($escape) must be empty or a single character
+fiber::__construct	0	receiver	threw:FiberError:Cannot call constructor twice
+fiber::resume	0	value	threw:FiberError:Cannot resume a fiber that is not suspended
+filesystemiterator::__construct	0	receiver	threw:Error:Directory object is already initialized
+filesystemiterator::__construct	1	receiver	threw:Error:Directory object is already initialized
+finfo::__construct	1	value	threw:Exception:finfo::__construct(/tmp/probe-scan-3253/rec): Failed to open stream: No such file or directory
+finfo_buffer	0	value	threw:TypeError:finfo_buffer(): Argument #1 ($finfo) must be of type finfo, resource given
+finfo_close	0	value	threw:TypeError:finfo_close(): Argument #1 ($finfo) must be of type finfo, resource given
+finfo_file	0	value	threw:TypeError:finfo_file(): Argument #1 ($finfo) must be of type finfo, resource given
+finfo_set_flags	0	value	threw:TypeError:finfo_set_flags(): Argument #1 ($finfo) must be of type finfo, resource given
+forward_static_call	0	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
+forward_static_call	1	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
+fputcsv	2	value	threw:ValueError:fputcsv(): Argument #3 ($separator) must be a single character
+fputcsv	3	value	threw:ValueError:fputcsv(): Argument #4 ($enclosure) must be a single character
+fputcsv	4	value	threw:ValueError:fputcsv(): Argument #5 ($escape) must be empty or a single character
+ftok	1	value	threw:ValueError:ftok(): Argument #2 ($project_id) must be a single character
+ftp_alloc	0	server	threw:TypeError:ftp_alloc(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_alloc	1	server	threw:TypeError:ftp_alloc(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_alloc	2	server	threw:TypeError:ftp_alloc(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_append	0	server	threw:TypeError:ftp_append(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_append	1	server	threw:TypeError:ftp_append(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_append	2	server	threw:TypeError:ftp_append(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_append	3	server	threw:TypeError:ftp_append(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_cdup	0	server	threw:TypeError:ftp_cdup(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_chdir	0	server	threw:TypeError:ftp_chdir(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_chdir	1	server	threw:TypeError:ftp_chdir(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_chmod	0	server	threw:TypeError:ftp_chmod(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_chmod	1	server	threw:TypeError:ftp_chmod(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_chmod	2	server	threw:TypeError:ftp_chmod(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_close	0	server	threw:TypeError:ftp_close(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_delete	0	server	threw:TypeError:ftp_delete(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_delete	1	server	threw:TypeError:ftp_delete(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_exec	0	server	threw:TypeError:ftp_exec(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_exec	1	server	threw:TypeError:ftp_exec(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_fget	0	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_fget	1	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_fget	2	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_fget	3	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_fget	4	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_fput	0	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_fput	1	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_fput	2	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_fput	3	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_fput	4	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_get	0	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_get	1	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_get	2	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_get	3	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_get	4	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_get_option	0	server	threw:TypeError:ftp_get_option(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_get_option	1	server	threw:TypeError:ftp_get_option(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_login	0	server	threw:TypeError:ftp_login(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_login	1	server	threw:TypeError:ftp_login(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_login	2	server	threw:TypeError:ftp_login(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_mdtm	0	server	threw:TypeError:ftp_mdtm(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_mdtm	1	server	threw:TypeError:ftp_mdtm(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_mkdir	0	server	threw:TypeError:ftp_mkdir(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_mkdir	1	server	threw:TypeError:ftp_mkdir(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_mlsd	0	server	threw:TypeError:ftp_mlsd(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_mlsd	1	server	threw:TypeError:ftp_mlsd(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_continue	0	server	threw:TypeError:ftp_nb_continue(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_nb_fget	0	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_nb_fget	1	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_fget	2	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_fget	3	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_fget	4	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_fput	0	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_nb_fput	1	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_fput	2	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_fput	3	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_fput	4	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_get	0	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_nb_get	1	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_get	2	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_get	3	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_get	4	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_put	0	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_nb_put	1	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_put	2	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_put	3	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nb_put	4	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_nlist	0	server	threw:TypeError:ftp_nlist(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_nlist	1	server	threw:TypeError:ftp_nlist(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_pasv	0	server	threw:TypeError:ftp_pasv(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_pasv	1	server	threw:TypeError:ftp_pasv(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_put	0	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_put	1	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_put	2	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_put	3	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_put	4	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_pwd	0	server	threw:TypeError:ftp_pwd(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_quit	0	server	threw:TypeError:ftp_quit(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_raw	0	server	threw:TypeError:ftp_raw(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_raw	1	server	threw:TypeError:ftp_raw(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_rawlist	0	server	threw:TypeError:ftp_rawlist(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_rawlist	1	server	threw:TypeError:ftp_rawlist(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_rawlist	2	server	threw:TypeError:ftp_rawlist(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_rename	0	server	threw:TypeError:ftp_rename(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_rename	1	server	threw:TypeError:ftp_rename(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_rename	2	server	threw:TypeError:ftp_rename(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_rmdir	0	server	threw:TypeError:ftp_rmdir(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_rmdir	1	server	threw:TypeError:ftp_rmdir(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_set_option	0	server	threw:TypeError:ftp_set_option(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_set_option	1	server	threw:TypeError:ftp_set_option(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_set_option	2	server	threw:TypeError:ftp_set_option(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_site	0	server	threw:TypeError:ftp_site(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_site	1	server	threw:TypeError:ftp_site(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_size	0	server	threw:TypeError:ftp_size(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_size	1	server	threw:TypeError:ftp_size(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
+ftp_systype	0	server	threw:TypeError:ftp_systype(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+func_get_arg	0	value	threw:Error:Cannot call func_get_arg() dynamically
+get_class_vars	0	class-name	threw:TypeError:get_class_vars(): Argument #1 ($class) must be a valid class name, rec://probe given
+get_resources	0	value	threw:ValueError:get_resources(): Argument #1 ($type) must be a valid resource type
+globiterator::__construct	0	receiver	threw:Error:Directory object is already initialized
+globiterator::__construct	1	receiver	threw:Error:Directory object is already initialized
+gzcompress	2	value	threw:ValueError:gzcompress(): Argument #3 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
+gzdeflate	2	value	threw:ValueError:gzdeflate(): Argument #3 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
+gzencode	2	value	threw:ValueError:gzencode(): Argument #3 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
+hash_init	1	value	threw:ValueError:hash_init(): Argument #3 ($key) must not be empty when HMAC is requested
+imageaffine	1	value	threw:ValueError:imageaffine(): Argument #2 ($affine) must have 6 elements
+imageaffine	2	value	threw:ValueError:imageaffine(): Argument #3 ($clip) must have an "x" key
+imageaffinematrixconcat	0	value	threw:ValueError:imageaffinematrixconcat(): Argument #1 ($matrix1) must have 6 elements
+imageaffinematrixconcat	1	value	threw:ValueError:imageaffinematrixconcat(): Argument #1 ($matrix1) must have 6 elements
+imagebmp	2	value	threw:TypeError:imagebmp(): Argument #2 ($file) must be a file name or a stream resource, int given
+imageconvolution	1	value	threw:ValueError:imageconvolution(): Argument #2 ($matrix) must be a 3x3 array
+imagecrop	1	value	threw:ValueError:imagecrop(): Argument #2 ($rectangle) must have an "x" key
+imagefilledpolygon	1	value	threw:ValueError:imagefilledpolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
+imagejpeg	2	value	threw:TypeError:imagejpeg(): Argument #2 ($file) must be a file name or a stream resource, int given
+imageopenpolygon	1	value	threw:ValueError:imageopenpolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
+imagepng	2	value	threw:TypeError:imagepng(): Argument #2 ($file) must be a file name or a stream resource, int given
+imagepng	3	value	threw:TypeError:imagepng(): Argument #2 ($file) must be a file name or a stream resource, int given
+imagepolygon	1	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
+imagepolygon	2	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
+imagepolygon	3	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
+imagewbmp	2	value	threw:TypeError:imagewbmp(): Argument #2 ($file) must be a file name or a stream resource, int given
+imagewebp	2	value	threw:TypeError:imagewebp(): Argument #2 ($file) must be a file name or a stream resource, int given
+imagick::animateimages	0	value	threw:ImagickException:unable to open X server `rec://probe' @ error/animate.c/AnimateImages/308
+imagick::channelfximage	0	value	threw:ImagickException:missing image channel `rec' @ error/channel.c/ChannelFxImage/318
+imagick::clipimagepath	0	value	threw:ImagickException:no clip path defined '': No such file or directory @ error/image.c/ClipImagePath/725
+imagick::clipimagepath	1	value	threw:ImagickException:no clip path defined '': No such file or directory @ error/image.c/ClipImagePath/725
+imagick::clippathimage	0	value	threw:ImagickException:no clip path defined '': No such file or directory @ error/image.c/ClipImagePath/725
+imagick::clippathimage	1	value	threw:ImagickException:no clip path defined '': No such file or directory @ error/image.c/ClipImagePath/725
+imagick::colordecisionlistimage	0	value	threw:ImagickException:ParseError root tag missing @ warning/xml-tree.c/NewXMLTree/1915
+imagick::colormatriximage	0	value	threw:ImagickException:Color matrix array must be 5x5 or 6x6
+imagick::compareimagelayers	0	value	killed:6
+imagick::compleximages	0	value	threw:ImagickException:image sequence is required `' @ error/fourier.c/ComplexImages/187
+imagick::convolveimage	1	value	threw:TypeError:Imagick::convolveImage(): Argument #1 ($kernel) must be of type ImagickKernel, stdClass given
+imagick::cropimage	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::cropimage	1	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::cropimage	2	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::cropimage	3	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::deleteimageartifact	0	value	threw:ImagickException:Unable to delete image artifact
+imagick::deleteoption	0	value	threw:ImagickException:Unable to deleteOption
+imagick::displayimage	0	value	threw:ImagickException:unable to open X server `rec://probe' @ error/display.c/DisplayImages/1654
+imagick::displayimages	0	value	threw:ImagickException:unable to open X server `rec://probe' @ error/display.c/DisplayImages/1654
+imagick::distortimage	0	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
+imagick::distortimage	1	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
+imagick::distortimage	2	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
+imagick::exportimagepixels	0	value	threw:ImagickException:The map contains disallowed characters
+imagick::exportimagepixels	1	value	threw:ImagickException:The map contains disallowed characters
+imagick::exportimagepixels	2	value	threw:ImagickException:The map contains disallowed characters
+imagick::exportimagepixels	3	value	threw:ImagickException:The map contains disallowed characters
+imagick::exportimagepixels	4	value	threw:ImagickException:The map contains disallowed characters
+imagick::exportimagepixels	5	value	threw:ImagickException:The map contains disallowed characters
+imagick::floodfillpaintimage	0	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
+imagick::floodfillpaintimage	1	value	threw:ImagickException:Unable to floodfill paint image
+imagick::floodfillpaintimage	2	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
+imagick::floodfillpaintimage	3	value	threw:ImagickException:Unable to floodfill paint image
+imagick::floodfillpaintimage	4	value	threw:ImagickException:Unable to floodfill paint image
+imagick::floodfillpaintimage	5	value	threw:ImagickException:Unable to floodfill paint image
+imagick::floodfillpaintimage	6	value	threw:ImagickException:Unable to floodfill paint image
+imagick::frameimage	0	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
+imagick::frameimage	1	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::frameimage	2	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::frameimage	3	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::frameimage	4	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::frameimagewithcomposite	0	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
+imagick::frameimagewithcomposite	1	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::frameimagewithcomposite	2	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::frameimagewithcomposite	3	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::frameimagewithcomposite	4	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::frameimagewithcomposite	5	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
+imagick::fximage	0	value	threw:ImagickException:Expected assignment after new UserSymbol 'rec' at '//probe' @ error/fx.c/TranslateExpression/2722
+imagick::fximage	1	value	threw:ImagickException:Expected operand at 'x' @ error/fx.c/GetOperand/2495
+imagick::getimagecolormapcolor	0	value	threw:ImagickException:invalid colormap index `MagickWand-0' @ error/magick-image.c/MagickGetImageColormapColor/4605
+imagick::getimageprofile	0	value	threw:ImagickException:Can not get image profile
+imagick::getimageregion	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::getimageregion	1	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::getimageregion	2	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::getimageregion	3	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::importimagepixels	0	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
+imagick::importimagepixels	1	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
+imagick::importimagepixels	2	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
+imagick::importimagepixels	3	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
+imagick::importimagepixels	4	value	threw:ImagickException:The map contains incorrect number of elements. Expected 11, array has 2
+imagick::importimagepixels	5	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
+imagick::importimagepixels	6	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
+imagick::morphology	0	value	threw:TypeError:Imagick::morphology(): Argument #3 ($kernel) must be of type ImagickKernel, stdClass given
+imagick::morphology	1	value	threw:TypeError:Imagick::morphology(): Argument #3 ($kernel) must be of type ImagickKernel, stdClass given
+imagick::morphology	3	value	threw:TypeError:Imagick::morphology(): Argument #3 ($kernel) must be of type ImagickKernel, stdClass given
+imagick::newimage	3	value	threw:ImagickException:Unable to set the image format
+imagick::newpseudoimage	0	value	threw:ImagickException:Invalid pseudo format string
+imagick::newpseudoimage	1	value	threw:ImagickException:Invalid pseudo format string
+imagick::orderedditherimage	0	value	threw:ImagickException:invalid argument for option ordered-dither : 'rec://probe' @ error/threshold.c/OrderedDitherImage/1948
+imagick::pingimageblob	0	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/PingBlob/3803
+imagick::raiseimage	0	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
+imagick::raiseimage	1	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
+imagick::raiseimage	2	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
+imagick::raiseimage	3	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
+imagick::raiseimage	4	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
+imagick::readimageblob	0	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/BlobToImage/481
+imagick::readimageblob	1	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/BlobToImage/481
+imagick::removeimageprofile	0	class-name	threw:ImagickException:The image profile does not exist
+imagick::resampleimage	0	value	threw:ImagickException:negative or zero image size `' @ error/resize.c/ResizeImage/3800
+imagick::resampleimage	1	value	threw:ImagickException:negative or zero image size `' @ error/resize.c/ResizeImage/3800
+imagick::resampleimage	2	value	threw:ImagickException:negative or zero image size `' @ error/resize.c/ResizeImage/3800
+imagick::resampleimage	3	value	threw:ImagickException:negative or zero image size `' @ error/resize.c/ResizeImage/3800
+imagick::roundcorners	0	value	threw:ImagickException:Unable to draw on image
+imagick::roundcorners	1	value	threw:ImagickException:Unable to draw on image
+imagick::roundcorners	2	value	threw:ImagickException:Unable to draw on image
+imagick::roundcorners	3	value	threw:ImagickException:Unable to draw on image
+imagick::roundcornersimage	0	value	threw:ImagickException:Unable to draw on image
+imagick::roundcornersimage	1	value	threw:ImagickException:Unable to draw on image
+imagick::roundcornersimage	2	value	threw:ImagickException:Unable to draw on image
+imagick::roundcornersimage	3	value	threw:ImagickException:Unable to draw on image
+imagick::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5236/rec:/probe
+imagick::setformat	0	value	threw:ImagickException:Unable to set format
+imagick::setimagecolormapcolor	0	value	threw:ImagickException:invalid colormap index `MagickWand-0' @ error/magick-image.c/MagickSetImageColormapColor/10112
+imagick::setimagecolormapcolor	1	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
+imagick::setimageformat	0	value	threw:ImagickException:Unable to set image format
+imagick::setimageindex	0	value	threw:ImagickException:Unable to set image index
+imagick::setimagepixelcolor	0	value	threw:ImagickException:pixels are not authentic `' @ error/cache.c/QueueAuthenticPixelCacheNexus/4304
+imagick::setimagepixelcolor	1	value	threw:ImagickException:pixels are not authentic `' @ error/cache.c/QueueAuthenticPixelCacheNexus/4304
+imagick::setimagepixelcolor	2	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
+imagick::setimageprogressmonitor	0	value	threw:ImagickException:Progress monitoring is disabled in ini-settings
+imagick::setimageproperty	1	value	threw:ImagickException:attempt to set read-only property `x' @ warning/property.c/SetImageProperty/4422
+imagick::setiteratorindex	0	value	threw:ImagickException:Unable to set iterator index
+imagick::shaveimage	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/ShaveImage/1653
+imagick::shaveimage	1	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/ShaveImage/1653
+imagick::sparsecolorimage	0	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
+imagick::sparsecolorimage	1	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
+imagick::sparsecolorimage	2	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
+imagick::trimimage	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::writeimage	0	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
+imagick::writeimagefile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
+imagick::writeimages	0	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
+imagick::writeimages	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
+imagick::writeimagesfile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
+imagickdraw::bezier	0	value	threw:ImagickDrawException:Unable to read coordinate array
+imagickdraw::polygon	0	value	threw:ImagickDrawException:Unable to read coordinate array
+imagickdraw::polyline	0	value	threw:ImagickDrawException:Unable to read coordinate array
+imagickdraw::setfillpatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetFillPatternURL/4978
+imagickdraw::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5622/rec:/probe
+imagickdraw::setfontfamily	0	value	threw:ImagickDrawException:Unable to set font family; parameter not found in the list of configured fonts
+imagickdraw::setfontweight	0	value	threw:ImagickDrawException:Font weight valid range is 100-900
+imagickdraw::setstrokepatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetStrokePatternURL/5420
+imagickdraw::setvectorgraphics	0	value	threw:ImagickException:ParseError root tag missing @ warning/xml-tree.c/NewXMLTree/1915
+imagickkernel::addunitykernel	0	value	threw:ImagickKernelException:ImagickKernel is empty, cannot be used
+imagickkernel::scale	0	value	threw:ImagickKernelException:ImagickKernel is empty, cannot be used
+imagickkernel::scale	1	value	threw:ImagickKernelException:ImagickKernel is empty, cannot be used
+imagickpixel::getcolorvalue	0	value	threw:TypeError:ImagickPixel::getColorValue(): Argument #1 ($color) must be of type int, string given
+imagickpixel::getcolorvaluequantum	0	value	threw:TypeError:ImagickPixel::getColorValueQuantum(): Argument #1 ($color) must be of type int, string given
+imagickpixel::setcolorvalue	0	value	threw:TypeError:ImagickPixel::setColorValue(): Argument #1 ($color) must be of type int, string given
+imagickpixel::setcolorvalue	1	value	threw:TypeError:ImagickPixel::setColorValue(): Argument #1 ($color) must be of type int, string given
+imagickpixel::setcolorvaluequantum	0	value	threw:TypeError:ImagickPixel::setColorValueQuantum(): Argument #1 ($color) must be of type int, string given
+imagickpixel::setcolorvaluequantum	1	value	threw:TypeError:ImagickPixel::setColorValueQuantum(): Argument #1 ($color) must be of type int, string given
+infiniteiterator::__construct	0	value	threw:BadMethodCallException:InfiniteIterator::getIterator() must be called exactly once per instance
+inflate_init	0	value	threw:ValueError:Encoding mode must be ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP or ZLIB_ENCODING_DEFLATE
+inflate_init	1	value	threw:ValueError:Encoding mode must be ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP or ZLIB_ENCODING_DEFLATE
+intlcal_create_instance	1	value	threw:IntlException:intlcal_create_instance(): No such time zone: "x"
+intldatepatterngenerator::getbestpattern	0	value	threw:Error:Found unconstructed IntlDatePatternGenerator
+intlgregcal_is_leap_year	1	value	threw:TypeError:intlgregcal_is_leap_year(): Argument #1 ($calendar) must be of type IntlGregorianCalendar, stdClass given
+intlgregcal_set_gregorian_change	1	value	threw:TypeError:intlgregcal_set_gregorian_change(): Argument #1 ($calendar) must be of type IntlGregorianCalendar, stdClass given
+intlgregoriancalendar::isleapyear	0	value	threw:Error:Found unconstructed IntlCalendar
+intlgregoriancalendar::setgregorianchange	0	value	threw:Error:Found unconstructed IntlCalendar
+iterator_apply	1	value	threw:TypeError:iterator_apply(): Argument #1 ($iterator) must be of type Traversable, array given
+iterator_apply	2	value	threw:TypeError:iterator_apply(): Argument #1 ($iterator) must be of type Traversable, array given
+iteratoriterator::__construct	0	value	threw:TypeError:IteratorIterator::__construct(): Argument #1 ($iterator) must be of type Traversable, array given
+iteratoriterator::__construct	1	value	threw:TypeError:IteratorIterator::__construct(): Argument #1 ($iterator) must be of type Traversable, array given
+jdtounix	0	value	threw:ValueError:jday must be between 2440588 and 106751993607888
+json_validate	2	value	threw:ValueError:json_validate(): Argument #3 ($flags) must be a valid flag (allowed flags: JSON_INVALID_UTF8_IGNORE)
+limititerator::__construct	0	value	threw:BadMethodCallException:LimitIterator::getIterator() must be called exactly once per instance
+limititerator::__construct	1	value	threw:BadMethodCallException:LimitIterator::getIterator() must be called exactly once per instance
+limititerator::__construct	2	value	threw:BadMethodCallException:LimitIterator::getIterator() must be called exactly once per instance
+locale_compose	0	value	threw:ValueError:locale_compose(): Argument #1 ($subtags) must contain a "language" key
+locale_lookup	1	value	threw:TypeError:locale_lookup(): Argument #2 ($locale) must only contain string values
+locale_lookup	2	value	threw:TypeError:locale_lookup(): Argument #2 ($locale) must only contain string values
+locale_lookup	3	value	threw:TypeError:locale_lookup(): Argument #2 ($locale) must only contain string values
+mb_ereg_search	0	value	threw:Error:No string was provided
+mb_ereg_search	1	value	threw:Error:No string was provided
+mb_ereg_search_pos	0	value	threw:Error:No string was provided
+mb_ereg_search_pos	1	value	threw:Error:No string was provided
+mb_ereg_search_regs	0	value	threw:Error:No string was provided
+mb_ereg_search_regs	1	value	threw:Error:No string was provided
+memcached::__construct	2	value	no-output
+method_exists	1	value	threw:TypeError:method_exists(): Argument #1 ($object_or_class) must be of type object|string, int given
+mysqli::__construct	0	receiver	threw:Error:Cannot call constructor twice
+mysqli::__construct	1	receiver	threw:Error:Cannot call constructor twice
+mysqli::__construct	2	receiver	threw:Error:Cannot call constructor twice
+mysqli::__construct	3	receiver	threw:Error:Cannot call constructor twice
+mysqli::__construct	4	receiver	threw:Error:Cannot call constructor twice
+mysqli::__construct	5	receiver	threw:Error:Cannot call constructor twice
+mysqli::autocommit	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::begin_transaction	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::begin_transaction	1	server	threw:Error:mysqli object is not fully initialized
+mysqli::change_user	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::change_user	1	server	threw:Error:mysqli object is not fully initialized
+mysqli::change_user	2	server	threw:Error:mysqli object is not fully initialized
+mysqli::commit	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::commit	1	server	threw:Error:mysqli object is not fully initialized
+mysqli::connect	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
+mysqli::connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::escape_string	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::execute_query	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::execute_query	1	server	threw:Error:mysqli object is not fully initialized
+mysqli::kill	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::multi_query	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::prepare	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::query	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::query	1	server	threw:Error:mysqli object is not fully initialized
+mysqli::real_connect	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
+mysqli::real_connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::real_connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::real_connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::real_connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::real_connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::real_connect	6	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::real_escape_string	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::real_query	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::release_savepoint	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::rollback	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::rollback	1	server	threw:Error:mysqli object is not fully initialized
+mysqli::savepoint	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::select_db	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::set_charset	0	server	threw:Error:mysqli object is not fully initialized
+mysqli::store_result	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_autocommit	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_begin_transaction	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_begin_transaction	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_change_user	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_change_user	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_change_user	3	server	threw:Error:mysqli object is not fully initialized
+mysqli_commit	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_commit	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_connect	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
+mysqli_connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_data_seek	1	server	threw:TypeError:mysqli_data_seek(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_escape_string	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_execute	1	server	threw:TypeError:mysqli_execute(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_execute_query	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_execute_query	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_fetch_all	1	server	threw:TypeError:mysqli_fetch_all(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_fetch_array	1	server	threw:TypeError:mysqli_fetch_array(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_fetch_column	1	server	threw:TypeError:mysqli_fetch_column(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_fetch_field_direct	1	server	threw:TypeError:mysqli_fetch_field_direct(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_fetch_object	1	server	threw:TypeError:mysqli_fetch_object(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_fetch_object	2	server	threw:TypeError:mysqli_fetch_object(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_field_seek	1	server	threw:TypeError:mysqli_field_seek(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_kill	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_multi_query	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_poll	0	server	threw:TypeError:mysqli_poll(): Argument #1 ($read) must be an instance of mysqli, RecordingObject given
+mysqli_poll	1	server	threw:TypeError:mysqli_poll(): Argument #1 ($read) must be an instance of mysqli, RecordingObject given
+mysqli_poll	2	value	threw:ValueError:No stream arrays were passed
+mysqli_poll	3	value	threw:ValueError:No stream arrays were passed
+mysqli_poll	4	value	threw:ValueError:No stream arrays were passed
+mysqli_prepare	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_query	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_query	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_real_connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
+mysqli_real_connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_real_connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_real_connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_real_connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_real_connect	6	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_real_connect	7	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_real_escape_string	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_real_query	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_release_savepoint	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_rollback	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_rollback	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_savepoint	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_select_db	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_set_charset	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_stmt_attr_get	1	server	threw:TypeError:mysqli_stmt_attr_get(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_attr_set	1	server	threw:TypeError:mysqli_stmt_attr_set(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_attr_set	2	server	threw:TypeError:mysqli_stmt_attr_set(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_bind_param	1	server	threw:TypeError:mysqli_stmt_bind_param(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_bind_param	2	server	threw:TypeError:mysqli_stmt_bind_param(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_bind_result	1	server	threw:TypeError:mysqli_stmt_bind_result(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_data_seek	1	server	threw:TypeError:mysqli_stmt_data_seek(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_execute	1	server	threw:TypeError:mysqli_stmt_execute(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_prepare	1	server	threw:TypeError:mysqli_stmt_prepare(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_send_long_data	1	server	threw:TypeError:mysqli_stmt_send_long_data(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_send_long_data	2	server	threw:TypeError:mysqli_stmt_send_long_data(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_store_result	1	server	threw:Error:mysqli object is not fully initialized
+nodiscard::__construct	0	value	threw:Error:Cannot modify readonly property NoDiscard::$message
+norewinditerator::__construct	0	value	threw:BadMethodCallException:NoRewindIterator::getIterator() must be called exactly once per instance
+normalizer_is_normalized	1	value	threw:ValueError:normalizer_is_normalized(): Argument #2 ($form) must be a a valid normalization form
+normalizer_normalize	1	value	threw:ValueError:normalizer_normalize(): Argument #2 ($form) must be a a valid normalization form
+numfmt_create	0	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "rec://probe" is invalid
+numfmt_create	1	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "x" is invalid
+numfmt_create	2	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "x" is invalid
+openssl_dh_compute_key	0	value	threw:TypeError:openssl_dh_compute_key(): Argument #2 ($private_key) must be of type OpenSSLAsymmetricKey, string given
+openssl_dh_compute_key	1	value	threw:TypeError:openssl_dh_compute_key(): Argument #2 ($private_key) must be of type OpenSSLAsymmetricKey, string given
+openssl_free_key	0	value	threw:TypeError:openssl_free_key(): Argument #1 ($key) must be of type OpenSSLAsymmetricKey, string given
+openssl_pkey_free	0	value	threw:TypeError:openssl_pkey_free(): Argument #1 ($key) must be of type OpenSSLAsymmetricKey, string given
+openssl_pkey_get_details	0	value	threw:TypeError:openssl_pkey_get_details(): Argument #1 ($key) must be of type OpenSSLAsymmetricKey, string given
+openssl_seal	0	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
+openssl_seal	1	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
+openssl_seal	2	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
+openssl_seal	4	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
+openssl_seal	5	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
+openssl_spki_new	0	value	threw:TypeError:openssl_spki_new(): Argument #1 ($private_key) must be of type OpenSSLAsymmetricKey, string given
+openssl_spki_new	1	value	threw:TypeError:openssl_spki_new(): Argument #1 ($private_key) must be of type OpenSSLAsymmetricKey, string given
+openssl_spki_new	2	value	threw:TypeError:openssl_spki_new(): Argument #1 ($private_key) must be of type OpenSSLAsymmetricKey, string given
+pack	0	value	threw:ValueError:Type r: unknown format code
+pdostatement::fetchall	1	arity	threw:ArgumentCountError:PDOStatement::fetchAll() expects exactly 1 argument for the fetch mode provided, 2 given
+pdostatement::fetchcolumn	0	value	threw:ValueError:Invalid column index
+pdostatement::fetchobject	0	class-name	threw:TypeError:PDOStatement::fetchObject(): Argument #1 ($class) must be a valid class name, rec://probe given
+pdostatement::fetchobject	1	class-name	threw:TypeError:PDOStatement::fetchObject(): Argument #1 ($class) must be a valid class name, x given
+pdostatement::getattribute	0	value	threw:PDOException:SQLSTATE[IM001]: Driver does not support this function: driver doesn't support getting that attribute
+pdostatement::getcolumnmeta	0	value	threw:PDOException:SQLSTATE[HY000]: General error: 100 another row available
+pdostatement::setfetchmode	1	arity	threw:ArgumentCountError:PDOStatement::setFetchMode() expects exactly 1 arguments for the fetch mode provided, 2 given
+pg_affected_rows	0	server	threw:TypeError:pg_affected_rows(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_cancel_query	0	server	threw:TypeError:pg_cancel_query(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_change_password	1	server	threw:TypeError:pg_change_password(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_change_password	2	server	threw:TypeError:pg_change_password(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_client_encoding	0	server	threw:TypeError:pg_client_encoding(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_close	0	server	threw:TypeError:pg_close(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_close_stmt	1	server	threw:TypeError:pg_close_stmt(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_connect_poll	0	server	threw:TypeError:pg_connect_poll(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_connection_busy	0	server	threw:TypeError:pg_connection_busy(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_connection_reset	0	server	threw:TypeError:pg_connection_reset(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_connection_status	0	server	threw:TypeError:pg_connection_status(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_convert	0	server	threw:TypeError:pg_convert(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_convert	1	server	threw:TypeError:pg_convert(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_convert	2	server	threw:TypeError:pg_convert(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_convert	3	server	threw:TypeError:pg_convert(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_copy_from	0	server	threw:TypeError:pg_copy_from(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_copy_from	1	server	threw:TypeError:pg_copy_from(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_copy_from	2	server	threw:TypeError:pg_copy_from(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_copy_from	3	server	threw:TypeError:pg_copy_from(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_copy_from	4	server	threw:TypeError:pg_copy_from(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_copy_to	0	server	threw:TypeError:pg_copy_to(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_copy_to	1	server	threw:TypeError:pg_copy_to(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_copy_to	2	server	threw:TypeError:pg_copy_to(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_copy_to	3	server	threw:TypeError:pg_copy_to(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_dbname	0	server	threw:TypeError:pg_dbname(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_delete	0	server	threw:TypeError:pg_delete(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_delete	1	server	threw:TypeError:pg_delete(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_delete	2	server	threw:TypeError:pg_delete(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_delete	3	server	threw:TypeError:pg_delete(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_end_copy	0	server	threw:TypeError:pg_end_copy(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_escape_bytea	1	server	threw:TypeError:pg_escape_bytea(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_escape_identifier	1	server	threw:TypeError:pg_escape_identifier(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_escape_literal	1	server	threw:TypeError:pg_escape_literal(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_escape_string	1	server	threw:TypeError:pg_escape_string(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_exec	1	server	threw:TypeError:pg_exec(): Argument #1 ($connection) must be of type PgSql\Connection, int given
+pg_execute	1	server	threw:TypeError:pg_execute(): Argument #1 ($connection) must be of type string, resource given
+pg_execute	2	server	threw:TypeError:pg_execute(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_fetch_all	0	server	threw:TypeError:pg_fetch_all(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_fetch_all	1	server	threw:TypeError:pg_fetch_all(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_all_columns	0	server	threw:TypeError:pg_fetch_all_columns(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_fetch_all_columns	1	server	threw:TypeError:pg_fetch_all_columns(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_array	0	server	threw:TypeError:pg_fetch_array(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_fetch_array	1	server	threw:TypeError:pg_fetch_array(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_array	2	server	threw:TypeError:pg_fetch_array(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_assoc	0	server	threw:TypeError:pg_fetch_assoc(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_fetch_assoc	1	server	threw:TypeError:pg_fetch_assoc(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_object	0	server	threw:TypeError:pg_fetch_object(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_fetch_object	1	server	threw:TypeError:pg_fetch_object(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_object	2	server	threw:TypeError:pg_fetch_object(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_object	3	server	threw:TypeError:pg_fetch_object(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_result	0	server	threw:TypeError:pg_fetch_result(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_fetch_result	1	server	threw:TypeError:pg_fetch_result(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_result	2	server	threw:TypeError:pg_fetch_result(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_row	0	server	threw:TypeError:pg_fetch_row(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_fetch_row	1	server	threw:TypeError:pg_fetch_row(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fetch_row	2	server	threw:TypeError:pg_fetch_row(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_is_null	0	server	threw:TypeError:pg_field_is_null(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_field_is_null	1	server	threw:TypeError:pg_field_is_null(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_is_null	2	server	threw:TypeError:pg_field_is_null(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_name	0	server	threw:TypeError:pg_field_name(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_field_name	1	server	threw:TypeError:pg_field_name(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_num	0	server	threw:TypeError:pg_field_num(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_field_num	1	server	threw:TypeError:pg_field_num(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_prtlen	0	server	threw:TypeError:pg_field_prtlen(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_field_prtlen	1	server	threw:TypeError:pg_field_prtlen(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_prtlen	2	server	threw:TypeError:pg_field_prtlen(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_size	0	server	threw:TypeError:pg_field_size(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_field_size	1	server	threw:TypeError:pg_field_size(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_table	0	server	threw:TypeError:pg_field_table(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_field_table	1	server	threw:TypeError:pg_field_table(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_table	2	server	threw:TypeError:pg_field_table(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_type	0	server	threw:TypeError:pg_field_type(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_field_type	1	server	threw:TypeError:pg_field_type(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_field_type_oid	0	server	threw:TypeError:pg_field_type_oid(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_field_type_oid	1	server	threw:TypeError:pg_field_type_oid(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fieldisnull	1	server	threw:TypeError:pg_fieldisnull(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fieldisnull	2	server	threw:TypeError:pg_fieldisnull(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fieldname	1	server	threw:TypeError:pg_fieldname(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fieldnum	1	server	threw:TypeError:pg_fieldnum(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fieldprtlen	1	server	threw:TypeError:pg_fieldprtlen(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fieldprtlen	2	server	threw:TypeError:pg_fieldprtlen(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fieldsize	1	server	threw:TypeError:pg_fieldsize(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_fieldtype	1	server	threw:TypeError:pg_fieldtype(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_free_result	0	server	threw:TypeError:pg_free_result(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_get_notify	0	server	threw:TypeError:pg_get_notify(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_get_notify	1	server	threw:TypeError:pg_get_notify(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_get_pid	0	server	threw:TypeError:pg_get_pid(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_get_result	0	server	threw:TypeError:pg_get_result(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_host	0	server	threw:TypeError:pg_host(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_insert	0	server	threw:TypeError:pg_insert(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_insert	1	server	threw:TypeError:pg_insert(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_insert	2	server	threw:TypeError:pg_insert(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_insert	3	server	threw:TypeError:pg_insert(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_last_error	0	server	threw:TypeError:pg_last_error(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_last_notice	0	server	threw:TypeError:pg_last_notice(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_last_notice	1	server	threw:TypeError:pg_last_notice(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_last_oid	0	server	threw:TypeError:pg_last_oid(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_lo_close	0	server	threw:TypeError:pg_lo_close(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
+pg_lo_create	0	server	threw:TypeError:pg_lo_create(): Argument #1 ($connection) must be of type PgSql\Connection when the connection is provided
+pg_lo_create	1	server	threw:TypeError:pg_lo_create(): Argument #1 ($connection) must be of type PgSql\Connection when the connection is provided
+pg_lo_export	0	value	threw:ArgumentCountError:Requires 2 or 3 arguments, 3 given
+pg_lo_export	2	value	threw:ArgumentCountError:Requires 2 or 3 arguments, 3 given
+pg_lo_import	1	server	threw:ArgumentCountError:Wrong parameter count for pg_lo_import()
+pg_lo_import	2	server	threw:ArgumentCountError:Wrong parameter count for pg_lo_import()
+pg_lo_open	0	value	threw:ArgumentCountError:Requires 1 or 2 arguments, 3 given
+pg_lo_open	2	value	threw:ArgumentCountError:Requires 1 or 2 arguments, 3 given
+pg_lo_read	0	server	threw:TypeError:pg_lo_read(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
+pg_lo_read	1	server	threw:TypeError:pg_lo_read(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_lo_read_all	0	server	threw:TypeError:pg_lo_read_all(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
+pg_lo_seek	0	server	threw:TypeError:pg_lo_seek(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
+pg_lo_seek	1	server	threw:TypeError:pg_lo_seek(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_lo_seek	2	server	threw:TypeError:pg_lo_seek(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_lo_tell	0	server	threw:TypeError:pg_lo_tell(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
+pg_lo_truncate	0	server	threw:TypeError:pg_lo_truncate(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
+pg_lo_truncate	1	server	threw:TypeError:pg_lo_truncate(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_lo_unlink	1	value	threw:ArgumentCountError:Requires 1 or 2 arguments, 2 given
+pg_lo_write	0	server	threw:TypeError:pg_lo_write(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
+pg_lo_write	1	server	threw:TypeError:pg_lo_write(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_lo_write	2	server	threw:TypeError:pg_lo_write(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_locreate	0	server	threw:TypeError:pg_locreate(): Argument #1 ($connection) must be of type PgSql\Connection when the connection is provided
+pg_locreate	1	server	threw:TypeError:pg_locreate(): Argument #1 ($connection) must be of type PgSql\Connection when the connection is provided
+pg_loexport	0	value	threw:ArgumentCountError:Requires 2 or 3 arguments, 3 given
+pg_loexport	2	value	threw:ArgumentCountError:Requires 2 or 3 arguments, 3 given
+pg_loimport	1	server	threw:Error:No PostgreSQL connection opened yet
+pg_loimport	2	server	threw:ArgumentCountError:Wrong parameter count for pg_loimport()
+pg_loopen	0	value	threw:ArgumentCountError:Requires 1 or 2 arguments, 3 given
+pg_loopen	2	value	threw:ArgumentCountError:Requires 1 or 2 arguments, 3 given
+pg_loread	1	server	threw:TypeError:pg_loread(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_lounlink	1	value	threw:ArgumentCountError:Requires 1 or 2 arguments, 2 given
+pg_lowrite	1	server	threw:TypeError:pg_lowrite(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_lowrite	2	server	threw:TypeError:pg_lowrite(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_meta_data	0	server	threw:TypeError:pg_meta_data(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_meta_data	1	server	threw:TypeError:pg_meta_data(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_meta_data	2	server	threw:TypeError:pg_meta_data(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_num_fields	0	server	threw:TypeError:pg_num_fields(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_num_rows	0	server	threw:TypeError:pg_num_rows(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_options	0	server	threw:TypeError:pg_options(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_parameter_status	1	server	threw:ArgumentCountError:pg_parameter_status() expects exactly 1 argument, 2 given
+pg_ping	0	server	threw:TypeError:pg_ping(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_port	0	server	threw:TypeError:pg_port(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_prepare	1	server	threw:TypeError:pg_prepare(): Argument #1 ($connection) must be of type string, resource given
+pg_prepare	2	server	threw:TypeError:pg_prepare(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_put_copy_data	1	server	threw:TypeError:pg_put_copy_data(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_put_copy_end	1	server	threw:TypeError:pg_put_copy_end(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_put_line	1	server	threw:TypeError:pg_put_line(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_query	1	server	threw:TypeError:pg_query(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_query_params	1	server	threw:TypeError:pg_query_params(): Argument #1 ($connection) must be of type string, resource given
+pg_query_params	2	server	threw:TypeError:pg_query_params(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_result	1	server	threw:TypeError:pg_result(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_result	2	server	threw:TypeError:pg_result(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_result_error	0	server	threw:TypeError:pg_result_error(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_result_error_field	0	server	threw:TypeError:pg_result_error_field(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_result_error_field	1	server	threw:TypeError:pg_result_error_field(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_result_seek	0	server	threw:TypeError:pg_result_seek(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_result_seek	1	server	threw:TypeError:pg_result_seek(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_result_status	0	server	threw:TypeError:pg_result_status(): Argument #1 ($result) must be of type PgSql\Result, resource given
+pg_result_status	1	server	threw:TypeError:pg_result_status(): Argument #1 ($result) must be of type PgSql\Result, stdClass given
+pg_select	1	server	threw:TypeError:pg_select(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_select	2	server	threw:TypeError:pg_select(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_select	3	server	threw:TypeError:pg_select(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_select	4	server	threw:TypeError:pg_select(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_send_execute	0	server	threw:TypeError:pg_send_execute(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_send_execute	1	server	threw:TypeError:pg_send_execute(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_send_execute	2	server	threw:TypeError:pg_send_execute(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_send_prepare	0	server	threw:TypeError:pg_send_prepare(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_send_prepare	1	server	threw:TypeError:pg_send_prepare(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_send_prepare	2	server	threw:TypeError:pg_send_prepare(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_send_query	0	server	threw:TypeError:pg_send_query(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_send_query	1	server	threw:TypeError:pg_send_query(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_send_query_params	0	server	threw:TypeError:pg_send_query_params(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_send_query_params	1	server	threw:TypeError:pg_send_query_params(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_send_query_params	2	server	threw:TypeError:pg_send_query_params(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_set_chunked_rows_size	1	server	threw:TypeError:pg_set_chunked_rows_size(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_set_client_encoding	1	server	threw:TypeError:pg_set_client_encoding(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_set_error_context_visibility	1	server	threw:TypeError:pg_set_error_context_visibility(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_set_error_verbosity	0	server	threw:TypeError:pg_set_error_verbosity(): Argument #1 ($connection) must be of type int, Closure given
+pg_set_error_verbosity	1	server	threw:TypeError:pg_set_error_verbosity(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_setclientencoding	1	server	threw:TypeError:pg_setclientencoding(): Argument #1 ($connection) must be of type PgSql\Connection, int given
+pg_socket	0	server	threw:TypeError:pg_socket(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_socket_poll	1	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
+pg_socket_poll	2	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
+pg_socket_poll	3	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
+pg_trace	0	server	threw:Error:No PostgreSQL connection opened yet
+pg_trace	1	server	threw:Error:No PostgreSQL connection opened yet
+pg_trace	2	server	threw:TypeError:pg_trace(): Argument #3 ($connection) must be of type ?PgSql\Connection, resource given
+pg_trace	3	server	threw:Error:No PostgreSQL connection opened yet
+pg_transaction_status	0	server	threw:TypeError:pg_transaction_status(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_tty	0	server	threw:TypeError:pg_tty(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_untrace	0	server	threw:TypeError:pg_untrace(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+pg_update	0	server	threw:TypeError:pg_update(): Argument #1 ($connection) must be of type PgSql\Connection, resource given
+pg_update	1	server	threw:TypeError:pg_update(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_update	2	server	threw:TypeError:pg_update(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_update	3	server	threw:TypeError:pg_update(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_update	4	server	threw:TypeError:pg_update(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
+pg_version	0	server	threw:TypeError:pg_version(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
+php_uname	0	value	threw:ValueError:php_uname(): Argument #1 ($mode) must be a single character
+popen	0	value	threw:ValueError:popen(): Argument #2 ($mode) must be one of "r", "rb", "w", or "wb"
+popen	1	value	threw:ValueError:popen(): Argument #2 ($mode) must be one of "r", "rb", "w", or "wb"
+preg_replace_callback_array	0	value	threw:TypeError:preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
+preg_replace_callback_array	2	value	threw:TypeError:preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
+preg_replace_callback_array	3	value	threw:TypeError:preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
+preg_replace_callback_array	4	value	threw:TypeError:preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
+proc_close	0	value	threw:TypeError:proc_close(): Argument #1 ($process) must be of type resource, Closure given
+proc_get_status	0	value	threw:TypeError:proc_get_status(): Argument #1 ($process) must be of type resource, Closure given
+proc_open	1	value	threw:ValueError:proc_open(): Argument #2 ($descriptor_spec) must only contain arrays and streams
+proc_terminate	0	value	threw:TypeError:proc_terminate(): Argument #1 ($process) must be of type resource, Closure given
+proc_terminate	1	value	threw:TypeError:proc_terminate(): supplied resource is not a valid process resource
+property_exists	1	value	threw:TypeError:property_exists(): Argument #1 ($object_or_class) must be of type object|string, int given
+random\engine\mt19937::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\Mt19937 object
+random\engine\pcgoneseq128xslrr64::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\PcgOneseq128XslRr64 object
+random\engine\xoshiro256starstar::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\Xoshiro256StarStar object
+random\randomizer::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Randomizer object
+random\randomizer::getfloat	0	value	threw:ValueError:Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+random\randomizer::getfloat	1	value	threw:ValueError:Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+readdir	0	value	threw:TypeError:readdir(): Argument #1 ($dir_handle) must be of type resource or null, Closure given
+recursivedirectoryiterator::__construct	0	receiver	threw:Error:Directory object is already initialized
+recursivedirectoryiterator::__construct	1	receiver	threw:Error:Directory object is already initialized
+redis::acl	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::acl	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::append	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::append	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::auth	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitcount	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitcount	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitcount	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitcount	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitop	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitop	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitpos	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitpos	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitpos	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitpos	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bitpos	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmove	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmove	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmove	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmove	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmove	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmpop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmpop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmpop	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blmpop	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blpop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blpop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::blpop	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::brpop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::brpop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::brpop	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::brpoplpush	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::brpoplpush	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::brpoplpush	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzmpop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzmpop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzmpop	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzmpop	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzpopmax	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzpopmax	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzpopmax	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzpopmin	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzpopmin	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::bzpopmin	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::client	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::client	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::command	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::command	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::config	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::config	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::config	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::connect	0	server	threw:RedisException:Unable to find the socket transport "rec" - did you forget to enable it when you configured PHP?
+redis::connect	1	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::connect	2	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::connect	3	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::connect	4	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::connect	5	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::connect	6	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::copy	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::copy	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::copy	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::debug	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::decr	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::decr	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::decrby	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::decrby	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::del	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::del	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::delete	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::delete	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::dump	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::echo	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::eval	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::eval	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::eval	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::eval_ro	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::eval_ro	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::eval_ro	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::evalsha	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::evalsha	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::evalsha	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::evalsha_ro	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::evalsha_ro	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::evalsha_ro	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::exists	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::exists	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expire	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expire	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expire	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expireat	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expireat	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expireat	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expiremember	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expiremember	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expiremember	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expiremember	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expirememberat	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expirememberat	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expirememberat	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::expiretime	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::failover	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::failover	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::failover	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::fcall	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::fcall	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::fcall	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::fcall_ro	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::fcall_ro	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::fcall_ro	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::flushall	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::flushdb	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::function	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::function	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geoadd	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geoadd	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geoadd	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geoadd	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geoadd	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geodist	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geodist	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geodist	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geodist	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geohash	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geohash	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geohash	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geopos	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geopos	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geopos	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius_ro	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius_ro	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius_ro	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius_ro	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius_ro	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadius_ro	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember_ro	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember_ro	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember_ro	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember_ro	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::georadiusbymember_ro	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearch	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearch	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearch	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearch	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearch	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearchstore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearchstore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearchstore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearchstore	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearchstore	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::geosearchstore	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::get	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getbit	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getbit	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getdel	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getex	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getex	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getrange	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getrange	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getrange	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getset	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getset	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::getwithmeta	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hdel	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hdel	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hdel	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hexists	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hexists	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hget	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hget	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hgetall	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hincrby	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hincrby	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hincrby	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hincrbyfloat	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hincrbyfloat	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hincrbyfloat	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hkeys	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hlen	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hmget	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hmget	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hmset	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hmset	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hrandfield	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hrandfield	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hscan	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hscan	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hscan	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hscan	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hset	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hset	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hsetnx	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hsetnx	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hsetnx	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hstrlen	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hstrlen	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::hvals	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::incr	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::incr	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::incrby	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::incrby	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::incrbyfloat	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::incrbyfloat	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::info	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::keys	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lcs	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lcs	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lcs	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lindex	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lindex	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::linsert	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::linsert	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::linsert	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::linsert	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::llen	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lmove	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lmove	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lmove	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lmove	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lmpop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lmpop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lmpop	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpos	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpos	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpos	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpush	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpush	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpushx	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lpushx	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lrange	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lrange	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lrange	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lrem	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lrem	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lrem	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lset	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lset	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::lset	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::ltrim	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::ltrim	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::ltrim	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::mget	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::migrate	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::migrate	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::migrate	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::migrate	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::migrate	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::migrate	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::migrate	6	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::migrate	7	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::move	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::move	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::mset	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::msetnx	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::multi	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::object	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::object	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::open	0	server	threw:RedisException:Unable to find the socket transport "rec" - did you forget to enable it when you configured PHP?
+redis::open	1	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::open	2	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::open	3	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::open	4	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::open	5	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::open	6	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::pconnect	0	server	threw:RedisException:Unable to find the socket transport "rec" - did you forget to enable it when you configured PHP?
+redis::pconnect	1	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::pconnect	2	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::pconnect	3	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::pconnect	4	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::pconnect	5	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::pconnect	6	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::persist	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pexpire	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pexpire	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pexpire	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pexpireat	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pexpireat	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pexpireat	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pexpiretime	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pfadd	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pfadd	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pfcount	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pfmerge	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pfmerge	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::ping	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::popen	0	server	threw:RedisException:Unable to find the socket transport "rec" - did you forget to enable it when you configured PHP?
+redis::popen	1	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::popen	2	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::popen	3	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::popen	4	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::popen	5	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::popen	6	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+redis::psetex	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::psetex	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::psetex	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::psubscribe	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::psubscribe	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pttl	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::publish	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::publish	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pubsub	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::pubsub	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::punsubscribe	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rawcommand	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rename	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rename	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::renamenx	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::renamenx	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::replicaof	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::replicaof	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::restore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::restore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::restore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::restore	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rpop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rpop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rpoplpush	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rpoplpush	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rpush	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rpush	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rpushx	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::rpushx	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sadd	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sadd	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sadd	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::saddarray	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::saddarray	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::scan	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::scan	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::scan	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::scan	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::scard	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::script	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::script	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sdiff	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sdiff	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sdiffstore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sdiffstore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sdiffstore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::select	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::set	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::set	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::set	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setbit	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setbit	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setbit	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setex	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setex	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setex	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setnx	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setnx	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setrange	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setrange	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::setrange	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sinter	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sinter	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sintercard	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sintercard	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sinterstore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sinterstore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sismember	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sismember	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::slaveof	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::slaveof	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::slowlog	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::slowlog	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::smembers	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::smismember	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::smismember	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::smismember	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::smove	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::smove	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::smove	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sort	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sort	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sort_ro	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sort_ro	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortasc	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortasc	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortasc	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortasc	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortasc	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortasc	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortascalpha	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortascalpha	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortascalpha	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortascalpha	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortascalpha	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortascalpha	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdesc	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdesc	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdesc	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdesc	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdesc	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdesc	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdescalpha	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdescalpha	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdescalpha	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdescalpha	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdescalpha	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sortdescalpha	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::spop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::spop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::srandmember	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::srandmember	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::srem	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::srem	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::srem	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sscan	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sscan	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sscan	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sscan	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::ssubscribe	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::ssubscribe	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::strlen	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::subscribe	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::subscribe	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sunion	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sunion	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sunionstore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sunionstore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sunionstore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::sunsubscribe	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::swapdb	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::swapdb	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::touch	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::touch	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::ttl	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::type	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::unlink	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::unlink	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::unsubscribe	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::wait	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::wait	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::waitaof	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::waitaof	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::waitaof	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::watch	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::watch	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xack	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xack	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xack	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xadd	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xadd	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xadd	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xadd	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xadd	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xadd	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xautoclaim	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xautoclaim	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xautoclaim	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xautoclaim	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xautoclaim	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xautoclaim	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xautoclaim	6	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xclaim	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xclaim	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xclaim	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xclaim	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xclaim	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xclaim	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xdel	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xdel	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xgroup	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xgroup	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xgroup	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xgroup	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xgroup	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xgroup	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xinfo	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xinfo	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xinfo	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xinfo	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xlen	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xpending	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xpending	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xpending	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xpending	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xpending	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xpending	5	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xrange	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xrange	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xrange	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xrange	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xread	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xread	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xread	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xreadgroup	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xreadgroup	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xreadgroup	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xreadgroup	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xreadgroup	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xrevrange	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xrevrange	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xrevrange	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xrevrange	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xtrim	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xtrim	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xtrim	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xtrim	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::xtrim	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zadd	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zadd	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zadd	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zcard	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zcount	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zcount	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zcount	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zdiff	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zdiff	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zdiffstore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zdiffstore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zincrby	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zincrby	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zincrby	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zinter	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zinter	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zinter	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zintercard	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zintercard	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zinterstore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zinterstore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zinterstore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zinterstore	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zlexcount	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zlexcount	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zlexcount	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zmpop	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zmpop	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zmpop	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zmscore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zmscore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zmscore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zpopmax	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zpopmax	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zpopmin	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zpopmin	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrandmember	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrandmember	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrange	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrange	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrange	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrange	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebylex	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebylex	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebylex	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebylex	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebylex	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebyscore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebyscore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebyscore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangebyscore	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangestore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangestore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangestore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangestore	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrangestore	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrank	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrank	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrem	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrem	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrem	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebylex	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebylex	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebylex	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebyrank	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebyrank	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebyrank	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebyscore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebyscore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zremrangebyscore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrange	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrange	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrange	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrange	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebylex	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebylex	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebylex	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebylex	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebylex	4	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebyscore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebyscore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebyscore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrangebyscore	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrank	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zrevrank	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zscan	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zscan	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zscan	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zscan	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zscore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zscore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zunion	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zunion	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zunion	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zunionstore	0	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zunionstore	1	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zunionstore	2	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redis::zunionstore	3	server	threw:RedisException:Redis server 127.0.0.1:6379 went away
+redissentinel::ckquorum	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
+redissentinel::failover	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
+redissentinel::getmasteraddrbyname	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
+redissentinel::master	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
+redissentinel::reset	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
+redissentinel::sentinels	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
+redissentinel::slaves	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
+reflectionclass::__construct	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getattributes	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getattributes	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getconstant	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getconstants	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getlazyinitializer	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getmethod	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getmethods	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getproperties	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getproperty	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getreflectionconstant	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getreflectionconstants	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getstaticpropertyvalue	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::getstaticpropertyvalue	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::hasconstant	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::hasmethod	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::hasproperty	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::implementsinterface	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::initializelazyobject	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::isinstance	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::issubclassof	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::isuninitializedlazyobject	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::marklazyobjectasinitialized	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::newinstance	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::newinstanceargs	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::newlazyghost	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::newlazyghost	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::newlazyproxy	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::newlazyproxy	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::resetaslazyghost	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::resetaslazyghost	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::resetaslazyghost	2	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::resetaslazyproxy	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::resetaslazyproxy	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::resetaslazyproxy	2	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::setstaticpropertyvalue	0	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclass::setstaticpropertyvalue	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclassconstant::__construct	0	class-name	threw:ReflectionException:Constant RecordingObject::x does not exist
+reflectionclassconstant::__construct	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionclassconstant::getattributes	1	value	threw:ValueError:ReflectionClassConstant::getAttributes(): Argument #2 ($flags) must be a valid attribute filter flag
+reflectionextension::__construct	0	class-name	threw:ReflectionException:Extension "rec://probe" does not exist
+reflectionfunction::__construct	0	class-name	threw:ReflectionException:Function x() does not exist
+reflectionfunction::invoke	0	class-name	threw:ReflectionException:Function x() does not exist
+reflectionfunction::invokeargs	0	class-name	threw:ReflectionException:Function x() does not exist
+reflectionmethod::__construct	0	value	threw:ValueError:ReflectionMethod::__construct(): Argument #2 ($method) cannot be null when argument #1 ($objectOrMethod) is an object
+reflectionmethod::__construct	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionmethod::invoke	1	value	threw:ReflectionException:Trying to invoke non static method RecordingObject::count() without an object
+reflectionmethod::invokeargs	1	value	threw:ReflectionException:Trying to invoke non static method RecordingObject::count() without an object
+reflectionparameter::getattributes	1	value	threw:ValueError:ReflectionParameter::getAttributes(): Argument #2 ($flags) must be a valid attribute filter flag
+reflectionproperty::__construct	0	class-name	threw:ReflectionException:Property RecordingObject::$x does not exist
+reflectionproperty::__construct	1	class-name	threw:ReflectionException:Class "x" does not exist
+reflectionproperty::getattributes	1	value	threw:ValueError:ReflectionProperty::getAttributes(): Argument #2 ($flags) must be a valid attribute filter flag
+reflectionproperty::setrawvaluewithoutlazyinitialization	1	value	threw:TypeError:ReflectionProperty::setRawValueWithoutLazyInitialization(): Argument #1 ($object) must be of type RecordingObject, stdClass given
+reflectionproperty::setvalue	1	value	threw:TypeError:ReflectionProperty::setValue(): Argument #1 ($objectOrValue) must be of type object, int given
+request_parse_body	0	value	threw:ValueError:Invalid integer key in $options argument
+rewinddir	0	value	threw:TypeError:rewinddir(): Argument #1 ($dir_handle) must be of type resource or null, Closure given
+sem_acquire	1	value	threw:TypeError:sem_acquire(): Argument #1 ($semaphore) must be of type SysvSemaphore, stdClass given
+sensitiveparametervalue::__construct	0	value	threw:Error:Cannot modify readonly property SensitiveParameterValue::$value
+session_set_save_handler	0	session	threw:TypeError:session_set_save_handler(): Argument #1 ($open) must be of type SessionHandlerInterface, Closure given
+session_set_save_handler	1	session	threw:TypeError:session_set_save_handler(): Argument #1 ($open) must be of type SessionHandlerInterface, Closure given
+session_set_save_handler	2	session	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
+session_set_save_handler	3	session	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
+session_set_save_handler	4	session	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
+session_set_save_handler	5	session	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
+session_set_save_handler	6	session	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
+session_set_save_handler	7	session	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
+session_set_save_handler	8	session	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
+session_start	0	session	threw:ValueError:session_start(): Argument #1 ($options) must be of type array with keys as string
+sessionhandler::destroy	0	session	threw:Error:Session is not active
+sessionhandler::gc	0	session	threw:Error:Session is not active
+sessionhandler::open	0	session	threw:Error:Session is not active
+sessionhandler::open	1	session	threw:Error:Session is not active
+sessionhandler::read	0	session	threw:Error:Session is not active
+sessionhandler::write	0	session	threw:Error:Session is not active
+sessionhandler::write	1	session	threw:Error:Session is not active
+settype	1	value	threw:ValueError:settype(): Argument #2 ($type) must be a valid type
+shmop_open	0	value	threw:ValueError:shmop_open(): Argument #2 ($mode) must be a valid access mode
+shmop_open	1	value	threw:ValueError:shmop_open(): Argument #2 ($mode) must be a valid access mode
+shmop_open	2	value	threw:ValueError:shmop_open(): Argument #2 ($mode) must be a valid access mode
+shmop_open	3	value	threw:ValueError:shmop_open(): Argument #2 ($mode) must be a valid access mode
+simplexml_import_dom	0	value	threw:TypeError:simplexml_import_dom(): Argument #1 ($node) must be a valid XML node
+simplexml_import_dom	1	class-name	threw:TypeError:simplexml_import_dom(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
+simplexml_load_file	1	class-name	threw:TypeError:simplexml_load_file(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
+simplexml_load_string	1	class-name	threw:TypeError:simplexml_load_string(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
+simplexmlelement::__construct	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::__construct	1	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::__construct	2	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::__construct	3	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::__construct	4	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::addattribute	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::addattribute	1	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::addattribute	2	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::addchild	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::addchild	1	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::addchild	2	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::asxml	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::attributes	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::attributes	1	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::children	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::children	1	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::getdocnamespaces	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::getdocnamespaces	1	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::getnamespaces	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::registerxpathnamespace	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::registerxpathnamespace	1	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::savexml	0	value	threw:Exception:String could not be parsed as XML
+simplexmlelement::xpath	0	value	threw:Exception:String could not be parsed as XML
+socket_addrinfo_lookup	2	value	threw:ValueError:socket_addrinfo_lookup(): Argument #3 ($hints) must only contain array keys "ai_flags", "ai_socktype", "ai_protocol", or "ai_family"
+socket_select	0	value	threw:TypeError:socket_select(): Argument #1 ($read) must only have elements of type Socket, RecordingObject given
+socket_select	1	value	threw:TypeError:socket_select(): Argument #2 ($write) must only have elements of type Socket, RecordingObject given
+socket_select	2	value	threw:TypeError:socket_select(): Argument #3 ($except) must only have elements of type Socket, RecordingObject given
+socket_select	3	value	threw:ValueError:socket_select(): At least one array argument must be passed
+socket_select	4	value	threw:ValueError:socket_select(): At least one array argument must be passed
+sodium_crypto_generichash	2	value	threw:SodiumException:unsupported output length
+sodium_crypto_generichash_final	1	value	threw:SodiumException:unsupported output length
+sodium_crypto_generichash_init	1	value	threw:SodiumException:unsupported output length
+spldoublylinkedlist::__unserialize	0	serialised	threw:UnexpectedValueException:Incomplete or ill-typed serialization data
+spldoublylinkedlist::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
+splfileinfo::getfileinfo	0	class-name	threw:TypeError:SplFileInfo::getFileInfo(): Argument #1 ($class) must be a class name derived from SplFileInfo or null, rec://probe given
+splfileinfo::getpathinfo	0	class-name	threw:TypeError:SplFileInfo::getPathInfo(): Argument #1 ($class) must be a valid class name or null, rec://probe given
+splfileinfo::openfile	1	value	threw:RuntimeException:SplFileInfo::openFile(/tmp/recqfs6pkull28r7MlXAqv): Failed to open stream: File exists
+splfileinfo::openfile	2	value	threw:TypeError:SplFileInfo::openFile(): Argument #3 ($context) must be of type resource or null, Closure given
+splfileinfo::setfileclass	0	class-name	threw:TypeError:SplFileInfo::setFileClass(): Argument #1 ($class) must be a class name derived from SplFileObject, rec://probe given
+splfileinfo::setinfoclass	0	class-name	threw:TypeError:SplFileInfo::setInfoClass(): Argument #1 ($class) must be a class name derived from SplFileInfo, rec://probe given
+splfileobject::__construct	0	receiver	threw:Error:Cannot call constructor twice
+splfileobject::__construct	1	receiver	threw:Error:Cannot call constructor twice
+splfileobject::__construct	2	receiver	threw:Error:Cannot call constructor twice
+splfileobject::__construct	3	value	threw:TypeError:SplFileObject::__construct(): Argument #4 ($context) must be of type resource or null, Closure given
+splfileobject::fgetcsv	0	value	threw:ValueError:SplFileObject::fgetcsv(): Argument #1 ($separator) must be a single character
+splfileobject::fgetcsv	1	value	threw:ValueError:SplFileObject::fgetcsv(): Argument #2 ($enclosure) must be a single character
+splfileobject::fgetcsv	2	value	threw:ValueError:SplFileObject::fgetcsv(): Argument #3 ($escape) must be empty or a single character
+splfileobject::fputcsv	1	value	threw:ValueError:SplFileObject::fputcsv(): Argument #2 ($separator) must be a single character
+splfileobject::fputcsv	2	value	threw:ValueError:SplFileObject::fputcsv(): Argument #3 ($enclosure) must be a single character
+splfileobject::fputcsv	3	value	threw:ValueError:SplFileObject::fputcsv(): Argument #4 ($escape) must be empty or a single character
+splfileobject::fscanf	1	receiver	threw:ValueError:Variable is not assigned by any conversion specifiers
+splfileobject::setcsvcontrol	0	value	threw:ValueError:SplFileObject::setCsvControl(): Argument #1 ($separator) must be a single character
+splfileobject::setcsvcontrol	1	value	threw:ValueError:SplFileObject::setCsvControl(): Argument #2 ($enclosure) must be a single character
+splfileobject::setcsvcontrol	2	value	threw:ValueError:SplFileObject::setCsvControl(): Argument #3 ($escape) must be empty or a single character
+splobjectstorage::__unserialize	0	serialised	threw:UnexpectedValueException:Incomplete or ill-typed serialization data
+splobjectstorage::offsetget	0	value	threw:UnexpectedValueException:Object not found
+splobjectstorage::seek	0	receiver	threw:OutOfBoundsException:Seek position 1 is out of range
+splobjectstorage::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
+splpriorityqueue::__unserialize	0	serialised	threw:Exception:Invalid serialization data for SplPriorityQueue object
+spltempfileobject::__construct	0	receiver	threw:Error:Cannot call constructor twice
+spoofchecker::setallowedchars	0	value	threw:ValueError:Spoofchecker::setAllowedChars(): Argument #1 ($pattern) must be a valid regular expression character set pattern
+spoofchecker::setallowedchars	1	value	threw:ValueError:Spoofchecker::setAllowedChars(): Argument #1 ($pattern) must be a valid regular expression character set pattern
+spoofchecker::setrestrictionlevel	0	value	threw:ValueError:Spoofchecker::setRestrictionLevel(): Argument #1 ($level) must be one of Spoofchecker::ASCII, Spoofchecker::SINGLE_SCRIPT_RESTRICTIVE, Spoofche
+sqlite3::__construct	0	value	threw:Exception:Already initialised DB Object
+sqlite3::__construct	1	value	threw:Exception:Already initialised DB Object
+sqlite3::__construct	2	value	threw:Exception:Already initialised DB Object
+sqlite3::backup	1	value	threw:TypeError:SQLite3::backup(): Argument #1 ($destination) must be of type SQLite3, stdClass given
+sqlite3::backup	2	value	threw:TypeError:SQLite3::backup(): Argument #1 ($destination) must be of type SQLite3, stdClass given
+sqlite3::open	0	value	threw:Exception:Already initialised DB Object
+sqlite3::open	1	value	threw:Exception:Already initialised DB Object
+sqlite3::open	2	value	threw:Exception:Already initialised DB Object
+sscanf	2	receiver	threw:ValueError:Variable is not assigned by any conversion specifiers
+str_decrement	0	value	threw:ValueError:str_decrement(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters
+str_getcsv	1	value	threw:ValueError:str_getcsv(): Argument #2 ($separator) must be a single character
+str_getcsv	2	value	threw:ValueError:str_getcsv(): Argument #3 ($enclosure) must be a single character
+str_getcsv	3	value	threw:ValueError:str_getcsv(): Argument #4 ($escape) must be empty or a single character
+str_increment	0	value	threw:ValueError:str_increment(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters
+stream_bucket_append	0	value	threw:TypeError:stream_bucket_append(): Argument #1 ($brigade) must be of type resource, Closure given
+stream_bucket_make_writeable	0	value	threw:TypeError:stream_bucket_make_writeable(): Argument #1 ($brigade) must be of type resource, Closure given
+stream_bucket_prepend	0	value	threw:TypeError:stream_bucket_prepend(): Argument #1 ($brigade) must be of type resource, Closure given
+stream_context_create	0	value	threw:ValueError:Options should have the form ["wrappername"]["optionname"] = $value
+stream_context_get_default	0	value	threw:ValueError:Options should have the form ["wrappername"]["optionname"] = $value
+stream_context_set_default	0	value	threw:ValueError:Options should have the form ["wrappername"]["optionname"] = $value
+stream_context_set_option	0	value	threw:TypeError:stream_context_set_option(): Argument #1 ($context) must be of type resource, Closure given
+stream_context_set_option	2	value	threw:ValueError:stream_context_set_option(): Argument #4 ($value) must be provided when argument #2 ($wrapper_or_options) is a string
+stream_context_set_options	1	value	threw:ValueError:Options should have the form ["wrappername"]["optionname"] = $value
+stream_filter_remove	0	value	threw:TypeError:stream_filter_remove(): Argument #1 ($stream_filter) must be of type resource, Closure given
+stream_register_wrapper	0	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, x given
+stream_register_wrapper	1	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, rec://probe given
+stream_register_wrapper	2	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, x given
+stream_select	0	value	threw:ValueError:No stream arrays were passed
+stream_select	1	value	threw:ValueError:No stream arrays were passed
+stream_select	2	value	threw:ValueError:No stream arrays were passed
+stream_select	3	value	threw:ValueError:No stream arrays were passed
+stream_select	4	value	threw:ValueError:No stream arrays were passed
+stream_wrapper_register	0	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
+stream_wrapper_register	1	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, rec://probe given
+stream_wrapper_register	2	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
+substr_count	3	value	threw:ValueError:substr_count(): Argument #4 ($length) must be contained in argument #1 ($haystack)
+trigger_error	1	value	threw:ValueError:trigger_error(): Argument #2 ($error_level) must be one of E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, or E_USER_DEPRECATED
+uconverter::__construct	0	value	threw:IntlException:UConverter::__construct(): returned error 4: U_FILE_ACCESS_ERROR
+uconverter::__construct	1	value	threw:IntlException:UConverter::__construct(): returned error 4: U_FILE_ACCESS_ERROR
+unpack	0	value	threw:ValueError:Invalid format type r
+uri\rfc3986\uri::__construct	0	value	threw:Error:Cannot modify readonly object of class Uri\Rfc3986\Uri
+uri\rfc3986\uri::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\Rfc3986\Uri object
+uri\rfc3986\uri::equals	0	value	threw:TypeError:Uri\Rfc3986\Uri::equals(): Argument #1 ($uri) must be of type Uri\Rfc3986\Uri, string given
+uri\whatwg\invalidurlexception::__construct	0	value	threw:Error:Cannot modify readonly property Uri\WhatWg\InvalidUrlException::$errors
+uri\whatwg\invalidurlexception::__construct	1	value	threw:ValueError:Uri\WhatWg\InvalidUrlException::__construct(): Argument #2 ($errors) must be a list of Uri\WhatWg\UrlValidationError
+uri\whatwg\invalidurlexception::__construct	2	value	threw:ValueError:Uri\WhatWg\InvalidUrlException::__construct(): Argument #2 ($errors) must be a list of Uri\WhatWg\UrlValidationError
+uri\whatwg\url::__construct	0	value	threw:Error:Cannot modify readonly object of class Uri\WhatWg\Url
+uri\whatwg\url::__construct	2	value	threw:Error:Cannot modify readonly object of class Uri\WhatWg\Url
+uri\whatwg\url::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\WhatWg\Url object
+user_error	1	value	threw:ValueError:user_error(): Argument #2 ($error_level) must be one of E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, or E_USER_DEPRECATED
+version_compare	2	value	threw:ValueError:version_compare(): Argument #3 ($operator) must be a valid comparison operator
+weakmap::offsetget	0	value	threw:Error:Object Closure#164 not contained in WeakMap
+xml_parser_create	0	value	threw:ValueError:xml_parser_create(): Argument #1 ($encoding) is not a supported source encoding
+xml_parser_create_ns	0	value	threw:ValueError:xml_parser_create_ns(): Argument #1 ($encoding) is not a supported source encoding
+xml_parser_create_ns	1	value	threw:ValueError:xml_parser_create_ns(): Argument #1 ($encoding) is not a supported source encoding
+xml_set_element_handler	1	receiver	threw:ValueError:xml_set_element_handler(): Argument #3 ($end_handler) an object must be set via xml_set_object() to be able to lookup method
+xml_set_element_handler	2	receiver	threw:ValueError:xml_set_element_handler(): Argument #2 ($start_handler) an object must be set via xml_set_object() to be able to lookup method
+xmlwriter::startattribute	0	value	threw:ValueError:XMLWriter::startAttribute(): Argument #2 must be a valid attribute name, "rec://probe" given
+xmlwriter::startattributens	1	value	threw:ValueError:XMLWriter::startAttributeNs(): Argument #3 ($namespace) must be a valid attribute name, "rec://probe" given
+xmlwriter::startdtdattlist	0	value	threw:ValueError:XMLWriter::startDtdAttlist(): Argument #2 must be a valid element name, "rec://probe" given
+xmlwriter::startdtdelement	0	value	threw:ValueError:XMLWriter::startDtdElement(): Argument #2 must be a valid element name, "rec://probe" given
+xmlwriter::startdtdentity	0	value	threw:ValueError:XMLWriter::startDtdEntity(): Argument #2 ($isParam) must be a valid attribute name, "rec://probe" given
+xmlwriter::startelement	0	value	threw:ValueError:XMLWriter::startElement(): Argument #2 must be a valid element name, "rec://probe" given
+xmlwriter::startelementns	1	value	threw:ValueError:XMLWriter::startElementNs(): Argument #3 ($namespace) must be a valid element name, "rec://probe" given
+xmlwriter::startpi	0	value	threw:ValueError:XMLWriter::startPi(): Argument #2 must be a valid PI target, "rec://probe" given
+xmlwriter::writeattribute	0	value	threw:ValueError:XMLWriter::writeAttribute(): Argument #2 ($value) must be a valid attribute name, "rec://probe" given
+xmlwriter::writeattributens	1	value	threw:ValueError:XMLWriter::writeAttributeNs(): Argument #3 ($namespace) must be a valid attribute name, "rec://probe" given
+xmlwriter::writedtdattlist	0	value	threw:ValueError:XMLWriter::writeDtdAttlist(): Argument #2 ($content) must be a valid element name, "rec://probe" given
+xmlwriter::writedtdelement	0	value	threw:ValueError:XMLWriter::writeDtdElement(): Argument #2 ($content) must be a valid element name, "rec://probe" given
+xmlwriter::writedtdentity	0	value	threw:ValueError:XMLWriter::writeDtdEntity(): Argument #2 ($content) must be a valid element name, "rec://probe" given
+xmlwriter::writeelement	0	value	threw:ValueError:XMLWriter::writeElement(): Argument #2 ($content) must be a valid element name, "rec://probe" given
+xmlwriter::writeelementns	1	value	threw:ValueError:XMLWriter::writeElementNs(): Argument #3 ($namespace) must be a valid element name, "rec://probe" given
+xmlwriter::writepi	0	value	threw:ValueError:XMLWriter::writePi(): Argument #2 ($content) must be a valid PI target, "rec://probe" given
+xmlwriter_start_attribute	1	value	threw:ValueError:xmlwriter_start_attribute(): Argument #2 ($name) must be a valid attribute name, "rec://probe" given
+xmlwriter_start_attribute_ns	2	value	threw:ValueError:xmlwriter_start_attribute_ns(): Argument #3 ($name) must be a valid attribute name, "rec://probe" given
+xmlwriter_start_dtd_attlist	1	value	threw:ValueError:xmlwriter_start_dtd_attlist(): Argument #2 ($name) must be a valid element name, "rec://probe" given
+xmlwriter_start_dtd_element	1	value	threw:ValueError:xmlwriter_start_dtd_element(): Argument #2 ($qualifiedName) must be a valid element name, "rec://probe" given
+xmlwriter_start_dtd_entity	1	value	threw:ValueError:xmlwriter_start_dtd_entity(): Argument #2 ($name) must be a valid attribute name, "rec://probe" given
+xmlwriter_start_element	1	value	threw:ValueError:xmlwriter_start_element(): Argument #2 ($name) must be a valid element name, "rec://probe" given
+xmlwriter_start_element_ns	2	value	threw:ValueError:xmlwriter_start_element_ns(): Argument #3 ($name) must be a valid element name, "rec://probe" given
+xmlwriter_start_pi	1	value	threw:ValueError:xmlwriter_start_pi(): Argument #2 ($target) must be a valid PI target, "rec://probe" given
+xmlwriter_write_attribute	1	value	threw:ValueError:xmlwriter_write_attribute(): Argument #2 ($name) must be a valid attribute name, "rec://probe" given
+xmlwriter_write_attribute_ns	2	value	threw:ValueError:xmlwriter_write_attribute_ns(): Argument #3 ($name) must be a valid attribute name, "rec://probe" given
+xmlwriter_write_dtd_attlist	1	value	threw:ValueError:xmlwriter_write_dtd_attlist(): Argument #2 ($name) must be a valid element name, "rec://probe" given
+xmlwriter_write_dtd_element	1	value	threw:ValueError:xmlwriter_write_dtd_element(): Argument #2 ($name) must be a valid element name, "rec://probe" given
+xmlwriter_write_dtd_entity	1	value	threw:ValueError:xmlwriter_write_dtd_entity(): Argument #2 ($name) must be a valid element name, "rec://probe" given
+xmlwriter_write_element	1	value	threw:ValueError:xmlwriter_write_element(): Argument #2 ($name) must be a valid element name, "rec://probe" given
+xmlwriter_write_element_ns	2	value	threw:ValueError:xmlwriter_write_element_ns(): Argument #3 ($name) must be a valid element name, "rec://probe" given
+xmlwriter_write_pi	1	value	threw:ValueError:xmlwriter_write_pi(): Argument #2 ($target) must be a valid PI target, "rec://probe" given
+xsltprocessor::getparameter	1	value	threw:ValueError:XSLTProcessor::getParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
+xsltprocessor::importstylesheet	0	value	threw:TypeError:XSLTProcessor::importStylesheet(): Argument #1 ($stylesheet) must be a valid XML node
+xsltprocessor::registerphpfunctionns	1	value	threw:ValueError:XSLTProcessor::registerPHPFunctionNS(): Argument #2 ($name) must be a valid callback name
+xsltprocessor::removeparameter	1	value	threw:ValueError:XSLTProcessor::removeParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
+xsltprocessor::setparameter	0	value	threw:ValueError:XSLTProcessor::setParameter(): Argument #3 ($value) cannot be null when argument #2 ($name) is a string
+xsltprocessor::transformtodoc	0	value	threw:TypeError:XSLTProcessor::transformToDoc(): Argument #1 ($document) must be a valid XML node
+xsltprocessor::transformtodoc	1	class-name	threw:TypeError:XSLTProcessor::transformToDoc(): Argument #2 ($returnClass) must be a valid class name or null, rec://probe given
+xsltprocessor::transformtouri	0	value	threw:TypeError:XSLTProcessor::transformToUri(): Argument #1 ($document) must be a valid XML node
+xsltprocessor::transformtoxml	0	value	threw:TypeError:XSLTProcessor::transformToXml(): Argument #1 ($document) must be a valid XML node
+zlib_encode	0	value	threw:ValueError:zlib_encode(): Argument #2 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
+zlib_encode	1	value	threw:ValueError:zlib_encode(): Argument #2 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
+zlib_encode	2	value	threw:ValueError:zlib_encode(): Argument #2 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
