@@ -353,8 +353,19 @@ function named_value(ReflectionParameter $param): ?Closure
     if ($class === 'spoofchecker' && $name === 'pattern') {
         return static fn (): string => '[a-z]';
     }
+    // An XML handler is a callable: a string would name a method of the parser's object.
+    if (str_starts_with($function, 'xml_set_') && str_ends_with($name, 'handler')) {
+        return static fn (): Closure => static fn (): int => 0;
+    }
     if (str_starts_with($function, 'image') && $name === 'file') {
         return static fn (): string => sys_get_temp_dir() . '/rec-' . getmypid() . '.png';
+    }
+    // A database file of SQLite3 is in memory; a directory of the directory iterators is the temporary one.
+    if ($class === 'sqlite3' && $name === 'filename') {
+        return static fn (): string => ':memory:';
+    }
+    if (in_array($class, ['directoryiterator', 'filesystemiterator', 'recursivedirectoryiterator'], true) && $name === 'directory') {
+        return static fn (): string => sys_get_temp_dir();
     }
     // Methods of a date or timezone class, by the class and the name.
     if (in_array($class, ['datetime', 'datetimeimmutable'], true) && $name === 'datetime') {
@@ -383,6 +394,7 @@ function named_value(ReflectionParameter $param): ?Closure
         ['json_validate', 'flags'] => static fn (): int => 0,
         ['extract', 'prefix'] => static fn (): string => 'p',
         ['popen', 'mode'] => static fn (): string => 'r',
+        ['sscanf', 'format'], ['fscanf', 'format'], ['splfileobject', 'format'] => static fn (): string => '%d',
         ['class_implements', 'autoload'], ['class_parents', 'autoload'], ['class_uses', 'autoload'] => static fn (): bool => false,
         ['normalizer_normalize', 'form'], ['normalizer_is_normalized', 'form'] => static fn (): int => Normalizer::FORM_C,
         ['setfontweight', 'weight'] => static fn (): int => 400,
