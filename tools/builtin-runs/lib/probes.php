@@ -130,6 +130,9 @@ function valid_value(?ReflectionType $type): ?Closure
     $values ??= [
         'xmlwriter' => static fn (): XMLWriter => xmlwriter_open_memory(),
         'xmlparser' => static fn (): XMLParser => xml_parser_create(),
+        // Not connected: a call on it fails for want of a connection, which the table records as a gap.
+        'mysqli' => static fn (): mysqli => new mysqli(),
+        'socket' => static fn (): Socket => socket_create(AF_UNIX, SOCK_STREAM, 0),
         // Made in the worker's own IPC namespace, which the sandbox gives it; without one the queue is the host's.
         'sysvmessagequeue' => static fn (): SysvMessageQueue => msg_get_queue(0x5150),
         'datetimeinterface' => static fn (): DateTimeImmutable => new DateTimeImmutable('2000-01-01 00:00:00', new DateTimeZone('UTC')),
@@ -159,11 +162,15 @@ function valid_value(?ReflectionType $type): ?Closure
 function plain_value(ReflectionParameter $param): mixed
 {
     $type = $param->getType();
+    // A memory stream serves every resource kind the stubs name: PHP takes a
+    // stream where it takes a stream context, and a function that needs another
+    // kind throws, which the table records. Untyped and `mixed` parameters are
+    // the ones the stubs document as resources (Imagick's take `mixed`).
+    if (($type === null || (string) $type === 'mixed') && documented_resource($param)) {
+        return fopen('php://memory', 'r+');
+    }
     if ($type === null) {
-        // A memory stream serves every resource kind the stubs name: PHP takes
-        // a stream where it takes a stream context, and a function that needs
-        // another kind throws, which the table records.
-        return documented_resource($param) ? fopen('php://memory', 'r+') : 1;
+        return 1;
     }
     if ($type->allowsNull() && !admits($type, 'int') && !admits($type, 'string')) {
         return null;
