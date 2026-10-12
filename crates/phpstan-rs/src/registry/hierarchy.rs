@@ -1756,15 +1756,18 @@ impl Registry {
     /// Same as `lookup_property`, but also returns the declaring
     /// ancestor's name - class-level generic substitution needs it the
     /// same way `lookup_method_with_owner`'s own doc comment explains.
-    pub fn lookup_property_with_owner<K: TableKey + ?Sized>(
+    pub fn lookup_property_with_owner<
+        K: TableKey + ?Sized,
+        P: syntax::name::NameKey + AsRef<str> + ?Sized,
+    >(
         &self,
         class: &K,
-        prop: &str,
+        prop: &P,
     ) -> Option<(Name, &PropertyReflection)> {
         let owner = self.property_owners(class)?.get(prop)?;
         let id = self.class_ids.get(owner)?;
         let sig = self
-            .property_result_by_name(*id, prop)
+            .property_result_by_name(*id, prop.as_ref())
             .or_else(|| self.class_by_id(*id)?.properties.get(prop).map(|p| &**p))?;
         Some((owner.clone(), sig))
     }
