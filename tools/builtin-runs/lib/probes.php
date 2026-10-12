@@ -96,10 +96,11 @@ function names_callable(?ReflectionType $type): bool
 function probes_for(ReflectionParameter $param): array
 {
     $type = $param->getType();
-    // A parameter the stubs document as a resource takes a stream and nothing
-    // else: every other probe is a TypeError before any user code.
+    // A parameter the stubs document as a resource takes a stream or a stream
+    // context, and nothing else: every other probe is a TypeError before any user
+    // code. The context's notification callback is user code.
     if (documented_resource($param)) {
-        return [['stream', static fn () => recording_stream()]];
+        return [['stream', static fn () => recording_stream()], ['context', static fn () => recording_context()]];
     }
     $probes = [];
     if (admits($type, 'callable') || admits($type, 'closure')) {
@@ -195,6 +196,14 @@ function valid_value(?ReflectionType $type): ?Closure
         'sysvsharedmemory' => static fn (): SysvSharedMemory => shm_attach(0x5151, 64),
     ];
     return $values[strtolower($type->getName())] ?? null;
+}
+
+/** A stream context whose notification callback is a recording callable. */
+function recording_context(): mixed
+{
+    $context = stream_context_create();
+    stream_context_set_params($context, ['notification' => recording_callable()]);
+    return $context;
 }
 
 /** A stream holding a 1x1 PNG, for the functions that read an image from a file handle. */
@@ -297,6 +306,8 @@ function valid_site(ReflectionParameter $param): ?Closure
         'stream_context_set_options' => [0 => static fn (): mixed => stream_context_create(), 1 => static fn (): array => ['http' => ['method' => 'GET']]],
         'mb_ereg_replace_callback' => [3 => static fn (): null => null],
         'strtr' => [1 => static fn (): array => ['a' => 'b']],
+        // A no-op command and no descriptors: proc_open starts a process whatever it is given.
+        'proc_open' => [0 => 'true', 1 => static fn (): array => []],
         'zip_entry_close' => [0 => static fn (): mixed => zip_entry_sample()],
         'zip_entry_compressedsize' => [0 => static fn (): mixed => zip_entry_sample()],
         'zip_entry_compressionmethod' => [0 => static fn (): mixed => zip_entry_sample()],
