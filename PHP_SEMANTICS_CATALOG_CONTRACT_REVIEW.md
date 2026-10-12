@@ -1333,7 +1333,7 @@ acceptance remains OPEN: that is a review judgement, not a computed check.
 
 Scope: the `strlen` catalog evidence and graph, checked against the rebuilt linked module,
 the path-free SVF and the regenerated evidence. This is an author review. The contract
-requires an independent semantic review (F00), which has not happened, so this review does
+requires a semantic review by a party other than the author (F00), which has not happened, so this review does
 not close F00 or the semantic acceptance. The checkpoint keeps the semantic acceptance OPEN.
 
 What was checked:
@@ -1353,11 +1353,11 @@ What was checked:
   OPEN.
 
 What remains open for the semantic gate:
-- The independent semantic-contract review (F00) and the PHP-source validation of the
+- The semantic-contract review by a party other than the author (F00) and the PHP-source validation of the
   contract's claims.
 - The ledger rows still open (15 Open, 1 Partial), which the record lists row by row,
   including R05.2 and R05.7 on the callback and fixture coverage.
 
 Verdict of the author: the evidence chain is consistent and reproduces, and the `strlen`
 slice agrees with its inventory. The contract's own gate for closing the semantic acceptance
-is an independent review, which the author cannot provide.
+requires a review by a party other than the author, which this record cannot provide.

@@ -6,7 +6,7 @@ This is the authoritative status record for Phase F tasks and their remediation 
 
 Statuses: **complete** means the stated evidence exists and passed its recorded
 check; **partial** means evidence covers only the listed narrow slice; **open**
-means the required evidence has not been produced or independently reviewed;
+means the required evidence has not been produced or reviewed by a party other than the author;
 **deferred** means the work belongs to a later plan phase.
 
 ### F00.1 — Partial: Specify observable traces, assumptions, abstract order, and return-refinement rules
@@ -39,7 +39,7 @@ means the required evidence has not been produced or independently reviewed;
 **Reviewed evidence and current disposition:** The contract defines typed records, canonical IDs, distinct evidence references, acyclic dependencies, and context-dependent validation. Schema v8 implements typed records, a separate assumption namespace, canonical IDs, target/program context matching, manifest round trips, and combined evidence/assumption cycle rejection (R01.2). R01.7 implements deployment-pinned validator execution and R01.7.a threads freshly validated assumptions through catalog-backed projection, evaluation, and certificate replay. Context-free graph APIs still fail closed for closed coverage citing assumptions. Independent acceptance remains pending; see [F00 review](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md).
 
 
-### F00.5 — Open: Independently review the contract and assumptions
+### F00.5 — Open: Review the contract and assumptions by a party other than the author
 
 **Reviewed evidence and current disposition:** A review is recorded in the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#review-record-2026-10-09); its findings remain unresolved or unaccepted, so this item stays Open. The review occurred after F01 and later checker/native work had begun, so those results remain provisional under the ledger's gate order until the findings receive dispositions.
 
@@ -86,7 +86,7 @@ means the required evidence has not been produced or independently reviewed;
 
 ### F01.4 — Partial: Validate reference contracts with broader branch/callback cases
 
-**Reviewed evidence and current disposition:** Callback result/write/throw order, state-sensitive predicates, joins, cleanup, and second-callback branch selection are covered. Review: Callback result/write order, result-selected second callback, state-sensitive predicates, branch joins, callback throws, cleanup, and normal/throw state separation have fixtures. These are substantial reference-contract examples, but not an independently reviewed or exhaustive composition matrix; F00.5 remains open. Independent contract review remains F00-dependent; broaden combinations after review.
+**Reviewed evidence and current disposition:** Callback result/write/throw order, state-sensitive predicates, joins, cleanup, and second-callback branch selection are covered. Review: Callback result/write order, result-selected second callback, state-sensitive predicates, branch joins, callback throws, cleanup, and normal/throw state separation have fixtures. These are substantial reference-contract examples, but not a matrix reviewed by a party other than the author, nor exhaustive; F00.5 remains open. Independent contract review remains F00-dependent; broaden combinations after review.
 
 - **R01.5 — Implementation complete; independent acceptance pending** (depends on: R00.2)
   `GraphError::UnsupportedCleanupReplacement` now makes unsupported cleanup replacement fail closed in both evaluation and certificate replay. The only modeled replacement remains cleanup `Return` over pending PHP throw. A full evaluator matrix covers all four pending kinds against cleanup Return, PHP throw, native unwind, fatal, and suspension; it asserts the sole supported cell succeeds and every other cell returns the typed error. A certificate replay regression verifies the validator independently rejects a pending-fatal cleanup return. A separate matrix proves `Resume` preserves all four pending kinds. A callback throw also passes through a `Maybe` branch, distinct state writes, a join, and `Resume` without losing the pending throw. Existing six fatal/native-unwind/suspension Return/Throw counterexamples now fail closed. RV-1's implementation defect is addressed; obtain a review before treating the finding or parent F01.2 as accepted.
@@ -341,7 +341,7 @@ means the required evidence has not been produced or independently reviewed;
 
 #### Gate roll-up
 
-- **F00 — Open:** independent semantic-contract review and PHP-source validation remain.
+- **F00 — Open:** a semantic-contract review by a party other than the author, and PHP-source validation, remain.
 - **F01 — Open:** core evaluator checks exist; broader reviewed contracts and a calibrated host remain.
 - **F02 — Open:** compiler/source evidence is narrow and does not establish broad native semantic correspondence.
 - **F03 — Open:** reduced probes exist, but production demand summaries, pointer reuse, and native post-fixpoint validation do not.

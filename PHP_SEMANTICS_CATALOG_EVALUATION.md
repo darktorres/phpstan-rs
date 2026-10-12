@@ -325,7 +325,7 @@ still needs semantic comparison of the wider native/PHP behavior; F03 needs
 native demand summaries and pointer reuse beyond the direct Zend string-field
 bridge; F05 needs stateful checker integration across effects and exceptions;
 and F06 needs same-slice precision, cost, and solver evidence. The next dependency is an
-independently reviewed observable-trace contract, followed by one locked 8.5.4
+observable-trace contract reviewed by a party other than the author, followed by one locked 8.5.4
 builtin slice driven from native import through graph validation and a checker
 call. Until that exists, producer/solver choice remains provisional.
 
@@ -703,7 +703,7 @@ authoritative [Phase F and remediation ledger](PHP_SEMANTICS_CATALOG_LEDGER.md).
 replay, manifest/catalog and target selection, PHP value/reference host,
 `strlen` builder/extractor, checker effect bridge, counterexample C model,
 comparison records, and checked-in evidence. It traced current implementation
-and tests against each task; this is an author audit, not independent semantic
+and tests against each task; this is an author audit, not a semantic review by a party other than the author
 acceptance.
 
 The inspected work maps to these task histories: F00 (`599c2508`, `5df391b9`,
