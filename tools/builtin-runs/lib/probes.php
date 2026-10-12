@@ -207,6 +207,7 @@ function valid_value(?ReflectionType $type): ?Closure
         'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
         'simplexmlelement' => static fn (): SimpleXMLElement => new SimpleXMLElement('<a><b/></a>'),
         'intlgregoriancalendar' => static fn (): IntlGregorianCalendar => IntlGregorianCalendar::createInstance('UTC', 'en'),
+        'ds\\map' => static fn (): Ds\Map => new Ds\Map(),
         'imagickkernel' => static fn (): ImagickKernel => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         'traversable' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
         'domelement' => static function (): DOMElement {
@@ -351,7 +352,32 @@ function named_value(ReflectionParameter $param): ?Closure
     if (str_starts_with($function, 'image') && $name === 'file') {
         return static fn (): string => sys_get_temp_dir() . '/rec-' . getmypid() . '.png';
     }
+    // Methods of a date or timezone class, by the class and the name.
+    if (in_array($class, ['datetime', 'datetimeimmutable'], true) && $name === 'datetime') {
+        return static fn (): string => '2000-01-01';
+    }
+    if (in_array($class, ['datetime', 'datetimeimmutable'], true) && $name === 'modifier') {
+        return static fn (): string => '+1 day';
+    }
+    if ($class === 'datetimezone' && $name === 'timezone') {
+        return static fn (): string => 'UTC';
+    }
     return match ([$function, $name]) {
+        ['datefmt_create', 'locale'] => static fn (): string => 'en',
+        ['checkdnsrr', 'type'], ['dns_check_record', 'type'] => static fn (): string => 'A',
+        ['class_implements', 'object_or_class'], ['class_parents', 'object_or_class'], ['class_uses', 'object_or_class'] => static fn (): string => 'stdClass',
+        ['closedir', 'dir_handle'], ['readdir', 'dir_handle'], ['rewinddir', 'dir_handle'] => static fn (): mixed => opendir(sys_get_temp_dir()),
+        ['constant', 'name'] => static fn (): string => 'PHP_EOL',
+        ['curl_setopt_array', 'options'] => static fn (): array => [CURLOPT_FOLLOWLOCATION => true],
+        ['curl_share_init_persistent', 'share_options'] => static fn (): array => [CURL_LOCK_DATA_DNS],
+        ['ftok', 'project_id'] => static fn (): string => 'a',
+        ['get_resources', 'type'] => static fn (): string => 'stream',
+        ['gzcompress', 'encoding'], ['gzdeflate', 'encoding'], ['gzencode', 'encoding'], ['inflate_init', 'encoding'] => static fn (): int => ZLIB_ENCODING_RAW,
+        ['hash_init', 'key'] => static fn (): string => 'secret',
+        ['jdtounix', 'julian_day'] => static fn (): int => 2440588,
+        ['hash_init', 'flags'] => static fn (): int => 0,
+        ['json_validate', 'flags'] => static fn (): int => 0,
+        ['extract', 'prefix'] => static fn (): string => 'p',
         ['popen', 'mode'] => static fn (): string => 'r',
         ['zlib_encode', 'encoding'] => static fn (): int => ZLIB_ENCODING_RAW,
         ['base_convert', 'from_base'] => static fn (): int => 16,
