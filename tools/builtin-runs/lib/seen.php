@@ -76,7 +76,7 @@ final class RecordingWrapper
         return "a,b\n";
     }
     public function stream_seek(int $offset, int $whence): bool { Seen::add('wrapper', 'stream_seek'); return true; }
-    public function stream_set_option(int $option, int $arg1, int $arg2): bool { Seen::add('wrapper', 'stream_set_option'); return false; }
+    public function stream_set_option(int $option, ?int $arg1, ?int $arg2): bool { Seen::add('wrapper', 'stream_set_option'); return false; }
     /** @return array<int|string, int> */
     public function stream_stat(): array { Seen::add('wrapper', 'stream_stat'); return self::stat(); }
     public function stream_tell(): int { Seen::add('wrapper', 'stream_tell'); return 0; }
