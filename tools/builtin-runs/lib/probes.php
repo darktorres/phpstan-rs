@@ -91,13 +91,15 @@ function probes_for(ReflectionParameter $param): array
     if (admits($type, 'callable') || admits($type, 'closure')) {
         $probes[] = ['callable', static fn () => recording_callable()];
     }
-    if (accepts_value($type, RecordingObject::class)) {
+    // A parameter the stubs document as a resource takes no object: only the stream probe reaches it.
+    $resource = documented_resource($param);
+    if (!$resource && accepts_value($type, RecordingObject::class)) {
         $probes[] = ['object', static fn () => new RecordingObject()];
     }
-    if (accepts_value($type, RecordingIterator::class)) {
+    if (!$resource && accepts_value($type, RecordingIterator::class)) {
         $probes[] = ['iterator', static fn () => new RecordingIterator()];
     }
-    if (accepts_value($type, RecordingSleeper::class)) {
+    if (!$resource && accepts_value($type, RecordingSleeper::class)) {
         $probes[] = ['sleeper', static fn () => new RecordingSleeper()];
     }
     if (admits($type, 'string')) {
