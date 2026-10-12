@@ -7,6 +7,7 @@
 
 require_once __DIR__ . '/../lib/seen.php';
 require_once __DIR__ . '/../lib/probes.php';
+require_once __DIR__ . '/../lib/plan.php';
 
 [, $table, $regex, $out] = $argv;
 
@@ -43,6 +44,7 @@ foreach (array_keys($names) as $name) {
     [$kind, $fn, $method, $reflection] = $targets[0];
     $label = $kind === 'function' ? $fn : "$fn::$method";
     $params = $reflection->getParameters();
+    $makers = $kind === 'method' ? makers(new ReflectionClass($fn)) : [];
     foreach ($params as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
             $pipe = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -62,7 +64,11 @@ foreach (array_keys($names) as $name) {
                     if ($kind === 'function') {
                         invoke_arguments($params, $at, $value, static fn (array $a): mixed => $fn(...$a));
                     } else {
-                        $object = new $fn();
+                        // The recorder's own makers, so an object is made as the recorder makes it.
+                        $object = ($makers[0][1])();
+                        if ($object === null) {
+                            throw new RuntimeException('no object');
+                        }
                         invoke_arguments($params, $at, $value, static fn (array $a): mixed => $object->$method(...$a));
                     }
                     $result = 'ok';
