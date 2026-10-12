@@ -1,28 +1,28 @@
 {
   "artifacts": {
     "campaign_inputs": {
-      "bytes": 14503,
-      "sha256": "95626baaaf5bc6627b93acb3f7d94b723de23fb5b5a1a54d1fab72f8f2c9d30f"
+      "bytes": 18844,
+      "sha256": "76ae87328dccdcadb1a61051ffca6b438b9f57989890a04f2a92830cf7d15e10"
     },
     "cir_log": {
-      "bytes": 1078652,
-      "sha256": "43fb1371160e9346f669dfad71350b2d0dd228517784e78700c5cdd81ea4167a"
+      "bytes": 157461,
+      "sha256": "c00ed242aa74b610a7831ab4fbdf8d20bdc4733a7102436fc9426b6c74f6e269"
     },
     "clang_ast": {
-      "bytes": 42735,
-      "sha256": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067"
+      "bytes": 42931,
+      "sha256": "4b8719029aeda1d352586c323f7cf887fb88c6bd10030a7e6a40815d972b896a"
     },
     "clang_llvm": {
       "bytes": 23222,
-      "sha256": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f"
+      "sha256": "c1d5103ab4b84a1830dc326eb4eb9c4bacbe210ef56f7880ce49713a5f510cb0"
     },
     "clang_manifest": {
-      "bytes": 59375,
-      "sha256": "86a9b25c1abc529b455992da2f1c6ec8883f11cb6b783fd29204ce203bfed875"
+      "bytes": 59055,
+      "sha256": "74529ba553d2d0616bf3a54aa4235fa27334c65f92fd2cba90fc79b03254f406"
     },
     "clang_measurements": {
-      "bytes": 123665,
-      "sha256": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a"
+      "bytes": 159489,
+      "sha256": "51d10622413601a61094d640d0ccee9870bae5e19dbe3914681541a1687d348e"
     },
     "cleanup_ast": {
       "bytes": 2255,
@@ -37,8 +37,8 @@
       "sha256": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672"
     },
     "cleanup_measurements": {
-      "bytes": 123665,
-      "sha256": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a"
+      "bytes": 159489,
+      "sha256": "51d10622413601a61094d640d0ccee9870bae5e19dbe3914681541a1687d348e"
     },
     "cleanup_source": {
       "bytes": 226,
@@ -53,8 +53,8 @@
       "sha256": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2"
     },
     "gcc_measurements": {
-      "bytes": 123665,
-      "sha256": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a"
+      "bytes": 159489,
+      "sha256": "51d10622413601a61094d640d0ccee9870bae5e19dbe3914681541a1687d348e"
     },
     "source": {
       "bytes": 64968,

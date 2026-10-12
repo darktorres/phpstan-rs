@@ -457,7 +457,7 @@
     "backend": "ast",
     "definitions": 1042,
     "source_sha256": "0455a443b7a56d88911153d97ce984acc6398d01deaaa8ff8ac90c84d7550114",
-    "artifact_bytes": 526016,
+    "artifact_bytes": 523500,
     "functions": [
       {
         "block_count": 111,
@@ -531,12 +531,12 @@
           {
             "name": "u1",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:357:2)"
           },
           {
             "name": "u2",
             "offset_bits": 96,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:368:2)"
           }
         ],
         "name": "_zval_struct",
@@ -552,7 +552,7 @@
           {
             "name": "u",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:410:2)"
           },
           {
             "name": "nTableMask",
@@ -562,7 +562,7 @@
           {
             "name": "",
             "offset_bits": 128,
-            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+            "type": "union _zend_array::(anonymous at ./Zend/zend_types.h:421:2)"
           },
           {
             "name": "nNumUsed",
@@ -812,7 +812,7 @@
     "backend": "ast",
     "definitions": 870,
     "source_sha256": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505",
-    "artifact_bytes": 42735,
+    "artifact_bytes": 42931,
     "functions": [
       {
         "block_count": 53,
@@ -838,12 +838,12 @@
           {
             "name": "u1",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+            "type": "union (unnamed union at /home/torres/.cache/php-catalog-evaluation/root/php-cli/php-src/Zend/zend_types.h:357:2)"
           },
           {
             "name": "u2",
             "offset_bits": 96,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+            "type": "union (unnamed union at /home/torres/.cache/php-catalog-evaluation/root/php-cli/php-src/Zend/zend_types.h:368:2)"
           }
         ],
         "name": "_zval_struct",
@@ -859,7 +859,7 @@
           {
             "name": "u",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+            "type": "union (unnamed union at /home/torres/.cache/php-catalog-evaluation/root/php-cli/php-src/Zend/zend_types.h:410:2)"
           },
           {
             "name": "nTableMask",
@@ -869,7 +869,7 @@
           {
             "name": "",
             "offset_bits": 128,
-            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+            "type": "union _zend_array::(anonymous at /home/torres/.cache/php-catalog-evaluation/root/php-cli/php-src/Zend/zend_types.h:421:2)"
           },
           {
             "name": "nNumUsed",
@@ -1087,7 +1087,7 @@
     "backend": "ast",
     "definitions": 925,
     "source_sha256": "b07b15d55c4b435f96a041ba07ae3a740261e2b04c1d69700af80e1fb1f5dad2",
-    "artifact_bytes": 357724,
+    "artifact_bytes": 358240,
     "functions": [
       {
         "block_count": 313,
@@ -1125,12 +1125,12 @@
           {
             "name": "u1",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:357:2)"
           },
           {
             "name": "u2",
             "offset_bits": 96,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:368:2)"
           }
         ],
         "name": "_zval_struct",
@@ -1146,7 +1146,7 @@
           {
             "name": "u",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:410:2)"
           },
           {
             "name": "nTableMask",
@@ -1156,7 +1156,7 @@
           {
             "name": "",
             "offset_bits": 128,
-            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+            "type": "union _zend_array::(anonymous at ./Zend/zend_types.h:421:2)"
           },
           {
             "name": "nNumUsed",
@@ -1382,7 +1382,7 @@
     "backend": "ast",
     "definitions": 786,
     "source_sha256": "abbf3e6efd4585f859b5846b294fff204567fc88ce5b69515a4a621a75cd4b35",
-    "artifact_bytes": 73012,
+    "artifact_bytes": 72288,
     "functions": [
       {
         "block_count": 22,
@@ -1456,12 +1456,12 @@
           {
             "name": "u1",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:357:2)"
           },
           {
             "name": "u2",
             "offset_bits": 96,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:368:2)"
           }
         ],
         "name": "_zval_struct",
@@ -1477,7 +1477,7 @@
           {
             "name": "u",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:410:2)"
           },
           {
             "name": "nTableMask",
@@ -1487,7 +1487,7 @@
           {
             "name": "",
             "offset_bits": 128,
-            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+            "type": "union _zend_array::(anonymous at ./Zend/zend_types.h:421:2)"
           },
           {
             "name": "nNumUsed",
@@ -1737,7 +1737,7 @@
     "backend": "ast",
     "definitions": 828,
     "source_sha256": "4356788d4cbf80fa69c1e485b6210020d8132135e14b6ba41246089c001fc4a0",
-    "artifact_bytes": 310528,
+    "artifact_bytes": 311732,
     "functions": [
       {
         "block_count": 393,
@@ -1763,12 +1763,12 @@
           {
             "name": "u1",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+            "type": "union (unnamed union at /home/torres/.cache/php-catalog-evaluation/root/php-cli/php-src/Zend/zend_types.h:357:2)"
           },
           {
             "name": "u2",
             "offset_bits": 96,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+            "type": "union (unnamed union at /home/torres/.cache/php-catalog-evaluation/root/php-cli/php-src/Zend/zend_types.h:368:2)"
           }
         ],
         "name": "_zval_struct",
@@ -1784,7 +1784,7 @@
           {
             "name": "u",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+            "type": "union (unnamed union at /home/torres/.cache/php-catalog-evaluation/root/php-cli/php-src/Zend/zend_types.h:410:2)"
           },
           {
             "name": "nTableMask",
@@ -1794,7 +1794,7 @@
           {
             "name": "",
             "offset_bits": 128,
-            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+            "type": "union _zend_array::(anonymous at /home/torres/.cache/php-catalog-evaluation/root/php-cli/php-src/Zend/zend_types.h:421:2)"
           },
           {
             "name": "nNumUsed",
@@ -2012,7 +2012,7 @@
     "backend": "ast",
     "definitions": 857,
     "source_sha256": "45cd1d8de65c68e6de1ceb7c2a8f50acc09181be2e1b2cb82aa63829fa413e77",
-    "artifact_bytes": 119720,
+    "artifact_bytes": 119550,
     "functions": [
       {
         "block_count": 88,
@@ -2050,12 +2050,12 @@
           {
             "name": "u1",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:357:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:357:2)"
           },
           {
             "name": "u2",
             "offset_bits": 96,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:368:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:368:2)"
           }
         ],
         "name": "_zval_struct",
@@ -2071,7 +2071,7 @@
           {
             "name": "u",
             "offset_bits": 64,
-            "type": "union (unnamed union at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:410:2)"
+            "type": "union (unnamed union at ./Zend/zend_types.h:410:2)"
           },
           {
             "name": "nTableMask",
@@ -2081,7 +2081,7 @@
           {
             "name": "",
             "offset_bits": 128,
-            "type": "union _zend_array::(anonymous at /tmp/php-catalog-comparison/php-src/Zend/zend_types.h:421:2)"
+            "type": "union _zend_array::(anonymous at ./Zend/zend_types.h:421:2)"
           },
           {
             "name": "nNumUsed",

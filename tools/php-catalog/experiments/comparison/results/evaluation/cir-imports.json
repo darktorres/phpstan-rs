@@ -1,0 +1,3777 @@
+[
+  {
+    "name": "dispatch",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2d75e03c31ee66d78e3190ffefd0d3bb0af9d744093bbb15ba6b3e084a90c040"
+  },
+  {
+    "name": "platform",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "90cac710564e653543e4bb54f6c8c7a54ad6e277b34a46733f14dbf91be25984"
+  },
+  {
+    "name": "cleanup",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6911bdb11132aa7dfe448f4b90b7f03d4368764415cb3ac321a0e531c0788122"
+  },
+  {
+    "name": "cleanup-windows",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d3426e5bf8427af6042d501ffca52dd7c05c83727721536bb979b91933e6baa8"
+  },
+  {
+    "name": "php-ext-date-php_date.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "288c556bc0894c017975cd560d1988a0d9a6e4b7955bb68a1d624d66d619a1e9"
+  },
+  {
+    "name": "php-ext-date-lib-astro.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-date-lib-astro.o.cir",
+    "output_sha256": "66c692c2c9dd523cddb9f935644508f255e1509ead8dfbbbd8a0965837cef8c7"
+  },
+  {
+    "name": "php-ext-date-lib-dow.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-date-lib-dow.o.cir",
+    "output_sha256": "9df1292f9da53dc78b0b6a518358035f2d54812f355716e83b4a0f944efdd5e3"
+  },
+  {
+    "name": "php-ext-date-lib-parse_date.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "54cb784010f94c2e0d24ee4a440ed38a856844d63e7802bcb061dedaa6559283"
+  },
+  {
+    "name": "php-ext-date-lib-parse_tz.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0f976fdd32709e7199c29d31ab1cd659af5db3c1d1e5c1bfc7823ea4ca999ab2"
+  },
+  {
+    "name": "php-ext-date-lib-parse_posix.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "885d8429e168739fa0dbc776bcb7a91201aaee97da64b11efbd8c8a20d870a99"
+  },
+  {
+    "name": "php-ext-date-lib-timelib.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4b41b76154f05d835d5254edf9f8739bb5f248b462078650804827fba7e3a052"
+  },
+  {
+    "name": "php-ext-date-lib-tm2unixtime.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-date-lib-tm2unixtime.o.cir",
+    "output_sha256": "ddd7dd509d58fb1cae65b20ce2995b180a29ab1fbc1672bf3cc931e956c706a4"
+  },
+  {
+    "name": "php-ext-date-lib-unixtime2tm.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "42f255688c90294c9749a334f88c0b26071a75dab44d6e854bda57cf9b083d24"
+  },
+  {
+    "name": "php-ext-date-lib-parse_iso_intervals.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ee5a1369699713077c049351b9f23748b193d13449a55daaea8a0cb2cb38158c"
+  },
+  {
+    "name": "php-ext-date-lib-interval.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-date-lib-interval.o.cir",
+    "output_sha256": "8cdc9fc69329c6e2c5013b915b44988da123279dbc59ee86b78f48440dcf554d"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_auto_possess.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c90b7264e643768f3b8e8d88582fe4d02a0a7be6bb32f34e4ae6c091ce247ca0"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_chartables.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-pcre-pcre2lib-pcre2_chartables.o.cir",
+    "output_sha256": "87768064b382e216c1e5ede8ae459cd83507521030c49b1e00da13afd9af6e68"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_chkdint.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-pcre-pcre2lib-pcre2_chkdint.o.cir",
+    "output_sha256": "1e53ac55c328035d3d5e229c52855504adbbc77915456aeb9cf85947193064d7"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_compile.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d9e560625748f2fd9ebc711780fd662c1f30510afaf43f146811170e966392e3"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_config.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1da7b22633120bf023220a2e6de1d8a9c38a6c68f5da02ab333efdbc83de3872"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_context.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ea5984b03a96655864959efd51088739e1ee31abbcf5bd42aaf21759ca479a72"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_convert.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e621f1c1ae7acedd2e1a45d87f88c3245b3d5db70910a500349bffcb9ab25408"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_dfa_match.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1c1246f26f8f1d95f30bbb1e71200397a8e2d0cb3e1f162393c90bcc840291b7"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_error.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-pcre-pcre2lib-pcre2_error.o.cir",
+    "output_sha256": "3057f81baee8cdded679fcc5c665a561cd3b158c457ce7035dcf472c431e4c91"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_extuni.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-pcre-pcre2lib-pcre2_extuni.o.cir",
+    "output_sha256": "0fb69e84cf73c7e8c3b0e536ef9d1e17ef2d29f6fc7fe37fe215b8439389ac18"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_find_bracket.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-pcre-pcre2lib-pcre2_find_bracket.o.cir",
+    "output_sha256": "220b57020ce24ee2985d270a935f8fea97d5ef47e50d109f6763a1c1a95a9f3e"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_jit_compile.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9bbba0441d524b34963f793ca1066a92adc5fd3100f33b2b7fe7b55c51f68931"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_maketables.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-pcre-pcre2lib-pcre2_maketables.o.cir",
+    "output_sha256": "bfad6784b0f19de88fdbbb8ae92ba27fabcc77ee1c3750d852f84a22a21d8671"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_match_data.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0c88bb113a1acc3237e5f9ffc0b1dc0b7c3397f3c27edb052826377d1501391a"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_match.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "19282df1cbd704874086013e6bd9ec59349f8da9c660f8058efdda0950e307af"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_newline.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7f441b5599d39fce9216c6e898ded3d746cbb6d4c096dc05292b8f2ad71f27a0"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_ord2utf.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-pcre-pcre2lib-pcre2_ord2utf.o.cir",
+    "output_sha256": "c5a03092bf368c02a79da2cb2f19887a275de502f08ae62ec7e84ddc697364f8"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_pattern_info.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "eb8530f8a53b053729884c05267e76e7180f9872ef545f1561db823579a3e57e"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_script_run.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-pcre-pcre2lib-pcre2_script_run.o.cir",
+    "output_sha256": "dead120b6d16753749d5ef2cbc94860f635424bb742529215109c7e0728f5c06"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_serialize.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "03e42a21bb0b7198d1781225bf75082e606ca608871336c50e150c421d6a194e"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_string_utils.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f6f27cc85a0ec9c60300d0a5da7a6c31fa824e14d06cf7edd7b88a1a880dae11"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_study.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f6a536dc068ee0e4ca58bacfabb2c4417d0c18c06f2da3d685146bcae79a7b42"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_substitute.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4ef8684183db975ca29fc436c9eff12b5580630ed310ace2a03412d045748b41"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_substring.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f19f0e9ebcec16cf8e38b1c3676a745ae69cbdacf3b8d4de6217e027b0731fb3"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_tables.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6813e0deb970eb2b1947cd96fea14cac6eab7ce2ace1797f78df082b2bb6139f"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_ucd.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "70cbfb73d73414fdc90421a0adfa136174c648c1ebffded82cbb96cd88ca32ce"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_valid_utf.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b75f567388e6345c0cb2108971bd425d695232ae76066e22c85ab482c9ffbcc2"
+  },
+  {
+    "name": "php-ext-pcre-pcre2lib-pcre2_xclass.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2248e90437bcca943fa327f541e37cbd046b9211f6adb1638d17ed81264f1f2e"
+  },
+  {
+    "name": "php-ext-pcre-php_pcre.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "db87f56100aa5bd82f41de533d64ac2aeba6ab11bd501f14659751b107aa297e"
+  },
+  {
+    "name": "php-ext-hash-sha3-generic64lc-KeccakP-1600-opt64.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7413d835488c1e79b5e2cd47534d0502733a690989e06fe04eb388d0f7a91671"
+  },
+  {
+    "name": "php-ext-hash-sha3-generic64lc-KeccakHash.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-hash-sha3-generic64lc-KeccakHash.o.cir",
+    "output_sha256": "f0a3b54f823e134aca8ff37bb453bd4daf1ed7f7c98e6b5ba686729bfd812c70"
+  },
+  {
+    "name": "php-ext-hash-sha3-generic64lc-KeccakSponge.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "dfd2a1b66d38aacb45c1d460d9dc10f83a17b45864b7eb6f52bd1eada9271225"
+  },
+  {
+    "name": "php-ext-hash-hash_adler32.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d84bcc9c0b0d0e741c2e40db464c1b6fb4cd1a5d27d4affd6ae41a99ee68173a"
+  },
+  {
+    "name": "php-ext-hash-hash_crc32.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ed4279b1cef6a45f99e34fc3040db7f420d76f67cd1c3bbc8a42340698401b59"
+  },
+  {
+    "name": "php-ext-hash-hash_fnv.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "eb9f1b3e6d29031c534134a20ba9f669d038bffd3c2184fb3bdd6603437cd918"
+  },
+  {
+    "name": "php-ext-hash-hash_gost.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f43aa3cd43fd8b90dc650a6112ce6a3634f10f44f6304d2b23563e3ff2756f88"
+  },
+  {
+    "name": "php-ext-hash-hash_haval.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "779d0d53c71d7a23e851d776e69af08d2eb7e7e698bbce8c7f40e82646a8f00f"
+  },
+  {
+    "name": "php-ext-hash-hash_joaat.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b5e0536bbab96e48c2f52ffb21a128aac43441b41faf232f0f85adda074c8b42"
+  },
+  {
+    "name": "php-ext-hash-hash_md.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "977b95fb5a53f72d317ae4a0683203382b1eeadb02ce64c8f622dcc1a4a3bdc8"
+  },
+  {
+    "name": "php-ext-hash-hash_murmur.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "795054783b6eec74221009451b63a70765a7622681def853c61acfa727c3d59e"
+  },
+  {
+    "name": "php-ext-hash-hash_ripemd.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "fccbd16946ada66b3af2a1297c0e2e47e37ce706b859f1d66d8355d0da8e9ff1"
+  },
+  {
+    "name": "php-ext-hash-hash_sha_ni.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d8a3c186ba25489b8e68b119390c57c401b4aee1fa7aea5841d241498163c428"
+  },
+  {
+    "name": "php-ext-hash-hash_sha_sse2.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d69d318b596c87f8059138f4e3262739eada103fe5b57b2c6068bb7f042678b4"
+  },
+  {
+    "name": "php-ext-hash-hash_sha.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3b382a08fe1d43deb81f14d4aef47e085d40a77c7bc02499e0865dcd0e407f23"
+  },
+  {
+    "name": "php-ext-hash-hash_sha3.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d39ecbe56c0a0b5056e74bf0c683f4aa19c9513a036adaa5be74dec42790730d"
+  },
+  {
+    "name": "php-ext-hash-hash_snefru.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c034dfcefd2a5c9b7d8a65e02b9d2c016b522d1cba6f35b2da545ca812eaed37"
+  },
+  {
+    "name": "php-ext-hash-hash_tiger.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4a7a586c502bfb2128fa564596df1039c5531545faac3d61f22a1942936c4826"
+  },
+  {
+    "name": "php-ext-hash-hash_whirlpool.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "99f149433a9e3708473ba14c513a2f0acf4da85d994c092a383e666f7ae044df"
+  },
+  {
+    "name": "php-ext-hash-hash_xxhash.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "77d883fc0caa2774e48ef88312412f360c25fed56eb468f621716ba723fd10a1"
+  },
+  {
+    "name": "php-ext-hash-hash.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1e54da4040b628991360915c4a5cb31da6a751f3536b38e98337079bb6a8effe"
+  },
+  {
+    "name": "php-ext-hash-murmur-PMurHash.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9ea7546ea372403b0daeb9dd82aeb16a10fb6030f68bfa955f853fae81351c93"
+  },
+  {
+    "name": "php-ext-hash-murmur-PMurHash128.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0366af4ede3ffff03e99a5d2e822aa13903176f04cff4d0e2beee4a6e0021150"
+  },
+  {
+    "name": "php-ext-json-json_encoder.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b64cb245617cd38693413feaa078493f78e1786f2f8654488ed28143f1e836c4"
+  },
+  {
+    "name": "php-ext-json-json_parser.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6a9455fbbf82a966cc6691797afcaf6cb55822d538f1887902687bdc551864b8"
+  },
+  {
+    "name": "php-ext-json-json_scanner.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "447972bcd07693527f5f6b337c3731c741aaecb268a08871c50f9472504be705"
+  },
+  {
+    "name": "php-ext-json-json.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8fa819ce9f6900a802412ba3d567d70f59de050da58c32689a0e1b6c1e4f8b8f"
+  },
+  {
+    "name": "php-ext-lexbor-php_lexbor.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "242ebad22e569223c405319a33b4ee26bdec8d0c916b877dbace65d950b7e127"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-array_obj.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-core-array_obj.o.cir",
+    "output_sha256": "be1137e5b2a0fa9a2f168fb8db0ea482176117782f90c7fffd578d1288a02fc4"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-array.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-core-array.o.cir",
+    "output_sha256": "4f03bac7474a5f0a63aea482d97087fe9e5b0b6bf40ae90f223cb3fc6f6c2f7b"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-avl.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-core-avl.o.cir",
+    "output_sha256": "a5bcae974bb7643cfb9f32e41f1dde9ff55cbdf8de0db188730e1f7e2512a0e9"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-bst.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-core-bst.o.cir",
+    "output_sha256": "e29f166c8ab93209afd63b87c74663a8f3d72230bfe1620a8c872fa97531e73b"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-conv.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "312b22dac99df6a3d694a1f9cb78fc9f278401d4a91ff7792f86351ff7e6f176"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-diyfp.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "353f712a23a16afb7aeb4d6b0ca3f7ebd375f65f0f3399f65395517c00c1d2b3"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-dobject.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-core-dobject.o.cir",
+    "output_sha256": "089c4beff1da15c34d44c04f7ce4f77d68abeb0d1b5fca6dfeea758c3757080c"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-dtoa.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4797b3968c678462902b57a7a973edbfcb33eab942e6fce5f76a48c11f9c6dec"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-hash.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "04b8c8ac5af9547ba6f2852cef4aebe210270de7bc1915f07b38ac1c28eb79b8"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-mem.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-core-mem.o.cir",
+    "output_sha256": "1b1b662b607a39d5af083f9f5f201c5e3a60afab22812889683cd3f7ac49edfa"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-mraw.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "59c007bbbb485a90a828ac0ebd809093b1d96b1580df3cdce888880ca514c511"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-plog.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-core-plog.o.cir",
+    "output_sha256": "54453f785f6f27eeacff7a89620e7fe92b9e153373211bad324d1e2e2fd30969"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-print.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "77c12f5f2f78d31c7ceada5b3d71dd7ea321adc3cc9555e04d811148be8c9bf5"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-serialize.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3c9ca78d8478b303387fc94d210e294ff8b7aa7e3e393a13580da052e1110303"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-shs.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-core-shs.o.cir",
+    "output_sha256": "e0acbe1ab9222d6f742323ac8ea09dc0f7487d6a8074cbb5a52f5e52a0b7aa0c"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-str.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "af3300caeda96cbda94000b1ec1a40ca6195e3189c48519bbd39e56e6e787c87"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-core-strtod.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2444767a9bbdda75774180b0c0237bd614fde435e2e79722bf634059c52de554"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-css.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6d0b98f0a541e9dcb1d5e7b87e1c1add99a8c594beda81602ec108fcf815db07"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-log.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8a855676e9d7d22661abc78eec5ee4026aed78856c84f4ac617fccd9289a8e31"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-parser.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "75d8281145fb2cb6d9f0fb7cfe334b4eb9a7e507e641e6ca6bdc59d854e21f65"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-selectors-pseudo_state.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0a2c3dea33a06be696402a7f814a7d49a5ddd8296b0f59c3e178e2cf16b7027d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-selectors-pseudo.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "03dd9e45af355336abbb256158135a4ca79f4d2963dfa8bac087291c83b31ed4"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-selectors-selector.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3ca40023edabae28950edc82462745f77d84ec3682223585f49fdcc95f8e4299"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-selectors-selectors.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "68683e29e2bc27986f5a6920df5f1703aba837540535ce0ae4ff901b824355bd"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-selectors-state.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6927a06d73d9c870b04962e57d7ceb8b0497cd2dc440fe60440a4f1231f16992"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-state.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "898400dd2c12173418950eb7f8770e8d1a6b5d21492d6371cc0d760a460652c2"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-syntax-anb.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e55617421f5d894aee03e2342d9c41a42585343ce5c10028a0615f6878df811b"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-syntax-parser.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "22595a55f74cef80f77d93a4d4a60b2e1da028afc3076e7cfdfca9d0eb052c69"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-syntax-state.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9a3e1efdf48e2da130f6f4e24d31c372507ae669186667891a7db167acf75def"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-syntax-syntax.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "aeb2724cf6cbc8a65a23984c053a362599b6c46b075edb0d3add1bcc53f67ef1"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-syntax-token.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ff4d2eac6999bb96393a40cfb4b892b57e8baafdd3cfa33c7841d0c5a033a5e3"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-syntax-tokenizer.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "68d2869475de175b00d7b5f9ecb42c7735a1679d9ea458c8c626bfabd19fccf2"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-css-syntax-tokenizer-error.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-css-syntax-tokenizer-error.o.cir",
+    "output_sha256": "7ae8f7ee3063261200d0655889a1dc8262a7759fb1d28939963c9dcd510dbc42"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interface.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "cd860cef90395b0a81b83c685ab2ad193a42ac5a0d97e4c69f089672775fc499"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-attr.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a9baab9d072fc902dfc7592b3bdf4e91efc8219fa27fdf4569a759f5d24bb507"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-cdata_section.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "afd62889306a126359b4c2d660e944e8442b32451ff5d43c6a0325395a056ce1"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-character_data.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0c6b9ac99a58d88410799d8d7b9b4b530b05c2e528e008f126857990c46d97b4"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-comment.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a3979927625917509190cb7a71ee885f565e494634b8c76d27a42b0107ea73b2"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-document_fragment.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c54e51a360109e91d941078764cd69f679119b051300980882f495884f1237ff"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-document_type.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "702b9e18689b8f99aec44cb1e1efc890cc58ef26d891f00ca503fd6d438b1187"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-document.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c178577b0930c6aab6deeac7db6994a9c1b0f1f2e225d3a431e0c1ce85abd90f"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "95963602c447fdc7b445059c891b82eec498841b1b210889809ccc10a2883db8"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-node.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c23a8873b14e713c9cc1f823bdea7b096a6cd9b67bb89ad3a2bb43fdda705f1e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-processing_instruction.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6a21d0f4ffc03d45b764d9dc4490a12d59ed666158de041950305ef74c0f8f1c"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-shadow_root.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0196287988a3fbff3137755fd19caf58aa8c04cd0e90a00666795c429001bef4"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-dom-interfaces-text.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4408376ef45d2f667171f2c4c48db048b83ec9af3b28c6406417ad3051387655"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-encoding-decode.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c2bc65c6606325a52099cc935a706f26e4f7dfe8ecc05e3f80038f5bc5924015"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-encoding-encode.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "32851c7ea8f27ef72ce16030b7ffa5ab0db72520e8ede3e9fb311caf8e7e0801"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-encoding-encoding.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8b2521983563552d3991055d24b4248f68c6a5f8c772e7c898067b24b51c8e51"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-encoding-multi.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-encoding-multi.o.cir",
+    "output_sha256": "c625f09684ffdfdc647ee4ede084d21f28880373057931e47f8f9b69f7f42ee6"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-encoding-range.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "fd8e7fc4a3fbc3315528531f5069844344a3416c7aebe7892e70056ba5b003f3"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-encoding-res.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ba73122c45843b6125def8a3e070cb5bd7d3492be635d1ba27bd326db50472fe"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-encoding-single.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3976839edce23337985999cdfb17e3540060c9090c268bd1b271de4d4d5e89f2"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-encoding.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1d02a02d4a64d6f9ba57173eea8cf12bf7c9e6c11395b2b033af25cf7125df24"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interface.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "48f77f84a7fdab794b14bc983c248bd347e0b3356ed177739f823f2bc8ac81dd"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-anchor_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8d2ca14c9af874ae118fb2fdfc9c4425bead99a499cb464d1d009ede6dc03f5f"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-area_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "139113da32c301820350767e54ea1c69d308f75cfbfc10ab208fe8b8f253ae43"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-audio_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "65622fce7ddd266463860f52c893a0b1c2be7c8a1da1df46e3c96bca4902bf13"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-base_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "17357767b38bde17671f191964f95883db2ce89bbae2f72ea5b2f2e7e4291961"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-body_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e43570dd349fc994eded6a5da418f403aa36dcc96040823a6781df1e6e077690"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-br_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "327af48b08a15492d49eab2a925bf873eede21323a207f7952fc90fb45c70ffb"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-button_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7c76aecafe249795b2045fbca08f6a20e379a1b4c27c5732f73669b7f985ff1b"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-canvas_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e715dd85080bced0744be8caa677dbf6a95a884cd1d3638e7e1bc16b73ba68b1"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-d_list_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f068b7a189f242f7f045438c740ca2759f862847f7e36fbadd8dd59452de55aa"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-data_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "de6835bfb35785362b5795d4cf28eb7339b4e379a5a7c473538d3691fef0e18d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-data_list_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5a9ec40aae63051cd0f052406aedfb628aa23c590ce4585d45163b5fc575814a"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-details_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a1ca0de26733d253807fcdb4e62ade51d34979f2d50156667c250683c265c2cb"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-dialog_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7c8dd9f49eefdaa932d40affc66e54c723d9ae4230217e10de55c9ce94831f4e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-directory_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "392701a77e9a29f9f4a079492483aeb1c8772f211ac1e21fed8b8323dae3fa26"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-div_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7dec1e8ac3fc533b882f0fe74f2dba176ef7bada44d5c3b4de3cf4dd523e4ee5"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-document.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "28efc4e54b87a90e40b92cd850b708456f5fe8e240ce4f0f22d2969463c28092"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "79881b530f1798549421edcd91976f858c34ed5e8c2b8b525929c196f44b9438"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-embed_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "14ddf0cf077ceb4d14ecd22d870ab66f583a950be64eb25c5cbd2ccbab4ecf53"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-field_set_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "76f05f63985e858ee31fdccaa2416ddc03385519db37237621fea52fc16a8c82"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-font_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "aa6092228a98b25069ce35dc304706d2ca57b6aea307bb2bddf6cb0a1bd04a3d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-form_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1197c7b1eb788c332c75c0946fcebfd9fbd9b5843bd30e5f6c2d2f5510f06d1d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-frame_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2a0779d2b217fa2588c7baad4cdffbf6eed7af497b8da7e51a8f165421159e1f"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-frame_set_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e06b97dd1c7f7e89778e4d71987f70038e929ddb7cc2ab2ffd67cdb595ea73c6"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-head_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "23ded1954d1058c816e17d74c1e8674531d1568c28df63b32f49ebbe62a40454"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-heading_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "508e57f5f436929e0f5ec13fa2941deaba5c48d666d40809b08127338981b798"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-hr_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a3a434e3e340d823db4f15da26246b7d23b91787a0174a6b05368763de76f588"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-html_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f4c14346791a8c075123ca026a1fb48f24675b86dda17cb82ae76900a1a02a71"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-iframe_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "fc9dd7d893cc7ee7bf4d28518a44768b49961ac316c16a509ce12453e8200461"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-image_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8bd189fca57fa1c94611737bec9598d3e742bff45f3d0af3bd40446a9eaca7c7"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-input_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e5062fc906fa8377d3affbc999043b4a893e83f91c112723eca43d4dd6bb8398"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-label_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c4796c568213e20f6f42cf2f822a88919ae28c399b7fd52b258a33c20c4d589e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-legend_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "76862d68675de78f232a8f583e44034c39708a84fda113914658600cc0ff0c40"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-li_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9002b7977a4de4a11358185028f2e8041d84f90d8cc1efc038ce481469140727"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-link_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5fedb53d868b0431aafb1fb91ef19c22b44b62955d1d72cfa649383134a44c93"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-map_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "63ecca9287cf25c9a7e067e32d7748fc2c6e2bdf00c47889be2adfa1ac4bfa6a"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-marquee_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0fe5c05cd7c1a8bda8bb80cdf242434a47b75b41017bee8ea174956ac67002cf"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-media_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e5ab17a49f9db4517a04968b6c43b0d28880db5cc5e2fdcf047495a73d16e1db"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-menu_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "65523361b93c8ffae42930f2eed992efc9c83b3a0fcee56aed9944ecf606a78c"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-meta_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "46d2eea80813fa08f4341783274b40186ca47e2a47e9cd50b5cc5557504e8d1f"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-meter_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "fc36be047bfb80a8cd9d38f115f096710495faefb1ce0a20441e4643da23f37e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-mod_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "db4d3371a44d497797acf124570257ae66212e116f45f07892d146e0c58932f4"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-o_list_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ec9981616dc472b39c7b60a78f8ac17adcb6880ac2d266d8773b393a46f9e78f"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-object_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5fb7e8001f3666e864254c941a6b1f946ace2201d8db9853d06dc2c2b80efc57"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-opt_group_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ca2b6a92b5272eda0751dfb5160eea0d20194c72a5fd90826e0d963d81f51c0d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-option_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8280ac9327be94ded7725aee4c272b477f7d2a432e01898cfc7d30bc6d74ccb4"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-output_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5984d3118149ee5a27f86775c7fdb94e6584e20af7bd0451ed74550c0b24603e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-paragraph_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b30f0ebb320e097eb4f861d711cc8cd96fb38e35844ca24edaea335ccbccad06"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-param_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "cc2d9d7ad5c292b0f92618ccc20353e51af83ddb7f830346a273a524332769ba"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-picture_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6d089615969ffac5cc39c86cc75fe896aefd3f610bb882f1932b8a27080015e6"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-pre_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "dcf37b785dedb875c4ad83ee1c529c1b6c18db777dad189ba3ce466aa4245375"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-progress_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6450aa6c75e19ebd43b7973eafe54cfa81defed363fafa9ee7577bdd8c41c7a5"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-quote_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1007d7752c5868eac59429d4ec69a790c55536cc5f9729700fcba81d66df0840"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-script_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "90d4a1132022bb75ac0b1db91d9605963b222c9e1c35e55eb7ea48d4afc4ec24"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-select_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "801e0606e3a62bff4f873171962ca3e6aa037773afed0a922f6b233e0eab6496"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-slot_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f3880276af8d7bec9b218dd62e5691347b264bc7a40cae4a703058a55793c28d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-source_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "28768d9a54b95187ddb03a7926736a1d9c80c07883c06a7a5f2771fe78735074"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-span_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0bbee3d90e71ba103b0df09dde85c92d3032c6cde0a6acf1a7af43bda7eecfaf"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-style_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "aab0ec74b079d5c39345a6e22fd3aa826af2308fbbd9f57278329f2f77dede5d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-table_caption_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "15a105ac80e40862da482601f04d8b17a2cbfb2c1962c324d4c9185db9dd76cf"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-table_cell_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "bf8208aa20b3399d2f35e8f9cd17fa7d22856ba7182017fedb11d78cccfe4600"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-table_col_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2e0ba5743c6c9fa11d95205d4437ebedcc15b96a91c0b0f4e4fa47a2d724715e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-table_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "bf26c46ef1e8158964ab6bdd37362fba98dd4dec0f1c78462608fe0fc27a0a69"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-table_row_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b5a49a17e9fb072d6a7a6430b17637b9a9453e1987477804f9eb68673f800be9"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-table_section_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e4ac55980b494fdbb48507e20a515822cb40db9745b5d6aa1a67e311dadd9d85"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-template_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "cce74ba7219a38fdea10b70d12c7b666e294c76aee0856f5f2b62f5e258ddf63"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-text_area_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3ac4a5e9e218e3f37713c3014c602229e3ca1959da9b15d8accf52b2d04701b4"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-time_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e5a31e0074017f40ac8c1045346c9bfb92b07c521cc48032c14b104a91e9f951"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-title_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f043a797b6c07fd4394221b912ed82cc511f20e208659af6bc0d0942b9e09917"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-track_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "11c0b9d01530db8ca7d3403ffff6d08273547aa5be312eab8f9518f98f84d950"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-u_list_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5a2b759c62f8988bbc148ad875135ae04c613d3318a58fcd13b56aada26a84ab"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-unknown_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "33539a2e4628b8f3523cd7471d29b3faeca7f334eb3fc334b5de78da2824f01e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-video_element.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "312673ee3ee27d7563ade3747a686617959fdfb3e25f9f717142ebf4808f2a85"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-interfaces-window.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4f975506f8ad89e72097ef414cc949ea246748ba056fc9b4f4bd73784dde380c"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-parser.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "763e4dff8cf8adc300cfdd355d9c6ff8ee80f4d9d11ea99e63b87d3b6a61a1c0"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-token_attr.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-html-token_attr.o.cir",
+    "output_sha256": "76fdce58ed9466b15c2997feb7e9be8efb9568adeb34bc365ff8584fd77c0293"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-token.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "31aaf30c524ed68d0f3b408270cba8bc6879af9dc0724ff02fee693f7252e4c1"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tokenizer.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "24141ee45efd9adb305be8561bbb22e76810b81e89ba4a8c3841a279fa5ba715"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tokenizer-error.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-html-tokenizer-error.o.cir",
+    "output_sha256": "8ddc1b2b47956dff145a6d742a4e9f6f20671144a15da0dce08ced4f9c9ea434"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tokenizer-state_comment.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6d8507daacfcef07324b18429491dd33b4042066d02c5d57f381e031895e5deb"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tokenizer-state_doctype.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "bf484ec6a4fa75d12cdba86e2b202b6b75fa5742635c47dffb8c1782ea0e1a72"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tokenizer-state_rawtext.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7c191facc24ac71353de8a39506327f20a45d1a58442f7c8af2aabd5d4fa928f"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tokenizer-state_rcdata.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9b11c13327d9815836e4334b0b723b92196ecd8d59ab4cf7d50a9b59b58f01bd"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tokenizer-state_script.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ea54ca5a08c87b869a099bb5413a12373f5fb2dfd9bde958d97e24d3d886817d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tokenizer-state.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "abea2cf7c8a14d4e546a37b2f7d0db38999e66e44cf318e3eed10f2fd893bd72"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0a564e01c9f2944b22716f8c19952181ef7cceac31d614bdd2734c66c8c69765"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-active_formatting.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "885d8429e168739fa0dbc776bcb7a91201aaee97da64b11efbd8c8a20d870a99"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-error.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "02d6717119ae86cd58bb7d3f1b3096f79b337eb86f5fb774fb75906fc509c1eb"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_after_body.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "237a15ad5a1a334e9437719b3f5acf1c1d8204d3b2c7fa19b925dd46c436455a"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_after_frameset.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "18b6b8635b615884d5f9f6df07c273cb0d309b2aebb4cb7564fb923320f8fab8"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_body.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "072ee524a38d06d3b71b8dfb331dce2a624a17d45344e360257e0200af10f9d6"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_frameset.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d09e764cd922123a576f08f739ae2bd74233cfb06f49e26fc6f5270fad7ac81e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_head.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b18837a6e1239154e76c996fdd5e458ceaaca5ab4c37b01f5a8ea722d3b0d957"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-before_head.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9068a9835f0bbd4da48f68568889e7eecbd036476e1127a8aeb86dc51ad39caf"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-before_html.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5bc00aa683a23e5dcab58d2ab7b428f4e8ff69ed97970c58cd85477a14cfc844"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-foreign_content.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ecd1b3152836d432a9d4ccf33ac4e28504ac2cc04b598fecd475a568f9bbf373"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_body.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "975296f00a63f26b44519adeccd282b37c8b238ae96850d32caa24cd1418f0fa"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_caption.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f29604eaeba06f098197aae23959fc9c91febce5160df6a86ea8277ea2b00354"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_cell.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a21b3da13b22678e9e6b9e9c923b90048edcba837c62d9a11c5a98afffd21533"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_column_group.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a3dd9edefd37b3c7bd613a0ccddc3091db5d8266b5c3735cbcb7c6177067a51c"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_frameset.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "47762a0c7229dc2b15cd435c56015c453335b7e17ff4027578bcfc2943af6287"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_head_noscript.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2f1c67550381756b00e34ea48817b1dcb51002b0fd359adf4c35e5c50d50b926"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_head.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "752b6b66b5d1c61676fa31d8f68f2d8dc09f0f6156cb54df6e36ed1e491e4823"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_row.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8dffeca8821e771142e3bda21b0654d20f8e26e33bd3b2f9ee823aa27fbb4420"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_select_in_table.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3259b5bf408e3178bf405c894e05572327414d37c31653f819817fd2f7eeba7d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_select.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7db1b840dc49defead252c8a0388e481e987b895fc7d2dda7451e776c1e89a1e"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table_body.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2472b614db4f9291ea8fe7250afcc2bc2e197ca1f85195f5d35948f635351941"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table_text.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table_text.o.cir",
+    "output_sha256": "13525c31a13ee84b9dc59c89b2e3b6ddd1ab4ccf504319efbf01a82e3ef1ef97"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4c4068396fd9de63ed65c2945aef0539154e38907bf33ecad289ac3a0cd3c428"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_template.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ad94365e33876e2a30dfb1b2f91726ae84044ec7f199866e1606a8979f7d756d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-initial.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "32a378de3956f6cb6ee5ee76b441a9436b1e97e353b5a49b08e78152f7d27235"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-insertion_mode-text.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-html-tree-insertion_mode-text.o.cir",
+    "output_sha256": "853295d2c9a10c5a472b4ec3e2033b5e361751481bcdb2e09c9250ade435020d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-html-tree-open_elements.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-lexbor-lexbor-html-tree-open_elements.o.cir",
+    "output_sha256": "59021b711b09bd180d37de95d9978dc5bcbab303018cab4e8d96c553cde1959b"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-ns-ns.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f66d0ac27cd97b0f93f3bd1bc9c1fae1b34b21ce78d8845c152367f02640b42d"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-ports-posix-lexbor-core-memory.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1e8f9a965cfa1e6de7745139db2e2a11b63f1bbc719e0d92df00a1aa3a5ea468"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-punycode-punycode.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "33cbbda3fdd1b4050acf812f638c8ea375f645614a3d7fba8ff8d23d91bff8a5"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-tag-tag.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5080760c16a7089d3ee3f32ca144f9539d730f2912e12a2fbe3ec9307f123fe9"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-unicode-idna.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "461586b9f1062b5e4b5f577439d45d2aa6689d005eea973368960b5ae6d8620c"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-unicode-unicode.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d876fa0f4c3f9ec57eef934eb4965f1caeac2fd6f72e0f6f1ded6cfa364257a5"
+  },
+  {
+    "name": "php-ext-lexbor-lexbor-url-url.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9089e28546d1c8405fd87cd07fab434cdc3f19d9fd0293365391f5711e6b335f"
+  },
+  {
+    "name": "php-ext-opcache-shared_alloc_mmap.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "98d668f8bbb2a3e9dc8384566ecc4dd20c87ae2a374461f9b08f50d0ec1be4a8"
+  },
+  {
+    "name": "php-ext-opcache-shared_alloc_posix.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e2d3b452926008abb7adaab2b3830e9cd8c47b2db8073394698abea088ed0940"
+  },
+  {
+    "name": "php-ext-opcache-shared_alloc_shm.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c983b7e9061f47172d93c626e68bbd21a4b7b3e94636284e16796aa56bdac687"
+  },
+  {
+    "name": "php-ext-opcache-zend_accelerator_api.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ee065f1e9895dcfb8f4505c120ffbfeea3339d0739eb3ed92527447a29658311"
+  },
+  {
+    "name": "php-ext-opcache-zend_accelerator_blacklist.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2339c244263b6a3eb488ce152ab3012826afaa5a519d6bf24b9db5aaaa9a8773"
+  },
+  {
+    "name": "php-ext-opcache-zend_accelerator_debug.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a6ee6a88961462978a55cb5a6de1a09204ef819b23f03336e949e4840a509915"
+  },
+  {
+    "name": "php-ext-opcache-zend_accelerator_hash.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "47b50ad37c6c9220a0f32616038ce382edb5adc1e39138e605a9605100486217"
+  },
+  {
+    "name": "php-ext-opcache-zend_accelerator_module.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1cd6dc724470aeaaa3a12434dd62d9f577c92881e21fd7ea4d0464d7bc9a692e"
+  },
+  {
+    "name": "php-ext-opcache-zend_accelerator_util_funcs.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "fc3e751185234eee3f0b25298ad32a11f73280cef425efdcfcc48410dcc5125c"
+  },
+  {
+    "name": "php-ext-opcache-zend_file_cache.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d5a2a0ae3f277b53feb85b22be843ab4a3530b15253a824306dfe1878ae0c7ca"
+  },
+  {
+    "name": "php-ext-opcache-zend_persist_calc.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c3d2476cc19f726c9d78bf05b29174d86deea1072d6bb8823e28be05a5400981"
+  },
+  {
+    "name": "php-ext-opcache-zend_persist.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "296158f75220c1e335c39861e422c0b5e9fe98a5de35935526ebb7626514d72b"
+  },
+  {
+    "name": "php-ext-opcache-zend_shared_alloc.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e8ec74f100a1cdc666710f60efea5abd3b332fa4acb59fce42491cfd8db89b6e"
+  },
+  {
+    "name": "php-ext-opcache-ZendAccelerator.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5e9ae02e72e3e459adbd62f838d07cdad291b5e629a94b4bb41246645545d517"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_cfg.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6d77381501945ac499a50717f5f9b4058200059f6ec7e5771e44b1def2bb983c"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_check.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7680497c1c7930ca3255924558e95abad88829cd3c37cb9de3decacc483942e6"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_dump.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "eb71e273b6864c266132f5896e034596d52087e4d7ebadbe4987696a10a1f23f"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_emit.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c49a1ce63155e76d5a755b8d19ace3b1c0a950bd064cf1071934a84644398759"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_gcm.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c788b53959d42bffc5c812c7890dc57ffc35b1aecd25a0a20e8054751a95e9ac"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_gdb.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0ad5a6c09f18ac05dbd3a5c3760fb938a875e1c81edb943ff9acc7f96d622304"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_patch.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e7b4971125cefccf216e2e768d046fb2cddecd0f19a20ac1e4b6ffcb5d68997d"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_perf.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "157f8bb8a4b1726286939a9ec84187c4fb66d91db5b2a825b64820d579509806"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_ra.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "049b7b662a7ecd4a4e1bb9c5d9b50f1423bd53bb57d653b08a92bc97a141cc64"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_save.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "98a8381a556ad8792546685c0ad5711674535d1f848318a6bded41b5e0c082a7"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_sccp.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d1fdd51a6e7fb1e0218bd88af5e1031ffd6935d1bc9af414ccc2b81326ace1c8"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir_strtab.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "cf840cb98501c701ce350e56336b60fad79b18e89c65fe46ccb5c271d7113d99"
+  },
+  {
+    "name": "php-ext-opcache-jit-ir-ir.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "300814a7d815da8ae8fc9220cec5d412b4577edf731cafab1829ef69a76f230a"
+  },
+  {
+    "name": "php-ext-opcache-jit-zend_jit_vm_helpers.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "25a21d35a624a6b6ec14bf10f1bed34af32b9eaf6c96a32141c6cbedf6575a0a"
+  },
+  {
+    "name": "php-ext-opcache-jit-zend_jit.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "cf507ceeaaf0e271c67fcb912e1b6d3aac4987f5db7ad6cbd6ed676aedf3b59b"
+  },
+  {
+    "name": "php-ext-random-csprng.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "340f8f282f38465fbd0f83ce3e487c922a36ef8aeb4ae66b73a897dbaa300bbc"
+  },
+  {
+    "name": "php-ext-random-engine_mt19937.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b7a6ee085cede936dd635b42ba7b5f5e5f6b2b6dce1a65910dc67014a57faed1"
+  },
+  {
+    "name": "php-ext-random-engine_pcgoneseq128xslrr64.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "33c3e3c69d257c65016fa7d3d6b232ee92ec078ecafb2e38261b9b6a5d1c6528"
+  },
+  {
+    "name": "php-ext-random-engine_secure.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f9369a231ef00f3c7c893bba4881e8495e4e38c5ef4e4852ba4bd25d73bf3a84"
+  },
+  {
+    "name": "php-ext-random-engine_user.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "979dc898cd0b213281b589eda2c3b3dadfa7b51ee2e0f68202782719c168411d"
+  },
+  {
+    "name": "php-ext-random-engine_xoshiro256starstar.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "398a946189c51ab0b7cdff5030c86a26d32f4d402365c6f3063a8e53358e8cd5"
+  },
+  {
+    "name": "php-ext-random-gammasection.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9334d4c0716b77dcd8cd83995a4ac5ee0777dca5ef17fc9a1a7f15b622c2f66e"
+  },
+  {
+    "name": "php-ext-random-random.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ee1d0685a2aa45f96a14916c1977053467a09f30dea40edb9c9579d2919934a4"
+  },
+  {
+    "name": "php-ext-random-randomizer.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "27983fb676bf4cbb051cd1ea96afcf40a3141afcded16e38a6522199010862af"
+  },
+  {
+    "name": "php-ext-random-zend_utils.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "07a3b82889a594b1a461ffbbf9cd75305e683ab99bbcadef1ffb998b3e3dfadc"
+  },
+  {
+    "name": "php-ext-reflection-php_reflection.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "abcb653ceb2171c93be5f38f40cab5b9453b5baf5cebac30de2968e7436a9a41"
+  },
+  {
+    "name": "php-ext-session-mod_user_class.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "718c3f50548f7800c7b39455ae8db380f2528ad3da1b6af5fd9c0950dc44d46f"
+  },
+  {
+    "name": "php-ext-session-session.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1a5536a711d0343015371114756dc6ba97b704d18126e2a1f1a244fcc29d9988"
+  },
+  {
+    "name": "php-ext-session-mod_files.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "82e065cfb285766784323aa8ba2cb0ffe492a28baa1ebda40c63fe0c5c8c2644"
+  },
+  {
+    "name": "php-ext-session-mod_mm.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b97602703b22962ac4d22d573079f9a5cde2d73a8469de31c2ce1a64d1f32659"
+  },
+  {
+    "name": "php-ext-session-mod_user.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "88dda5922810a2570fa16213d3aacf6870a459d903329848ddfe248bc7783852"
+  },
+  {
+    "name": "php-ext-spl-php_spl.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0dd61580cfb2d029d579897e7fadb3c48eaa21ac62fa9bad1e292a0d44680f7d"
+  },
+  {
+    "name": "php-ext-spl-spl_array.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6d680caff9c2e934fefe5ddafe122009c0902f99b69f8be3838406f58e223562"
+  },
+  {
+    "name": "php-ext-spl-spl_directory.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "be88272e625fb32f1cd981cd40a7662259df37f80761c0ac55af328045a72148"
+  },
+  {
+    "name": "php-ext-spl-spl_dllist.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8dfe98fc2a9140e102b19d579dbbe0d89dff80e960a88b956f27f3a034463f34"
+  },
+  {
+    "name": "php-ext-spl-spl_exceptions.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "50f6c97c8e4fb0c5d2327b98644793bc3dbe206914487be05247833c091d791c"
+  },
+  {
+    "name": "php-ext-spl-spl_fixedarray.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0f2809b1ffb712963a1531de02f79dcd47b79624ce53d52c210c9e7c7e0219a1"
+  },
+  {
+    "name": "php-ext-spl-spl_functions.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "395e6cf183e0091b13fb09922c548b7a07350a6681380c2c7a8a45c175b1d1f2"
+  },
+  {
+    "name": "php-ext-spl-spl_heap.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "849e22d52e157ef497110d5c561920f47569fea01e8070c1f0055dacb45a4479"
+  },
+  {
+    "name": "php-ext-spl-spl_iterators.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d2ca2485c1b3e43d554ef45e2f2d695cc58ab55da27093998ac9fdf7ac25a7de"
+  },
+  {
+    "name": "php-ext-spl-spl_observer.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0d65dd02ffb583cee4164e47483983b50f53c209fff2627c32d1913f24d8325a"
+  },
+  {
+    "name": "php-ext-standard-array.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ad7cf228f6af5c490b417635c06209feb33075c0fd00d5f7f504ecd880d3bbe7"
+  },
+  {
+    "name": "php-ext-standard-assert.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "16c7df207a2996f555d01f3f0d0c0b467e734b03fd41cac9621845b01f2dd013"
+  },
+  {
+    "name": "php-ext-standard-base64.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "958721374000e2e57c9e7cb50dd79d60af82d91fa75ce8c04c975853962180b2"
+  },
+  {
+    "name": "php-ext-standard-basic_functions.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d1b3ddf5c4b611a8babf259d3ecbb5dffb338aa7a5961bf8a79936d9bdcb5798"
+  },
+  {
+    "name": "php-ext-standard-browscap.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "68e1c13b9b9ac482485d38900627635a4849443c3043e97ab82a0a60484273dd"
+  },
+  {
+    "name": "php-ext-standard-crc32_x86.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d2584af6820dbd9bce3c9efa01e5add6fadc588b52e66fa8bd4a08ca50947be3"
+  },
+  {
+    "name": "php-ext-standard-crc32.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b56363986266d1aecd98f70c8864b8906f812388bb79023d4a5d7310d7ca3b62"
+  },
+  {
+    "name": "php-ext-standard-credits.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "02e7f1003b0a2323c180733928e011f1439b500d0903932dd869774ca7eeebe6"
+  },
+  {
+    "name": "php-ext-standard-crypt.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f96a79bf7a570ed2d22940f8ad905579a7c8899ecf6795d911b29a3205cc1fcd"
+  },
+  {
+    "name": "php-ext-standard-css.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b3d50938babd7b64ac7d411f8e794c13d04dede445fd3ce7d8b92c9285c47295"
+  },
+  {
+    "name": "php-ext-standard-datetime.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a74e3013ad4fa96e74cf5831ddb4ff6807a5a9abc458af22c6182c51ca124936"
+  },
+  {
+    "name": "php-ext-standard-dir.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "563722b069e461a6a7710137b29a880ca602edbb7be6c65a7005203221eb09c4"
+  },
+  {
+    "name": "php-ext-standard-dl.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c11b9717885af1d2de7f070455655b78d6ee650dcda4acaace9a4e25fd8e7686"
+  },
+  {
+    "name": "php-ext-standard-dns.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "33044b4eb5e5ea02d01b7b68e4b6c20899e9868aeda7568e8c0e7feec3672059"
+  },
+  {
+    "name": "php-ext-standard-exec.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7c37110d3999a3e38d1e67a16da10aa9d54c9d6b3dc1862ab7db4ef8f9fe4c03"
+  },
+  {
+    "name": "php-ext-standard-file.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3ca723aaa702e0760143b97e7ad4fba76e117d39644e79184d02e956d5033699"
+  },
+  {
+    "name": "php-ext-standard-filestat.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "cabc11c6493463dde1e1b46c7b231b46e883ca09d046f6b936c926d0245ee19c"
+  },
+  {
+    "name": "php-ext-standard-filters.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "48838938570b111fca2a4c0e867b66e78189d6c964903c310bbf13c9a1a4059e"
+  },
+  {
+    "name": "php-ext-standard-flock_compat.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ada039cc50f4961c0845ac165646802f1dac8fc9b08aa0db07e63b08a7674d4b"
+  },
+  {
+    "name": "php-ext-standard-formatted_print.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "486fc593998942634233784bb231ffb86e5cec281df64871916f38d663a7c546"
+  },
+  {
+    "name": "php-ext-standard-fsock.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5f502ec9519bb574bb82b2461fe2cfad1affdbe58221d93d2f0be2de7f844b31"
+  },
+  {
+    "name": "php-ext-standard-ftok.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f81758f4090fc1d935bcb383f7b2ee75faab24a878c16cf74dda35d68f729b08"
+  },
+  {
+    "name": "php-ext-standard-ftp_fopen_wrapper.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "43f0f24560467f37918c5b38a0b61750a6bed916d730f0dd3cb8f9c918206e6f"
+  },
+  {
+    "name": "php-ext-standard-head.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "454c32884ed2d14f81a410ae29c8feba02b5f7dab941f57f5aee829db9d46a9a"
+  },
+  {
+    "name": "php-ext-standard-hrtime.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a8e9cf23088794fa1fab989914cb8aa94b4e68f4b4c374fa843a00b38460e3eb"
+  },
+  {
+    "name": "php-ext-standard-html.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "27e9049fabffda4bf19f5703f1025a1e0ccd9f4e3358c8205aab6c43f537d6a1"
+  },
+  {
+    "name": "php-ext-standard-http_fopen_wrapper.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1474c2f6604e4e096faa73e1e9b79b20c14356a88560695a0f21f32b472b9bbb"
+  },
+  {
+    "name": "php-ext-standard-http.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "bbbbcdc5ff51ad8d577ee0abed97e788c92a903ea51a1abb230e9f8b4fd237b2"
+  },
+  {
+    "name": "php-ext-standard-image.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7a5ca23f89102ade12822b55e2cad3ba0610d8481292f1cd31095c546f3feb58"
+  },
+  {
+    "name": "php-ext-standard-incomplete_class.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "44165a17318e7f85b6299b69ad03c87a7d09c8706a900f700c51facbcf3de680"
+  },
+  {
+    "name": "php-ext-standard-info.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "46fc5d4b5310b1cb164d304c3413f69c0f53cb6df891955759f6297d3ad771ed"
+  },
+  {
+    "name": "php-ext-standard-iptc.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "15777faabedb4dceb61532ab80b9d004bc1c6b36be85c3b3ab42f7dc4b8d692e"
+  },
+  {
+    "name": "php-ext-standard-levenshtein.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5ac3fad173292315a9af08dd1fcf1183a54ed128fb4c0ee0da161a72939cf903"
+  },
+  {
+    "name": "php-ext-standard-libavifinfo-avifinfo.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d709ae059a6b3419765fe79a3088c645b2f342de41390645620a1f7745c4def5"
+  },
+  {
+    "name": "php-ext-standard-link.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5c43f57d404afc9d2adc207171c96654d3133b2d80b2cfd9349eb77944d80690"
+  },
+  {
+    "name": "php-ext-standard-mail.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "bc6d5160666b5a77d3666226f7b5c48d5ae972e0eed455c6f0828ce5ba7b90f5"
+  },
+  {
+    "name": "php-ext-standard-math.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0c93c69fdbc213becceaf5b2be5fbd4ae6d2a644106a2c1bb4516774daf903b8"
+  },
+  {
+    "name": "php-ext-standard-md5.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b6fb2f149714fcae36b0f6f89b3ec32ceeb531f5f8c30422d183c3e1d9dc4aa8"
+  },
+  {
+    "name": "php-ext-standard-metaphone.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d2bc4111ba2d43ef92921fd263a89ab332d3103d2475ba949c09bf4da55f53b3"
+  },
+  {
+    "name": "php-ext-standard-microtime.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b480fec0bdbb826b2ea17d375ec86e353108ae31c03a9a48056a32b2247013fe"
+  },
+  {
+    "name": "php-ext-standard-net.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "dcf08cb872b8346102871e5478e0243515f77ceccc4a5b430e653d3e1ce82dab"
+  },
+  {
+    "name": "php-ext-standard-pack.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5e90d2ea198495fc76bb076e39e8d2604c84b00f2bf4778c136a546abc9e7327"
+  },
+  {
+    "name": "php-ext-standard-pageinfo.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "bd413fe3e5520ebf33bc8ed867d74da0f8f6a7d34a3cdf3bb15d10f0e2605014"
+  },
+  {
+    "name": "php-ext-standard-password.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9ef7dfc29e815c24c9f5c55828934a1b604b8edaf322ffa7bad69152b8ac11ff"
+  },
+  {
+    "name": "php-ext-standard-php_fopen_wrapper.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d08f2da3e7e29af0f1c71d1aa2f79ff38fb69668c05cd83963a7d38d2041b2f5"
+  },
+  {
+    "name": "php-ext-standard-proc_open.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9a4736062f8f3a1a4b99a85e039a5e4981de0f89661cc6822309c9900dc9ca26"
+  },
+  {
+    "name": "php-ext-standard-quot_print.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ab929c1781576d86fef8afdfa99dcb4222fdaa120de844b01b66525817a3d0d3"
+  },
+  {
+    "name": "php-ext-standard-scanf.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "012152305821b8359f03c26e3eb33ba89c4e7760c1f69e31b9f3f4cc0bbb0349"
+  },
+  {
+    "name": "php-ext-standard-sha1.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4a88614a499ce25796849bd43b9d0f36486fa6ab1f0492e40f38f9a0cdc4305d"
+  },
+  {
+    "name": "php-ext-standard-soundex.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ba4ee8ab1c9e33bb2bcd417e4f24bb5cb92cafcb76debb8e5c2f87a93c741e80"
+  },
+  {
+    "name": "php-ext-standard-streamsfuncs.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8b2ca879781f2a640ccf2648205e90af0ab0d1a6956595021750ba65bfca4853"
+  },
+  {
+    "name": "php-ext-standard-string.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e15c41bba7ae4c7f806c3d8fc699501967186278f496271f754fe90a1df55bfe"
+  },
+  {
+    "name": "php-ext-standard-strnatcmp.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0f0f6b6bb1e2bd999f75a9736bdb00ce3e1658148cb670f0a4509270d8f8309d"
+  },
+  {
+    "name": "php-ext-standard-syslog.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b27f92b542204f77ec81f4a044a505cdbc554de10630a4b595eda98b03ae7f90"
+  },
+  {
+    "name": "php-ext-standard-type.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3dd0842bb1f30ab71401bae610d8840676ffb20bf30ad100a1cad676d3d5acce"
+  },
+  {
+    "name": "php-ext-standard-uniqid.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a0cc6f5dd3bee9e33773b07bbb7bda95579cc19dd5009ae8c6016a20bcf14740"
+  },
+  {
+    "name": "php-ext-standard-url_scanner_ex.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0fbab1e4ba93492cc23cbb09ca137e4cdf3149a74344b47d8ff00dc562edc288"
+  },
+  {
+    "name": "php-ext-standard-url.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ef5c6de10ece16e0d3e0db2829204136067e03c81c3cfc43d990e0766f344904"
+  },
+  {
+    "name": "php-ext-standard-user_filters.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0742fa2c32fb29569084f0f4b9d1c5b6f83a4141b1ec6473cbf88959d338e61a"
+  },
+  {
+    "name": "php-ext-standard-uuencode.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d7ca95c467edf397e291072fad577da01b87b776d0bcf26de654e2a310e9e510"
+  },
+  {
+    "name": "php-ext-standard-var_unserializer.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "910ff7406f140b1d9da2953c4c8879816e18fdccb6708f130f2203b79aba605c"
+  },
+  {
+    "name": "php-ext-standard-var.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3e0d534a788080326739a23a2ede02cdfd2c121e3220999ca356228dcee0a5b4"
+  },
+  {
+    "name": "php-ext-standard-versioning.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a0f13f2b8bc2beb170b0a344317c9cb3b965801d1ff5c5a9ad6b1cbc04244292"
+  },
+  {
+    "name": "php-ext-standard-crypt_blowfish.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "fd7189ed24ef96d6f4158323b6e99c95c43e43b7ecaa9838fc085df36fb73cfd"
+  },
+  {
+    "name": "php-ext-standard-crypt_freesec.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "327e259bd4aedbf94c36f323fca120352d259b2fa3e67e4f9a2f48cb3dfdde83"
+  },
+  {
+    "name": "php-ext-standard-crypt_sha256.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "74270a521ef7978dae1a75e2f87aeecb8eb110076ef0ca7eef43ceb0888b472e"
+  },
+  {
+    "name": "php-ext-standard-crypt_sha512.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9ee98a6bd9a86976d68da95840de6dc9e4d331cbe63448973e21da75e71500d4"
+  },
+  {
+    "name": "php-ext-standard-php_crypt_r.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a88b64ca5714369d5c17d654367268dac7e827e9af1c9eac51c6322eab02f1db"
+  },
+  {
+    "name": "php-ext-uri-php_uri.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "fde78fbecb65f4230a5e530109a2ce165aea86c16f72ea998d5a9090e5d502c5"
+  },
+  {
+    "name": "php-ext-uri-php_uri_common.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8891f7c3db97c79f844ab8fe37f75d75db3575f39b3cde1e2d511df700e78576"
+  },
+  {
+    "name": "php-ext-uri-uri_parser_rfc3986.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4b2db17257608fdee87d7533fc80a1e7c4ad8574ca8cf3f4ac81153b17b8973c"
+  },
+  {
+    "name": "php-ext-uri-uri_parser_whatwg.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a3c559b991bf5979fa5add4f3f2ffada401fd2c81a1d7f098d402d782a0eb518"
+  },
+  {
+    "name": "php-ext-uri-uri_parser_php_parse_url.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ee95e6f40ff036063e1bc78dfcf1ffa1856a79dc1a84e48c88930d48ecf7c4bf"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriCommon.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6018f16227e3531644a02454b37afb9e53930f438a0397e993d052be6bf977c7"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriCompare.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriCompare.o.cir",
+    "output_sha256": "f21124c6e589de17957bc11b842128746ad2e55c84abbd4408ae3fb02396a9f9"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriCopy.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriCopy.o.cir",
+    "output_sha256": "79570e38a87b7c043605632e5a6e601f1a482ee15ae1b8a930f8814a607e5127"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriEscape.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriEscape.o.cir",
+    "output_sha256": "accc4579359567624b2039935bfe0a4bd5033ddd009905cf2a2da3127e593a9e"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriFile.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "ee637facdb472363d3e1a69fe89e90cf435a3752f51b8c5de2759da390a4d3c5"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriIp4.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "979da24294b4a7be88e10d05e2e8839b887fd43af5e6af5a0ca67d77c5485782"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriIp4Base.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriIp4Base.o.cir",
+    "output_sha256": "b0970ad55218b72e003da201be2fb17b5826a508654a8898480e8bced962707c"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriMemory.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f88f4601391fe9a25b72c2fcae025993cbdbceb5ecead87c3578d179940ab75c"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriNormalize.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f31e698637f2b64e833b5f22809f6d24f33a2e0bac668352a5cce4b45524b60c"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriNormalizeBase.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c79e4f8b423a11f1339ee24394830437fdb54c2ffac06f284ad0696b7f84cd14"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriParse.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2e11b224ea945a339e1f50b2f7adc90d763c608d310af26a038e3ca91d851bfc"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriParseBase.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "24d88d9952b856e8faf99444011883e214cf6fa6ef6bd3438d16c8189eb6159b"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriQuery.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3078707ba6b7ba649f704c4c2e96a17cad7e9322ff2358a4d69390901f9ef487"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriRecompose.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e74ea73e728191eadca2303a6fe41ecc8be20d83f5a926b1fa4ddccf3c4ecb69"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriResolve.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriResolve.o.cir",
+    "output_sha256": "078864b55cef8749f3fabec5bb861c490588dd3897df82deeb7a737458dd681b"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetFragment.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "86415e394d24aac8ae59b16a7ca074d8f8f0b33767568b9500f98f0334d34e3c"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetHostAuto.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d5b4287394843b30c852387bfbe4c77f77e12b6514a81def8a474d252e125bda"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetHostCommon.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriSetHostCommon.o.cir",
+    "output_sha256": "dbeead8043404729c76c352b11d1c0d5e9b903adf2f994d35232eccda4c6fa2f"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetHostIp4.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriSetHostIp4.o.cir",
+    "output_sha256": "26d968e356d76e90e7d03f635882edfb78d89a32a5e6ad185283d1f5a8f7fd8b"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetHostIp6.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2bb2c98555b6ca69bce6123942e60e8686619f6828239b415cb9ef3aa2855b60"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetHostIpFuture.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7bcd16c290e66c7bae69f47d9128158cf9ba1860c4ee9d6d039bd0f9d3a052af"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetHostRegName.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "04f40b04440b0e176fe34a1a8718da5df824fcf8bba1073ad89b03b2a0320a70"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetPath.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "88f81d3634f9c3a668cf117f3fdbcd9e045950fe95b5a41619516331fef4f4ed"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetPort.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriSetPort.o.cir",
+    "output_sha256": "4be7ac26457704aac82e945f58bf4a9b2ee1624596fd17ef255dabd1931e646c"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetQuery.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "54d3a3ed5ca94c51767e7e80a79b74402ef43b09d86b075f021120ec10b7b1e0"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetScheme.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriSetScheme.o.cir",
+    "output_sha256": "4d4979faae412472f5bcaac7c1c0b1679802a72569dad8124ae91e1977a1e44e"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriSetUserInfo.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "aa621cffb57e2dbb8a8a8bd6eaad4896964faf79a8193613a341d7d9e179f5bb"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriShorten.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-ext-uri-uriparser-src-UriShorten.o.cir",
+    "output_sha256": "db30a7e0bbbe169bb09de7703955d37932889f9e124c634d63887db9a71c25a9"
+  },
+  {
+    "name": "php-ext-uri-uriparser-src-UriVersion.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "11b7487ac00f493ae757341679960879e38d43077cdeb3cf5d1b2163045eecc3"
+  },
+  {
+    "name": "php-TSRM-TSRM.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-TSRM-TSRM.o.cir",
+    "output_sha256": "d461250a1fbfc7bb0a57e415015f306f5ffa80ee048ad081dfef893dad64ee6c"
+  },
+  {
+    "name": "php-main-explicit_bzero.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c3122ab12e4a002af7d4d955b4ad3683ab4b01bd31c30bea2c1c40a47cbcf27b"
+  },
+  {
+    "name": "php-main-fopen_wrappers.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "024b7007b7ee1562cd224a640af4a63bebc98123dbf84d26bed2409e619c4390"
+  },
+  {
+    "name": "php-main-getopt.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5c8892b28615598a1c12b94676418d3413f0bd578e1d254e01d35ed9d2c67d1f"
+  },
+  {
+    "name": "php-main-main.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b103bbeb9ff53b03271e6971e348b0ba3533ac266fcedc1691c9610a2e0c5ac1"
+  },
+  {
+    "name": "php-main-network.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9503966b670acabba87131c824a8917065343aef796adb6506826f3a68ba6c1d"
+  },
+  {
+    "name": "php-main-output.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d1f5dc77c078cebd455158ceae81c2e3abf52c4efbd88b760c48c538ea67fccc"
+  },
+  {
+    "name": "php-main-php_content_types.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0154a0502f038cad6aa4e005f31826f461c5d51b010b6f69598ad02a4d499c12"
+  },
+  {
+    "name": "php-main-php_ini_builder.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a24fca0195ddd941ad248865178a1315232b64a69334cbd57fdfbaf27fbcf3ff"
+  },
+  {
+    "name": "php-main-php_ini.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2a1c95d792a77070bbfa9383fe65b905c68e12b92cbb8507cd6a7fa45497d2d2"
+  },
+  {
+    "name": "php-main-php_glob.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b34121baa18a6f12d6b6c80813419e90689bec0a8e009d23fe24f9825d457021"
+  },
+  {
+    "name": "php-main-php_odbc_utils.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b8159f8ea6ea9eb4269b57b1513275b92d07a779b922cf6c316fe809c97ba8af"
+  },
+  {
+    "name": "php-main-php_open_temporary_file.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7db1972f18efb759bbcef088a193862bf35f95f0c04df1f31b306f93c800a351"
+  },
+  {
+    "name": "php-main-php_scandir.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8324bdcda2280b620406d9ac677effca6867dae11e3df7810bf05e853d563375"
+  },
+  {
+    "name": "php-main-php_syslog.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "09245c5e20e2bdf7f7365c06c3c2582546330e9f4793196be9a7790094a9fe8a"
+  },
+  {
+    "name": "php-main-php_ticks.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "49e9daa202b6468f4ac47e38c804d6edb44eee7913f735747126532ee36f17dc"
+  },
+  {
+    "name": "php-main-php_variables.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8406874c53bbc10dd367004e2460cafa33482e905b9982d6d9665e3d6b3fd0d9"
+  },
+  {
+    "name": "php-main-reentrancy.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "12178b4a959b8ce1057585eebff083c55e8c4f23171945625c2e76d80925c9fa"
+  },
+  {
+    "name": "php-main-rfc1867.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "45225ec2054de37acedd21c680abb80a2d4b30e48fe38055129dc5ca51556d1d"
+  },
+  {
+    "name": "php-main-safe_bcmp.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4abaa410a3e2b0c51951050c341e0560c4c3c4c7b92b48769ba61553b524a467"
+  },
+  {
+    "name": "php-main-SAPI.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "13bfddcafd0b8a821b4e81c765c38947289d41bb28a7011263e5f68788f4ef5f"
+  },
+  {
+    "name": "php-main-snprintf.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "919ca34a38d4460619c6e97c68b24187a26f4dd8a56da2db17e1849af1d51a24"
+  },
+  {
+    "name": "php-main-spprintf.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c3e1b94440f2cf2ecf308ce6d23a75313ca64a9f16f9a8b167320fa581a484f3"
+  },
+  {
+    "name": "php-main-strlcat.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8c64ff2a1f8821c72c34b80395ab34b7c32c83eb54509bd12885d439496cc000"
+  },
+  {
+    "name": "php-main-strlcpy.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "5f5589b9c3a2d59eb02084ef3583a8378e3dcc6d68321bdbda60668f434687ec"
+  },
+  {
+    "name": "php-main-debug_gdb_scripts.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f32c511b8ae6d64be958c2f9aee7fddb079a2bf2ceadff0c49d125e8e7453db1"
+  },
+  {
+    "name": "php-main-streams-cast.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d1cfd31a9c5df8bdc04ae82b0c3585fe1f747459a5ad4a9c6e9868b7e04f8b2b"
+  },
+  {
+    "name": "php-main-streams-filter.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "413bab1cd767feccc00b899f3d2d0402bbf520780f38ffc79f39ad2936dd75f3"
+  },
+  {
+    "name": "php-main-streams-glob_wrapper.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c8344a9df9bcc1fc8afc082d0e0f91dd59650ea2695dc29a02932b8acbbf0998"
+  },
+  {
+    "name": "php-main-streams-memory.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "84c4507e690cbfcf101f6602c5176c36f2dc19c5c9f5ad2c9c715af7284681c7"
+  },
+  {
+    "name": "php-main-streams-mmap.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "33052874df64e54a5f2b5488332a2b6ea2f1fe43b5161627ee5faf5a14cf01fc"
+  },
+  {
+    "name": "php-main-streams-plain_wrapper.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "57eaec5fdfbed1b7509aa10b950a6db79c1d05bc2a6e6bdd28edcfecf17f861f"
+  },
+  {
+    "name": "php-main-streams-streams.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "eb5d57a662919533bf91f4e92da75b02459c1b10e6df58a495f383af8f5f7511"
+  },
+  {
+    "name": "php-main-streams-transports.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "44e995f95b45fc5313a5e072a8435facb0c55d43b636edb4a572fd88389d42a4"
+  },
+  {
+    "name": "php-main-streams-userspace.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "54f2958ec2ca8c8c3b69382b2d0f3908e8e0d62d28f36626aa71733ca4b97cff"
+  },
+  {
+    "name": "php-main-streams-xp_socket.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6143cb3f9e1089c714696b0e27d8ee3301d3750bcb833a2190698984ac18ba20"
+  },
+  {
+    "name": "php-Zend-Optimizer-block_pass.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7e90367edc14bcfeb729c38d127012272b5a06ed031ca65ec4490bfde457a50a"
+  },
+  {
+    "name": "php-Zend-Optimizer-compact_literals.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "95a848324949f992745f9829a7f7f72e49ff4f101960dc898199e38da0a9f461"
+  },
+  {
+    "name": "php-Zend-Optimizer-compact_vars.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2ffe8a2c2b120224d15477addfcbe17d816329a62c83eeb8b3919c04080c3021"
+  },
+  {
+    "name": "php-Zend-Optimizer-dce.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "867070f3fa43f04ed56c2121fbbd327e0327706570938db9a38ca6dc97c35116"
+  },
+  {
+    "name": "php-Zend-Optimizer-dfa_pass.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "d1a1d2d33d937d8d5496dfba2609ca2f1b0347fe0538ede2338d9705b86e3688"
+  },
+  {
+    "name": "php-Zend-Optimizer-escape_analysis.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "179fa7f02989111f1ca12b1aebaf39134e2a65fa62389af7837ced145686f060"
+  },
+  {
+    "name": "php-Zend-Optimizer-nop_removal.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "97a0eaea884fcb46d841bb47a5e2e6834fcc8e16ef83ea85737ee5906fa265da"
+  },
+  {
+    "name": "php-Zend-Optimizer-optimize_func_calls.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b27eb18bd4e4cb81b5ebf664171e5dec15203ffbc0a40d75895841bb88294bb2"
+  },
+  {
+    "name": "php-Zend-Optimizer-optimize_temp_vars_5.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2362cf35d0730c161834f2243acfe2c9aa274cf1a9185d2723589a0b03641fc3"
+  },
+  {
+    "name": "php-Zend-Optimizer-pass1.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "9f3e6e79bba7c861248f6d436922565c6bb96bc66be5564e8dcd7f6757c6cfa1"
+  },
+  {
+    "name": "php-Zend-Optimizer-pass3.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b78497431493e67df8cb023fd5f2c6e98a6e237ade183bec01932be8f608abc4"
+  },
+  {
+    "name": "php-Zend-Optimizer-sccp.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "02794cfd5b40c93ce304220dfd0556b1b5cc8ef561437cdfffd8827ecf0fbcba"
+  },
+  {
+    "name": "php-Zend-Optimizer-scdf.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1b5e74b2b194171f9f5a6d01a624537805ba6242470bc3dd4273f28adc65bdf8"
+  },
+  {
+    "name": "php-Zend-Optimizer-zend_call_graph.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "aebe05ed611edeeb7c1564038a50936571bb66a26ab05cd074b2ad5968323496"
+  },
+  {
+    "name": "php-Zend-Optimizer-zend_cfg.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "47404d0738e2b25b09191677582e5c7b9210ad1d28e027fe384920bcb04ee0ad"
+  },
+  {
+    "name": "php-Zend-Optimizer-zend_dfg.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "91dd911c8244e800807ed448a2bf2f271a517d43dbf39f8fe81cbc413116c081"
+  },
+  {
+    "name": "php-Zend-Optimizer-zend_dump.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "8986ef99b9f031ddccc5c3363d5cb38b846a87107438cdc5d0cea6f764c1b45e"
+  },
+  {
+    "name": "php-Zend-Optimizer-zend_func_info.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "df1d336ef1b2417074f22acece202a7c4855a33026c06df6499664557e7a34a9"
+  },
+  {
+    "name": "php-Zend-Optimizer-zend_inference.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3682ed0560ad3545b36f6d562c32aa7c34d4c3ca8b6bebedaefbca3a18b9d960"
+  },
+  {
+    "name": "php-Zend-Optimizer-zend_optimizer.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a855802698192e545e6624f6cc9cea8e526b7eb6d1611bccb0a9d15208d5a14f"
+  },
+  {
+    "name": "php-Zend-Optimizer-zend_ssa.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "b6a9b091db83ce9c76ef44b01637d0b5e1217aa62ea0712deb4b1be41d54b093"
+  },
+  {
+    "name": "php-Zend-zend_alloc.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "60bd8ad8b3713475742202e6f140165005015539cdabda926094466a1c0c5b99"
+  },
+  {
+    "name": "php-Zend-zend_API.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e484663a1c461c5997c860cd6c5edda72603df034894f1d5cd62368e99a7d5eb"
+  },
+  {
+    "name": "php-Zend-zend_ast.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "80d5c6bc3c1629609c01daf2cf6ac31ba24deba88d13c08ddde3446546ed471d"
+  },
+  {
+    "name": "php-Zend-zend_atomic.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "727b755922a95936f660650fc94d93da721d270e561d03be07b4b4652d54accb"
+  },
+  {
+    "name": "php-Zend-zend_attributes.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a92b94a516a120fad6c6d07920567fcb6489dc17d671a82ada5e5ebb65231864"
+  },
+  {
+    "name": "php-Zend-zend_builtin_functions.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "af08e561e11982f9f1a9fd6acb6ad96596b8e0b5eb0af3923c702940fcc9cca8"
+  },
+  {
+    "name": "php-Zend-zend_call_stack.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7555bc28d07cfbe7569e15cb6980afa4a2a947bad84cb77db41baa37bae64bcb"
+  },
+  {
+    "name": "php-Zend-zend_closures.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "73f22309001d010c19a5238944d11d27f1805785edf9d725c6ddc1e36563dc41"
+  },
+  {
+    "name": "php-Zend-zend_compile.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a6895fb20c391ba89513e63a591a52c6054aae3c1b0538af91947fea4c975a80"
+  },
+  {
+    "name": "php-Zend-zend_constants.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "797f2ef471eca799804a6fca075c349f2209bbdef64e83cc0f807495fe04313e"
+  },
+  {
+    "name": "php-Zend-zend_cpuinfo.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "76094857f20e444836142b946d3a4f972e4347a262d3fea83aba956227c97dac"
+  },
+  {
+    "name": "php-Zend-zend_default_classes.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "cc07b5962d5f873dcfbfd9cb74d753df352c88d3a1febddc532964958b96b59f"
+  },
+  {
+    "name": "php-Zend-zend_dtrace.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "00ed54f9620d5ba25fa134a6612a525f88729ff6579017da5ca21dfc85c7f8f1"
+  },
+  {
+    "name": "php-Zend-zend_enum.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1152c6a0bec5d87c4da415681f71307dcf28b70877c8ba3e2d80de5e74203b84"
+  },
+  {
+    "name": "php-Zend-zend_exceptions.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "354fad9f8b478d65b8630b0e4fb62c7592117d6abae20b0148d13c4e1fd84506"
+  },
+  {
+    "name": "php-Zend-zend_execute_API.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2b09c8dd56aefc914c606c6ca25da00aa97fa94af3f515f50ccf3f98b422de69"
+  },
+  {
+    "name": "php-Zend-zend_execute.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "7c048f357a4ac0f40a6b1310a3d8cf71ed443360b7c957e3f938f933d5473218"
+  },
+  {
+    "name": "php-Zend-zend_extensions.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "51e6b15c2b321e24c81229546f26f039bbbeab1c571d1c842bafedb716e4b24f"
+  },
+  {
+    "name": "php-Zend-zend_fibers.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1927189a3b14ba3b25131169d76e858c5d7c6df391f901a06c53c60df39f3e02"
+  },
+  {
+    "name": "php-Zend-zend_float.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3618e2eacb46779f80aecc0616d139fc824342486b54dcf9c4ddcd1715beb771"
+  },
+  {
+    "name": "php-Zend-zend_frameless_function.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-Zend-zend_frameless_function.o.cir",
+    "output_sha256": "d826d463fe20b2ab865d380a4290eb9cbe3e029620b08c02b9ff63cb41d576d0"
+  },
+  {
+    "name": "php-Zend-zend_gc.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "39d531b39c7357476cb9cb452dc8b4ec948d897b75c6c7aa767ffc4a1a720699"
+  },
+  {
+    "name": "php-Zend-zend_gdb.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "03df4f8bd12a25a07dc366b0ed91280427949ffadef3f256fbb6483dfea3a4e1"
+  },
+  {
+    "name": "php-Zend-zend_generators.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a5c3f975f6f26b20c6eb10989a6125a05ba91777f735e2d7ad7fa7cd53996c47"
+  },
+  {
+    "name": "php-Zend-zend_hash.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "efa7f17c7e28fbb17c284d7dd5c95c1225e8201d205a09af45fb67f22c6e8b6d"
+  },
+  {
+    "name": "php-Zend-zend_highlight.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "24848ca493e92714993bdd6bec33aeb34dd346f0fca74323a7e20422ffbc1933"
+  },
+  {
+    "name": "php-Zend-zend_hrtime.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-Zend-zend_hrtime.o.cir",
+    "output_sha256": "44a44ba950b94e37d7b8b0758f25fe7588d96d08e67bc7fb12fe9d4670391f41"
+  },
+  {
+    "name": "php-Zend-zend_inheritance.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "371e6eb002626fd30be6013b493e4778a00bd2ae7617d985baa80fa1232d8116"
+  },
+  {
+    "name": "php-Zend-zend_ini_parser.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a792995181a9463da04744291d7041739f42d436d64d689b324c413ae9b7ef2f"
+  },
+  {
+    "name": "php-Zend-zend_ini_scanner.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "16bebbea91fe34f0e827e996199b333aa5e64d798f47109aa445a6656d5f5197"
+  },
+  {
+    "name": "php-Zend-zend_ini.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2e910fbad44509f25f71a210b66441bb322be802540cd21d01f2fb2e6b1b4cc5"
+  },
+  {
+    "name": "php-Zend-zend_interfaces.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "56afad6647d1530ef592ac0f525784ab8e1a5c31892fb8dc1927a7c9ae1ff96b"
+  },
+  {
+    "name": "php-Zend-zend_iterators.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f1d3452644dcb5761a1a57b527dece66beb294fa1255ec98f9fae203d8aae47c"
+  },
+  {
+    "name": "php-Zend-zend_language_parser.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "f2f7ca90f4138a14f7a395e3eef49c3cba7897c1d836a9f0fcb63d5d9083108e"
+  },
+  {
+    "name": "php-Zend-zend_language_scanner.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "68d51d227f3e9463a54db341ac40c20548481ab0b2f50f25be3f889a0201609b"
+  },
+  {
+    "name": "php-Zend-zend_lazy_objects.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3fc974ca6473adc71ca24f74297380bba063590329f73010a316542e16e01116"
+  },
+  {
+    "name": "php-Zend-zend_list.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "36c97346d39adc671bf1362fa9fb5912a78f935bde837718fdafbcbfb60bb0dd"
+  },
+  {
+    "name": "php-Zend-zend_llist.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6d932eb1c1aef8ee960aaaf039d96129ba3b0bca28eaf552f769505a9ebd70dc"
+  },
+  {
+    "name": "php-Zend-zend_max_execution_timer.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-Zend-zend_max_execution_timer.o.cir",
+    "output_sha256": "d461250a1fbfc7bb0a57e415015f306f5ffa80ee048ad081dfef893dad64ee6c"
+  },
+  {
+    "name": "php-Zend-zend_multibyte.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3d12ce4963a854f93569d18e5bcd6a0c70a52e0193d5b6061219ca8b5e90259e"
+  },
+  {
+    "name": "php-Zend-zend_object_handlers.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "0d0b53e5fb7f1554e8d913104c1763616a6d5c0d6f613038883207a0ed28b366"
+  },
+  {
+    "name": "php-Zend-zend_objects_API.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "6c1c09f9f0b23e47edd449467eab02a13ef51f9de04300459a7e54ea5c8573b6"
+  },
+  {
+    "name": "php-Zend-zend_objects.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2278c2d9729d3997d4503ffc98c1ebc4c11d12a78cfd366918136ce64828b382"
+  },
+  {
+    "name": "php-Zend-zend_observer.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "84fe51cc9eeda49c876c4160ce02c10b01a6b5ef4d0a502a6a8357cf36d66c68"
+  },
+  {
+    "name": "php-Zend-zend_opcode.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "71473d44a209188c70189809fba4cd5cfdb8cf82fb0edd3220481b33af8cbbae"
+  },
+  {
+    "name": "php-Zend-zend_operators.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2dcf28eb0e24de1bde1e511d2e899bb7c7509d7ad66e522deb128fedd0fd50d6"
+  },
+  {
+    "name": "php-Zend-zend_property_hooks.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1b114e8ead70ba8425c42b2781e4b51d6d0ff33c048cbb1005af608d2d4c3010"
+  },
+  {
+    "name": "php-Zend-zend_ptr_stack.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "c5fcbc12ef5a67f9ec51f524f0c66c03615732f9c79ac999b62670d9f95cfca8"
+  },
+  {
+    "name": "php-Zend-zend_signal.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "badf1f445e76a974126bd1d983f88857527f52ee8429a39287bda118c5fb2fd2"
+  },
+  {
+    "name": "php-Zend-zend_smart_str.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "57c1ad3f8db0e5c41c2c94e2825d84b0746571056b243e2a68dc2f1a305cb7c8"
+  },
+  {
+    "name": "php-Zend-zend_sort.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "38b13da4b11d4d76e4ce664abe7398a2e047284dcf89774fb04f8962b0822de5"
+  },
+  {
+    "name": "php-Zend-zend_stack.o",
+    "imported": true,
+    "exit_code": 0,
+    "classification": "emitted",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_path": "<cache>/finish-A/php-Zend-zend_stack.o.cir",
+    "output_sha256": "381b328c3004450ea4130d43defbec935c9fd8f7d4d6dbb4342b63d67ce97b2b"
+  },
+  {
+    "name": "php-Zend-zend_stream.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "984a3230943518372a4625d7012ef3afc4dd3790ae8be0f889028cdc73cb7ff5"
+  },
+  {
+    "name": "php-Zend-zend_string.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "04e1e38a0601cfcebc3fb61dc0785cdd85817948af8f3aea10e9d9b6e2a6b844"
+  },
+  {
+    "name": "php-Zend-zend_strtod.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "64afdc5769030c80d2279b662d84ce8917fb1c228fe410005b30a8a094ec952f"
+  },
+  {
+    "name": "php-Zend-zend_system_id.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "fa5db82f64aeef92914030d23153e5f2ec5e4dc9ee7f945a41aeba42fcee2059"
+  },
+  {
+    "name": "php-Zend-zend_variables.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "e751ef706a37b89d1ca9ec6406192254138c52d0fb79a1feb17a9418fc3cfb1e"
+  },
+  {
+    "name": "php-Zend-zend_virtual_cwd.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "1f87a427074e333cd70219d2a0c3dc1d5bdbecdc7ca37793dafd0da6a1f71975"
+  },
+  {
+    "name": "php-Zend-zend_vm_opcodes.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "2a3401606d588a84175a8776f9d3c934af834a27b9aeb1d2fe02c470bffb1484"
+  },
+  {
+    "name": "php-Zend-zend_weakrefs.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a73ab5587f615c0caa8ac5e2ea5c7aed797a845ef50f07925f0c8a6c084f0045"
+  },
+  {
+    "name": "php-Zend-zend.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a15b6c60608aea7fcb774600cce54c934385ba8807df6a388efc105ada4a821c"
+  },
+  {
+    "name": "php-main-internal_functions_cli.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "4fd93114e168ca30757de4a4c08159c87ce66496c1c8aa184429d101161de782"
+  },
+  {
+    "name": "php-sapi-cli-php_cli.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "34e4cd93e5444faf0d230f2c9b0a26c49485936cf17b3bc93d65dac5564481cf"
+  },
+  {
+    "name": "php-sapi-cli-php_http_parser.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a8308158844d5dd777594fe784f1cba7333c68b2488f2cb9bde770b8edaa04ab"
+  },
+  {
+    "name": "php-sapi-cli-php_cli_server.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3a561ca06a61c3bccb480075a8a1ba0ff0b88425b8ce673017803bb9d20f5294"
+  },
+  {
+    "name": "php-sapi-cli-ps_title.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "3ef0d15edaf4c43b2fc8f516fcd9daea27d3901358c1b86d521734b2d77d133b"
+  },
+  {
+    "name": "php-sapi-cli-php_cli_process_title.o",
+    "imported": false,
+    "exit_code": 1,
+    "classification": "frontend rejected this translation unit; retained as unsupported evidence",
+    "stderr_sha256": "a411bdb405cf7bc38665cd53f24bed8342b6109ce8f6dd1307864157f715da3b"
+  }
+]

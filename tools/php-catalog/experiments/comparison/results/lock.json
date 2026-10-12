@@ -38,20 +38,20 @@
   "link_manifest_sha256": "589c9a3318f5f8adaa800829ba60bac2eebe5d8a3a77c34c38cbc40081f86bb6",
   "recorded_root": "/tmp/php-catalog-comparison",
   "representation_correspondence_inputs": {
-    "campaign_inputs": "95626baaaf5bc6627b93acb3f7d94b723de23fb5b5a1a54d1fab72f8f2c9d30f",
-    "cir_log": "43fb1371160e9346f669dfad71350b2d0dd228517784e78700c5cdd81ea4167a",
-    "clang_ast": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067",
-    "clang_llvm": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f",
-    "clang_manifest": "86a9b25c1abc529b455992da2f1c6ec8883f11cb6b783fd29204ce203bfed875",
-    "clang_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+    "campaign_inputs": "76ae87328dccdcadb1a61051ffca6b438b9f57989890a04f2a92830cf7d15e10",
+    "cir_log": "c00ed242aa74b610a7831ab4fbdf8d20bdc4733a7102436fc9426b6c74f6e269",
+    "clang_ast": "4b8719029aeda1d352586c323f7cf887fb88c6bd10030a7e6a40815d972b896a",
+    "clang_llvm": "c1d5103ab4b84a1830dc326eb4eb9c4bacbe210ef56f7880ce49713a5f510cb0",
+    "clang_manifest": "74529ba553d2d0616bf3a54aa4235fa27334c65f92fd2cba90fc79b03254f406",
+    "clang_measurements": "51d10622413601a61094d640d0ccee9870bae5e19dbe3914681541a1687d348e",
     "cleanup_ast": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242",
     "cleanup_gimple": "13382af7b554b6311ec0c5b19607898badc21692f60f1c3ea91faf982e81b254",
     "cleanup_llvm": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672",
-    "cleanup_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+    "cleanup_measurements": "51d10622413601a61094d640d0ccee9870bae5e19dbe3914681541a1687d348e",
     "cleanup_source": "3e346ddb906205cd64506bd98e1a232d6ecfa8d6abdc6a1453150342534777d6",
     "gcc_cfg": "16fd020bcfd952490217b6d24ddb2b76c420aa59df10fd37d77de68a83deaab9",
     "gcc_gimple": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2",
-    "gcc_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+    "gcc_measurements": "51d10622413601a61094d640d0ccee9870bae5e19dbe3914681541a1687d348e",
     "source": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
   },
   "svf_binary_sha256": {
@@ -95,6 +95,26 @@
         "run.py": "5a0fbcc5f6ac"
       },
       "reason": "run.py changed in the producer fixes (recipe match by resolved path, tree-relative sources)"
+    },
+    "representation_correspondence_inputs": {
+      "value": {
+        "campaign_inputs": "95626baaaf5bc6627b93acb3f7d94b723de23fb5b5a1a54d1fab72f8f2c9d30f",
+        "cir_log": "43fb1371160e9346f669dfad71350b2d0dd228517784e78700c5cdd81ea4167a",
+        "clang_ast": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067",
+        "clang_llvm": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f",
+        "clang_manifest": "86a9b25c1abc529b455992da2f1c6ec8883f11cb6b783fd29204ce203bfed875",
+        "clang_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+        "cleanup_ast": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242",
+        "cleanup_gimple": "13382af7b554b6311ec0c5b19607898badc21692f60f1c3ea91faf982e81b254",
+        "cleanup_llvm": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672",
+        "cleanup_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+        "cleanup_source": "3e346ddb906205cd64506bd98e1a232d6ecfa8d6abdc6a1453150342534777d6",
+        "gcc_cfg": "16fd020bcfd952490217b6d24ddb2b76c420aa59df10fd37d77de68a83deaab9",
+        "gcc_gimple": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2",
+        "gcc_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+        "source": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
+      },
+      "reason": "the correspondence inputs were the earlier campaign and producer archives"
     }
   },
   "php_call_cli_sha256": "bb4aabfef575d223db59cc6dc75c3d8138debb2324702df016d9465a75adbf57"
