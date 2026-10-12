@@ -207,6 +207,7 @@ function valid_value(?ReflectionType $type): ?Closure
         'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
         'simplexmlelement' => static fn (): SimpleXMLElement => new SimpleXMLElement('<a><b/></a>'),
         'intlgregoriancalendar' => static fn (): IntlGregorianCalendar => IntlGregorianCalendar::createInstance('UTC', 'en'),
+        'traversable' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
         'domelement' => static function (): DOMElement {
             $document = new DOMDocument();
             $document->loadXML('<a/>');
@@ -338,7 +339,39 @@ function named_value(ReflectionParameter $param): ?Closure
             default => static fn (): string => '\\',
         };
     }
+    // Methods of a class, by the class and the name.
+    $class = $param->getDeclaringFunction() instanceof ReflectionMethod ? strtolower($param->getDeclaringFunction()->getDeclaringClass()->getName()) : '';
+    if ($class === 'random\\randomizer' && in_array($name, ['min', 'max'], true)) {
+        return $name === 'min' ? static fn (): float => 0.0 : static fn (): float => 1.0;
+    }
+    if ($class === 'spoofchecker' && $name === 'pattern') {
+        return static fn (): string => '[a-z]';
+    }
+    if (str_starts_with($function, 'image') && $name === 'file') {
+        return static fn (): string => sys_get_temp_dir() . '/rec-' . getmypid() . '.png';
+    }
     return match ([$function, $name]) {
+        ['popen', 'mode'] => static fn (): string => 'r',
+        ['zlib_encode', 'encoding'] => static fn (): int => ZLIB_ENCODING_RAW,
+        ['base_convert', 'from_base'] => static fn (): int => 16,
+        ['base_convert', 'to_base'] => static fn (): int => 2,
+        ['easter_date', 'year'], ['easter_days', 'year'] => static fn (): int => 2000,
+        ['numfmt_create', 'locale'] => static fn (): string => 'en',
+        ['xml_parser_create', 'encoding'], ['xml_parser_create_ns', 'encoding'] => static fn (): string => 'UTF-8',
+        ['imagepolygon', 'num_points_or_color'], ['imagefilledpolygon', 'num_points_or_color'], ['imageopenpolygon', 'num_points_or_color'] => static fn (): int => 3,
+        ['imagepolygon', 'points'], ['imagefilledpolygon', 'points'], ['imageopenpolygon', 'points'] => static fn (): array => [0, 0, 1, 0, 0, 1],
+        ['imageaffinematrixconcat', 'matrix1'], ['imageaffinematrixconcat', 'matrix2'] => static fn (): array => [1, 0, 0, 1, 0, 0],
+        ['imageaffine', 'affine'] => static fn (): array => [1, 0, 0, 1, 0, 0],
+        ['imageaffine', 'clip'], ['imagecrop', 'rectangle'] => static fn (): array => ['x' => 0, 'y' => 0, 'width' => 1, 'height' => 1],
+        ['imageconvolution', 'matrix'] => static fn (): array => [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+        ['imagecolormatch', 'image2'] => static function (): GdImage {
+            $palette = imagecreate(1, 1);
+            imagecolorallocate($palette, 255, 255, 255);
+            return $palette;
+        },
+        ['sodium_crypto_generichash_final', 'length'] => static fn (): int => 32,
+        ['setrestrictionlevel', 'level'] => static fn (): int => Spoofchecker::SINGLE_SCRIPT_RESTRICTION,
+        ['sodium_crypto_generichash', 'length'], ['sodium_crypto_generichash_init', 'length'] => static fn (): int => 32,
         ['str_increment', 'string'] => static fn (): string => 'a',
         ['str_decrement', 'string'] => static fn (): string => 'b',
         ['stream_context_create', 'options'], ['stream_context_get_default', 'options'], ['stream_context_set_default', 'options'], ['stream_context_set_options', 'options'] => static fn (): array => ['http' => ['method' => 'GET']],
