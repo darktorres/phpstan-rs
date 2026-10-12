@@ -41,7 +41,8 @@ function admits(?ReflectionType $type, string $name): bool
 /**
  * Whether `$type` admits a value of the class `$class`: `mixed` and no type do,
  * `object` does, a type the class is an instance of does (an interface it
- * implements, or its own class), and `iterable` does for a `Traversable`.
+ * implements, or its own class), `iterable` does for a `Traversable`, and a
+ * union with `string` does for an object with `__toString` (the recording object).
  */
 function accepts_value(?ReflectionType $type, string $class): bool
 {
@@ -54,7 +55,15 @@ function accepts_value(?ReflectionType $type, string $class): bool
             || ($t === 'iterable' && is_a($class, Traversable::class, true))
             || is_a($class, $type->getName(), true);
     }
-    foreach ($type->getTypes() as $member) {
+    // In a union with `string`, an object the class of which is not a member is converted
+    // to a string by its `__toString` (PHP's coercion, outside strict types): the recording
+    // object has one, so it reaches that user code.
+    $members = $type->getTypes();
+    $hasString = array_filter($members, static fn (ReflectionType $member): bool => $member instanceof ReflectionNamedType && strtolower($member->getName()) === 'string') !== [];
+    if ($hasString && $class === RecordingObject::class) {
+        return true;
+    }
+    foreach ($members as $member) {
         if (accepts_value($member, $class)) {
             return true;
         }
