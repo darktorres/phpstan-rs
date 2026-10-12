@@ -280,7 +280,73 @@ function zip_entry_sample(): mixed
  */
 function known_parameter_value(ReflectionParameter $param): ?Closure
 {
-    return sodium_length_value($param) ?? mbstring_value($param);
+    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param);
+}
+
+/** The valid value of a bcmath parameter: a number string, a modulus that is not zero, or a scale. */
+function bcmath_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction();
+    $class = $function instanceof ReflectionMethod ? strtolower($function->getDeclaringClass()->getName()) : '';
+    if (!str_starts_with(strtolower($function->getName()), 'bc') && $class !== 'bcmath\\number') {
+        return null;
+    }
+    return match ($param->getName()) {
+        'num', 'num1', 'num2' => static fn (): string => '1',
+        'exponent' => static fn (): string => '2',
+        'modulus' => static fn (): string => '3',
+        'scale' => static fn (): int => 0,
+        default => null,
+    };
+}
+
+/** The valid value of an openssl key parameter: a PEM private or public key of a generated RSA pair. */
+function openssl_value(ReflectionParameter $param): ?Closure
+{
+    if (!str_starts_with($param->getDeclaringFunction()->getName(), 'openssl_')) {
+        return null;
+    }
+    return match ($param->getName()) {
+        'private_key', 'key' => static function (): string {
+            openssl_pkey_export(openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]), $pem);
+            return $pem;
+        },
+        'public_key' => static function (): string {
+            $pem = openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+            return openssl_pkey_get_details($pem)['key'];
+        },
+        default => null,
+    };
+}
+
+/** The valid value of a URI class's parameter: an absolute URI, or a component of one. */
+function uri_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction();
+    if (!$function instanceof ReflectionMethod || !str_starts_with(strtolower($function->getDeclaringClass()->getName()), 'uri\\')) {
+        return null;
+    }
+    return match ($param->getName()) {
+        'uri' => static fn (): string => 'https://example.com/',
+        'host' => static fn (): string => 'example.com',
+        'scheme' => static fn (): string => 'https',
+        'userinfo' => static fn (): string => 'user:pass',
+        'username' => static fn (): string => 'user',
+        'password' => static fn (): string => 'pass',
+        'path' => static fn (): string => '/a',
+        'query' => static fn (): string => 'b=1',
+        'fragment' => static fn (): string => 'f',
+        default => null,
+    };
+}
+
+/** The valid value of a hash function's algorithm: a name the hash extension knows. */
+function hash_value(ReflectionParameter $param): ?Closure
+{
+    if ($param->getName() !== 'algo' || !str_starts_with($param->getDeclaringFunction()->getName(), 'hash')) {
+        return null;
+    }
+    return static fn (): string => 'sha256';
 }
 
 /** The valid value of an mbstring parameter: an encoding name, or the flags and types its options take. */
