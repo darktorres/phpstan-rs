@@ -760,11 +760,11 @@ records the follow-up LLVM lowering and verifier result for each emitted unit;
 the replay script is
 [evaluate_cir_lowering.py](tools/php-catalog/experiments/comparison/evaluate_cir_lowering.py).
 Raw CIR outputs/logs, GCC dumps, configured source trees, and binaries remain in
-`/home/torres/.cache/php-catalog-evaluation`; the report names that location so
+`~/.cache/php-catalog-evaluation`; the report names that location so
 those files can be matched to the checked-in hashes.
 
 Complete raw artifacts, linked bitcode, configured source trees, binaries, and
-build caches are in **`/home/torres/.cache/php-catalog-evaluation`**. The original
+build caches are in **`~/.cache/php-catalog-evaluation`**. The original
 Clang PHP/SVF build inputs still reside in `<scratch root>`; restore
 them using the first experiment's README if that directory disappears. Exact
 identities and package digests are in `results/evaluation/lock.json`.
