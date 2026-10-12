@@ -502,3 +502,24 @@ fn a_target_set_shares_the_list_it_holds() {
     assert_eq!(list.len(), 15);
     assert_eq!(&set.into_shared()[..], &list[..]);
 }
+
+#[test]
+fn advancing_the_generation_clears_the_destroyed_holders() {
+    let mut registry = registry("<?php class B {} class A { public B $p; }");
+    let first = {
+        let reach = Reach {
+            registry: &registry,
+            ctx: &NoContext,
+        };
+        reach.destroy_held(&Name::from("A"))
+    };
+    assert!(registry.reach_memo.destroy_held.is_used());
+    registry.advance_relation_generation();
+    assert!(!registry.reach_memo.destroy_held.is_used());
+    let again = Reach {
+        registry: &registry,
+        ctx: &NoContext,
+    }
+    .destroy_held(&Name::from("A"));
+    assert_eq!(first, again);
+}
