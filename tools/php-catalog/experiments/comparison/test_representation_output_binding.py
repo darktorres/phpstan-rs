@@ -176,6 +176,41 @@ class RecordedRootTests(unittest.TestCase):
                 correspondence_arguments(LOCKED_SOURCE, recorded_root="/srv/elsewhere"), LOCK)
 
 
+class SwappedArchiveTests(unittest.TestCase):
+    def test_two_archives_with_swapped_contents_are_each_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ast = root / "php-type-ast-0.out"
+            llvm = root / "php-type-llvm-read-0.out"
+            ast.write_bytes(b"clang ast summary\n")
+            llvm.write_bytes(b"clang llvm summary\n")
+            records = [
+                {"name": "php-type-ast-0", "exit_code": 0,
+                 "stdout_path": str(ast.resolve()), "stdout_sha256": BUILDER.sha(ast)},
+                {"name": "php-type-llvm-read-0", "exit_code": 0,
+                 "stdout_path": str(llvm.resolve()), "stdout_sha256": BUILDER.sha(llvm)},
+            ]
+            ast.write_bytes(b"clang llvm summary\n")
+            llvm.write_bytes(b"clang ast summary\n")
+            for name, path in (("php-type-ast-0", ast), ("php-type-llvm-read-0", llvm)):
+                with self.assertRaisesRegex(ValueError, "digest differs"):
+                    BUILDER.validate_measurement_output(records, name, path)
+
+    def test_an_archive_cannot_stand_in_for_another_recorded_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ast = root / "php-type-ast-0.out"
+            llvm = root / "php-type-llvm-read-0.out"
+            ast.write_bytes(b"same bytes\n")
+            llvm.write_bytes(b"same bytes\n")
+            records = [
+                {"name": "php-type-ast-0", "exit_code": 0,
+                 "stdout_path": str(ast.resolve()), "stdout_sha256": BUILDER.sha(ast)},
+            ]
+            with self.assertRaisesRegex(ValueError, "does not bind"):
+                BUILDER.validate_measurement_output(records, "php-type-ast-0", llvm)
+
+
 class InputPinTests(unittest.TestCase):
     def test_an_input_that_differs_from_its_locked_digest_is_refused_before_parsing(self):
         with tempfile.TemporaryDirectory() as temporary:
