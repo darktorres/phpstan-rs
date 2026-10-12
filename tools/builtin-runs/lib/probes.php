@@ -181,6 +181,7 @@ function valid_value(?ReflectionType $type): ?Closure
         // Valid for every function that takes the type, so they are type defaults.
         'iterator' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
         'datetimezone' => static fn (): DateTimeZone => new DateTimeZone('UTC'),
+        'resourcebundle' => static fn (): ResourceBundle => resourcebundle_create('en', null),
         'curlsharehandle' => static fn (): CurlShareHandle => curl_share_init(),
         'opensslasymmetrickey' => static fn (): OpenSSLAsymmetricKey => openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]),
         'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
@@ -194,6 +195,23 @@ function valid_value(?ReflectionType $type): ?Closure
         'sysvsharedmemory' => static fn (): SysvSharedMemory => shm_attach(0x5151, 64),
     ];
     return $values[strtolower($type->getName())] ?? null;
+}
+
+/** A directory of a zip archive with one entry, made in the worker's temporary directory. */
+function zip_dir_sample(): mixed
+{
+    $path = tempnam(sys_get_temp_dir(), 'zip');
+    $archive = new ZipArchive();
+    $archive->open($path, ZipArchive::CREATE);
+    $archive->addFromString('a', 'x');
+    $archive->close();
+    return zip_open($path);
+}
+
+/** An entry of the zip archive `zip_dir_sample` makes. */
+function zip_entry_sample(): mixed
+{
+    return zip_read(zip_dir_sample());
 }
 
 /**
@@ -241,6 +259,38 @@ function valid_site(ReflectionParameter $param): ?Closure
         'spldoublylinkedlist::add' => [0 => 0],
         'splobjectstorage::offsetset' => [0 => static fn (): stdClass => new stdClass()],
         'weakmap::offsetset' => [0 => static fn (): stdClass => new stdClass()],
+        'copy' => [2 => static fn (): mixed => stream_context_create()],
+        'dir' => [1 => static fn (): mixed => stream_context_create()],
+        'file' => [2 => static fn (): mixed => stream_context_create()],
+        'file_get_contents' => [2 => static fn (): mixed => stream_context_create()],
+        'file_put_contents' => [3 => static fn (): mixed => stream_context_create()],
+        'finfo_file' => [3 => static fn (): mixed => stream_context_create()],
+        'finfo::file' => [2 => static fn (): mixed => stream_context_create()],
+        'fopen' => [3 => static fn (): mixed => stream_context_create()],
+        'get_headers' => [2 => static fn (): mixed => stream_context_create()],
+        'hash_update_file' => [2 => static fn (): mixed => stream_context_create()],
+        'libxml_set_streams_context' => [0 => static fn (): mixed => stream_context_create()],
+        'mkdir' => [3 => static fn (): mixed => stream_context_create()],
+        'opendir' => [1 => static fn (): mixed => stream_context_create()],
+        'readfile' => [2 => static fn (): mixed => stream_context_create()],
+        'rename' => [2 => static fn (): mixed => stream_context_create()],
+        'rmdir' => [1 => static fn (): mixed => stream_context_create()],
+        'scandir' => [2 => static fn (): mixed => stream_context_create()],
+        'stream_socket_client' => [5 => static fn (): mixed => stream_context_create()],
+        'stream_socket_server' => [4 => static fn (): mixed => stream_context_create()],
+        'unlink' => [1 => static fn (): mixed => stream_context_create()],
+        'stream_context_set_options' => [0 => static fn (): mixed => stream_context_create(), 1 => static fn (): array => ['http' => ['method' => 'GET']]],
+        'mb_ereg_replace_callback' => [3 => static fn (): null => null],
+        'strtr' => [1 => static fn (): array => ['a' => 'b']],
+        'zip_entry_close' => [0 => static fn (): mixed => zip_entry_sample()],
+        'zip_entry_compressedsize' => [0 => static fn (): mixed => zip_entry_sample()],
+        'zip_entry_compressionmethod' => [0 => static fn (): mixed => zip_entry_sample()],
+        'zip_entry_filesize' => [0 => static fn (): mixed => zip_entry_sample()],
+        'zip_entry_name' => [0 => static fn (): mixed => zip_entry_sample()],
+        'zip_entry_open' => [0 => static fn (): mixed => zip_dir_sample(), 1 => static fn (): mixed => zip_entry_sample()],
+        'zip_entry_read' => [0 => static fn (): mixed => zip_entry_sample()],
+        'zip_read' => [0 => static fn (): mixed => zip_dir_sample()],
+        'zip_close' => [0 => static fn (): mixed => zip_dir_sample()],
         'stream_context_set_option' => [1 => 'http', 2 => 'method', 3 => 'GET'],
     ];
     $function = $param->getDeclaringFunction();
