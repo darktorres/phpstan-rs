@@ -348,6 +348,9 @@ function valid_site(ReflectionParameter $param): ?Closure
         'sodium_crypto_secretstream_xchacha20poly1305_rekey' => [0 => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0]],
         // A no-op command and no descriptors: proc_open starts a process whatever it is given.
         'proc_open' => [0 => 'true', 1 => static fn (): array => []],
+        // A null connection reaches the object argument's __toString, which a stream connection does not.
+        'pg_lo_open' => [0 => static fn (): null => null],
+        'pg_lo_export' => [0 => static fn (): null => null],
         'zip_entry_close' => [0 => static fn (): mixed => zip_entry_sample()],
         'zip_entry_compressedsize' => [0 => static fn (): mixed => zip_entry_sample()],
         'zip_entry_compressionmethod' => [0 => static fn (): mixed => zip_entry_sample()],
