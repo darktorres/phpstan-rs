@@ -1212,6 +1212,9 @@ RV-29 has four checker-level fixtures beside
   property narrowed before the call is widened in `catch`, after `finally`, through a
   non-matching inner `try`, after a temporary whose destructor throws, and through a
   dynamic `'strlen'` name.
+- `strlen_catalog_array_throw_keeps_try_state`: an `array` argument throws a `TypeError`
+  without invoking a callback, and the catch sees the property value written before the
+  call.
 
 The `assertType` expectations were checked against a runtime twin under PHP 8.5.4 (each
 observed value lies in the asserted type). The fixtures pass under `gate`.
@@ -1220,22 +1223,25 @@ Mutation check on `checker/expr.rs`:
 
 - Disabling the invoked-route `record_throw_state` fails two of the new fixtures.
 - Disabling string-argument invalidation on the throw path fails one.
-- Disabling the without-invocation `record_throw_state` fails none. The plan required every
-  mutation to fail a new fixture before commit; this one does not, and the commit went in
-  with that deviation recorded here.
+- Disabling the without-invocation `record_throw_state` fails
+  `strlen_catalog_array_throw_keeps_try_state`. The `try` body writes `'after'` to the
+  property after the call, and the catch then sees `'after'` instead of `'before'`.
 
-Why that mutation is equivalent for this checker: the invoked-route state is seeded from
-the same pre-call state as the without-invocation state, and the callback transfers
-applied to it (`forget_operation_may_change_except`, `forget_what_an_operation_may_change`
-in `checker/call_effects.rs`) only forget facts. A forgotten fact is wider, so the invoked
-state contains the without-invocation state and the join is unchanged. A probe of the
-fixture run confirmed the premise: every call that reaches the without-invocation record
-also has an invoked route (`(true, [0])`, 2 calls; no `(true, [])`, 0 calls). Two
-inputs that can throw without invoking a callback (`string|array`, `object`) were tried
-with the record disabled; the catch still received the asserted state. Those runs were
-not probed for the route each call took, so the single-route case is not established
-for them. The argument depends on the transfers only forgetting facts; a future transfer
-that narrows a fact would need the record again, and a fixture would then be needed.
+That fixture is the first input found where the without-invocation route runs alone. A
+probe of the throw-state records showed that a `strlen` call with an `array` argument has
+no invoked route (`(true, [])`, 3 calls). Calls with a non-Stringable `object` argument
+always also have an invoked route (`(true, [0])`).
+
+An earlier version of the fixture did not discriminate. The catch then fell back to the
+locals at the end of the `try` body, and those matched the recorded state, so the catch
+type was the same with the record disabled. The fixture now writes the property after the
+call, so the end-of-body state differs from the recorded state. The body never completes
+normally, so the `'after'` line is reported as unreachable; that diagnostic is expected.
+
+Earlier this record argued that the mutation was equivalent for every input, based on the
+invoked route containing the without-invocation route. That argument still holds for calls
+that have both routes, but the array case shows the record is needed when the invoked route
+is absent.
 
 The ledger has no row for this item, so no ledger row was changed.
 
@@ -1252,7 +1258,7 @@ checked-in evidence as defaults; its output is byte-identical to
 Tests in `test_representation_output_binding.py` cover the root mapping and its escape
 refusal, a wrong recorded root, a tampered input, two archives with swapped contents, an
 archive standing in for another recorded output, and the byte-for-byte regeneration (skipped
-only when the locked source is absent). All 42 `cmp` tests pass.
+only when the locked source is absent). All 46 `cmp` tests pass.
 
 This is not yet the path-free rerun: the producer archives still record the old root, and
 the regeneration is run against the checked-in archives. The rerun is a separate step.
