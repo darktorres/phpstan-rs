@@ -199,6 +199,8 @@ def cir_profile(cache, runner, php_source):
         cir_path = runner.output/(name+'.cir')
         results.append(dict(
             name=name,
+            source=str(source),
+            source_sha256=digest(directory / source),
             imported=result,
             exit_code=measurement['exit_code'],
             classification=("emitted" if result else "frontend rejected this translation unit; retained as unsupported evidence"),
