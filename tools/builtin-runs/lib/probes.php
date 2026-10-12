@@ -96,12 +96,6 @@ function names_callable(?ReflectionType $type): bool
 function probes_for(ReflectionParameter $param): array
 {
     $type = $param->getType();
-    // A parameter the stubs document as a resource takes a stream or a stream
-    // context, and nothing else: every other probe is a TypeError before any user
-    // code. The context's notification callback is user code.
-    if (documented_resource($param)) {
-        return [['stream', static fn () => recording_stream()], ['context', static fn () => recording_context()]];
-    }
     $probes = [];
     if (admits($type, 'callable') || admits($type, 'closure')) {
         $probes[] = ['callable', static fn () => recording_callable()];
@@ -125,6 +119,12 @@ function probes_for(ReflectionParameter $param): array
     }
     if (admits($type, 'resource') || $type === null || (string) $type === 'mixed') {
         $probes[] = ['stream', static fn () => recording_stream()];
+    }
+    // The stubs document a resource here, and PHP takes a stream or a stream context:
+    // the context's notification callback is user code. Other kinds stay probed, since
+    // the stubs can be out of date (PostgreSQL's connection also takes a string).
+    if (documented_resource($param)) {
+        $probes[] = ['context', static fn () => recording_context()];
     }
     return $probes;
 }
