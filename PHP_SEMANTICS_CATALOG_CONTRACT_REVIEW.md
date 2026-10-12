@@ -1361,3 +1361,13 @@ What remains open for the semantic gate:
 Verdict of the author: the evidence chain is consistent and reproduces, and the `strlen`
 slice agrees with its inventory. The contract's own gate for closing the semantic acceptance
 requires a review by a party other than the author, which this record cannot provide.
+
+**Gap closure (2026-10-12).** The configuration of each build was compared with the
+checked-in build. The CLI's `php_config.h` matches it exactly. The CALL build differs in one
+line, `HAVE_PRESERVE_NONE`, which is the setting that defines the CALL build. The gcc tree
+differs in two lines: `HAVE_GCC_GLOBAL_REGS` and `HAVE_PRESERVE_NONE`, which are compiler
+features. The toolchain canary in `restore_environment.py` re-emits two units from the link
+manifest and checks their digests. The correspondence's CIR outcome for the zend unit records
+the digest of the pinned source, and the builder rejects an outcome for any other source.
+Reruns are compared as text, with timestamps normalized; only crash diagnostics, whose order
+depends on buffering, are compared by outcome.

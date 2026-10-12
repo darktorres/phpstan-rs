@@ -18,11 +18,16 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+from run import resolve_record
 
 
 HERE = Path(__file__).resolve().parent
 LOCK = json.loads((HERE / "results" / "lock.json").read_text())
+# Measured after a full restore: svf-pathfree 141 MiB, php-cli 341 MiB, php-call 335 MiB,
+# deps 40 MiB, plus the php-src clone and the build copies; about 1.5 GiB in total.
 REQUIRED_FREE_BYTES = 4 * 1024 ** 3
 PHP_REPOSITORY = "https://github.com/php/php-src.git"
 SVF_REPOSITORY = "https://github.com/SVF-tools/SVF.git"
@@ -85,6 +90,29 @@ def _matches(path: Path, digest: str) -> bool:
     return path.is_file() and sha(path) == digest
 
 
+def canary(root: Path, units: int = 2, manifest_path: Path = None) -> None:
+    """Re-emit the first units of the linked module from the link manifest and compare their digests.
+
+    The manifest records each unit's bitcode command and the digest of the module that command
+    produced. Matching digests show that the toolchain and the built tree still reproduce the
+    pinned bitcode; a mismatch means drift, and the restore stops.
+    """
+    manifest_path = manifest_path or HERE / "results" / "evaluation" / "link-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    emitted = [o for o in manifest["objects"] if o.get("imported") and o.get("module_sha256")][:units]
+    require(len(emitted) == units, "the link manifest has too few emitted units for the canary")
+    tree = root / "php-cli" / "php-src"
+    for record in emitted:
+        with tempfile.TemporaryDirectory() as scratch:
+            command = [resolve_record(x) for x in record["bitcode_command"]]
+            output = command.index("-o") + 1
+            command[output] = str(Path(scratch) / "unit.bc")
+            subprocess.run(command, cwd=tree, check=True)
+            actual = sha(Path(scratch) / "unit.bc")
+        require(actual == record["module_sha256"],
+                f"canary unit {record['object']} differs from its manifest digest: drift in the toolchain or tree")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.home() / ".cache/php-catalog-evaluation/root")
@@ -125,6 +153,11 @@ def main(argv=None) -> int:
             subprocess.run([str(HERE / "build_php_pathfree.sh"), str(php_call),
                             str(root / "php-src"), str(deps), "CALL"], check=True)
         require(sha(php_call / "php-src/sapi/cli/php") == call, "CALL php CLI differs from the lock")
+    except (RestoreError, subprocess.CalledProcessError) as error:
+        print(f"restore stopped: {error}", file=sys.stderr)
+        return 1
+    try:
+        canary(root)
     except (RestoreError, subprocess.CalledProcessError) as error:
         print(f"restore stopped: {error}", file=sys.stderr)
         return 1

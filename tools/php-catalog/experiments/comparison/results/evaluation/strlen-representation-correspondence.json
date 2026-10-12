@@ -5,8 +5,8 @@
       "sha256": "76ae87328dccdcadb1a61051ffca6b438b9f57989890a04f2a92830cf7d15e10"
     },
     "cir_log": {
-      "bytes": 157461,
-      "sha256": "c00ed242aa74b610a7831ab4fbdf8d20bdc4733a7102436fc9426b6c74f6e269"
+      "bytes": 231821,
+      "sha256": "a4362119095efa559cb05817b24b7124c2cef5ad9304e80fdc21ee9173ffd10f"
     },
     "clang_ast": {
       "bytes": 42931,

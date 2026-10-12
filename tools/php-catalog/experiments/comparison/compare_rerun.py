@@ -27,6 +27,9 @@ IGNORED_FILES = {'.time.json', '.cgroup.json', 'completed.json'}
 # (exit 139) prints its diagnostics in an order that depends on buffering, and build logs record
 # build warnings. The exit codes and classifications are compared through the JSON records.
 OUTCOME_ONLY_FILES = ('.err',)
+# A frontend that crashes prints its stack and its own diagnostics in an order that depends on
+# buffering; such a file is compared by outcome only. Other stderr is compared as text.
+CRASH_MARKERS = ('Stack dump:', 'PLEASE submit a bug report')
 # Build trees are inputs to a run, not evidence; their binaries' digests are recorded in
 # compact-lock.json and the gcc manifest, and those files are compared.
 IGNORED_PREFIXES = ('compact-svf/', 'compact-svf-source/', 'php-gcc/')
@@ -35,6 +38,7 @@ IGNORED_PREFIXES = ('compact-svf/', 'compact-svf-source/', 'php-gcc/')
 IGNORED_PATTERNS = [
     (re.compile(r'^(\S*Time)\s+[0-9.eE+-]+$', re.M), r'\1 <time>'),
     (re.compile(r'0x[0-9a-f]{6,}'), '0x<address>'),
+    (re.compile(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+'), '<timestamp>'),
     (re.compile(r'^(AvgTime\S*|MemoryUsage\S*)\s+[0-9.eE+-]+$', re.M), r'\1 <measured>'),
 ]
 
@@ -79,7 +83,9 @@ def compare(run_a, run_b, also_runs=()):
             continue
         if str(name).startswith(IGNORED_PREFIXES):
             continue
-        if str(name).endswith(OUTCOME_ONLY_FILES):
+        if str(name).endswith(OUTCOME_ONLY_FILES) and any(
+                marker in (a / name).read_text(errors='replace') or marker in (b / name).read_text(errors='replace')
+                for marker in CRASH_MARKERS):
             continue
         path_a, path_b = a / name, b / name
         if path_a.suffix == '.json':

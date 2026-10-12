@@ -45,15 +45,21 @@ class CompareRerunTests(unittest.TestCase):
             c = self.make_run(root, 'c', [], text='Nodes 13\nLLVMIRTime 0.02\n')
             self.assertEqual(CR.compare(a, c), ['out.txt: differs'])
 
-    def test_a_stderr_file_is_compared_by_outcome_only(self):
+    def test_stderr_differs_only_in_timestamps_or_crash_diagnostics(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            a = self.make_run(root, 'a', [], text='one diagnostic\n')
+            a = self.make_run(root, 'a', [], text='one\n')
             b = self.make_run(root, 'b', [])
-            (b / 'out.txt').write_text('one diagnostic\n')
-            (a / 'binary.err').write_text('2026-10-12 timestamped log\n')
-            (b / 'binary.err').write_text('2026-10-12 another timestamped log\n')
+            (b / 'out.txt').write_text('one\n')
+            (a / 'binary.err').write_text('2026-10-12 09:26:37,929 | log line\n')
+            (b / 'binary.err').write_text('2026-10-12 10:01:02,111 | log line\n')
             self.assertEqual(CR.compare(a, b), [])
+            (a / 'gcc.err').write_text('a real warning in one run\n')
+            (b / 'gcc.err').write_text('a different warning in the other\n')
+            self.assertEqual(CR.compare(a, b), ['gcc.err: differs'])
+            (a / 'cir.err').write_text('Stack dump:\n#0 0x1234567890\n')
+            (b / 'cir.err').write_text('Stack dump:\n#0 0x9999999999\n')
+            self.assertEqual(CR.compare(a, b), ['gcc.err: differs'])
 
     def test_a_file_present_in_one_run_is_reported(self):
         with tempfile.TemporaryDirectory() as temporary:

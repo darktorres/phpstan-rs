@@ -319,8 +319,8 @@ def build_report(args, lock):
         raise SystemExit("GCC GIMPLE/CFG does not expose the parse/length/result bridge")
 
     cir = load(args.cir_log)
-    # Two formats: the campaign's `units` document (source digest per unit), and the finish
-    # stage's list of outcomes, which binds the zend unit by name within the pinned PHP commit.
+    # Two formats: the campaign's `units` document, and the finish stage's list of outcomes, whose
+    # zend unit must record the digest of the pinned source.
     if isinstance(cir, dict):
         cir_units = [u for u in cir.get("units", [])
                      if u.get("source", "").endswith("/Zend/zend_builtin_functions.c")]
@@ -333,6 +333,8 @@ def build_report(args, lock):
         zend_units = [u for u in cir if u.get("name") == "php-Zend-zend_builtin_functions.o"]
         if len(zend_units) != 1:
             raise SystemExit("CIR outcome list does not uniquely identify the zend unit")
+        if zend_units[0].get("source_sha256") != source_hash:
+            raise SystemExit("CIR outcome for the zend unit compiled a source other than the pinned one")
         cir_status = "emitted" if zend_units[0].get("imported") is True else "failed"
 
     cleanup_ast, cleanup_llvm = load(args.cleanup_ast), load(args.cleanup_llvm)
