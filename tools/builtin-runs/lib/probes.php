@@ -164,6 +164,19 @@ function valid_value(?ReflectionType $type): ?Closure
         },
         'imagickdraw' => static fn (): ImagickDraw => new ImagickDraw(),
         'imagickpixel' => static fn (): ImagickPixel => new ImagickPixel('white'),
+        // Valid for every function that takes the type, so they are type defaults.
+        'iterator' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
+        'curlsharehandle' => static fn (): CurlShareHandle => curl_share_init(),
+        'opensslasymmetrickey' => static fn (): OpenSSLAsymmetricKey => openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]),
+        'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
+        'domdocument' => static function (): DOMDocument {
+            $document = new DOMDocument();
+            $document->loadXML('<a/>');
+            return $document;
+        },
+        // In the worker's IPC namespace, as the message queue is.
+        'shmop' => static fn (): Shmop => shmop_open(0x5150, 'c', 0644, 64),
+        'sysvsharedmemory' => static fn (): SysvSharedMemory => shm_attach(0x5151, 64),
     ];
     return $values[strtolower($type->getName())] ?? null;
 }
@@ -175,18 +188,41 @@ function valid_value(?ReflectionType $type): ?Closure
  */
 function valid_site(ReflectionParameter $param): ?Closure
 {
+    // Each value is a closure, so a constant of an extension that is not loaded is read only when its function is probed.
     static $sites = [
         'mb_convert_variables' => [
             0 => 'UTF-8',
             1 => 'UTF-8',
         ],
+        'curl_setopt' => [1 => static fn (): int => CURLOPT_FOLLOWLOCATION],
+        'curl_multi_setopt' => [1 => static fn (): int => CURLMOPT_MAXCONNECTS],
+        'curl_share_setopt' => [1 => static fn (): int => CURLSHOPT_SHARE],
+        'datefmt_create' => [0 => 'en'],
+        'datefmt_format_object' => [0 => static fn (): DateTime => new DateTime('2000-01-01 00:00:00', new DateTimeZone('UTC'))],
+        'deflate_init' => [0 => static fn (): int => ZLIB_ENCODING_RAW],
+        'domdocument::registernodeclass' => [0 => 'DOMElement', 1 => static fn (): null => null],
+        'imageaffinematrixget' => [0 => static fn (): int => IMG_AFFINE_TRANSLATE, 1 => static fn (): array => ['x' => 1, 'y' => 1]],
+        'xsltprocessor::transformtouri' => [0 => static function (): DOMDocument {
+            $document = new DOMDocument();
+            $document->loadXML('<a/>');
+            return $document;
+        }],
+        'settype' => [1 => 'int'],
+        'simplexml_load_file' => [1 => static fn (): null => null],
+        'simplexml_load_string' => [1 => static fn (): null => null],
+        'spldoublylinkedlist::add' => [0 => 0],
+        'splobjectstorage::offsetset' => [0 => static fn (): stdClass => new stdClass()],
+        'stream_context_set_option' => [1 => 'http', 2 => 'method', 3 => 'GET'],
     ];
     $function = $param->getDeclaringFunction();
     $key = $function instanceof ReflectionMethod
         ? strtolower($function->getDeclaringClass()->getName() . '::' . $function->getName())
         : strtolower($function->getName());
     $value = $sites[$key][$param->getPosition()] ?? null;
-    return $value === null ? null : static fn (): string => $value;
+    if ($value === null) {
+        return null;
+    }
+    return $value instanceof Closure ? $value : static fn (): mixed => $value;
 }
 
 /** A plain value for a parameter a probe is not at. */
