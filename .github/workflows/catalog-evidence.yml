@@ -26,3 +26,56 @@ jobs:
           TMPDIR: ${{ runner.temp }}
         working-directory: tools/php-catalog/experiments/comparison
         run: python3 -m unittest discover -p 'test_*.py' -v
+
+  # Manual only: the SVF build needs the toolchain the lock pins (LLVM and Clang 21.1.8, Z3 4.13.3,
+  # bison 3.8.2, re2c 4.4). Hosted runners do not provide that set, so the job runs on a
+  # self-hosted runner labelled for it.
+  svf-reproduction:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, catalog-toolchain]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and check the pinned packages, and extract them without installing
+        working-directory: tools/php-catalog/experiments/comparison
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/packages" "$RUNNER_TEMP/deps"
+          cd "$RUNNER_TEMP/packages"
+          apt-get download bison re2c libz3-dev libz3-4
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          pinned = json.loads(pathlib.Path(os.environ['GITHUB_WORKSPACE'] + '/tools/php-catalog/experiments/comparison/results/lock.json').read_text())['downloaded_packages_sha256']
+          for name, digest in pinned.items():
+              actual = hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()
+              assert actual == digest, f'{name} differs from the lock'
+              subprocess.run(['dpkg-deb', '-x', name, os.environ['RUNNER_TEMP'] + '/deps'], check=True)
+          print('packages match the lock and are extracted')
+          PY
+
+      - name: Fetch the pinned SVF commit
+        run: |
+          git clone https://github.com/SVF-tools/SVF.git "$RUNNER_TEMP/SVF"
+          git -C "$RUNNER_TEMP/SVF" checkout --detach e889a5139dbca132142b07d90192efab9a16c614
+
+      - name: Build the SVF tools at two roots and compare them with the lock
+        working-directory: tools/php-catalog/experiments/comparison
+        run: |
+          set -eu
+          DEPS="$RUNNER_TEMP/deps/usr"
+          for root in "$RUNNER_TEMP/svf-a" "$RUNNER_TEMP/svf-b"; do
+            ./build_svf_pathfree.sh "$root" "$RUNNER_TEMP/SVF" "$DEPS"
+          done
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          lock = json.loads(pathlib.Path('results/lock.json').read_text())
+          runner = pathlib.Path(os.environ['RUNNER_TEMP'])
+          def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          for name in ['bin/dvf', 'bin/wpa']:
+              a = sha(runner / 'svf-a/svf-build' / name); b = sha(runner / 'svf-b/svf-build' / name)
+              assert a == b, f'{name} differs between roots'
+              assert a == lock['svf_binary_sha256'][name], f'{name} differs from the lock'
+          extapi = sha(runner / 'svf-a/svf-build/lib/extapi.bc')
+          assert extapi == lock['svf_extapi_sha256'], 'extapi.bc differs from the lock'
+          print('SVF tools reproduce at two roots and match the lock')
+          PY
