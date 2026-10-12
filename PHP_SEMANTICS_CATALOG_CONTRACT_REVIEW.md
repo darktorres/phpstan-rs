@@ -1262,3 +1262,49 @@ only when the locked source is absent). All 46 `cmp` tests pass.
 
 This is not yet the path-free rerun: the producer archives still record the old root, and
 the regeneration is run against the checked-in archives. The rerun is a separate step.
+
+## Remediation of the four open items (2026-10-12)
+
+The evidence chain is path-free: the SVF tools, the PHP CLI, its CALL build and the linked
+module are built from the pinned commits, and each is reproduced at a second location
+with identical digests. Records name the cache and the checkout by placeholder. The
+configuration fault found in the first PHP build (a warning that made configure drop three
+attribute macros) is fixed; every artifact downstream of that build was regenerated.
+
+**RV-26 (SVF replay): closed for the claims stated.** The replay ran twice in the 10 GiB
+enforcing cgroup on the path-free `dvf`; the two runs agree (`compare_rerun.py`). The
+record is checked in (`results/evaluation/strlen-native-demand-svf.json`), names the binary
+by placeholder, and takes the SVF commit and LLVM version from the lock. Its runtime fixture
+digest is the current one (9b38a3ea...); the stale 94dc6509... is no longer cited.
+
+**RV-27 (correspondence artifact): closed for the stated scope.** The producers were rerun
+on the path-free build and checked in under `results/main`, each artifact bound to its
+archived copy. The correspondence was regenerated from them. Its structural content matches
+the earlier artifact exactly; only its input digests differ, and the lock pins the new
+inputs and keeps the old under `superseded_pins`. The byte-for-byte regeneration test runs
+in CI (`.github/workflows/catalog-evidence.yml`), against the locked source fetched by tag.
+Two format changes are part of this closure: sources are named relative to the PHP tree,
+and records carry placeholders. The earlier archives used absolute spellings. Where the
+rerun differs textually from those archives, the difference is in spelling: a tree-relative
+source name, a relative `-I` flag, and the file sizes that follow from them. The content is
+the same.
+
+**RV-13 and RV-18 (resource-limited campaign): open.** The campaign ran end to end on the
+path-free build, twice, with the same outcomes (37 steps; two invalid CBMC runs exit 10 and
+the compact resource gate exit 247 with kernel OOM proof); the finish stage ran end to end,
+twice. Two things remain open:
+- The plan's concurrent scenario was not run. The campaign's admission wait was exercised
+  against an enforcing report that had already been published; a campaign started while a
+  job still runs was not observed to block.
+- The campaign, finish and checkpoint records are not checked in: `results/evaluation` still
+  holds the earlier campaign measurements and checkpoint hashes.
+
+**Observed harness behaviour, recorded for the review:**
+- The enforcing worker needs `OOMPolicy=continue`. Without it, systemd stops the whole scope
+  when its child is OOM-killed, and the worker never publishes its result.
+- A kernel OOM kill of the analysis is reported as exit 247 by GNU time under this wrapper.
+  The resource gate accepts 137, 143 or 247 only with `kernel_oom_kill`, at least one counted
+  kill, and a peak within 256 MiB of the 10 GiB cap.
+- A crashing CIR frontend (exit 139) prints its diagnostics in a buffering-dependent order.
+  Its stderr is not byte-reproducible, so stderr is compared by outcome, not by bytes.
+- Analysis timings and measured memory vary between identical runs and are excluded by name.
