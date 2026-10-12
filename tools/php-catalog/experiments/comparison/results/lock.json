@@ -2,14 +2,14 @@
   "php_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
   "svf_commit": "e889a5139dbca132142b07d90192efab9a16c614",
   "svf_version": "3.4",
-  "svf_extapi_sha256": "64e848a4993d4913d5ac0c68a3fd48cfbc1080c5244fe1899553f5d4a530a245",
+  "svf_extapi_sha256": "65339c216145dc8744fe176a477ee11b0da6d4f2e9770d7ba8ce72894e99a779",
   "z3_experimental_version": "4.13.3; not the proposed production Z3 5.1.0 lock",
   "z3_library_sha256": "eff8f0f91482d0809aae7aa0ed54cb52ff5ee9b5fe1ed1d2bfa9153c4a2fcfaf",
   "compiler_versions": {
     "clang-21": "Ubuntu clang version 21.1.8 (6ubuntu1)",
     "llvm-config-21": "21.1.8",
     "gcc": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
-    "php": "PHP 8.5.4 (cli) (built: Sep  2 2026 14:42:18) (NTS)"
+    "php": "PHP 8.5.4 (cli) (built: Jan 01 2000 00:00:00) (NTS)"
   },
   "probe_sha256": "0188b31399b8eb3ea81f9a1706af22aea280ada33d372b3f8d13692d49b534aa",
   "source_sha256": {
@@ -53,5 +53,23 @@
     "gcc_gimple": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2",
     "gcc_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
     "source": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
-  }
+  },
+  "svf_binary_sha256": {
+    "bin/dvf": "80bcf3c48ab4b55da0acf6f8c49877b2cfd3e31518383b380f0f0d0cb6eb8c91",
+    "bin/wpa": "cbab61507d30ae25e4d02b54481afcdf942bce1f430d1f65ca3b3c8606d5b3f1"
+  },
+  "svf_relocatable_patch_sha256": "c984c1e928e58ec2100517f832843f4cc0116dc05d0ffb204d20058a50a648e1",
+  "php_cli_sha256": "373a40c22fef3e0864f6a6b61df631af3065cbbdbafb0daeb536c024d6c6eb6d",
+  "php_fixed_time_header_sha256": "10c976349a063f02b37ac44817f24ab2a5fd0dfa075ad0e878d66334f7ed448a",
+  "superseded_pins": {
+    "svf_extapi_sha256": {
+      "value": "64e848a4993d4913d5ac0c68a3fd48cfbc1080c5244fe1899553f5d4a530a245",
+      "reason": "built with the absolute build-directory extapi candidate and an absolute source path; not reproducible from another root"
+    },
+    "compiler_versions.php": {
+      "value": "PHP 8.5.4 (cli) (built: Sep  2 2026 14:42:18) (NTS)",
+      "reason": "built with the build root in __FILE__ and the build time in the binary"
+    }
+  },
+  "php_call_cli_sha256": "c09cc82f1c22783888d65ec513d8d7c0541d988c33796d045a41fc67a3268129"
 }
