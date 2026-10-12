@@ -36,6 +36,25 @@ class CompareRerunTests(unittest.TestCase):
             b = self.make_run(root, 'b', [], text=f'from {root / "b"}/x.c\n')
             self.assertEqual(CR.compare(a, b), [])
 
+    def test_a_timing_line_in_stdout_may_differ_but_a_count_may_not(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            a = self.make_run(root, 'a', [], text='Nodes 12\nLLVMIRTime 0.02\n')
+            b = self.make_run(root, 'b', [], text='Nodes 12\nLLVMIRTime 5.9e-05\n')
+            self.assertEqual(CR.compare(a, b), [])
+            c = self.make_run(root, 'c', [], text='Nodes 13\nLLVMIRTime 0.02\n')
+            self.assertEqual(CR.compare(a, c), ['out.txt: differs'])
+
+    def test_a_stderr_file_is_compared_by_outcome_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            a = self.make_run(root, 'a', [], text='one diagnostic\n')
+            b = self.make_run(root, 'b', [])
+            (b / 'out.txt').write_text('one diagnostic\n')
+            (a / 'binary.err').write_text('2026-10-12 timestamped log\n')
+            (b / 'binary.err').write_text('2026-10-12 another timestamped log\n')
+            self.assertEqual(CR.compare(a, b), [])
+
     def test_a_file_present_in_one_run_is_reported(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

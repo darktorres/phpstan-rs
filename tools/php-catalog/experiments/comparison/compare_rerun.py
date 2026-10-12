@@ -11,33 +11,64 @@ Every other difference is listed. Exit status 0 means no unexplained difference.
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 
 IGNORED_KEYS = {
-    'elapsed_seconds', 'user_seconds', 'system_seconds', 'max_rss_kib', 'sampled_group_peak_bytes',
+    # Raw digests of stderr and stdout include the timings and addresses named above; each
+    # stdout file is compared after that normalization, and each stderr file is outcome-only.
+    'max_rss_kib', 'sampled_group_peak_bytes', 'stderr_sha256', 'stdout_sha256',
     'pid', 'cgroup', 'systemd_messages', 'memory_peak_bytes', 'memory_events',
 }
-IGNORED_FILES = {'.time.json', '.cgroup.json'}
+IGNORED_KEY_SUFFIXES = ('_seconds',)
+IGNORED_FILES = {'.time.json', '.cgroup.json', 'completed.json'}
+# Frontend and build-log stderr is compared by outcome, not by bytes: a frontend that crashes
+# (exit 139) prints its diagnostics in an order that depends on buffering, and build logs record
+# build warnings. The exit codes and classifications are compared through the JSON records.
+OUTCOME_ONLY_FILES = ('.err',)
+# Build trees are inputs to a run, not evidence; their binaries' digests are recorded in
+# compact-lock.json and the gcc manifest, and those files are compared.
+IGNORED_PREFIXES = ('compact-svf/', 'compact-svf-source/', 'php-gcc/')
+# Text that varies between identical runs: timings printed by the analysis, and addresses
+# in the stack traces that LLVM prints when a frontend rejects a unit (ASLR).
+IGNORED_PATTERNS = [
+    (re.compile(r'^(\S*Time)\s+[0-9.eE+-]+$', re.M), r'\1 <time>'),
+    (re.compile(r'0x[0-9a-f]{6,}'), '0x<address>'),
+    (re.compile(r'^(AvgTime\S*|MemoryUsage\S*)\s+[0-9.eE+-]+$', re.M), r'\1 <measured>'),
+]
 
 
 def normalize(value):
     if isinstance(value, dict):
-        return {key: normalize(item) for key, item in value.items() if key not in IGNORED_KEYS}
+        return {key: normalize(item) for key, item in value.items()
+                if key not in IGNORED_KEYS and not key.endswith(IGNORED_KEY_SUFFIXES)}
     if isinstance(value, list):
         return [normalize(item) for item in value]
     return value
 
 
-def text_for(path, run_dirs):
-    text = path.read_bytes().decode('utf-8', errors='replace')
+def replace_runs(text, run_dirs):
     for directory in run_dirs:
         text = text.replace(str(directory), '<run>')
+        # Records name a run's directory by the <cache> placeholder as well.
+        text = text.replace('<cache>/' + directory.name, '<run>')
+    for pattern, replacement in IGNORED_PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
 
-def compare(run_a, run_b):
+def text_for(path, run_dirs):
+    return replace_runs(path.read_bytes().decode('utf-8', errors='replace'), run_dirs)
+
+
+def json_for(path, run_dirs):
+    return replace_runs(json.dumps(normalize(json.loads(path.read_text())), sort_keys=True, indent=1), run_dirs)
+
+
+def compare(run_a, run_b, also_runs=()):
     a, b = Path(run_a).resolve(), Path(run_b).resolve()
+    runs = [a, b, *(Path(x).resolve() for x in also_runs)]
     names_a = {p.relative_to(a) for p in a.rglob('*') if p.is_file()}
     names_b = {p.relative_to(b) for p in b.rglob('*') if p.is_file()}
     differences = []
@@ -46,14 +77,18 @@ def compare(run_a, run_b):
     for name in sorted(names_a & names_b, key=str):
         if any(str(name).endswith(suffix) for suffix in IGNORED_FILES):
             continue
+        if str(name).startswith(IGNORED_PREFIXES):
+            continue
+        if str(name).endswith(OUTCOME_ONLY_FILES):
+            continue
         path_a, path_b = a / name, b / name
         if path_a.suffix == '.json':
             try:
-                same = normalize(json.loads(path_a.read_text())) == normalize(json.loads(path_b.read_text()))
+                same = json_for(path_a, runs) == json_for(path_b, runs)
             except ValueError:
-                same = text_for(path_a, [a, b]) == text_for(path_b, [a, b])
+                same = text_for(path_a, runs) == text_for(path_b, runs)
         else:
-            same = text_for(path_a, [a, b]) == text_for(path_b, [a, b])
+            same = text_for(path_a, runs) == text_for(path_b, runs)
         if not same:
             differences.append(f'{name}: differs')
     return differences
@@ -64,8 +99,10 @@ def main(argv=None):
     parser.add_argument('run_a', type=Path)
     parser.add_argument('run_b', type=Path)
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--also-run', type=Path, action='append', default=[],
+                        help='another run directory the records refer to; replaced like the two compared runs')
     args = parser.parse_args(argv)
-    differences = compare(args.run_a, args.run_b)
+    differences = compare(args.run_a, args.run_b, args.also_run)
     text = '\n'.join(differences) + ('\n' if differences else '')
     if args.report and differences:
         args.report.write_text(text)
