@@ -2700,26 +2700,6 @@ fn settle(
             .collect::<SmallVec<[usize; 8]>>()
     };
     let mut callers: Vec<Vec<u32>> = vec![Vec::new(); classified.len()];
-    {
-        // Each list is sized once, from the callers counted in a first pass
-        // that skips a caller's repeats the way the second does.
-        let mut counts = vec![0u32; classified.len()];
-        let mut last = vec![u32::MAX; classified.len()];
-        for (pos, (_, classification)) in classified.iter().enumerate() {
-            if !live(pos) {
-                continue;
-            }
-            for callee in callees_of(classification) {
-                if last[callee] != pos as u32 {
-                    last[callee] = pos as u32;
-                    counts[callee] += 1;
-                }
-            }
-        }
-        for (list, count) in callers.iter_mut().zip(counts) {
-            list.reserve_exact(count as usize);
-        }
-    }
     for (pos, (_, classification)) in classified.iter().enumerate() {
         if !live(pos) {
             continue;
