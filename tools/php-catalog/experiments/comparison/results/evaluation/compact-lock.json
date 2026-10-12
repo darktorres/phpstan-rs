@@ -1,9 +1,7 @@
 {
   "source_commit": "e889a5139dbca132142b07d90192efab9a16c614",
   "patch_sha256": "3065137de58e5e805e91b8583230d0cbc633997f4d7040be91009682e9fbae4d",
-  "adapted_source_sha256": "69e3f8d8681c12d8f3b91c9ad549a699ffe9fc39996d12454e1c45fdcc8eb964",
-  "reused_library_sha256": "603b373160884a6b9a6d17a9f316ea401fba1e39313816490160ce7433786dc3",
-  "binary_sha256": "df395743669ec60b37df67a8cc4edcbb6fc19801790fded6ecfa674374a594fa",
-  "unchanged_object_reuse": true,
-  "affected_source_files": 1
+  "relocatable_patch_sha256": "c984c1e928e58ec2100517f832843f4cc0116dc05d0ffb204d20058a50a648e1",
+  "binary_sha256": "6994aafbc82eb93ebd027265d24ae3e354dfaefda30ff8d82e376dfcbf26669f",
+  "build": "build_svf_pathfree.sh (full build from the pinned commit; no object reuse)"
 }

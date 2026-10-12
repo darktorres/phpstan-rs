@@ -1,0 +1,160 @@
+{
+  "schema": 1,
+  "status": "complete",
+  "step_count": 37,
+  "steps": [
+    "cbmc-contracts",
+    "cbmc-invalid-composition",
+    "cbmc-low-budget",
+    "smt",
+    "layout-build-clang-21",
+    "layout-runtime-clang-21",
+    "layout-build-gcc",
+    "layout-runtime-gcc",
+    "binary",
+    "dispatch-emit",
+    "dispatch-promote",
+    "dispatch-stock",
+    "dispatch-compact",
+    "external-emit",
+    "external-promote",
+    "external-stock",
+    "external-compact",
+    "layout_cases-emit",
+    "layout_cases-promote",
+    "layout_cases-stock",
+    "layout_cases-compact",
+    "growth-64-emit",
+    "growth-64-promote",
+    "growth-64-compact",
+    "growth-65536-emit",
+    "growth-65536-promote",
+    "growth-65536-compact",
+    "growth-16777216-emit",
+    "growth-16777216-promote",
+    "growth-16777216-compact",
+    "growth-67108864-emit",
+    "growth-67108864-promote",
+    "growth-67108864-compact",
+    "growth-268435456-emit",
+    "growth-268435456-promote",
+    "growth-268435456-compact",
+    "whole-compact-dda"
+  ],
+  "expected_exit_codes": {
+    "cbmc-contracts": [
+      0
+    ],
+    "cbmc-invalid-composition": [
+      10
+    ],
+    "cbmc-low-budget": [
+      10
+    ],
+    "smt": [
+      0
+    ],
+    "layout-build-clang-21": [
+      0
+    ],
+    "layout-runtime-clang-21": [
+      0
+    ],
+    "layout-build-gcc": [
+      0
+    ],
+    "layout-runtime-gcc": [
+      0
+    ],
+    "binary": [
+      0
+    ],
+    "dispatch-emit": [
+      0
+    ],
+    "dispatch-promote": [
+      0
+    ],
+    "dispatch-stock": [
+      0
+    ],
+    "dispatch-compact": [
+      0
+    ],
+    "external-emit": [
+      0
+    ],
+    "external-promote": [
+      0
+    ],
+    "external-stock": [
+      0
+    ],
+    "external-compact": [
+      0
+    ],
+    "layout_cases-emit": [
+      0
+    ],
+    "layout_cases-promote": [
+      0
+    ],
+    "layout_cases-stock": [
+      0
+    ],
+    "layout_cases-compact": [
+      0
+    ],
+    "growth-64-emit": [
+      0
+    ],
+    "growth-64-promote": [
+      0
+    ],
+    "growth-64-compact": [
+      0
+    ],
+    "growth-65536-emit": [
+      0
+    ],
+    "growth-65536-promote": [
+      0
+    ],
+    "growth-65536-compact": [
+      0
+    ],
+    "growth-16777216-emit": [
+      0
+    ],
+    "growth-16777216-promote": [
+      0
+    ],
+    "growth-16777216-compact": [
+      0
+    ],
+    "growth-67108864-emit": [
+      0
+    ],
+    "growth-67108864-promote": [
+      0
+    ],
+    "growth-67108864-compact": [
+      0
+    ],
+    "growth-268435456-emit": [
+      0
+    ],
+    "growth-268435456-promote": [
+      0
+    ],
+    "growth-268435456-compact": [
+      0
+    ],
+    "whole-compact-dda": [
+      137,
+      143,
+      247
+    ]
+  },
+  "measurements_sha256": "e53f421a05b402f2cf8104211949bda4a4b9fc739b8dad762be72b81df0b4623"
+}

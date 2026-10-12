@@ -117,5 +117,14 @@
       "reason": "the correspondence inputs were the earlier campaign and producer archives"
     }
   },
-  "php_call_cli_sha256": "bb4aabfef575d223db59cc6dc75c3d8138debb2324702df016d9465a75adbf57"
+  "php_call_cli_sha256": "bb4aabfef575d223db59cc6dc75c3d8138debb2324702df016d9465a75adbf57",
+  "campaign_checkpoint_sha256": {
+    "campaign-measurements.json": "e53f421a05b402f2cf8104211949bda4a4b9fc739b8dad762be72b81df0b4623",
+    "campaign-completed.json": "ff0d492c8b3d60263148f7f5246c348807f435ea845feb5082a1f79474c607b1",
+    "campaign-whole-compact-dda.cgroup.json": "79125ec6c0299434bc0f4ad85b0b316127d3bc8dfa823f9cb56558926eaacf63",
+    "compact-lock.json": "972052e74c57e903e15e58abfa7f154d27c55e1e93d87bbc09eaff32aac2ee48",
+    "finish-measurements.json": "7713ce72a38769049ee1eba3330f1de2c42559323cc6d6db4b5d4b1e8127832f",
+    "finish-completed.json": "a307bd4bd98028e83b32e150a056e6242eccb95053d19fabe5b0e73bb02e3848",
+    "cir-imports.json": "c00ed242aa74b610a7831ab4fbdf8d20bdc4733a7102436fc9426b6c74f6e269"
+  }
 }

@@ -1,0 +1,4282 @@
+{
+  "schema": 1,
+  "status": "complete",
+  "step_count": 1068,
+  "steps": [
+    "binary-retry",
+    "layout-stock-constants",
+    "layout-stock-arrays",
+    "layout-stock-constants-arrays",
+    "layout-compact-constants",
+    "layout-compact-arrays",
+    "layout-compact-constants-arrays",
+    "instrument-build",
+    "closure-build",
+    "instrument-whole",
+    "instrument-verify",
+    "instrument-link",
+    "instrumented-runtime",
+    "instrument-symbols",
+    "native-closure-audit",
+    "gcc-tree",
+    "gcc-runtime",
+    "gcc-0-gimple",
+    "gcc-1-gimple",
+    "gcc-2-gimple",
+    "gcc-3-gimple",
+    "gcc-4-gimple",
+    "gcc-5-gimple",
+    "gcc-6-gimple",
+    "gcc-7-gimple",
+    "gcc-8-gimple",
+    "gcc-9-gimple",
+    "gcc-10-gimple",
+    "gcc-11-gimple",
+    "gcc-12-gimple",
+    "gcc-13-gimple",
+    "gcc-14-gimple",
+    "gcc-15-gimple",
+    "gcc-16-gimple",
+    "gcc-17-gimple",
+    "gcc-18-gimple",
+    "gcc-19-gimple",
+    "gcc-20-gimple",
+    "gcc-21-gimple",
+    "gcc-22-gimple",
+    "gcc-23-gimple",
+    "gcc-24-gimple",
+    "gcc-25-gimple",
+    "gcc-26-gimple",
+    "gcc-27-gimple",
+    "gcc-28-gimple",
+    "gcc-29-gimple",
+    "gcc-30-gimple",
+    "gcc-31-gimple",
+    "gcc-32-gimple",
+    "gcc-33-gimple",
+    "gcc-34-gimple",
+    "gcc-35-gimple",
+    "gcc-36-gimple",
+    "gcc-37-gimple",
+    "gcc-38-gimple",
+    "gcc-39-gimple",
+    "gcc-40-gimple",
+    "gcc-41-gimple",
+    "gcc-42-gimple",
+    "gcc-43-gimple",
+    "gcc-44-gimple",
+    "gcc-45-gimple",
+    "gcc-46-gimple",
+    "gcc-47-gimple",
+    "gcc-48-gimple",
+    "gcc-49-gimple",
+    "gcc-50-gimple",
+    "gcc-51-gimple",
+    "gcc-52-gimple",
+    "gcc-53-gimple",
+    "gcc-54-gimple",
+    "gcc-55-gimple",
+    "gcc-56-gimple",
+    "gcc-57-gimple",
+    "gcc-58-gimple",
+    "gcc-59-gimple",
+    "gcc-60-gimple",
+    "gcc-61-gimple",
+    "gcc-62-gimple",
+    "gcc-63-gimple",
+    "gcc-64-gimple",
+    "gcc-65-gimple",
+    "gcc-66-gimple",
+    "gcc-67-gimple",
+    "gcc-68-gimple",
+    "gcc-69-gimple",
+    "gcc-70-gimple",
+    "gcc-71-gimple",
+    "gcc-72-gimple",
+    "gcc-73-gimple",
+    "gcc-74-gimple",
+    "gcc-75-gimple",
+    "gcc-76-gimple",
+    "gcc-77-gimple",
+    "gcc-78-gimple",
+    "gcc-79-gimple",
+    "gcc-80-gimple",
+    "gcc-81-gimple",
+    "gcc-82-gimple",
+    "gcc-83-gimple",
+    "gcc-84-gimple",
+    "gcc-85-gimple",
+    "gcc-86-gimple",
+    "gcc-87-gimple",
+    "gcc-88-gimple",
+    "gcc-89-gimple",
+    "gcc-90-gimple",
+    "gcc-91-gimple",
+    "gcc-92-gimple",
+    "gcc-93-gimple",
+    "gcc-94-gimple",
+    "gcc-95-gimple",
+    "gcc-96-gimple",
+    "gcc-97-gimple",
+    "gcc-98-gimple",
+    "gcc-99-gimple",
+    "gcc-100-gimple",
+    "gcc-101-gimple",
+    "gcc-102-gimple",
+    "gcc-103-gimple",
+    "gcc-104-gimple",
+    "gcc-105-gimple",
+    "gcc-106-gimple",
+    "gcc-107-gimple",
+    "gcc-108-gimple",
+    "gcc-109-gimple",
+    "gcc-110-gimple",
+    "gcc-111-gimple",
+    "gcc-112-gimple",
+    "gcc-113-gimple",
+    "gcc-114-gimple",
+    "gcc-115-gimple",
+    "gcc-116-gimple",
+    "gcc-117-gimple",
+    "gcc-118-gimple",
+    "gcc-119-gimple",
+    "gcc-120-gimple",
+    "gcc-121-gimple",
+    "gcc-122-gimple",
+    "gcc-123-gimple",
+    "gcc-124-gimple",
+    "gcc-125-gimple",
+    "gcc-126-gimple",
+    "gcc-127-gimple",
+    "gcc-128-gimple",
+    "gcc-129-gimple",
+    "gcc-130-gimple",
+    "gcc-131-gimple",
+    "gcc-132-gimple",
+    "gcc-133-gimple",
+    "gcc-134-gimple",
+    "gcc-135-gimple",
+    "gcc-136-gimple",
+    "gcc-137-gimple",
+    "gcc-138-gimple",
+    "gcc-139-gimple",
+    "gcc-140-gimple",
+    "gcc-141-gimple",
+    "gcc-142-gimple",
+    "gcc-143-gimple",
+    "gcc-144-gimple",
+    "gcc-145-gimple",
+    "gcc-146-gimple",
+    "gcc-147-gimple",
+    "gcc-148-gimple",
+    "gcc-149-gimple",
+    "gcc-150-gimple",
+    "gcc-151-gimple",
+    "gcc-152-gimple",
+    "gcc-153-gimple",
+    "gcc-154-gimple",
+    "gcc-155-gimple",
+    "gcc-156-gimple",
+    "gcc-157-gimple",
+    "gcc-158-gimple",
+    "gcc-159-gimple",
+    "gcc-160-gimple",
+    "gcc-161-gimple",
+    "gcc-162-gimple",
+    "gcc-163-gimple",
+    "gcc-164-gimple",
+    "gcc-165-gimple",
+    "gcc-166-gimple",
+    "gcc-167-gimple",
+    "gcc-168-gimple",
+    "gcc-169-gimple",
+    "gcc-170-gimple",
+    "gcc-171-gimple",
+    "gcc-172-gimple",
+    "gcc-173-gimple",
+    "gcc-174-gimple",
+    "gcc-175-gimple",
+    "gcc-176-gimple",
+    "gcc-177-gimple",
+    "gcc-178-gimple",
+    "gcc-179-gimple",
+    "gcc-180-gimple",
+    "gcc-181-gimple",
+    "gcc-182-gimple",
+    "gcc-183-gimple",
+    "gcc-184-gimple",
+    "gcc-185-gimple",
+    "gcc-186-gimple",
+    "gcc-187-gimple",
+    "gcc-188-gimple",
+    "gcc-189-gimple",
+    "gcc-190-gimple",
+    "gcc-191-gimple",
+    "gcc-192-gimple",
+    "gcc-193-gimple",
+    "gcc-194-gimple",
+    "gcc-195-gimple",
+    "gcc-196-gimple",
+    "gcc-197-gimple",
+    "gcc-198-gimple",
+    "gcc-199-gimple",
+    "gcc-200-gimple",
+    "gcc-201-gimple",
+    "gcc-202-gimple",
+    "gcc-203-gimple",
+    "gcc-204-gimple",
+    "gcc-205-gimple",
+    "gcc-206-gimple",
+    "gcc-207-gimple",
+    "gcc-208-gimple",
+    "gcc-209-gimple",
+    "gcc-210-gimple",
+    "gcc-211-gimple",
+    "gcc-212-gimple",
+    "gcc-213-gimple",
+    "gcc-214-gimple",
+    "gcc-215-gimple",
+    "gcc-216-gimple",
+    "gcc-217-gimple",
+    "gcc-218-gimple",
+    "gcc-219-gimple",
+    "gcc-220-gimple",
+    "gcc-221-gimple",
+    "gcc-222-gimple",
+    "gcc-223-gimple",
+    "gcc-224-gimple",
+    "gcc-225-gimple",
+    "gcc-226-gimple",
+    "gcc-227-gimple",
+    "gcc-228-gimple",
+    "gcc-229-gimple",
+    "gcc-230-gimple",
+    "gcc-231-gimple",
+    "gcc-232-gimple",
+    "gcc-233-gimple",
+    "gcc-234-gimple",
+    "gcc-235-gimple",
+    "gcc-236-gimple",
+    "gcc-237-gimple",
+    "gcc-238-gimple",
+    "gcc-239-gimple",
+    "gcc-240-gimple",
+    "gcc-241-gimple",
+    "gcc-242-gimple",
+    "gcc-243-gimple",
+    "gcc-244-gimple",
+    "gcc-245-gimple",
+    "gcc-246-gimple",
+    "gcc-247-gimple",
+    "gcc-248-gimple",
+    "gcc-249-gimple",
+    "gcc-250-gimple",
+    "gcc-251-gimple",
+    "gcc-252-gimple",
+    "gcc-253-gimple",
+    "gcc-254-gimple",
+    "gcc-255-gimple",
+    "gcc-256-gimple",
+    "gcc-257-gimple",
+    "gcc-258-gimple",
+    "gcc-259-gimple",
+    "gcc-260-gimple",
+    "gcc-261-gimple",
+    "gcc-262-gimple",
+    "gcc-263-gimple",
+    "gcc-264-gimple",
+    "gcc-265-gimple",
+    "gcc-266-gimple",
+    "gcc-267-gimple",
+    "gcc-268-gimple",
+    "gcc-269-gimple",
+    "gcc-270-gimple",
+    "gcc-271-gimple",
+    "gcc-272-gimple",
+    "gcc-273-gimple",
+    "gcc-274-gimple",
+    "gcc-275-gimple",
+    "gcc-276-gimple",
+    "gcc-277-gimple",
+    "gcc-278-gimple",
+    "gcc-279-gimple",
+    "gcc-280-gimple",
+    "gcc-281-gimple",
+    "gcc-282-gimple",
+    "gcc-283-gimple",
+    "gcc-284-gimple",
+    "gcc-285-gimple",
+    "gcc-286-gimple",
+    "gcc-287-gimple",
+    "gcc-288-gimple",
+    "gcc-289-gimple",
+    "gcc-290-gimple",
+    "gcc-291-gimple",
+    "gcc-292-gimple",
+    "gcc-293-gimple",
+    "gcc-294-gimple",
+    "gcc-295-gimple",
+    "gcc-296-gimple",
+    "gcc-297-gimple",
+    "gcc-298-gimple",
+    "gcc-299-gimple",
+    "gcc-300-gimple",
+    "gcc-301-gimple",
+    "gcc-302-gimple",
+    "gcc-303-gimple",
+    "gcc-304-gimple",
+    "gcc-305-gimple",
+    "gcc-306-gimple",
+    "gcc-307-gimple",
+    "gcc-308-gimple",
+    "gcc-309-gimple",
+    "gcc-310-gimple",
+    "gcc-311-gimple",
+    "gcc-312-gimple",
+    "gcc-313-gimple",
+    "gcc-314-gimple",
+    "gcc-315-gimple",
+    "gcc-316-gimple",
+    "gcc-317-gimple",
+    "gcc-318-gimple",
+    "gcc-319-gimple",
+    "gcc-320-gimple",
+    "gcc-321-gimple",
+    "gcc-322-gimple",
+    "gcc-323-gimple",
+    "gcc-324-gimple",
+    "gcc-325-gimple",
+    "gcc-326-gimple",
+    "gcc-327-gimple",
+    "gcc-328-gimple",
+    "gcc-329-gimple",
+    "gcc-330-gimple",
+    "gcc-331-gimple",
+    "gcc-332-gimple",
+    "gcc-333-gimple",
+    "gcc-334-gimple",
+    "gcc-335-gimple",
+    "gcc-336-gimple",
+    "gcc-337-gimple",
+    "gcc-338-gimple",
+    "gcc-339-gimple",
+    "gcc-340-gimple",
+    "gcc-341-gimple",
+    "gcc-342-gimple",
+    "gcc-343-gimple",
+    "gcc-344-gimple",
+    "gcc-345-gimple",
+    "gcc-346-gimple",
+    "gcc-347-gimple",
+    "gcc-348-gimple",
+    "gcc-349-gimple",
+    "gcc-350-gimple",
+    "gcc-351-gimple",
+    "gcc-352-gimple",
+    "gcc-353-gimple",
+    "gcc-354-gimple",
+    "gcc-355-gimple",
+    "gcc-356-gimple",
+    "gcc-357-gimple",
+    "gcc-358-gimple",
+    "gcc-359-gimple",
+    "gcc-360-gimple",
+    "gcc-361-gimple",
+    "gcc-362-gimple",
+    "gcc-363-gimple",
+    "gcc-364-gimple",
+    "gcc-365-gimple",
+    "gcc-366-gimple",
+    "gcc-367-gimple",
+    "gcc-368-gimple",
+    "gcc-369-gimple",
+    "gcc-370-gimple",
+    "gcc-371-gimple",
+    "gcc-372-gimple",
+    "gcc-373-gimple",
+    "gcc-374-gimple",
+    "gcc-375-gimple",
+    "gcc-376-gimple",
+    "gcc-377-gimple",
+    "gcc-378-gimple",
+    "gcc-379-gimple",
+    "gcc-380-gimple",
+    "gcc-381-gimple",
+    "gcc-382-gimple",
+    "gcc-383-gimple",
+    "gcc-384-gimple",
+    "gcc-385-gimple",
+    "gcc-386-gimple",
+    "gcc-387-gimple",
+    "gcc-388-gimple",
+    "gcc-389-gimple",
+    "gcc-390-gimple",
+    "gcc-391-gimple",
+    "gcc-392-gimple",
+    "gcc-393-gimple",
+    "gcc-394-gimple",
+    "gcc-395-gimple",
+    "gcc-396-gimple",
+    "gcc-397-gimple",
+    "gcc-398-gimple",
+    "gcc-401-gimple",
+    "gcc-402-gimple",
+    "gcc-403-gimple",
+    "gcc-404-gimple",
+    "gcc-405-gimple",
+    "gcc-406-gimple",
+    "gcc-407-gimple",
+    "gcc-408-gimple",
+    "gcc-409-gimple",
+    "gcc-410-gimple",
+    "gcc-411-gimple",
+    "gcc-412-gimple",
+    "gcc-413-gimple",
+    "gcc-414-gimple",
+    "gcc-415-gimple",
+    "gcc-416-gimple",
+    "gcc-417-gimple",
+    "gcc-418-gimple",
+    "gcc-419-gimple",
+    "gcc-420-gimple",
+    "gcc-421-gimple",
+    "gcc-422-gimple",
+    "gcc-423-gimple",
+    "gcc-424-gimple",
+    "gcc-425-gimple",
+    "gcc-426-gimple",
+    "gcc-427-gimple",
+    "gcc-428-gimple",
+    "gcc-429-gimple",
+    "gcc-430-gimple",
+    "gcc-431-gimple",
+    "gcc-432-gimple",
+    "gcc-433-gimple",
+    "gcc-434-gimple",
+    "gcc-435-gimple",
+    "gcc-436-gimple",
+    "gcc-437-gimple",
+    "gcc-438-gimple",
+    "gcc-439-gimple",
+    "gcc-440-gimple",
+    "gcc-441-gimple",
+    "gcc-442-gimple",
+    "gcc-443-gimple",
+    "gcc-444-gimple",
+    "gcc-445-gimple",
+    "gcc-446-gimple",
+    "gcc-447-gimple",
+    "gcc-448-gimple",
+    "gcc-449-gimple",
+    "gcc-450-gimple",
+    "gcc-451-gimple",
+    "gcc-452-gimple",
+    "gcc-453-gimple",
+    "gcc-454-gimple",
+    "gcc-455-gimple",
+    "gcc-456-gimple",
+    "gcc-457-gimple",
+    "gcc-458-gimple",
+    "gcc-459-gimple",
+    "gcc-460-gimple",
+    "gcc-461-gimple",
+    "gcc-462-gimple",
+    "gcc-463-gimple",
+    "gcc-464-gimple",
+    "gcc-465-gimple",
+    "gcc-466-gimple",
+    "gcc-467-gimple",
+    "gcc-468-gimple",
+    "gcc-469-gimple",
+    "gcc-470-gimple",
+    "gcc-471-gimple",
+    "gcc-472-gimple",
+    "gcc-473-gimple",
+    "gcc-474-gimple",
+    "gcc-475-gimple",
+    "gcc-476-gimple",
+    "gcc-477-gimple",
+    "gcc-478-gimple",
+    "gcc-479-gimple",
+    "gcc-480-gimple",
+    "gcc-481-gimple",
+    "gcc-482-gimple",
+    "gcc-483-gimple",
+    "gcc-484-gimple",
+    "gcc-485-gimple",
+    "gcc-486-gimple",
+    "gcc-487-gimple",
+    "gcc-488-gimple",
+    "gcc-489-gimple",
+    "gcc-490-gimple",
+    "gcc-491-gimple",
+    "gcc-492-gimple",
+    "gcc-493-gimple",
+    "gcc-494-gimple",
+    "gcc-495-gimple",
+    "gcc-496-gimple",
+    "gcc-497-gimple",
+    "gcc-498-gimple",
+    "gcc-499-gimple",
+    "gcc-500-gimple",
+    "gcc-501-gimple",
+    "gcc-502-gimple",
+    "gcc-503-gimple",
+    "gcc-504-gimple",
+    "gcc-505-gimple",
+    "gcc-506-gimple",
+    "gcc-507-gimple",
+    "gcc-508-gimple",
+    "gcc-509-gimple",
+    "gcc-510-gimple",
+    "gcc-511-gimple",
+    "gcc-512-gimple",
+    "gcc-513-gimple",
+    "gcc-514-gimple",
+    "gcc-515-gimple",
+    "gcc-516-gimple",
+    "gcc-517-gimple",
+    "gcc-518-gimple",
+    "gcc-519-gimple",
+    "gcc-520-gimple",
+    "gcc-521-gimple",
+    "gcc-522-gimple",
+    "gcc-523-gimple",
+    "gcc-524-gimple",
+    "cir-build",
+    "dispatch-cir",
+    "platform-cir",
+    "cleanup-cir",
+    "cleanup-windows-cir",
+    "php-ext-date-php_date.o-cir",
+    "php-ext-date-lib-astro.o-cir",
+    "php-ext-date-lib-dow.o-cir",
+    "php-ext-date-lib-parse_date.o-cir",
+    "php-ext-date-lib-parse_tz.o-cir",
+    "php-ext-date-lib-parse_posix.o-cir",
+    "php-ext-date-lib-timelib.o-cir",
+    "php-ext-date-lib-tm2unixtime.o-cir",
+    "php-ext-date-lib-unixtime2tm.o-cir",
+    "php-ext-date-lib-parse_iso_intervals.o-cir",
+    "php-ext-date-lib-interval.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_auto_possess.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_chartables.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_chkdint.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_compile.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_config.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_context.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_convert.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_dfa_match.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_error.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_extuni.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_find_bracket.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_jit_compile.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_maketables.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_match_data.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_match.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_newline.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_ord2utf.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_pattern_info.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_script_run.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_serialize.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_string_utils.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_study.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_substitute.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_substring.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_tables.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_ucd.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_valid_utf.o-cir",
+    "php-ext-pcre-pcre2lib-pcre2_xclass.o-cir",
+    "php-ext-pcre-php_pcre.o-cir",
+    "php-ext-hash-sha3-generic64lc-KeccakP-1600-opt64.o-cir",
+    "php-ext-hash-sha3-generic64lc-KeccakHash.o-cir",
+    "php-ext-hash-sha3-generic64lc-KeccakSponge.o-cir",
+    "php-ext-hash-hash_adler32.o-cir",
+    "php-ext-hash-hash_crc32.o-cir",
+    "php-ext-hash-hash_fnv.o-cir",
+    "php-ext-hash-hash_gost.o-cir",
+    "php-ext-hash-hash_haval.o-cir",
+    "php-ext-hash-hash_joaat.o-cir",
+    "php-ext-hash-hash_md.o-cir",
+    "php-ext-hash-hash_murmur.o-cir",
+    "php-ext-hash-hash_ripemd.o-cir",
+    "php-ext-hash-hash_sha_ni.o-cir",
+    "php-ext-hash-hash_sha_sse2.o-cir",
+    "php-ext-hash-hash_sha.o-cir",
+    "php-ext-hash-hash_sha3.o-cir",
+    "php-ext-hash-hash_snefru.o-cir",
+    "php-ext-hash-hash_tiger.o-cir",
+    "php-ext-hash-hash_whirlpool.o-cir",
+    "php-ext-hash-hash_xxhash.o-cir",
+    "php-ext-hash-hash.o-cir",
+    "php-ext-hash-murmur-PMurHash.o-cir",
+    "php-ext-hash-murmur-PMurHash128.o-cir",
+    "php-ext-json-json_encoder.o-cir",
+    "php-ext-json-json_parser.o-cir",
+    "php-ext-json-json_scanner.o-cir",
+    "php-ext-json-json.o-cir",
+    "php-ext-lexbor-php_lexbor.o-cir",
+    "php-ext-lexbor-lexbor-core-array_obj.o-cir",
+    "php-ext-lexbor-lexbor-core-array.o-cir",
+    "php-ext-lexbor-lexbor-core-avl.o-cir",
+    "php-ext-lexbor-lexbor-core-bst.o-cir",
+    "php-ext-lexbor-lexbor-core-conv.o-cir",
+    "php-ext-lexbor-lexbor-core-diyfp.o-cir",
+    "php-ext-lexbor-lexbor-core-dobject.o-cir",
+    "php-ext-lexbor-lexbor-core-dtoa.o-cir",
+    "php-ext-lexbor-lexbor-core-hash.o-cir",
+    "php-ext-lexbor-lexbor-core-mem.o-cir",
+    "php-ext-lexbor-lexbor-core-mraw.o-cir",
+    "php-ext-lexbor-lexbor-core-plog.o-cir",
+    "php-ext-lexbor-lexbor-core-print.o-cir",
+    "php-ext-lexbor-lexbor-core-serialize.o-cir",
+    "php-ext-lexbor-lexbor-core-shs.o-cir",
+    "php-ext-lexbor-lexbor-core-str.o-cir",
+    "php-ext-lexbor-lexbor-core-strtod.o-cir",
+    "php-ext-lexbor-lexbor-css-css.o-cir",
+    "php-ext-lexbor-lexbor-css-log.o-cir",
+    "php-ext-lexbor-lexbor-css-parser.o-cir",
+    "php-ext-lexbor-lexbor-css-selectors-pseudo_state.o-cir",
+    "php-ext-lexbor-lexbor-css-selectors-pseudo.o-cir",
+    "php-ext-lexbor-lexbor-css-selectors-selector.o-cir",
+    "php-ext-lexbor-lexbor-css-selectors-selectors.o-cir",
+    "php-ext-lexbor-lexbor-css-selectors-state.o-cir",
+    "php-ext-lexbor-lexbor-css-state.o-cir",
+    "php-ext-lexbor-lexbor-css-syntax-anb.o-cir",
+    "php-ext-lexbor-lexbor-css-syntax-parser.o-cir",
+    "php-ext-lexbor-lexbor-css-syntax-state.o-cir",
+    "php-ext-lexbor-lexbor-css-syntax-syntax.o-cir",
+    "php-ext-lexbor-lexbor-css-syntax-token.o-cir",
+    "php-ext-lexbor-lexbor-css-syntax-tokenizer.o-cir",
+    "php-ext-lexbor-lexbor-css-syntax-tokenizer-error.o-cir",
+    "php-ext-lexbor-lexbor-dom-interface.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-attr.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-cdata_section.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-character_data.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-comment.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-document_fragment.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-document_type.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-document.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-element.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-node.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-processing_instruction.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-shadow_root.o-cir",
+    "php-ext-lexbor-lexbor-dom-interfaces-text.o-cir",
+    "php-ext-lexbor-lexbor-encoding-decode.o-cir",
+    "php-ext-lexbor-lexbor-encoding-encode.o-cir",
+    "php-ext-lexbor-lexbor-encoding-encoding.o-cir",
+    "php-ext-lexbor-lexbor-encoding-multi.o-cir",
+    "php-ext-lexbor-lexbor-encoding-range.o-cir",
+    "php-ext-lexbor-lexbor-encoding-res.o-cir",
+    "php-ext-lexbor-lexbor-encoding-single.o-cir",
+    "php-ext-lexbor-lexbor-html-encoding.o-cir",
+    "php-ext-lexbor-lexbor-html-interface.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-anchor_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-area_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-audio_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-base_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-body_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-br_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-button_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-canvas_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-d_list_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-data_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-data_list_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-details_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-dialog_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-directory_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-div_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-document.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-embed_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-field_set_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-font_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-form_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-frame_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-frame_set_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-head_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-heading_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-hr_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-html_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-iframe_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-image_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-input_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-label_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-legend_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-li_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-link_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-map_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-marquee_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-media_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-menu_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-meta_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-meter_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-mod_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-o_list_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-object_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-opt_group_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-option_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-output_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-paragraph_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-param_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-picture_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-pre_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-progress_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-quote_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-script_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-select_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-slot_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-source_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-span_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-style_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-table_caption_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-table_cell_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-table_col_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-table_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-table_row_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-table_section_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-template_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-text_area_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-time_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-title_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-track_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-u_list_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-unknown_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-video_element.o-cir",
+    "php-ext-lexbor-lexbor-html-interfaces-window.o-cir",
+    "php-ext-lexbor-lexbor-html-parser.o-cir",
+    "php-ext-lexbor-lexbor-html-token_attr.o-cir",
+    "php-ext-lexbor-lexbor-html-token.o-cir",
+    "php-ext-lexbor-lexbor-html-tokenizer.o-cir",
+    "php-ext-lexbor-lexbor-html-tokenizer-error.o-cir",
+    "php-ext-lexbor-lexbor-html-tokenizer-state_comment.o-cir",
+    "php-ext-lexbor-lexbor-html-tokenizer-state_doctype.o-cir",
+    "php-ext-lexbor-lexbor-html-tokenizer-state_rawtext.o-cir",
+    "php-ext-lexbor-lexbor-html-tokenizer-state_rcdata.o-cir",
+    "php-ext-lexbor-lexbor-html-tokenizer-state_script.o-cir",
+    "php-ext-lexbor-lexbor-html-tokenizer-state.o-cir",
+    "php-ext-lexbor-lexbor-html-tree.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-active_formatting.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-error.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_after_body.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_after_frameset.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_body.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_frameset.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_head.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-before_head.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-before_html.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-foreign_content.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_body.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_caption.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_cell.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_column_group.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_frameset.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_head_noscript.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_head.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_row.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_select_in_table.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_select.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table_body.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table_text.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_template.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-initial.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-text.o-cir",
+    "php-ext-lexbor-lexbor-html-tree-open_elements.o-cir",
+    "php-ext-lexbor-lexbor-ns-ns.o-cir",
+    "php-ext-lexbor-lexbor-ports-posix-lexbor-core-memory.o-cir",
+    "php-ext-lexbor-lexbor-punycode-punycode.o-cir",
+    "php-ext-lexbor-lexbor-tag-tag.o-cir",
+    "php-ext-lexbor-lexbor-unicode-idna.o-cir",
+    "php-ext-lexbor-lexbor-unicode-unicode.o-cir",
+    "php-ext-lexbor-lexbor-url-url.o-cir",
+    "php-ext-opcache-shared_alloc_mmap.o-cir",
+    "php-ext-opcache-shared_alloc_posix.o-cir",
+    "php-ext-opcache-shared_alloc_shm.o-cir",
+    "php-ext-opcache-zend_accelerator_api.o-cir",
+    "php-ext-opcache-zend_accelerator_blacklist.o-cir",
+    "php-ext-opcache-zend_accelerator_debug.o-cir",
+    "php-ext-opcache-zend_accelerator_hash.o-cir",
+    "php-ext-opcache-zend_accelerator_module.o-cir",
+    "php-ext-opcache-zend_accelerator_util_funcs.o-cir",
+    "php-ext-opcache-zend_file_cache.o-cir",
+    "php-ext-opcache-zend_persist_calc.o-cir",
+    "php-ext-opcache-zend_persist.o-cir",
+    "php-ext-opcache-zend_shared_alloc.o-cir",
+    "php-ext-opcache-ZendAccelerator.o-cir",
+    "php-ext-opcache-jit-ir-ir_cfg.o-cir",
+    "php-ext-opcache-jit-ir-ir_check.o-cir",
+    "php-ext-opcache-jit-ir-ir_dump.o-cir",
+    "php-ext-opcache-jit-ir-ir_emit.o-cir",
+    "php-ext-opcache-jit-ir-ir_gcm.o-cir",
+    "php-ext-opcache-jit-ir-ir_gdb.o-cir",
+    "php-ext-opcache-jit-ir-ir_patch.o-cir",
+    "php-ext-opcache-jit-ir-ir_perf.o-cir",
+    "php-ext-opcache-jit-ir-ir_ra.o-cir",
+    "php-ext-opcache-jit-ir-ir_save.o-cir",
+    "php-ext-opcache-jit-ir-ir_sccp.o-cir",
+    "php-ext-opcache-jit-ir-ir_strtab.o-cir",
+    "php-ext-opcache-jit-ir-ir.o-cir",
+    "php-ext-opcache-jit-zend_jit_vm_helpers.o-cir",
+    "php-ext-opcache-jit-zend_jit.o-cir",
+    "php-ext-random-csprng.o-cir",
+    "php-ext-random-engine_mt19937.o-cir",
+    "php-ext-random-engine_pcgoneseq128xslrr64.o-cir",
+    "php-ext-random-engine_secure.o-cir",
+    "php-ext-random-engine_user.o-cir",
+    "php-ext-random-engine_xoshiro256starstar.o-cir",
+    "php-ext-random-gammasection.o-cir",
+    "php-ext-random-random.o-cir",
+    "php-ext-random-randomizer.o-cir",
+    "php-ext-random-zend_utils.o-cir",
+    "php-ext-reflection-php_reflection.o-cir",
+    "php-ext-session-mod_user_class.o-cir",
+    "php-ext-session-session.o-cir",
+    "php-ext-session-mod_files.o-cir",
+    "php-ext-session-mod_mm.o-cir",
+    "php-ext-session-mod_user.o-cir",
+    "php-ext-spl-php_spl.o-cir",
+    "php-ext-spl-spl_array.o-cir",
+    "php-ext-spl-spl_directory.o-cir",
+    "php-ext-spl-spl_dllist.o-cir",
+    "php-ext-spl-spl_exceptions.o-cir",
+    "php-ext-spl-spl_fixedarray.o-cir",
+    "php-ext-spl-spl_functions.o-cir",
+    "php-ext-spl-spl_heap.o-cir",
+    "php-ext-spl-spl_iterators.o-cir",
+    "php-ext-spl-spl_observer.o-cir",
+    "php-ext-standard-array.o-cir",
+    "php-ext-standard-assert.o-cir",
+    "php-ext-standard-base64.o-cir",
+    "php-ext-standard-basic_functions.o-cir",
+    "php-ext-standard-browscap.o-cir",
+    "php-ext-standard-crc32_x86.o-cir",
+    "php-ext-standard-crc32.o-cir",
+    "php-ext-standard-credits.o-cir",
+    "php-ext-standard-crypt.o-cir",
+    "php-ext-standard-css.o-cir",
+    "php-ext-standard-datetime.o-cir",
+    "php-ext-standard-dir.o-cir",
+    "php-ext-standard-dl.o-cir",
+    "php-ext-standard-dns.o-cir",
+    "php-ext-standard-exec.o-cir",
+    "php-ext-standard-file.o-cir",
+    "php-ext-standard-filestat.o-cir",
+    "php-ext-standard-filters.o-cir",
+    "php-ext-standard-flock_compat.o-cir",
+    "php-ext-standard-formatted_print.o-cir",
+    "php-ext-standard-fsock.o-cir",
+    "php-ext-standard-ftok.o-cir",
+    "php-ext-standard-ftp_fopen_wrapper.o-cir",
+    "php-ext-standard-head.o-cir",
+    "php-ext-standard-hrtime.o-cir",
+    "php-ext-standard-html.o-cir",
+    "php-ext-standard-http_fopen_wrapper.o-cir",
+    "php-ext-standard-http.o-cir",
+    "php-ext-standard-image.o-cir",
+    "php-ext-standard-incomplete_class.o-cir",
+    "php-ext-standard-info.o-cir",
+    "php-ext-standard-iptc.o-cir",
+    "php-ext-standard-levenshtein.o-cir",
+    "php-ext-standard-libavifinfo-avifinfo.o-cir",
+    "php-ext-standard-link.o-cir",
+    "php-ext-standard-mail.o-cir",
+    "php-ext-standard-math.o-cir",
+    "php-ext-standard-md5.o-cir",
+    "php-ext-standard-metaphone.o-cir",
+    "php-ext-standard-microtime.o-cir",
+    "php-ext-standard-net.o-cir",
+    "php-ext-standard-pack.o-cir",
+    "php-ext-standard-pageinfo.o-cir",
+    "php-ext-standard-password.o-cir",
+    "php-ext-standard-php_fopen_wrapper.o-cir",
+    "php-ext-standard-proc_open.o-cir",
+    "php-ext-standard-quot_print.o-cir",
+    "php-ext-standard-scanf.o-cir",
+    "php-ext-standard-sha1.o-cir",
+    "php-ext-standard-soundex.o-cir",
+    "php-ext-standard-streamsfuncs.o-cir",
+    "php-ext-standard-string.o-cir",
+    "php-ext-standard-strnatcmp.o-cir",
+    "php-ext-standard-syslog.o-cir",
+    "php-ext-standard-type.o-cir",
+    "php-ext-standard-uniqid.o-cir",
+    "php-ext-standard-url_scanner_ex.o-cir",
+    "php-ext-standard-url.o-cir",
+    "php-ext-standard-user_filters.o-cir",
+    "php-ext-standard-uuencode.o-cir",
+    "php-ext-standard-var_unserializer.o-cir",
+    "php-ext-standard-var.o-cir",
+    "php-ext-standard-versioning.o-cir",
+    "php-ext-standard-crypt_blowfish.o-cir",
+    "php-ext-standard-crypt_freesec.o-cir",
+    "php-ext-standard-crypt_sha256.o-cir",
+    "php-ext-standard-crypt_sha512.o-cir",
+    "php-ext-standard-php_crypt_r.o-cir",
+    "php-ext-uri-php_uri.o-cir",
+    "php-ext-uri-php_uri_common.o-cir",
+    "php-ext-uri-uri_parser_rfc3986.o-cir",
+    "php-ext-uri-uri_parser_whatwg.o-cir",
+    "php-ext-uri-uri_parser_php_parse_url.o-cir",
+    "php-ext-uri-uriparser-src-UriCommon.o-cir",
+    "php-ext-uri-uriparser-src-UriCompare.o-cir",
+    "php-ext-uri-uriparser-src-UriCopy.o-cir",
+    "php-ext-uri-uriparser-src-UriEscape.o-cir",
+    "php-ext-uri-uriparser-src-UriFile.o-cir",
+    "php-ext-uri-uriparser-src-UriIp4.o-cir",
+    "php-ext-uri-uriparser-src-UriIp4Base.o-cir",
+    "php-ext-uri-uriparser-src-UriMemory.o-cir",
+    "php-ext-uri-uriparser-src-UriNormalize.o-cir",
+    "php-ext-uri-uriparser-src-UriNormalizeBase.o-cir",
+    "php-ext-uri-uriparser-src-UriParse.o-cir",
+    "php-ext-uri-uriparser-src-UriParseBase.o-cir",
+    "php-ext-uri-uriparser-src-UriQuery.o-cir",
+    "php-ext-uri-uriparser-src-UriRecompose.o-cir",
+    "php-ext-uri-uriparser-src-UriResolve.o-cir",
+    "php-ext-uri-uriparser-src-UriSetFragment.o-cir",
+    "php-ext-uri-uriparser-src-UriSetHostAuto.o-cir",
+    "php-ext-uri-uriparser-src-UriSetHostCommon.o-cir",
+    "php-ext-uri-uriparser-src-UriSetHostIp4.o-cir",
+    "php-ext-uri-uriparser-src-UriSetHostIp6.o-cir",
+    "php-ext-uri-uriparser-src-UriSetHostIpFuture.o-cir",
+    "php-ext-uri-uriparser-src-UriSetHostRegName.o-cir",
+    "php-ext-uri-uriparser-src-UriSetPath.o-cir",
+    "php-ext-uri-uriparser-src-UriSetPort.o-cir",
+    "php-ext-uri-uriparser-src-UriSetQuery.o-cir",
+    "php-ext-uri-uriparser-src-UriSetScheme.o-cir",
+    "php-ext-uri-uriparser-src-UriSetUserInfo.o-cir",
+    "php-ext-uri-uriparser-src-UriShorten.o-cir",
+    "php-ext-uri-uriparser-src-UriVersion.o-cir",
+    "php-TSRM-TSRM.o-cir",
+    "php-main-explicit_bzero.o-cir",
+    "php-main-fopen_wrappers.o-cir",
+    "php-main-getopt.o-cir",
+    "php-main-main.o-cir",
+    "php-main-network.o-cir",
+    "php-main-output.o-cir",
+    "php-main-php_content_types.o-cir",
+    "php-main-php_ini_builder.o-cir",
+    "php-main-php_ini.o-cir",
+    "php-main-php_glob.o-cir",
+    "php-main-php_odbc_utils.o-cir",
+    "php-main-php_open_temporary_file.o-cir",
+    "php-main-php_scandir.o-cir",
+    "php-main-php_syslog.o-cir",
+    "php-main-php_ticks.o-cir",
+    "php-main-php_variables.o-cir",
+    "php-main-reentrancy.o-cir",
+    "php-main-rfc1867.o-cir",
+    "php-main-safe_bcmp.o-cir",
+    "php-main-SAPI.o-cir",
+    "php-main-snprintf.o-cir",
+    "php-main-spprintf.o-cir",
+    "php-main-strlcat.o-cir",
+    "php-main-strlcpy.o-cir",
+    "php-main-debug_gdb_scripts.o-cir",
+    "php-main-streams-cast.o-cir",
+    "php-main-streams-filter.o-cir",
+    "php-main-streams-glob_wrapper.o-cir",
+    "php-main-streams-memory.o-cir",
+    "php-main-streams-mmap.o-cir",
+    "php-main-streams-plain_wrapper.o-cir",
+    "php-main-streams-streams.o-cir",
+    "php-main-streams-transports.o-cir",
+    "php-main-streams-userspace.o-cir",
+    "php-main-streams-xp_socket.o-cir",
+    "php-Zend-Optimizer-block_pass.o-cir",
+    "php-Zend-Optimizer-compact_literals.o-cir",
+    "php-Zend-Optimizer-compact_vars.o-cir",
+    "php-Zend-Optimizer-dce.o-cir",
+    "php-Zend-Optimizer-dfa_pass.o-cir",
+    "php-Zend-Optimizer-escape_analysis.o-cir",
+    "php-Zend-Optimizer-nop_removal.o-cir",
+    "php-Zend-Optimizer-optimize_func_calls.o-cir",
+    "php-Zend-Optimizer-optimize_temp_vars_5.o-cir",
+    "php-Zend-Optimizer-pass1.o-cir",
+    "php-Zend-Optimizer-pass3.o-cir",
+    "php-Zend-Optimizer-sccp.o-cir",
+    "php-Zend-Optimizer-scdf.o-cir",
+    "php-Zend-Optimizer-zend_call_graph.o-cir",
+    "php-Zend-Optimizer-zend_cfg.o-cir",
+    "php-Zend-Optimizer-zend_dfg.o-cir",
+    "php-Zend-Optimizer-zend_dump.o-cir",
+    "php-Zend-Optimizer-zend_func_info.o-cir",
+    "php-Zend-Optimizer-zend_inference.o-cir",
+    "php-Zend-Optimizer-zend_optimizer.o-cir",
+    "php-Zend-Optimizer-zend_ssa.o-cir",
+    "php-Zend-zend_alloc.o-cir",
+    "php-Zend-zend_API.o-cir",
+    "php-Zend-zend_ast.o-cir",
+    "php-Zend-zend_atomic.o-cir",
+    "php-Zend-zend_attributes.o-cir",
+    "php-Zend-zend_builtin_functions.o-cir",
+    "php-Zend-zend_call_stack.o-cir",
+    "php-Zend-zend_closures.o-cir",
+    "php-Zend-zend_compile.o-cir",
+    "php-Zend-zend_constants.o-cir",
+    "php-Zend-zend_cpuinfo.o-cir",
+    "php-Zend-zend_default_classes.o-cir",
+    "php-Zend-zend_dtrace.o-cir",
+    "php-Zend-zend_enum.o-cir",
+    "php-Zend-zend_exceptions.o-cir",
+    "php-Zend-zend_execute_API.o-cir",
+    "php-Zend-zend_execute.o-cir",
+    "php-Zend-zend_extensions.o-cir",
+    "php-Zend-zend_fibers.o-cir",
+    "php-Zend-zend_float.o-cir",
+    "php-Zend-zend_frameless_function.o-cir",
+    "php-Zend-zend_gc.o-cir",
+    "php-Zend-zend_gdb.o-cir",
+    "php-Zend-zend_generators.o-cir",
+    "php-Zend-zend_hash.o-cir",
+    "php-Zend-zend_highlight.o-cir",
+    "php-Zend-zend_hrtime.o-cir",
+    "php-Zend-zend_inheritance.o-cir",
+    "php-Zend-zend_ini_parser.o-cir",
+    "php-Zend-zend_ini_scanner.o-cir",
+    "php-Zend-zend_ini.o-cir",
+    "php-Zend-zend_interfaces.o-cir",
+    "php-Zend-zend_iterators.o-cir",
+    "php-Zend-zend_language_parser.o-cir",
+    "php-Zend-zend_language_scanner.o-cir",
+    "php-Zend-zend_lazy_objects.o-cir",
+    "php-Zend-zend_list.o-cir",
+    "php-Zend-zend_llist.o-cir",
+    "php-Zend-zend_max_execution_timer.o-cir",
+    "php-Zend-zend_multibyte.o-cir",
+    "php-Zend-zend_object_handlers.o-cir",
+    "php-Zend-zend_objects_API.o-cir",
+    "php-Zend-zend_objects.o-cir",
+    "php-Zend-zend_observer.o-cir",
+    "php-Zend-zend_opcode.o-cir",
+    "php-Zend-zend_operators.o-cir",
+    "php-Zend-zend_property_hooks.o-cir",
+    "php-Zend-zend_ptr_stack.o-cir",
+    "php-Zend-zend_signal.o-cir",
+    "php-Zend-zend_smart_str.o-cir",
+    "php-Zend-zend_sort.o-cir",
+    "php-Zend-zend_stack.o-cir",
+    "php-Zend-zend_stream.o-cir",
+    "php-Zend-zend_string.o-cir",
+    "php-Zend-zend_strtod.o-cir",
+    "php-Zend-zend_system_id.o-cir",
+    "php-Zend-zend_variables.o-cir",
+    "php-Zend-zend_virtual_cwd.o-cir",
+    "php-Zend-zend_vm_opcodes.o-cir",
+    "php-Zend-zend_weakrefs.o-cir",
+    "php-Zend-zend.o-cir",
+    "php-main-internal_functions_cli.o-cir",
+    "php-sapi-cli-php_cli.o-cir",
+    "php-sapi-cli-php_http_parser.o-cir",
+    "php-sapi-cli-php_cli_server.o-cir",
+    "php-sapi-cli-ps_title.o-cir",
+    "php-sapi-cli-php_cli_process_title.o-cir"
+  ],
+  "expected_exit_codes": {
+    "binary-retry": [
+      0
+    ],
+    "layout-stock-constants": [
+      0
+    ],
+    "layout-stock-arrays": [
+      0
+    ],
+    "layout-stock-constants-arrays": [
+      0
+    ],
+    "layout-compact-constants": [
+      0
+    ],
+    "layout-compact-arrays": [
+      0
+    ],
+    "layout-compact-constants-arrays": [
+      0
+    ],
+    "instrument-build": [
+      0
+    ],
+    "closure-build": [
+      0
+    ],
+    "instrument-whole": [
+      0
+    ],
+    "instrument-verify": [
+      0
+    ],
+    "instrument-link": [
+      0
+    ],
+    "instrumented-runtime": [
+      0
+    ],
+    "instrument-symbols": [
+      0
+    ],
+    "native-closure-audit": [
+      0
+    ],
+    "gcc-tree": [
+      0
+    ],
+    "gcc-runtime": [
+      0
+    ],
+    "gcc-0-gimple": [
+      0
+    ],
+    "gcc-1-gimple": [
+      0
+    ],
+    "gcc-2-gimple": [
+      0
+    ],
+    "gcc-3-gimple": [
+      0
+    ],
+    "gcc-4-gimple": [
+      0
+    ],
+    "gcc-5-gimple": [
+      0
+    ],
+    "gcc-6-gimple": [
+      0
+    ],
+    "gcc-7-gimple": [
+      0
+    ],
+    "gcc-8-gimple": [
+      0
+    ],
+    "gcc-9-gimple": [
+      0
+    ],
+    "gcc-10-gimple": [
+      0
+    ],
+    "gcc-11-gimple": [
+      0
+    ],
+    "gcc-12-gimple": [
+      0
+    ],
+    "gcc-13-gimple": [
+      0
+    ],
+    "gcc-14-gimple": [
+      0
+    ],
+    "gcc-15-gimple": [
+      0
+    ],
+    "gcc-16-gimple": [
+      0
+    ],
+    "gcc-17-gimple": [
+      0
+    ],
+    "gcc-18-gimple": [
+      0
+    ],
+    "gcc-19-gimple": [
+      0
+    ],
+    "gcc-20-gimple": [
+      0
+    ],
+    "gcc-21-gimple": [
+      0
+    ],
+    "gcc-22-gimple": [
+      0
+    ],
+    "gcc-23-gimple": [
+      0
+    ],
+    "gcc-24-gimple": [
+      0
+    ],
+    "gcc-25-gimple": [
+      0
+    ],
+    "gcc-26-gimple": [
+      0
+    ],
+    "gcc-27-gimple": [
+      0
+    ],
+    "gcc-28-gimple": [
+      0
+    ],
+    "gcc-29-gimple": [
+      0
+    ],
+    "gcc-30-gimple": [
+      0
+    ],
+    "gcc-31-gimple": [
+      0
+    ],
+    "gcc-32-gimple": [
+      0
+    ],
+    "gcc-33-gimple": [
+      0
+    ],
+    "gcc-34-gimple": [
+      0
+    ],
+    "gcc-35-gimple": [
+      0
+    ],
+    "gcc-36-gimple": [
+      0
+    ],
+    "gcc-37-gimple": [
+      0
+    ],
+    "gcc-38-gimple": [
+      0
+    ],
+    "gcc-39-gimple": [
+      0
+    ],
+    "gcc-40-gimple": [
+      0
+    ],
+    "gcc-41-gimple": [
+      0
+    ],
+    "gcc-42-gimple": [
+      0
+    ],
+    "gcc-43-gimple": [
+      0
+    ],
+    "gcc-44-gimple": [
+      0
+    ],
+    "gcc-45-gimple": [
+      0
+    ],
+    "gcc-46-gimple": [
+      0
+    ],
+    "gcc-47-gimple": [
+      0
+    ],
+    "gcc-48-gimple": [
+      0
+    ],
+    "gcc-49-gimple": [
+      0
+    ],
+    "gcc-50-gimple": [
+      0
+    ],
+    "gcc-51-gimple": [
+      0
+    ],
+    "gcc-52-gimple": [
+      0
+    ],
+    "gcc-53-gimple": [
+      0
+    ],
+    "gcc-54-gimple": [
+      0
+    ],
+    "gcc-55-gimple": [
+      0
+    ],
+    "gcc-56-gimple": [
+      0
+    ],
+    "gcc-57-gimple": [
+      0
+    ],
+    "gcc-58-gimple": [
+      0
+    ],
+    "gcc-59-gimple": [
+      0
+    ],
+    "gcc-60-gimple": [
+      0
+    ],
+    "gcc-61-gimple": [
+      0
+    ],
+    "gcc-62-gimple": [
+      0
+    ],
+    "gcc-63-gimple": [
+      0
+    ],
+    "gcc-64-gimple": [
+      0
+    ],
+    "gcc-65-gimple": [
+      0
+    ],
+    "gcc-66-gimple": [
+      0
+    ],
+    "gcc-67-gimple": [
+      0
+    ],
+    "gcc-68-gimple": [
+      0
+    ],
+    "gcc-69-gimple": [
+      0
+    ],
+    "gcc-70-gimple": [
+      0
+    ],
+    "gcc-71-gimple": [
+      0
+    ],
+    "gcc-72-gimple": [
+      0
+    ],
+    "gcc-73-gimple": [
+      0
+    ],
+    "gcc-74-gimple": [
+      0
+    ],
+    "gcc-75-gimple": [
+      0
+    ],
+    "gcc-76-gimple": [
+      0
+    ],
+    "gcc-77-gimple": [
+      0
+    ],
+    "gcc-78-gimple": [
+      0
+    ],
+    "gcc-79-gimple": [
+      0
+    ],
+    "gcc-80-gimple": [
+      0
+    ],
+    "gcc-81-gimple": [
+      0
+    ],
+    "gcc-82-gimple": [
+      0
+    ],
+    "gcc-83-gimple": [
+      0
+    ],
+    "gcc-84-gimple": [
+      0
+    ],
+    "gcc-85-gimple": [
+      0
+    ],
+    "gcc-86-gimple": [
+      0
+    ],
+    "gcc-87-gimple": [
+      0
+    ],
+    "gcc-88-gimple": [
+      0
+    ],
+    "gcc-89-gimple": [
+      0
+    ],
+    "gcc-90-gimple": [
+      0
+    ],
+    "gcc-91-gimple": [
+      0
+    ],
+    "gcc-92-gimple": [
+      0
+    ],
+    "gcc-93-gimple": [
+      0
+    ],
+    "gcc-94-gimple": [
+      0
+    ],
+    "gcc-95-gimple": [
+      0
+    ],
+    "gcc-96-gimple": [
+      0
+    ],
+    "gcc-97-gimple": [
+      0
+    ],
+    "gcc-98-gimple": [
+      0
+    ],
+    "gcc-99-gimple": [
+      0
+    ],
+    "gcc-100-gimple": [
+      0
+    ],
+    "gcc-101-gimple": [
+      0
+    ],
+    "gcc-102-gimple": [
+      0
+    ],
+    "gcc-103-gimple": [
+      0
+    ],
+    "gcc-104-gimple": [
+      0
+    ],
+    "gcc-105-gimple": [
+      0
+    ],
+    "gcc-106-gimple": [
+      0
+    ],
+    "gcc-107-gimple": [
+      0
+    ],
+    "gcc-108-gimple": [
+      0
+    ],
+    "gcc-109-gimple": [
+      0
+    ],
+    "gcc-110-gimple": [
+      0
+    ],
+    "gcc-111-gimple": [
+      0
+    ],
+    "gcc-112-gimple": [
+      0
+    ],
+    "gcc-113-gimple": [
+      0
+    ],
+    "gcc-114-gimple": [
+      0
+    ],
+    "gcc-115-gimple": [
+      0
+    ],
+    "gcc-116-gimple": [
+      0
+    ],
+    "gcc-117-gimple": [
+      0
+    ],
+    "gcc-118-gimple": [
+      0
+    ],
+    "gcc-119-gimple": [
+      0
+    ],
+    "gcc-120-gimple": [
+      0
+    ],
+    "gcc-121-gimple": [
+      0
+    ],
+    "gcc-122-gimple": [
+      0
+    ],
+    "gcc-123-gimple": [
+      0
+    ],
+    "gcc-124-gimple": [
+      0
+    ],
+    "gcc-125-gimple": [
+      0
+    ],
+    "gcc-126-gimple": [
+      0
+    ],
+    "gcc-127-gimple": [
+      0
+    ],
+    "gcc-128-gimple": [
+      0
+    ],
+    "gcc-129-gimple": [
+      0
+    ],
+    "gcc-130-gimple": [
+      0
+    ],
+    "gcc-131-gimple": [
+      0
+    ],
+    "gcc-132-gimple": [
+      0
+    ],
+    "gcc-133-gimple": [
+      0
+    ],
+    "gcc-134-gimple": [
+      0
+    ],
+    "gcc-135-gimple": [
+      0
+    ],
+    "gcc-136-gimple": [
+      0
+    ],
+    "gcc-137-gimple": [
+      0
+    ],
+    "gcc-138-gimple": [
+      0
+    ],
+    "gcc-139-gimple": [
+      0
+    ],
+    "gcc-140-gimple": [
+      0
+    ],
+    "gcc-141-gimple": [
+      0
+    ],
+    "gcc-142-gimple": [
+      0
+    ],
+    "gcc-143-gimple": [
+      0
+    ],
+    "gcc-144-gimple": [
+      0
+    ],
+    "gcc-145-gimple": [
+      0
+    ],
+    "gcc-146-gimple": [
+      0
+    ],
+    "gcc-147-gimple": [
+      0
+    ],
+    "gcc-148-gimple": [
+      0
+    ],
+    "gcc-149-gimple": [
+      0
+    ],
+    "gcc-150-gimple": [
+      0
+    ],
+    "gcc-151-gimple": [
+      0
+    ],
+    "gcc-152-gimple": [
+      0
+    ],
+    "gcc-153-gimple": [
+      0
+    ],
+    "gcc-154-gimple": [
+      0
+    ],
+    "gcc-155-gimple": [
+      0
+    ],
+    "gcc-156-gimple": [
+      0
+    ],
+    "gcc-157-gimple": [
+      0
+    ],
+    "gcc-158-gimple": [
+      0
+    ],
+    "gcc-159-gimple": [
+      0
+    ],
+    "gcc-160-gimple": [
+      0
+    ],
+    "gcc-161-gimple": [
+      0
+    ],
+    "gcc-162-gimple": [
+      0
+    ],
+    "gcc-163-gimple": [
+      0
+    ],
+    "gcc-164-gimple": [
+      0
+    ],
+    "gcc-165-gimple": [
+      0
+    ],
+    "gcc-166-gimple": [
+      0
+    ],
+    "gcc-167-gimple": [
+      0
+    ],
+    "gcc-168-gimple": [
+      0
+    ],
+    "gcc-169-gimple": [
+      0
+    ],
+    "gcc-170-gimple": [
+      0
+    ],
+    "gcc-171-gimple": [
+      0
+    ],
+    "gcc-172-gimple": [
+      0
+    ],
+    "gcc-173-gimple": [
+      0
+    ],
+    "gcc-174-gimple": [
+      0
+    ],
+    "gcc-175-gimple": [
+      0
+    ],
+    "gcc-176-gimple": [
+      0
+    ],
+    "gcc-177-gimple": [
+      0
+    ],
+    "gcc-178-gimple": [
+      0
+    ],
+    "gcc-179-gimple": [
+      0
+    ],
+    "gcc-180-gimple": [
+      0
+    ],
+    "gcc-181-gimple": [
+      0
+    ],
+    "gcc-182-gimple": [
+      0
+    ],
+    "gcc-183-gimple": [
+      0
+    ],
+    "gcc-184-gimple": [
+      0
+    ],
+    "gcc-185-gimple": [
+      0
+    ],
+    "gcc-186-gimple": [
+      0
+    ],
+    "gcc-187-gimple": [
+      0
+    ],
+    "gcc-188-gimple": [
+      0
+    ],
+    "gcc-189-gimple": [
+      0
+    ],
+    "gcc-190-gimple": [
+      0
+    ],
+    "gcc-191-gimple": [
+      0
+    ],
+    "gcc-192-gimple": [
+      0
+    ],
+    "gcc-193-gimple": [
+      0
+    ],
+    "gcc-194-gimple": [
+      0
+    ],
+    "gcc-195-gimple": [
+      0
+    ],
+    "gcc-196-gimple": [
+      0
+    ],
+    "gcc-197-gimple": [
+      0
+    ],
+    "gcc-198-gimple": [
+      0
+    ],
+    "gcc-199-gimple": [
+      0
+    ],
+    "gcc-200-gimple": [
+      0
+    ],
+    "gcc-201-gimple": [
+      0
+    ],
+    "gcc-202-gimple": [
+      0
+    ],
+    "gcc-203-gimple": [
+      0
+    ],
+    "gcc-204-gimple": [
+      0
+    ],
+    "gcc-205-gimple": [
+      0
+    ],
+    "gcc-206-gimple": [
+      0
+    ],
+    "gcc-207-gimple": [
+      0
+    ],
+    "gcc-208-gimple": [
+      0
+    ],
+    "gcc-209-gimple": [
+      0
+    ],
+    "gcc-210-gimple": [
+      0
+    ],
+    "gcc-211-gimple": [
+      0
+    ],
+    "gcc-212-gimple": [
+      0
+    ],
+    "gcc-213-gimple": [
+      0
+    ],
+    "gcc-214-gimple": [
+      0
+    ],
+    "gcc-215-gimple": [
+      0
+    ],
+    "gcc-216-gimple": [
+      0
+    ],
+    "gcc-217-gimple": [
+      0
+    ],
+    "gcc-218-gimple": [
+      0
+    ],
+    "gcc-219-gimple": [
+      0
+    ],
+    "gcc-220-gimple": [
+      0
+    ],
+    "gcc-221-gimple": [
+      0
+    ],
+    "gcc-222-gimple": [
+      0
+    ],
+    "gcc-223-gimple": [
+      0
+    ],
+    "gcc-224-gimple": [
+      0
+    ],
+    "gcc-225-gimple": [
+      0
+    ],
+    "gcc-226-gimple": [
+      0
+    ],
+    "gcc-227-gimple": [
+      0
+    ],
+    "gcc-228-gimple": [
+      0
+    ],
+    "gcc-229-gimple": [
+      0
+    ],
+    "gcc-230-gimple": [
+      0
+    ],
+    "gcc-231-gimple": [
+      0
+    ],
+    "gcc-232-gimple": [
+      0
+    ],
+    "gcc-233-gimple": [
+      0
+    ],
+    "gcc-234-gimple": [
+      0
+    ],
+    "gcc-235-gimple": [
+      0
+    ],
+    "gcc-236-gimple": [
+      0
+    ],
+    "gcc-237-gimple": [
+      0
+    ],
+    "gcc-238-gimple": [
+      0
+    ],
+    "gcc-239-gimple": [
+      0
+    ],
+    "gcc-240-gimple": [
+      0
+    ],
+    "gcc-241-gimple": [
+      0
+    ],
+    "gcc-242-gimple": [
+      0
+    ],
+    "gcc-243-gimple": [
+      0
+    ],
+    "gcc-244-gimple": [
+      0
+    ],
+    "gcc-245-gimple": [
+      0
+    ],
+    "gcc-246-gimple": [
+      0
+    ],
+    "gcc-247-gimple": [
+      0
+    ],
+    "gcc-248-gimple": [
+      0
+    ],
+    "gcc-249-gimple": [
+      0
+    ],
+    "gcc-250-gimple": [
+      0
+    ],
+    "gcc-251-gimple": [
+      0
+    ],
+    "gcc-252-gimple": [
+      0
+    ],
+    "gcc-253-gimple": [
+      0
+    ],
+    "gcc-254-gimple": [
+      0
+    ],
+    "gcc-255-gimple": [
+      0
+    ],
+    "gcc-256-gimple": [
+      0
+    ],
+    "gcc-257-gimple": [
+      0
+    ],
+    "gcc-258-gimple": [
+      0
+    ],
+    "gcc-259-gimple": [
+      0
+    ],
+    "gcc-260-gimple": [
+      0
+    ],
+    "gcc-261-gimple": [
+      0
+    ],
+    "gcc-262-gimple": [
+      0
+    ],
+    "gcc-263-gimple": [
+      0
+    ],
+    "gcc-264-gimple": [
+      0
+    ],
+    "gcc-265-gimple": [
+      0
+    ],
+    "gcc-266-gimple": [
+      0
+    ],
+    "gcc-267-gimple": [
+      0
+    ],
+    "gcc-268-gimple": [
+      0
+    ],
+    "gcc-269-gimple": [
+      0
+    ],
+    "gcc-270-gimple": [
+      0
+    ],
+    "gcc-271-gimple": [
+      0
+    ],
+    "gcc-272-gimple": [
+      0
+    ],
+    "gcc-273-gimple": [
+      0
+    ],
+    "gcc-274-gimple": [
+      0
+    ],
+    "gcc-275-gimple": [
+      0
+    ],
+    "gcc-276-gimple": [
+      0
+    ],
+    "gcc-277-gimple": [
+      0
+    ],
+    "gcc-278-gimple": [
+      0
+    ],
+    "gcc-279-gimple": [
+      0
+    ],
+    "gcc-280-gimple": [
+      0
+    ],
+    "gcc-281-gimple": [
+      0
+    ],
+    "gcc-282-gimple": [
+      0
+    ],
+    "gcc-283-gimple": [
+      0
+    ],
+    "gcc-284-gimple": [
+      0
+    ],
+    "gcc-285-gimple": [
+      0
+    ],
+    "gcc-286-gimple": [
+      0
+    ],
+    "gcc-287-gimple": [
+      0
+    ],
+    "gcc-288-gimple": [
+      0
+    ],
+    "gcc-289-gimple": [
+      0
+    ],
+    "gcc-290-gimple": [
+      0
+    ],
+    "gcc-291-gimple": [
+      0
+    ],
+    "gcc-292-gimple": [
+      0
+    ],
+    "gcc-293-gimple": [
+      0
+    ],
+    "gcc-294-gimple": [
+      0
+    ],
+    "gcc-295-gimple": [
+      0
+    ],
+    "gcc-296-gimple": [
+      0
+    ],
+    "gcc-297-gimple": [
+      0
+    ],
+    "gcc-298-gimple": [
+      0
+    ],
+    "gcc-299-gimple": [
+      0
+    ],
+    "gcc-300-gimple": [
+      0
+    ],
+    "gcc-301-gimple": [
+      0
+    ],
+    "gcc-302-gimple": [
+      0
+    ],
+    "gcc-303-gimple": [
+      0
+    ],
+    "gcc-304-gimple": [
+      0
+    ],
+    "gcc-305-gimple": [
+      0
+    ],
+    "gcc-306-gimple": [
+      0
+    ],
+    "gcc-307-gimple": [
+      0
+    ],
+    "gcc-308-gimple": [
+      0
+    ],
+    "gcc-309-gimple": [
+      0
+    ],
+    "gcc-310-gimple": [
+      0
+    ],
+    "gcc-311-gimple": [
+      0
+    ],
+    "gcc-312-gimple": [
+      0
+    ],
+    "gcc-313-gimple": [
+      0
+    ],
+    "gcc-314-gimple": [
+      0
+    ],
+    "gcc-315-gimple": [
+      0
+    ],
+    "gcc-316-gimple": [
+      0
+    ],
+    "gcc-317-gimple": [
+      0
+    ],
+    "gcc-318-gimple": [
+      0
+    ],
+    "gcc-319-gimple": [
+      0
+    ],
+    "gcc-320-gimple": [
+      0
+    ],
+    "gcc-321-gimple": [
+      0
+    ],
+    "gcc-322-gimple": [
+      0
+    ],
+    "gcc-323-gimple": [
+      0
+    ],
+    "gcc-324-gimple": [
+      0
+    ],
+    "gcc-325-gimple": [
+      0
+    ],
+    "gcc-326-gimple": [
+      0
+    ],
+    "gcc-327-gimple": [
+      0
+    ],
+    "gcc-328-gimple": [
+      0
+    ],
+    "gcc-329-gimple": [
+      0
+    ],
+    "gcc-330-gimple": [
+      0
+    ],
+    "gcc-331-gimple": [
+      0
+    ],
+    "gcc-332-gimple": [
+      0
+    ],
+    "gcc-333-gimple": [
+      0
+    ],
+    "gcc-334-gimple": [
+      0
+    ],
+    "gcc-335-gimple": [
+      0
+    ],
+    "gcc-336-gimple": [
+      0
+    ],
+    "gcc-337-gimple": [
+      0
+    ],
+    "gcc-338-gimple": [
+      0
+    ],
+    "gcc-339-gimple": [
+      0
+    ],
+    "gcc-340-gimple": [
+      0
+    ],
+    "gcc-341-gimple": [
+      0
+    ],
+    "gcc-342-gimple": [
+      0
+    ],
+    "gcc-343-gimple": [
+      0
+    ],
+    "gcc-344-gimple": [
+      0
+    ],
+    "gcc-345-gimple": [
+      0
+    ],
+    "gcc-346-gimple": [
+      0
+    ],
+    "gcc-347-gimple": [
+      0
+    ],
+    "gcc-348-gimple": [
+      0
+    ],
+    "gcc-349-gimple": [
+      0
+    ],
+    "gcc-350-gimple": [
+      0
+    ],
+    "gcc-351-gimple": [
+      0
+    ],
+    "gcc-352-gimple": [
+      0
+    ],
+    "gcc-353-gimple": [
+      0
+    ],
+    "gcc-354-gimple": [
+      0
+    ],
+    "gcc-355-gimple": [
+      0
+    ],
+    "gcc-356-gimple": [
+      0
+    ],
+    "gcc-357-gimple": [
+      0
+    ],
+    "gcc-358-gimple": [
+      0
+    ],
+    "gcc-359-gimple": [
+      0
+    ],
+    "gcc-360-gimple": [
+      0
+    ],
+    "gcc-361-gimple": [
+      0
+    ],
+    "gcc-362-gimple": [
+      0
+    ],
+    "gcc-363-gimple": [
+      0
+    ],
+    "gcc-364-gimple": [
+      0
+    ],
+    "gcc-365-gimple": [
+      0
+    ],
+    "gcc-366-gimple": [
+      0
+    ],
+    "gcc-367-gimple": [
+      0
+    ],
+    "gcc-368-gimple": [
+      0
+    ],
+    "gcc-369-gimple": [
+      0
+    ],
+    "gcc-370-gimple": [
+      0
+    ],
+    "gcc-371-gimple": [
+      0
+    ],
+    "gcc-372-gimple": [
+      0
+    ],
+    "gcc-373-gimple": [
+      0
+    ],
+    "gcc-374-gimple": [
+      0
+    ],
+    "gcc-375-gimple": [
+      0
+    ],
+    "gcc-376-gimple": [
+      0
+    ],
+    "gcc-377-gimple": [
+      0
+    ],
+    "gcc-378-gimple": [
+      0
+    ],
+    "gcc-379-gimple": [
+      0
+    ],
+    "gcc-380-gimple": [
+      0
+    ],
+    "gcc-381-gimple": [
+      0
+    ],
+    "gcc-382-gimple": [
+      0
+    ],
+    "gcc-383-gimple": [
+      0
+    ],
+    "gcc-384-gimple": [
+      0
+    ],
+    "gcc-385-gimple": [
+      0
+    ],
+    "gcc-386-gimple": [
+      0
+    ],
+    "gcc-387-gimple": [
+      0
+    ],
+    "gcc-388-gimple": [
+      0
+    ],
+    "gcc-389-gimple": [
+      0
+    ],
+    "gcc-390-gimple": [
+      0
+    ],
+    "gcc-391-gimple": [
+      0
+    ],
+    "gcc-392-gimple": [
+      0
+    ],
+    "gcc-393-gimple": [
+      0
+    ],
+    "gcc-394-gimple": [
+      0
+    ],
+    "gcc-395-gimple": [
+      0
+    ],
+    "gcc-396-gimple": [
+      0
+    ],
+    "gcc-397-gimple": [
+      0
+    ],
+    "gcc-398-gimple": [
+      0
+    ],
+    "gcc-401-gimple": [
+      0
+    ],
+    "gcc-402-gimple": [
+      0
+    ],
+    "gcc-403-gimple": [
+      0
+    ],
+    "gcc-404-gimple": [
+      0
+    ],
+    "gcc-405-gimple": [
+      0
+    ],
+    "gcc-406-gimple": [
+      0
+    ],
+    "gcc-407-gimple": [
+      0
+    ],
+    "gcc-408-gimple": [
+      0
+    ],
+    "gcc-409-gimple": [
+      0
+    ],
+    "gcc-410-gimple": [
+      0
+    ],
+    "gcc-411-gimple": [
+      0
+    ],
+    "gcc-412-gimple": [
+      0
+    ],
+    "gcc-413-gimple": [
+      0
+    ],
+    "gcc-414-gimple": [
+      0
+    ],
+    "gcc-415-gimple": [
+      0
+    ],
+    "gcc-416-gimple": [
+      0
+    ],
+    "gcc-417-gimple": [
+      0
+    ],
+    "gcc-418-gimple": [
+      0
+    ],
+    "gcc-419-gimple": [
+      0
+    ],
+    "gcc-420-gimple": [
+      0
+    ],
+    "gcc-421-gimple": [
+      0
+    ],
+    "gcc-422-gimple": [
+      0
+    ],
+    "gcc-423-gimple": [
+      0
+    ],
+    "gcc-424-gimple": [
+      0
+    ],
+    "gcc-425-gimple": [
+      0
+    ],
+    "gcc-426-gimple": [
+      0
+    ],
+    "gcc-427-gimple": [
+      0
+    ],
+    "gcc-428-gimple": [
+      0
+    ],
+    "gcc-429-gimple": [
+      0
+    ],
+    "gcc-430-gimple": [
+      0
+    ],
+    "gcc-431-gimple": [
+      0
+    ],
+    "gcc-432-gimple": [
+      0
+    ],
+    "gcc-433-gimple": [
+      0
+    ],
+    "gcc-434-gimple": [
+      0
+    ],
+    "gcc-435-gimple": [
+      0
+    ],
+    "gcc-436-gimple": [
+      0
+    ],
+    "gcc-437-gimple": [
+      0
+    ],
+    "gcc-438-gimple": [
+      0
+    ],
+    "gcc-439-gimple": [
+      0
+    ],
+    "gcc-440-gimple": [
+      0
+    ],
+    "gcc-441-gimple": [
+      0
+    ],
+    "gcc-442-gimple": [
+      0
+    ],
+    "gcc-443-gimple": [
+      0
+    ],
+    "gcc-444-gimple": [
+      0
+    ],
+    "gcc-445-gimple": [
+      0
+    ],
+    "gcc-446-gimple": [
+      0
+    ],
+    "gcc-447-gimple": [
+      0
+    ],
+    "gcc-448-gimple": [
+      0
+    ],
+    "gcc-449-gimple": [
+      0
+    ],
+    "gcc-450-gimple": [
+      0
+    ],
+    "gcc-451-gimple": [
+      0
+    ],
+    "gcc-452-gimple": [
+      0
+    ],
+    "gcc-453-gimple": [
+      0
+    ],
+    "gcc-454-gimple": [
+      0
+    ],
+    "gcc-455-gimple": [
+      0
+    ],
+    "gcc-456-gimple": [
+      0
+    ],
+    "gcc-457-gimple": [
+      0
+    ],
+    "gcc-458-gimple": [
+      0
+    ],
+    "gcc-459-gimple": [
+      0
+    ],
+    "gcc-460-gimple": [
+      0
+    ],
+    "gcc-461-gimple": [
+      0
+    ],
+    "gcc-462-gimple": [
+      0
+    ],
+    "gcc-463-gimple": [
+      0
+    ],
+    "gcc-464-gimple": [
+      0
+    ],
+    "gcc-465-gimple": [
+      0
+    ],
+    "gcc-466-gimple": [
+      0
+    ],
+    "gcc-467-gimple": [
+      0
+    ],
+    "gcc-468-gimple": [
+      0
+    ],
+    "gcc-469-gimple": [
+      0
+    ],
+    "gcc-470-gimple": [
+      0
+    ],
+    "gcc-471-gimple": [
+      0
+    ],
+    "gcc-472-gimple": [
+      0
+    ],
+    "gcc-473-gimple": [
+      0
+    ],
+    "gcc-474-gimple": [
+      0
+    ],
+    "gcc-475-gimple": [
+      0
+    ],
+    "gcc-476-gimple": [
+      0
+    ],
+    "gcc-477-gimple": [
+      0
+    ],
+    "gcc-478-gimple": [
+      0
+    ],
+    "gcc-479-gimple": [
+      0
+    ],
+    "gcc-480-gimple": [
+      0
+    ],
+    "gcc-481-gimple": [
+      0
+    ],
+    "gcc-482-gimple": [
+      0
+    ],
+    "gcc-483-gimple": [
+      0
+    ],
+    "gcc-484-gimple": [
+      0
+    ],
+    "gcc-485-gimple": [
+      0
+    ],
+    "gcc-486-gimple": [
+      0
+    ],
+    "gcc-487-gimple": [
+      0
+    ],
+    "gcc-488-gimple": [
+      0
+    ],
+    "gcc-489-gimple": [
+      0
+    ],
+    "gcc-490-gimple": [
+      0
+    ],
+    "gcc-491-gimple": [
+      0
+    ],
+    "gcc-492-gimple": [
+      0
+    ],
+    "gcc-493-gimple": [
+      0
+    ],
+    "gcc-494-gimple": [
+      0
+    ],
+    "gcc-495-gimple": [
+      0
+    ],
+    "gcc-496-gimple": [
+      0
+    ],
+    "gcc-497-gimple": [
+      0
+    ],
+    "gcc-498-gimple": [
+      0
+    ],
+    "gcc-499-gimple": [
+      0
+    ],
+    "gcc-500-gimple": [
+      0
+    ],
+    "gcc-501-gimple": [
+      0
+    ],
+    "gcc-502-gimple": [
+      0
+    ],
+    "gcc-503-gimple": [
+      0
+    ],
+    "gcc-504-gimple": [
+      0
+    ],
+    "gcc-505-gimple": [
+      0
+    ],
+    "gcc-506-gimple": [
+      0
+    ],
+    "gcc-507-gimple": [
+      0
+    ],
+    "gcc-508-gimple": [
+      0
+    ],
+    "gcc-509-gimple": [
+      0
+    ],
+    "gcc-510-gimple": [
+      0
+    ],
+    "gcc-511-gimple": [
+      0
+    ],
+    "gcc-512-gimple": [
+      0
+    ],
+    "gcc-513-gimple": [
+      0
+    ],
+    "gcc-514-gimple": [
+      0
+    ],
+    "gcc-515-gimple": [
+      0
+    ],
+    "gcc-516-gimple": [
+      0
+    ],
+    "gcc-517-gimple": [
+      0
+    ],
+    "gcc-518-gimple": [
+      0
+    ],
+    "gcc-519-gimple": [
+      0
+    ],
+    "gcc-520-gimple": [
+      0
+    ],
+    "gcc-521-gimple": [
+      0
+    ],
+    "gcc-522-gimple": [
+      0
+    ],
+    "gcc-523-gimple": [
+      0
+    ],
+    "gcc-524-gimple": [
+      0
+    ],
+    "cir-build": [
+      0
+    ],
+    "dispatch-cir": [
+      1
+    ],
+    "platform-cir": [
+      1
+    ],
+    "cleanup-cir": [
+      1
+    ],
+    "cleanup-windows-cir": [
+      1
+    ],
+    "php-ext-date-php_date.o-cir": [
+      1
+    ],
+    "php-ext-date-lib-astro.o-cir": [
+      0
+    ],
+    "php-ext-date-lib-dow.o-cir": [
+      0
+    ],
+    "php-ext-date-lib-parse_date.o-cir": [
+      1
+    ],
+    "php-ext-date-lib-parse_tz.o-cir": [
+      1
+    ],
+    "php-ext-date-lib-parse_posix.o-cir": [
+      1
+    ],
+    "php-ext-date-lib-timelib.o-cir": [
+      1
+    ],
+    "php-ext-date-lib-tm2unixtime.o-cir": [
+      0
+    ],
+    "php-ext-date-lib-unixtime2tm.o-cir": [
+      1
+    ],
+    "php-ext-date-lib-parse_iso_intervals.o-cir": [
+      1
+    ],
+    "php-ext-date-lib-interval.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_auto_possess.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_chartables.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_chkdint.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_compile.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_config.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_context.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_convert.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_dfa_match.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_error.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_extuni.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_find_bracket.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_jit_compile.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_maketables.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_match_data.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_match.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_newline.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_ord2utf.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_pattern_info.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_script_run.o-cir": [
+      0
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_serialize.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_string_utils.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_study.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_substitute.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_substring.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_tables.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_ucd.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_valid_utf.o-cir": [
+      1
+    ],
+    "php-ext-pcre-pcre2lib-pcre2_xclass.o-cir": [
+      1
+    ],
+    "php-ext-pcre-php_pcre.o-cir": [
+      1
+    ],
+    "php-ext-hash-sha3-generic64lc-KeccakP-1600-opt64.o-cir": [
+      1
+    ],
+    "php-ext-hash-sha3-generic64lc-KeccakHash.o-cir": [
+      0
+    ],
+    "php-ext-hash-sha3-generic64lc-KeccakSponge.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_adler32.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_crc32.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_fnv.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_gost.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_haval.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_joaat.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_md.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_murmur.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_ripemd.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_sha_ni.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_sha_sse2.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_sha.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_sha3.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_snefru.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_tiger.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_whirlpool.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash_xxhash.o-cir": [
+      1
+    ],
+    "php-ext-hash-hash.o-cir": [
+      1
+    ],
+    "php-ext-hash-murmur-PMurHash.o-cir": [
+      1
+    ],
+    "php-ext-hash-murmur-PMurHash128.o-cir": [
+      1
+    ],
+    "php-ext-json-json_encoder.o-cir": [
+      1
+    ],
+    "php-ext-json-json_parser.o-cir": [
+      1
+    ],
+    "php-ext-json-json_scanner.o-cir": [
+      1
+    ],
+    "php-ext-json-json.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-php_lexbor.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-array_obj.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-core-array.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-core-avl.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-core-bst.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-core-conv.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-diyfp.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-dobject.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-core-dtoa.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-hash.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-mem.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-core-mraw.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-plog.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-core-print.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-serialize.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-shs.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-core-str.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-core-strtod.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-css.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-log.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-parser.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-selectors-pseudo_state.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-selectors-pseudo.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-selectors-selector.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-selectors-selectors.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-selectors-state.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-state.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-syntax-anb.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-syntax-parser.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-syntax-state.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-syntax-syntax.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-syntax-token.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-syntax-tokenizer.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-css-syntax-tokenizer-error.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-dom-interface.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-attr.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-cdata_section.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-character_data.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-comment.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-document_fragment.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-document_type.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-document.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-node.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-processing_instruction.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-shadow_root.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-dom-interfaces-text.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-encoding-decode.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-encoding-encode.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-encoding-encoding.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-encoding-multi.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-encoding-range.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-encoding-res.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-encoding-single.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-encoding.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interface.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-anchor_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-area_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-audio_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-base_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-body_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-br_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-button_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-canvas_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-d_list_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-data_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-data_list_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-details_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-dialog_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-directory_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-div_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-document.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-embed_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-field_set_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-font_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-form_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-frame_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-frame_set_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-head_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-heading_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-hr_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-html_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-iframe_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-image_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-input_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-label_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-legend_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-li_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-link_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-map_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-marquee_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-media_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-menu_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-meta_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-meter_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-mod_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-o_list_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-object_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-opt_group_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-option_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-output_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-paragraph_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-param_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-picture_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-pre_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-progress_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-quote_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-script_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-select_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-slot_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-source_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-span_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-style_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-table_caption_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-table_cell_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-table_col_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-table_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-table_row_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-table_section_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-template_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-text_area_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-time_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-title_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-track_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-u_list_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-unknown_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-video_element.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-interfaces-window.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-parser.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-token_attr.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-html-token.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tokenizer.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tokenizer-error.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-html-tokenizer-state_comment.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tokenizer-state_doctype.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tokenizer-state_rawtext.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tokenizer-state_rcdata.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tokenizer-state_script.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tokenizer-state.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-active_formatting.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-error.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_after_body.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_after_frameset.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_body.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_frameset.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-after_head.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-before_head.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-before_html.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-foreign_content.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_body.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_caption.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_cell.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_column_group.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_frameset.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_head_noscript.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_head.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_row.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_select_in_table.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_select.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table_body.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table_text.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_table.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-in_template.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-initial.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-html-tree-insertion_mode-text.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-html-tree-open_elements.o-cir": [
+      0
+    ],
+    "php-ext-lexbor-lexbor-ns-ns.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-ports-posix-lexbor-core-memory.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-punycode-punycode.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-tag-tag.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-unicode-idna.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-unicode-unicode.o-cir": [
+      1
+    ],
+    "php-ext-lexbor-lexbor-url-url.o-cir": [
+      1
+    ],
+    "php-ext-opcache-shared_alloc_mmap.o-cir": [
+      1
+    ],
+    "php-ext-opcache-shared_alloc_posix.o-cir": [
+      1
+    ],
+    "php-ext-opcache-shared_alloc_shm.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_accelerator_api.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_accelerator_blacklist.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_accelerator_debug.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_accelerator_hash.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_accelerator_module.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_accelerator_util_funcs.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_file_cache.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_persist_calc.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_persist.o-cir": [
+      1
+    ],
+    "php-ext-opcache-zend_shared_alloc.o-cir": [
+      1
+    ],
+    "php-ext-opcache-ZendAccelerator.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_cfg.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_check.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_dump.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_emit.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_gcm.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_gdb.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_patch.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_perf.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_ra.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_save.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_sccp.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir_strtab.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-ir-ir.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-zend_jit_vm_helpers.o-cir": [
+      1
+    ],
+    "php-ext-opcache-jit-zend_jit.o-cir": [
+      1
+    ],
+    "php-ext-random-csprng.o-cir": [
+      1
+    ],
+    "php-ext-random-engine_mt19937.o-cir": [
+      1
+    ],
+    "php-ext-random-engine_pcgoneseq128xslrr64.o-cir": [
+      1
+    ],
+    "php-ext-random-engine_secure.o-cir": [
+      1
+    ],
+    "php-ext-random-engine_user.o-cir": [
+      1
+    ],
+    "php-ext-random-engine_xoshiro256starstar.o-cir": [
+      1
+    ],
+    "php-ext-random-gammasection.o-cir": [
+      1
+    ],
+    "php-ext-random-random.o-cir": [
+      1
+    ],
+    "php-ext-random-randomizer.o-cir": [
+      1
+    ],
+    "php-ext-random-zend_utils.o-cir": [
+      1
+    ],
+    "php-ext-reflection-php_reflection.o-cir": [
+      1
+    ],
+    "php-ext-session-mod_user_class.o-cir": [
+      1
+    ],
+    "php-ext-session-session.o-cir": [
+      1
+    ],
+    "php-ext-session-mod_files.o-cir": [
+      1
+    ],
+    "php-ext-session-mod_mm.o-cir": [
+      1
+    ],
+    "php-ext-session-mod_user.o-cir": [
+      1
+    ],
+    "php-ext-spl-php_spl.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_array.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_directory.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_dllist.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_exceptions.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_fixedarray.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_functions.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_heap.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_iterators.o-cir": [
+      1
+    ],
+    "php-ext-spl-spl_observer.o-cir": [
+      1
+    ],
+    "php-ext-standard-array.o-cir": [
+      1
+    ],
+    "php-ext-standard-assert.o-cir": [
+      1
+    ],
+    "php-ext-standard-base64.o-cir": [
+      1
+    ],
+    "php-ext-standard-basic_functions.o-cir": [
+      1
+    ],
+    "php-ext-standard-browscap.o-cir": [
+      1
+    ],
+    "php-ext-standard-crc32_x86.o-cir": [
+      1
+    ],
+    "php-ext-standard-crc32.o-cir": [
+      1
+    ],
+    "php-ext-standard-credits.o-cir": [
+      1
+    ],
+    "php-ext-standard-crypt.o-cir": [
+      1
+    ],
+    "php-ext-standard-css.o-cir": [
+      1
+    ],
+    "php-ext-standard-datetime.o-cir": [
+      1
+    ],
+    "php-ext-standard-dir.o-cir": [
+      1
+    ],
+    "php-ext-standard-dl.o-cir": [
+      1
+    ],
+    "php-ext-standard-dns.o-cir": [
+      1
+    ],
+    "php-ext-standard-exec.o-cir": [
+      1
+    ],
+    "php-ext-standard-file.o-cir": [
+      1
+    ],
+    "php-ext-standard-filestat.o-cir": [
+      1
+    ],
+    "php-ext-standard-filters.o-cir": [
+      1
+    ],
+    "php-ext-standard-flock_compat.o-cir": [
+      1
+    ],
+    "php-ext-standard-formatted_print.o-cir": [
+      1
+    ],
+    "php-ext-standard-fsock.o-cir": [
+      1
+    ],
+    "php-ext-standard-ftok.o-cir": [
+      1
+    ],
+    "php-ext-standard-ftp_fopen_wrapper.o-cir": [
+      1
+    ],
+    "php-ext-standard-head.o-cir": [
+      1
+    ],
+    "php-ext-standard-hrtime.o-cir": [
+      1
+    ],
+    "php-ext-standard-html.o-cir": [
+      1
+    ],
+    "php-ext-standard-http_fopen_wrapper.o-cir": [
+      1
+    ],
+    "php-ext-standard-http.o-cir": [
+      1
+    ],
+    "php-ext-standard-image.o-cir": [
+      1
+    ],
+    "php-ext-standard-incomplete_class.o-cir": [
+      1
+    ],
+    "php-ext-standard-info.o-cir": [
+      1
+    ],
+    "php-ext-standard-iptc.o-cir": [
+      1
+    ],
+    "php-ext-standard-levenshtein.o-cir": [
+      1
+    ],
+    "php-ext-standard-libavifinfo-avifinfo.o-cir": [
+      1
+    ],
+    "php-ext-standard-link.o-cir": [
+      1
+    ],
+    "php-ext-standard-mail.o-cir": [
+      1
+    ],
+    "php-ext-standard-math.o-cir": [
+      1
+    ],
+    "php-ext-standard-md5.o-cir": [
+      1
+    ],
+    "php-ext-standard-metaphone.o-cir": [
+      1
+    ],
+    "php-ext-standard-microtime.o-cir": [
+      1
+    ],
+    "php-ext-standard-net.o-cir": [
+      1
+    ],
+    "php-ext-standard-pack.o-cir": [
+      1
+    ],
+    "php-ext-standard-pageinfo.o-cir": [
+      1
+    ],
+    "php-ext-standard-password.o-cir": [
+      1
+    ],
+    "php-ext-standard-php_fopen_wrapper.o-cir": [
+      1
+    ],
+    "php-ext-standard-proc_open.o-cir": [
+      1
+    ],
+    "php-ext-standard-quot_print.o-cir": [
+      1
+    ],
+    "php-ext-standard-scanf.o-cir": [
+      1
+    ],
+    "php-ext-standard-sha1.o-cir": [
+      1
+    ],
+    "php-ext-standard-soundex.o-cir": [
+      1
+    ],
+    "php-ext-standard-streamsfuncs.o-cir": [
+      1
+    ],
+    "php-ext-standard-string.o-cir": [
+      1
+    ],
+    "php-ext-standard-strnatcmp.o-cir": [
+      1
+    ],
+    "php-ext-standard-syslog.o-cir": [
+      1
+    ],
+    "php-ext-standard-type.o-cir": [
+      1
+    ],
+    "php-ext-standard-uniqid.o-cir": [
+      1
+    ],
+    "php-ext-standard-url_scanner_ex.o-cir": [
+      1
+    ],
+    "php-ext-standard-url.o-cir": [
+      1
+    ],
+    "php-ext-standard-user_filters.o-cir": [
+      1
+    ],
+    "php-ext-standard-uuencode.o-cir": [
+      1
+    ],
+    "php-ext-standard-var_unserializer.o-cir": [
+      1
+    ],
+    "php-ext-standard-var.o-cir": [
+      1
+    ],
+    "php-ext-standard-versioning.o-cir": [
+      1
+    ],
+    "php-ext-standard-crypt_blowfish.o-cir": [
+      1
+    ],
+    "php-ext-standard-crypt_freesec.o-cir": [
+      1
+    ],
+    "php-ext-standard-crypt_sha256.o-cir": [
+      1
+    ],
+    "php-ext-standard-crypt_sha512.o-cir": [
+      1
+    ],
+    "php-ext-standard-php_crypt_r.o-cir": [
+      1
+    ],
+    "php-ext-uri-php_uri.o-cir": [
+      1
+    ],
+    "php-ext-uri-php_uri_common.o-cir": [
+      1
+    ],
+    "php-ext-uri-uri_parser_rfc3986.o-cir": [
+      1
+    ],
+    "php-ext-uri-uri_parser_whatwg.o-cir": [
+      1
+    ],
+    "php-ext-uri-uri_parser_php_parse_url.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriCommon.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriCompare.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriCopy.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriEscape.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriFile.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriIp4.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriIp4Base.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriMemory.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriNormalize.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriNormalizeBase.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriParse.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriParseBase.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriQuery.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriRecompose.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriResolve.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriSetFragment.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriSetHostAuto.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriSetHostCommon.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriSetHostIp4.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriSetHostIp6.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriSetHostIpFuture.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriSetHostRegName.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriSetPath.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriSetPort.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriSetQuery.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriSetScheme.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriSetUserInfo.o-cir": [
+      1
+    ],
+    "php-ext-uri-uriparser-src-UriShorten.o-cir": [
+      0
+    ],
+    "php-ext-uri-uriparser-src-UriVersion.o-cir": [
+      1
+    ],
+    "php-TSRM-TSRM.o-cir": [
+      0
+    ],
+    "php-main-explicit_bzero.o-cir": [
+      1
+    ],
+    "php-main-fopen_wrappers.o-cir": [
+      1
+    ],
+    "php-main-getopt.o-cir": [
+      1
+    ],
+    "php-main-main.o-cir": [
+      1
+    ],
+    "php-main-network.o-cir": [
+      1
+    ],
+    "php-main-output.o-cir": [
+      1
+    ],
+    "php-main-php_content_types.o-cir": [
+      1
+    ],
+    "php-main-php_ini_builder.o-cir": [
+      1
+    ],
+    "php-main-php_ini.o-cir": [
+      1
+    ],
+    "php-main-php_glob.o-cir": [
+      1
+    ],
+    "php-main-php_odbc_utils.o-cir": [
+      1
+    ],
+    "php-main-php_open_temporary_file.o-cir": [
+      1
+    ],
+    "php-main-php_scandir.o-cir": [
+      1
+    ],
+    "php-main-php_syslog.o-cir": [
+      1
+    ],
+    "php-main-php_ticks.o-cir": [
+      1
+    ],
+    "php-main-php_variables.o-cir": [
+      1
+    ],
+    "php-main-reentrancy.o-cir": [
+      1
+    ],
+    "php-main-rfc1867.o-cir": [
+      1
+    ],
+    "php-main-safe_bcmp.o-cir": [
+      1
+    ],
+    "php-main-SAPI.o-cir": [
+      1
+    ],
+    "php-main-snprintf.o-cir": [
+      1
+    ],
+    "php-main-spprintf.o-cir": [
+      1
+    ],
+    "php-main-strlcat.o-cir": [
+      1
+    ],
+    "php-main-strlcpy.o-cir": [
+      1
+    ],
+    "php-main-debug_gdb_scripts.o-cir": [
+      1
+    ],
+    "php-main-streams-cast.o-cir": [
+      1
+    ],
+    "php-main-streams-filter.o-cir": [
+      1
+    ],
+    "php-main-streams-glob_wrapper.o-cir": [
+      1
+    ],
+    "php-main-streams-memory.o-cir": [
+      1
+    ],
+    "php-main-streams-mmap.o-cir": [
+      1
+    ],
+    "php-main-streams-plain_wrapper.o-cir": [
+      1
+    ],
+    "php-main-streams-streams.o-cir": [
+      1
+    ],
+    "php-main-streams-transports.o-cir": [
+      1
+    ],
+    "php-main-streams-userspace.o-cir": [
+      1
+    ],
+    "php-main-streams-xp_socket.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-block_pass.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-compact_literals.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-compact_vars.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-dce.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-dfa_pass.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-escape_analysis.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-nop_removal.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-optimize_func_calls.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-optimize_temp_vars_5.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-pass1.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-pass3.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-sccp.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-scdf.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-zend_call_graph.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-zend_cfg.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-zend_dfg.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-zend_dump.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-zend_func_info.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-zend_inference.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-zend_optimizer.o-cir": [
+      1
+    ],
+    "php-Zend-Optimizer-zend_ssa.o-cir": [
+      1
+    ],
+    "php-Zend-zend_alloc.o-cir": [
+      1
+    ],
+    "php-Zend-zend_API.o-cir": [
+      1
+    ],
+    "php-Zend-zend_ast.o-cir": [
+      1
+    ],
+    "php-Zend-zend_atomic.o-cir": [
+      1
+    ],
+    "php-Zend-zend_attributes.o-cir": [
+      1
+    ],
+    "php-Zend-zend_builtin_functions.o-cir": [
+      1
+    ],
+    "php-Zend-zend_call_stack.o-cir": [
+      1
+    ],
+    "php-Zend-zend_closures.o-cir": [
+      1
+    ],
+    "php-Zend-zend_compile.o-cir": [
+      1
+    ],
+    "php-Zend-zend_constants.o-cir": [
+      1
+    ],
+    "php-Zend-zend_cpuinfo.o-cir": [
+      1
+    ],
+    "php-Zend-zend_default_classes.o-cir": [
+      1
+    ],
+    "php-Zend-zend_dtrace.o-cir": [
+      1
+    ],
+    "php-Zend-zend_enum.o-cir": [
+      1
+    ],
+    "php-Zend-zend_exceptions.o-cir": [
+      1
+    ],
+    "php-Zend-zend_execute_API.o-cir": [
+      1
+    ],
+    "php-Zend-zend_execute.o-cir": [
+      1
+    ],
+    "php-Zend-zend_extensions.o-cir": [
+      1
+    ],
+    "php-Zend-zend_fibers.o-cir": [
+      1
+    ],
+    "php-Zend-zend_float.o-cir": [
+      1
+    ],
+    "php-Zend-zend_frameless_function.o-cir": [
+      0
+    ],
+    "php-Zend-zend_gc.o-cir": [
+      1
+    ],
+    "php-Zend-zend_gdb.o-cir": [
+      1
+    ],
+    "php-Zend-zend_generators.o-cir": [
+      1
+    ],
+    "php-Zend-zend_hash.o-cir": [
+      1
+    ],
+    "php-Zend-zend_highlight.o-cir": [
+      1
+    ],
+    "php-Zend-zend_hrtime.o-cir": [
+      0
+    ],
+    "php-Zend-zend_inheritance.o-cir": [
+      1
+    ],
+    "php-Zend-zend_ini_parser.o-cir": [
+      1
+    ],
+    "php-Zend-zend_ini_scanner.o-cir": [
+      1
+    ],
+    "php-Zend-zend_ini.o-cir": [
+      1
+    ],
+    "php-Zend-zend_interfaces.o-cir": [
+      1
+    ],
+    "php-Zend-zend_iterators.o-cir": [
+      1
+    ],
+    "php-Zend-zend_language_parser.o-cir": [
+      1
+    ],
+    "php-Zend-zend_language_scanner.o-cir": [
+      1
+    ],
+    "php-Zend-zend_lazy_objects.o-cir": [
+      1
+    ],
+    "php-Zend-zend_list.o-cir": [
+      1
+    ],
+    "php-Zend-zend_llist.o-cir": [
+      1
+    ],
+    "php-Zend-zend_max_execution_timer.o-cir": [
+      0
+    ],
+    "php-Zend-zend_multibyte.o-cir": [
+      1
+    ],
+    "php-Zend-zend_object_handlers.o-cir": [
+      1
+    ],
+    "php-Zend-zend_objects_API.o-cir": [
+      1
+    ],
+    "php-Zend-zend_objects.o-cir": [
+      1
+    ],
+    "php-Zend-zend_observer.o-cir": [
+      1
+    ],
+    "php-Zend-zend_opcode.o-cir": [
+      1
+    ],
+    "php-Zend-zend_operators.o-cir": [
+      1
+    ],
+    "php-Zend-zend_property_hooks.o-cir": [
+      1
+    ],
+    "php-Zend-zend_ptr_stack.o-cir": [
+      1
+    ],
+    "php-Zend-zend_signal.o-cir": [
+      1
+    ],
+    "php-Zend-zend_smart_str.o-cir": [
+      1
+    ],
+    "php-Zend-zend_sort.o-cir": [
+      1
+    ],
+    "php-Zend-zend_stack.o-cir": [
+      0
+    ],
+    "php-Zend-zend_stream.o-cir": [
+      1
+    ],
+    "php-Zend-zend_string.o-cir": [
+      1
+    ],
+    "php-Zend-zend_strtod.o-cir": [
+      1
+    ],
+    "php-Zend-zend_system_id.o-cir": [
+      1
+    ],
+    "php-Zend-zend_variables.o-cir": [
+      1
+    ],
+    "php-Zend-zend_virtual_cwd.o-cir": [
+      1
+    ],
+    "php-Zend-zend_vm_opcodes.o-cir": [
+      1
+    ],
+    "php-Zend-zend_weakrefs.o-cir": [
+      1
+    ],
+    "php-Zend-zend.o-cir": [
+      1
+    ],
+    "php-main-internal_functions_cli.o-cir": [
+      1
+    ],
+    "php-sapi-cli-php_cli.o-cir": [
+      1
+    ],
+    "php-sapi-cli-php_http_parser.o-cir": [
+      1
+    ],
+    "php-sapi-cli-php_cli_server.o-cir": [
+      1
+    ],
+    "php-sapi-cli-ps_title.o-cir": [
+      1
+    ],
+    "php-sapi-cli-php_cli_process_title.o-cir": [
+      1
+    ]
+  },
+  "measurements_sha256": "7713ce72a38769049ee1eba3330f1de2c42559323cc6d6db4b5d4b1e8127832f"
+}

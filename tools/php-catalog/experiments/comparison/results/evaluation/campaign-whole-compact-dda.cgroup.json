@@ -1,14 +1,18 @@
 {
-  "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p685308-i685726.scope",
+  "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p4103165-i4105709.scope",
   "memory_max_bytes": 10737418240,
   "swap_max_bytes": 0,
   "aggregate_hard_limit_enforced": true,
   "command": [
-    "/home/torres/.cache/php-catalog-evaluation/campaign/dvf-compact",
+    "/home/torres/.cache/php-catalog-evaluation/campaign-A/compact-svf/svf-build/bin/dvf",
+    "-extapi=/home/torres/.cache/php-catalog-evaluation/campaign-A/compact-svf/svf-build/lib/extapi.bc",
     "-dfs",
     "-query=funptr",
     "-stat",
     "-print-query-pts",
-    "/home/torres/.cache/php-catalog-evaluation/whole-clang/php-cli-promoted.bc"
-  ]
+    "/home/torres/.cache/php-catalog-evaluation/evaluation-pathfree/php-cli-promoted.bc"
+  ],
+  "exit_code": -9,
+  "memory_peak_bytes": 10737418240,
+  "memory_events": "low 0\nhigh 0\nmax 205\noom 1\noom_kill 1\noom_group_kill 0\nsock_throttled 0\n"
 }
