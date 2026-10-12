@@ -171,6 +171,18 @@ class CampaignAdmissionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "measurement digest"):
                 FINISH.validate_finish_completion(output, cir_results)
 
+    def test_a_placeholder_output_path_resolves_to_the_emitted_artifact(self):
+        import run as RUN
+        with tempfile.TemporaryDirectory() as temporary:
+            emitted = Path(temporary) / "unit.cir"
+            emitted.write_text("cir\n")
+            recorded_path = RUN.record_text(emitted.resolve())
+            result = {"name": "unit", "imported": True, "exit_code": 0, "classification": "emitted",
+                      "stderr_sha256": "a" * 64, "output_path": recorded_path,
+                      "output_sha256": FINISH.digest(emitted)}
+            measurements = [{"name": "unit-cir", "exit_code": 0, "stderr_sha256": "a" * 64}]
+            self.assertEqual(FINISH.finish_expected_exit_codes(measurements, [result]), {"unit-cir": [0]})
+
     def test_successful_cir_outcome_requires_the_emitted_artifact_digest(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

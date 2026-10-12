@@ -10,7 +10,7 @@ import time
 
 from evaluation import EnforcedRunner, recipes
 from campaign import expected_outcome, step_passed
-from run import HERE, digest, recorded, svf_command
+from run import HERE, digest, recorded, resolve_record, svf_command
 
 
 def require_success(success, name):
@@ -42,8 +42,8 @@ def finish_expected_exit_codes(measurements, cir_results):
             if (result.get('exit_code') != 0 or result.get('classification') != 'emitted'
                     or not isinstance(output_path, str)
                     or re.fullmatch(r'[0-9a-f]{64}', str(output_sha256)) is None
-                    or not Path(output_path).is_file()
-                    or digest(Path(output_path)) != output_sha256):
+                    or not Path(resolve_record(output_path)).is_file()
+                    or digest(Path(resolve_record(output_path))) != output_sha256):
                 raise ValueError(f'{name}: successful CIR outcome is malformed')
         elif (result.get('exit_code') != 1
               or result.get('classification') != 'frontend rejected this translation unit; retained as unsupported evidence'
