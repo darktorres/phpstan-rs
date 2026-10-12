@@ -337,7 +337,7 @@ function valid_site(ReflectionParameter $param): ?Closure
         'fopen' => [1 => 'r'],
         'stream_copy_to_stream' => [0 => static fn (): mixed => fopen('php://memory', 'r+'), 1 => static fn (): mixed => fopen('php://memory', 'r+')],
         'sodium_crypto_secretstream_xchacha20poly1305_push' => [0 => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0]],
-        'array_multisort' => [0 => static fn (): array => [3, 1, 2]],
+        'array_multisort' => [0 => static fn (): array => [2, 1]],
         // A no-op command and no descriptors: proc_open starts a process whatever it is given.
         'proc_open' => [0 => 'true', 1 => static fn (): array => []],
         'zip_entry_close' => [0 => static fn (): mixed => zip_entry_sample()],
