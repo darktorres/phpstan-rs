@@ -98,9 +98,9 @@ class CampaignAdmissionTests(unittest.TestCase):
             CAMPAIGN.publish_completion(SimpleNamespace(output=output))
             marker = json.loads((output / "completed.json").read_text())
             self.assertEqual(marker["expected_exit_codes"], {
-                "cbmc-contracts": 0,
-                "cbmc-invalid-composition": 10,
-                "cbmc-low-budget": 10,
+                "cbmc-contracts": [0],
+                "cbmc-invalid-composition": [10],
+                "cbmc-low-budget": [10],
             })
             FINISH.validate_campaign_completion(root)
 
@@ -136,7 +136,7 @@ class CampaignAdmissionTests(unittest.TestCase):
             "stderr_sha256": "a" * 64,
         }
         expected = FINISH.finish_expected_exit_codes(measurements, [result])
-        self.assertEqual(expected, {"instrument-link": 0, "zend_builtin_functions-cir": 1})
+        self.assertEqual(expected, {"instrument-link": [0], "zend_builtin_functions-cir": [1]})
         with self.assertRaisesRegex(ValueError, "not an explicitly classified"):
             FINISH.finish_expected_exit_codes(measurements, [{**result, "exit_code": 139}])
 
@@ -183,7 +183,7 @@ class CampaignAdmissionTests(unittest.TestCase):
                 "classification": "emitted", "stderr_sha256": stderr_hash,
                 "output_path": str(emitted), "output_sha256": FINISH.digest(emitted),
             }
-            self.assertEqual(FINISH.finish_expected_exit_codes(measurements, [result]), {"unit-cir": 0})
+            self.assertEqual(FINISH.finish_expected_exit_codes(measurements, [result]), {"unit-cir": [0]})
             emitted.write_text("mutated output\n")
             with self.assertRaisesRegex(ValueError, "successful CIR outcome is malformed"):
                 FINISH.finish_expected_exit_codes(measurements, [result])

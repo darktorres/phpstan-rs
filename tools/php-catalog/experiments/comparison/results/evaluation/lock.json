@@ -189,5 +189,17 @@
         }
       }
     }
+  },
+  "expected_outcomes": {
+    "whole-compact-dda": {
+      "kind": "resource_gate_oom",
+      "exit_codes": [
+        137,
+        143
+      ],
+      "min_oom_kills": 1,
+      "peak_slack_bytes": 268435456,
+      "reason": "the compact analysis is measured against the 10 GiB aggregate cgroup; exit 137 or 143 is the finding only with kernel OOM proof"
+    }
   }
 }

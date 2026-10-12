@@ -179,33 +179,31 @@ def validate_cbmc_run(name, actual_document, reference_document, command_exit_co
         raise ValueError(f'{name}: checked-in reference no longer matches its declared expectation')
 
 
-def compact_build(cache, original, runner):
-    commands = subprocess.check_output(['ninja', '-t', 'commands', 'dvf'], cwd=original, text=True).splitlines()
-    compile_line = next(x for x in commands if ' -c ' in x and x.endswith('/lib/LLVMModule.cpp'))
-    command = shlex.split(compile_line)
-    replacement = runner.output / 'LLVMModule.cpp.o'
-    command[command.index('-c') + 1] = str(cache / 'svf-compact/svf-llvm/lib/LLVMModule.cpp')
-    command[command.index('-o') + 1] = str(replacement)
-    for flag in ['-MT', '-MF']:
-        at = command.index(flag); del command[at:at+2]
-    require_success(runner.run('compact-compile', command, cwd=original, timeout=300), 'compact-compile')
-    library = runner.output / 'libSvfLLVM.a'
-    shutil.copy2(original / 'lib/libSvfLLVM.a', library)
-    require_success(runner.run('compact-archive', ['llvm-ar-21', 'r', library, replacement]), 'compact-archive')
-    line = next(x for x in commands if ' -o bin/dvf ' in x)
-    command = shlex.split(line.split('&&')[1])
-    binary = runner.output / 'dvf-compact'
-    command[command.index('-o') + 1] = str(binary)
-    command = [str(library) if x == 'lib/libSvfLLVM.a' else x for x in command]
-    command = [x for x in command if not x.startswith('--dependency-file=')]
-    # The corresponding standalone -Xlinker must be removed as well.
-    command = [x for i, x in enumerate(command) if not (x == '-Xlinker' and (i+1 == len(command) or not command[i+1].startswith('-')))]
-    require_success(runner.run('compact-link', command, cwd=original, timeout=300), 'compact-link')
+def compact_build(cache, runner):
+    """Build SVF at the locked commit with the compact LLVMModule change, path-free.
+
+    The compact tree is a copy of the pinned SVF clone with svf-compact.patch applied,
+    built by build_svf_pathfree.sh. The source commit and both patch digests are checked
+    and recorded; nothing is reused from an earlier build.
+    """
+    lock = json.loads((HERE / 'results/lock.json').read_text())
+    clone = cache / 'compact-svf-source'
+    build_root = cache / 'compact-svf'
+    shutil.rmtree(clone, ignore_errors=True)
+    shutil.copytree(cache / 'root/SVF', clone, symlinks=True)
+    subprocess.run(['git', '-C', str(clone), 'apply', str(HERE / 'svf-compact.patch')], check=True)
+    head = subprocess.check_output(['git', '-C', str(clone), 'rev-parse', 'HEAD'], text=True).strip()
+    if head != lock['svf_commit']:
+        raise RuntimeError(f'compact source is at {head}, not the locked {lock["svf_commit"]}')
+    subprocess.run([str(HERE / 'build_svf_pathfree.sh'), str(build_root), str(clone),
+                    str(cache / 'root/deps/usr')], check=True)
+    binary = build_root / 'svf-build/bin/dvf'
     (runner.output / 'compact-lock.json').write_text(json.dumps(dict(
-        source_commit=subprocess.check_output(['git', '-C', str(cache/'svf-compact'), 'rev-parse', 'HEAD'], text=True).strip(),
-        patch_sha256=digest(HERE/'svf-compact.patch'), adapted_source_sha256=digest(cache/'svf-compact/svf-llvm/lib/LLVMModule.cpp'),
-        reused_library_sha256=digest(original/'lib/libSvfLLVM.a'), binary_sha256=digest(binary),
-        unchanged_object_reuse=True, affected_source_files=1), indent=2)+'\n')
+        source_commit=head,
+        patch_sha256=digest(HERE / 'svf-compact.patch'),
+        relocatable_patch_sha256=digest(HERE / 'svf-relocatable-extapi.patch'),
+        binary_sha256=digest(binary),
+        build='build_svf_pathfree.sh (full build from the pinned commit; no object reuse)'), indent=2) + '\n')
     return binary
 
 
@@ -237,9 +235,44 @@ def require_success(success, step):
         raise RuntimeError(f"campaign step failed: {step}")
 
 
-def expected_exit_code(step):
-    expectation = CBMC_EXPECTATIONS.get(step)
-    return 0 if expectation is None else expectation['command_exit_code']
+def expected_outcome(step):
+    """The reviewed outcome of a step: its kind and the exit codes it may end with.
+
+    CBMC steps keep their reviewed exit codes; every other step is listed in
+    expected_outcomes of results/evaluation/lock.json, and anything not listed must exit 0.
+    """
+    if step in CBMC_EXPECTATIONS:
+        return dict(kind='cbmc', exit_codes=[CBMC_EXPECTATIONS[step]['command_exit_code']])
+    table = json.loads((HERE / 'results/evaluation/lock.json').read_text()).get('expected_outcomes', {})
+    return table.get(step, dict(kind='ok', exit_codes=[0]))
+
+
+def resource_gate_proven(record, outcome):
+    """A resource-gate exit counts only with the kernel's OOM kill in the enforcing cgroup."""
+    proof = record.get('resource_proof') or {}
+    if proof.get('aggregate_hard_limit_enforced') is not True or proof.get('kernel_oom_kill') is not True:
+        return False
+    kills = [int(line.split()[1]) for line in str(proof.get('memory_events', '')).splitlines()
+             if line.startswith('oom_kill ') and line.split()[1:2] and line.split()[1].isdigit()]
+    if not kills or max(kills) < outcome['min_oom_kills']:
+        return False
+    peak = proof.get('memory_peak_bytes')
+    return isinstance(peak, int) and peak >= proof['memory_max_bytes'] - outcome['peak_slack_bytes']
+
+
+def step_passed(record):
+    outcome = expected_outcome(record.get('name'))
+    if record.get('exit_code') not in outcome['exit_codes']:
+        return False
+    if outcome['kind'] == 'resource_gate_oom':
+        return resource_gate_proven(record, outcome)
+    return True
+
+
+def run_resource_gate(runner, step, command, timeout):
+    runner.run(step, command, timeout=timeout)
+    if not step_passed(runner.measurements[-1]):
+        raise RuntimeError(f'campaign step failed: {step}')
 
 
 def wait_for_enforcing_worker(report_path, timeout_seconds=6 * 60 * 60,
@@ -282,7 +315,7 @@ def complementary(cache, runner, php_binary):
         '--output', runner.output/'binary-results.json'], timeout=300), 'binary')
 
 
-def pointer_cases(cache, original, compact, runner):
+def pointer_cases(original, compact, promoted_module, runner):
     for fixture in ['dispatch', 'external', 'layout_cases']:
         bc = runner.output / (fixture+'.bc')
         require_success(runner.run(fixture+'-emit', ['clang-21', '-O0', '-g', '-Xclang', '-disable-O0-optnone',
@@ -300,8 +333,8 @@ def pointer_cases(cache, original, compact, runner):
         require_success(runner.run('growth-'+str(size)+'-promote', ['opt-21', '-passes=mem2reg', bc, '-o', promoted]), 'growth-'+str(size)+'-promote')
         step = 'growth-'+str(size)+'-compact'
         require_success(runner.run(step, [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts', promoted]), step)
-    require_success(runner.run('whole-compact-dda', [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts',
-        cache/'whole-clang/php-cli-promoted.bc'], timeout=1800), 'whole-compact-dda')
+    run_resource_gate(runner, 'whole-compact-dda', [compact, '-dfs', '-query=funptr', '-stat', '-print-query-pts',
+        promoted_module], timeout=1800)
 
 
 def publish_completion(runner):
@@ -310,8 +343,7 @@ def publish_completion(runner):
     names = [record.get('name') for record in measurements]
     if any(not isinstance(name, str) for name in names) or len(set(names)) != len(names):
         raise RuntimeError('cannot publish completion; measurement step names are missing or duplicated')
-    failures = [record['name'] for record in measurements
-                if record.get('exit_code') != expected_exit_code(record['name'])]
+    failures = [record['name'] for record in measurements if not step_passed(record)]
     if failures:
         raise RuntimeError(f"cannot publish completion; failed steps: {failures}")
     manifest = {
@@ -319,7 +351,7 @@ def publish_completion(runner):
         'status': 'complete',
         'step_count': len(measurements),
         'steps': names,
-        'expected_exit_codes': {record['name']: expected_exit_code(record['name'])
+        'expected_exit_codes': {record['name']: expected_outcome(record['name'])['exit_codes']
                                 for record in measurements},
         'measurements_sha256': digest(measurements_path),
     }
@@ -331,19 +363,26 @@ def main():
     parser.add_argument('--cache', type=Path, required=True)
     parser.add_argument('--stock-build', type=Path, required=True)
     parser.add_argument('--php-binary', type=Path, required=True)
+    parser.add_argument('--promoted-module', type=Path, required=True,
+                        help='mem2reg form of the linked php-cli.bc (evaluation.py --svf writes it)')
+    parser.add_argument('--admission-report', type=Path, required=True,
+                        help='the enforcing worker report this campaign must wait for')
+    parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     cache, original = args.cache.resolve(), args.stock_build.resolve()
     php_binary = args.php_binary.resolve()
+    promoted = args.promoted_module.resolve()
     if not php_binary.is_file():
         parser.error('--php-binary must name the exact measured PHP executable')
-    # Admission is serial across campaigns. The first full-link job was started
-    # before this script; let its enforcing cgroup finish before admitting more.
-    report = cache/'stock-whole-kernel/whole-svf-dda.cgroup.json'
-    wait_for_enforcing_worker(report)
-    runner = EnforcedRunner(cache/'campaign')
+    # Admission is serial across campaigns: nothing is admitted while the
+    # enforcing worker that produces the promoted module has not published its result.
+    wait_for_enforcing_worker(args.admission_report.resolve())
+    if not promoted.is_file():
+        parser.error('--promoted-module must name an existing module')
+    runner = EnforcedRunner(args.output.resolve())
     complementary(cache, runner, php_binary)
-    compact = compact_build(cache, original, runner)
-    pointer_cases(cache, original, compact, runner)
+    compact = compact_build(cache, runner)
+    pointer_cases(original, compact, promoted, runner)
     publish_completion(runner)
 
 

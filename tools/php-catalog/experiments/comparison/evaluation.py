@@ -28,7 +28,7 @@ class EnforcedRunner(Runner):
         record = self.measurements[-1]
         record['job_command'] = recorded(list(map(str, command)))
         if proof.exists():
-            record['resource_proof'] = json.loads(proof.read_text())
+            record['resource_proof'] = recorded(json.loads(proof.read_text()))
         else:
             record['resource_proof'] = {'aggregate_hard_limit_enforced': False}
         (self.output / 'measurements.json').write_text(json.dumps(self.measurements, indent=2) + '\n')

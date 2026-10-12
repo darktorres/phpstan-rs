@@ -9,7 +9,7 @@ import subprocess
 import time
 
 from evaluation import EnforcedRunner, recipes
-from campaign import expected_exit_code
+from campaign import expected_outcome, step_passed
 from run import HERE, digest
 
 
@@ -29,7 +29,7 @@ def finish_expected_exit_codes(measurements, cir_results):
     for record in measurements:
         name = record['name']
         if name not in cir_by_name:
-            expected[name] = expected_exit_code(name)
+            expected[name] = expected_outcome(name)['exit_codes']
             continue
         result = cir_by_name[name]
         if result.get('stderr_sha256') != record.get('stderr_sha256') or re.fullmatch(
@@ -49,7 +49,7 @@ def finish_expected_exit_codes(measurements, cir_results):
               or result.get('classification') != 'frontend rejected this translation unit; retained as unsupported evidence'
               or not isinstance(result.get('stderr_sha256'), str)):
             raise ValueError(f'{name}: CIR rejection is not an explicitly classified unsupported result')
-        expected[name] = result['exit_code']
+        expected[name] = [result['exit_code']]
     return expected
 
 
@@ -65,13 +65,12 @@ def validate_campaign_completion(cache):
         raise ValueError('campaign completion marker has no successful schema/status')
     if marker.get('step_count') != len(measurements) or marker.get('steps') != names:
         raise ValueError('campaign completion marker does not bind the measured steps')
-    expected = {record['name']: expected_exit_code(record['name']) for record in measurements}
+    expected = {record['name']: expected_outcome(record['name'])['exit_codes'] for record in measurements}
     if marker.get('expected_exit_codes') != expected:
         raise ValueError('campaign completion marker has an unexpected exit-code policy')
     if marker.get('measurements_sha256') != digest(measurements_path):
         raise ValueError('campaign measurement digest differs from completion marker')
-    failures = [record['name'] for record in measurements
-                if record.get('exit_code') != expected_exit_code(record['name'])]
+    failures = [record['name'] for record in measurements if not step_passed(record)]
     if failures:
         raise ValueError(f"campaign contains failed steps: {failures}")
 
@@ -94,7 +93,7 @@ def validate_finish_completion(output, cir_results):
     if marker.get('measurements_sha256') != digest(measurements_path):
         raise ValueError('finish measurement digest differs from completion marker')
     failures = [record['name'] for record in measurements
-                if record.get('exit_code') != expected[record['name']]]
+                if record.get('exit_code') not in expected[record['name']]]
     if failures:
         raise ValueError(f'finish campaign contains failed steps: {failures}')
 
@@ -254,7 +253,7 @@ def main():
     cir_results=json.loads((runner.output/'cir-imports.json').read_text())
     expected_codes=finish_expected_exit_codes(measurements, cir_results)
     failures=[record['name'] for record in measurements
-              if record.get('exit_code') != expected_codes[record['name']]]
+              if record.get('exit_code') not in expected_codes[record['name']]]
     if failures:
         raise RuntimeError(f"finish campaign has failed steps: {failures}")
     (runner.output/'completed.json').write_text(json.dumps({
