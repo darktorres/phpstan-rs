@@ -48,6 +48,7 @@ function recipe(string $class): ?Closure
         'reflectionparameter' => static fn (): object => new ReflectionParameter([RecordingObject::class, 'offsetGet'], 0),
         'reflectionclassconstant' => static fn (): object => new ReflectionClassConstant(Attribute::class, 'TARGET_CLASS'),
         'reflectionextension' => static fn (): object => new ReflectionExtension('standard'),
+        'reflectionclass' => static fn (): object => new ReflectionClass(stdClass::class),
         'splfileobject' => static fn (): object => new SplFileObject(recipe_file(), 'w+'),
         'splfileinfo' => static fn (): object => new SplFileInfo(recipe_file()),
         // Imagick's methods throw on an empty object: one image is read first.
@@ -101,6 +102,7 @@ function recipe(string $class): ?Closure
         'finfo' => static fn (): object => new finfo(FILEINFO_MIME_TYPE),
         'fiber' => static fn (): object => new Fiber(static fn (): int => 1),
         'splobjectstorage' => static fn (): object => new SplObjectStorage(),
+        'imagickkernel' => static fn (): object => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         default => null,
     };
 }
