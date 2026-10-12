@@ -280,7 +280,7 @@ function valid_site(ReflectionParameter $param): ?Closure
         'curl_setopt' => [1 => static fn (): int => CURLOPT_FOLLOWLOCATION],
         'curl_multi_setopt' => [1 => static fn (): int => CURLMOPT_MAXCONNECTS],
         'curl_share_setopt' => [1 => static fn (): int => CURLSHOPT_SHARE],
-        'datefmt_create' => [0 => 'en'],
+        'datefmt_create' => [0 => 'en', 3 => 'UTC'],
         'datefmt_format_object' => [0 => static fn (): DateTime => new DateTime('2000-01-01 00:00:00', new DateTimeZone('UTC'))],
         'deflate_init' => [0 => static fn (): int => ZLIB_ENCODING_RAW],
         'domdocument::registernodeclass' => [0 => 'DOMElement', 1 => static fn (): null => null],
@@ -318,7 +318,7 @@ function valid_site(ReflectionParameter $param): ?Closure
         'file_put_contents' => [3 => static fn (): mixed => stream_context_create()],
         'finfo_file' => [3 => static fn (): mixed => stream_context_create()],
         'finfo::file' => [2 => static fn (): mixed => stream_context_create()],
-        'fopen' => [3 => static fn (): mixed => stream_context_create()],
+        'fopen' => [1 => 'r', 3 => static fn (): mixed => stream_context_create()],
         'get_headers' => [2 => static fn (): mixed => stream_context_create()],
         'hash_update_file' => [2 => static fn (): mixed => stream_context_create()],
         'libxml_set_streams_context' => [0 => static fn (): mixed => stream_context_create()],
@@ -334,10 +334,18 @@ function valid_site(ReflectionParameter $param): ?Closure
         'stream_context_set_options' => [0 => static fn (): mixed => stream_context_create(), 1 => static fn (): array => ['http' => ['method' => 'GET']]],
         'mb_ereg_replace_callback' => [3 => static fn (): null => null],
         'strtr' => [1 => static fn (): array => ['a' => 'b']],
-        'fopen' => [1 => 'r'],
         'stream_copy_to_stream' => [0 => static fn (): mixed => fopen('php://memory', 'r+'), 1 => static fn (): mixed => fopen('php://memory', 'r+')],
         'sodium_crypto_secretstream_xchacha20poly1305_push' => [0 => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0]],
         'array_multisort' => [0 => static fn (): array => [2, 1]],
+        'imagick::newimage' => [2 => 'white'],
+        'sodium_crypto_generichash_final' => [0 => static fn (): string => sodium_crypto_generichash_init()],
+        'sodium_crypto_generichash_update' => [0 => static fn (): string => sodium_crypto_generichash_init()],
+        'sodium_crypto_secretstream_xchacha20poly1305_pull' => [0 => static function (): string {
+            $key = sodium_crypto_secretstream_xchacha20poly1305_keygen();
+            [, $header] = sodium_crypto_secretstream_xchacha20poly1305_init_push($key);
+            return sodium_crypto_secretstream_xchacha20poly1305_init_pull($header, $key);
+        }],
+        'sodium_crypto_secretstream_xchacha20poly1305_rekey' => [0 => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0]],
         // A no-op command and no descriptors: proc_open starts a process whatever it is given.
         'proc_open' => [0 => 'true', 1 => static fn (): array => []],
         'zip_entry_close' => [0 => static fn (): mixed => zip_entry_sample()],
