@@ -3333,3 +3333,22 @@ Written as a design discussion; nothing here is built. The first three pieces sh
 6. **Settings, last (EG.17, EG.11).** No sound bound exists (reflection, `Closure::bind`, `unserialize`, `settype` write any property; a thrown exception's trace keeps arguments alive), so the proper form is a named, documented assumption in the configuration: `unknown_code.writes = "all" | "public" | "declared-writers"` (default `all`) and `exception_traces_keep_arguments` (default off). Built after 1-5, since they leave only the truly unknowable (`$callback()` of a `mixed` value).
 
 Decisions pending: whether to build 1-5 as one body of work, and whether 6 is built at all.
+
+## Measurements against the targets (E2.V, 2026-10-11)
+
+The full numbers, with how each run was made, are in `PROFILE_DRILL_PIWIGO_9071_BATCH_PLAN.md` (section "Measurements (E2.V, 2026-10-11)"). This section sets them against this plan's targets.
+
+| measure | this plan's baseline | target in this plan | `97b8f3f0` (HEAD for E2.V) |
+|---|---|---|---|
+| callgrind, off | 20.57 G (`5fb858c9`) | about 8 G fewer | 49.36 G (`9071f48f`: 54.13 G) |
+| heap, total allocated | 2.67 GB, 19.44 M blocks (`5fb858c9`) | 1.85 M blocks | 7.41 GB, 43.00 M blocks |
+| heap, peak | 0.87 GB (`5fb858c9`) | 350 to 385 MB | 1.48 GB |
+| heap, at exit | 0.66 GB (`5fb858c9`) | about 290 MB | 1.13 GB |
+
+The 20.57 G baseline and the 54.13 G baseline of `9071f48f` are both cache-off callgrind runs of the same Piwigo check, but they are not on the same basis. The batch plan records both figures without reconciling them. I haven't reconciled them either, and until someone does, the callgrind row above can't show the target was met or missed.
+
+The heap rose sharply between `5fb858c9` (2026-10-03) and `df603944` (2026-10-07), from 2.67 GB to 7.43 GB, before the batch started. From `df603944` to `97b8f3f0`, which covers the batch and the commits between, the total moved from 7.43 GB to 7.41 GB and the allocation count from 46.17 M to 43.00 M. Peak and exit memory went up in the same window, from 0.88 GB to 1.48 GB and from 0.66 GB to 1.13 GB. So the memory targets in this plan were not reached, and the batch did not cause the jump between `5fb858c9` and `df603944`.
+
+Wall time (outside valgrind): off mode 4.12 s against 4.22 s, and warm mode 3.77 s against 3.56 s, both within the noise. The batch-plan section has the spreads.
+
+Open against this plan's targets: the memory growth, which is not explained yet; the callgrind baseline reconciliation above; and the open ledger rows listed in the batch plan's section.

@@ -403,3 +403,66 @@ One always-on facility, `phpstan_rs::stats`, extending the `syntax::memo::Memo<V
 4. Callgrind rerun in two modes, one process each, same binary and settings, each in its own run directory: **off** (`PHPSTAN_RS_NO_FILE_CACHE=1`; comparable with `cl-20g` 20.57 G and with the Baseline step) and **warm** (cache filled by an unprofiled run first); plus **cold-with-store** (empty cache directory) because AB and AA change the cache format and the store path. The modes' callgrind runs may overlap (Ir does not depend on load): off and warm in parallel under `nice -n 19`, each with its own cache directory; cold-with-store after them (memory: about 18 G free, valgrind runs of 2–7 G each). Timing runs (hyperfine) never overlap anything. One script runs the modes and prints each total Ir and the comparison with `run-631ad001.json`. Parse and drill each; `PHPSTAN_RS_MEMO_STATS=1` output gives the hit rate of every memo site. The 42.2 G figure is a warm-mode total; off-mode targets come from the Baseline step and exclude AA, AB's decode part and `Reader::open`.
 5. Heap (`dhat-heap`) peak not above the previous (W's old memo stays alive while the new one fills). Then `hyperfine -N --warmup 2 --runs 10` warm previous vs new, alternating, on `gate`-profile binaries from a throwaway `git worktree` of the base commit (copy `vendor/phpstan-src` into it); wall effects of W, the vendor wait, the session read path and the syscall rows are read here, not in Ir.
 6. The end-of-batch drill re-lists every function above 20 M and any `mi_free_try_collect_mt` caller above 5 M; each is given a fix or a recorded reason. Ledger rows E2.11/E2.8/E2.9/E2.V and `WORK_STACK.md` updated; E2.8 and E2.9 are closed by item L with their final numbers.
+
+## Measurements (E2.V, 2026-10-11)
+
+Baseline: `9071f48f`, the commit this batch profiled. Current: `97b8f3f0` (the batch with two fixes: `5ddb4436` for the implicit-call index, `97b8f3f0` for the parameter-use order). Pre-fix: `97df097c`, which holds the batch before those fixes.
+
+### Instructions (callgrind, `--separate-threads=yes`, self cost summed over threads; the sums equal each run's summary totals)
+
+| mode | `9071f48f` | `97b8f3f0` | change |
+|---|---|---|---|
+| off (`PHPSTAN_RS_NO_FILE_CACHE=1`) | 54.13 G | 49.36 G | −4.77 G (−8.8%) |
+| warm (cache filled by two unprofiled runs) | 42.14 G | 39.37 G | −2.77 G (−6.6%) |
+| cold-with-store (stub cache warm, file cache empty) | 56.24 G | 53.13 G | −3.11 G (−5.5%) |
+
+The first cold run (59.23 G) emptied the stub cache as well, so it is not comparable with the baseline's cold run and is not used here.
+
+Largest changes by function name, off mode (names can move with inlining, so these are indicative):
+- Down: the `TokenStream` `payload_at` and `token_at` (−2.8 G together; the lexer and parser group is −2.6 G), `memcpy` (−1.4 G), `lowered_text` (−0.8 G, item F/G), the folded-name comparisons (−0.9 G), a `HashMap` keyed by `(DeclKey, Transfer)` (−0.9 G, item E/D), `memset` (−0.7 G, item Z), summary printing (−0.6 G, item A).
+- Up: the `Name`-keyed property lookups (+1.8 G). `lookup_property_with_owner` makes 2.6 M calls against 0.26 M, `property_owners` 5.4 M against 0.23 M. Of those calls, 6.7 M come from `Reach::destroy_held`, which commit `d6d55292` (EG.22, a correctness fix that landed after the baseline) added. The batch is not the only cause of this rise.
+- Also up: the holder cycle (+0.3 G; item B/C is PART in the ledger), the settle and resolve path (+0.8 G; E2.6 OPEN, E2.12.25 NOT BUILT), `Reach::destroy_held` itself (+0.5 G), and `Parser::token_ref` (+0.5 G).
+
+### Wall time (`hyperfine -N --warmup 1 --runs 5`, output to `/dev/null`, outside valgrind)
+
+Each binary's block ran in sequence, not alternated. Load averages were 2 to 5 during the runs.
+
+| mode | `97df097c` (pre-fix) | `97b8f3f0` |
+|---|---|---|
+| off (cache off) | 4.22 s ± 0.11 | 4.12 s ± 0.39 |
+| warm (own warm cache) | 3.56 s ± 0.04 | 3.77 s ± 0.29 |
+
+Neither difference is outside the noise. The fixed binary has the wider spread in both modes. Wall time against `9071f48f` was not measured, because no binary for it was built.
+
+### Output
+
+- Piwigo output from `97df097c` and `97b8f3f0` is byte-identical, with 613 findings. Callgrind's off, warm and cold runs and the hyperfine runs all match it.
+- The plan's reference, `run-631ad001.json` (611 findings), is no longer on disk. Against the saved 610-finding run `0694cfdc`, the extra findings are `src/Piwigo/Search/SearchFilterRenderer.php:442` (`argument.type`) and `tools/openapi/ResponseBodyCallSiteVisitor.php:79` (`property.notFound`). Both arrived between `9071f48f` and `97df097c`, not with the two fixes. The investigation is deferred in `WORK_STACK.md`, under level 7.
+
+### Oracle corpus (`cargo xtask corpus --profile oracle`, cache off)
+
+- At `97df097c`: 35 debug-assertion panics. 30 at `registry/body_passes.rs:192` (the parameter-use order from the shared walk), and 5 at `registry/summaries.rs:2407` (the implicit-call dedupe).
+- At `97b8f3f0`, after `5ddb4436` and `97b8f3f0`: 0 panics, exit 0.
+
+### Tests
+
+- At `97df097c`: lib 1295 passed, fixtures 3999 passed, workspace 2403 passed across 34 test binaries, clippy clean. The plan's earlier counts (1206 and 3948) are older.
+- After each fix: clippy clean, and the lib suite passed (1295).
+
+### Heap (dhat, default mode: the profiler runs from the start of the run; cache off)
+
+| run | commit | total allocated | peak (t-gmax) | at exit |
+|---|---|---|---|---|
+| `dhat-20g` (2026-10-03) | `5fb858c9` | 2.67 GB, 19.44 M blocks | 0.87 GB, 4.57 M | 0.66 GB, 4.11 M |
+| `heap-head` (2026-10-07) | `df603944` | 7.43 GB, 46.17 M | 0.88 GB, 4.01 M | 0.66 GB, 4.05 M |
+| E2.V | `97b8f3f0` | 7.41 GB, 43.00 M | 1.48 GB, 7.97 M | 1.13 GB, 6.71 M |
+
+The run's own live maximum was 1.146 GB, and its resident maximum 2.31 GB. Against `heap-head`, peak memory is up 68% and memory held at exit is up 71%. Allocation count is down 7%, and total bytes are flat. The batch's peak target was about 350 to 385 MB, and its exit target about 290 MB, so neither is met. The cache setting of the `heap-head` run isn't recorded, so that comparison is only as good as the setting matches.
+
+### Open
+
+- The memory growth is not explained yet.
+- Property lookups by `Name`: the rise is in call count, and the batch's lookup path and `d6d55292` both contribute.
+- Holder ids (B/C) and the settle path (I/P/Q) are not finished, per the ledger rows E2.3, E2.4, E2.6, E2.8, E2.11 and E2.12.25.
+- Wall time: no clear change in either mode.
+- The Piwigo output gate (613 against 611) is open, as above.
