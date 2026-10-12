@@ -111,7 +111,7 @@ function probes_for(ReflectionParameter $param): array
     }
     // The length or int a sodium function checks the parameter against: the valid value of the parameter.
     // A string probe is refused by the length check of a sized parameter, so it is offered only where no sized value is known.
-    $sized = sodium_length_value($param);
+    $sized = known_parameter_value($param);
     if ($sized !== null) {
         $probes[] = ['sized', $sized];
     } elseif (admits($type, 'string')) {
@@ -275,6 +275,49 @@ function zip_entry_sample(): mixed
  * lowercased function or `class::method`, then by position.
  */
 /**
+ * The valid value of a parameter that a probe of its own type gets wrong, from the families that need one: sodium
+ * (a length, a state, an int) and mbstring (an encoding, a flag string). Null when the parameter has no such value.
+ */
+function known_parameter_value(ReflectionParameter $param): ?Closure
+{
+    return sodium_length_value($param) ?? mbstring_value($param);
+}
+
+/** The valid value of an mbstring parameter: an encoding name, or the flags and types its options take. */
+function mbstring_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction()->getName();
+    if (!str_starts_with($function, 'mb_')) {
+        return null;
+    }
+    $name = $param->getName();
+    if (in_array($name, ['encoding', 'to_encoding', 'from_encoding', 'charset', 'encodings'], true)) {
+        return static fn (): string => 'UTF-8';
+    }
+    // Conversion maps: groups of four ints (start, end, offset, mask).
+    if ($name === 'map' && str_contains($function, 'numericentity')) {
+        return static fn (): array => [0, 127, 0, 127];
+    }
+    // Options and flags of each function that the stubs take as a string.
+    static $values = [
+        'mb_convert_kana' => ['mode' => 'a'],
+        'mb_http_input' => ['type' => 'G'],
+        'mb_language' => ['language' => 'uni'],
+        'mb_substitute_character' => ['substitute_character' => 'none'],
+        'mb_encode_mimeheader' => ['transfer_encoding' => 'B', 'newline' => "\r\n"],
+        'mb_ereg' => ['options' => ''],
+        'mb_ereg_match' => ['options' => ''],
+        'mb_ereg_replace' => ['options' => ''],
+        'mb_ereg_replace_callback' => ['options' => ''],
+        'mb_ereg_search_init' => ['options' => ''],
+        'mb_eregi_replace' => ['options' => ''],
+        'mb_regex_set_options' => ['options' => ''],
+    ];
+    $value = $values[$function][$name] ?? null;
+    return $value === null ? null : static fn (): string => $value;
+}
+
+/**
  * The valid values of a sodium function's parameters that a probe of the parameter's own type gets wrong: a
  * string of the length the function checks, an int, or a state or key that the function's other calls make.
  * Lengths are keyed by function and parameter name, and each constant is named as the scan's messages write
@@ -417,7 +460,7 @@ function sodium_length_value(ReflectionParameter $param): ?Closure
 
 function valid_site(ReflectionParameter $param): ?Closure
 {
-    if ($length = sodium_length_value($param)) {
+    if ($length = known_parameter_value($param)) {
         return $length;
     }
     // Each value is a closure, so a constant of an extension that is not loaded is read only when its function is probed.
