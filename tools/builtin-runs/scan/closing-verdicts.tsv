@@ -1,0 +1,2042 @@
+index	builtin	position	declared	verdict	reason
+0	array_combine	0	array $keys	WK	closure and url are not array keys
+1	array_combine	1	array $values	VAL	values need the same count as the keys
+2	array_diff_assoc	1	array $arrays	WK	closure element of arrays
+3	array_diff_uassoc	0	array $array	VAL	variadic callbacks not supplied at the array position
+4	array_diff_uassoc	1	untyped $rest	WK	rest probes that are not callables
+5	array_diff_ukey	0	array $array	VAL	variadic callbacks not supplied
+6	array_diff_ukey	1	untyped $rest	WK	rest probes that are not callables
+7	array_diff	1	array $arrays	WK	closure element
+8	array_fill_keys	0	array $keys	WK	closure key
+9	array_intersect_assoc	1	array $arrays	WK	closure element
+10	array_intersect_uassoc	0	array $array	VAL	variadic callbacks not supplied
+11	array_intersect_uassoc	1	untyped $rest	WK	rest probes not callables
+12	array_intersect_ukey	0	array $array	VAL	variadic callbacks not supplied
+13	array_intersect_ukey	1	untyped $rest	WK	rest probes not callables
+14	array_intersect	0	array $array	WK	closure element
+15	array_intersect	1	array $arrays	WK	closure element
+16	array_key_exists	0	untyped $key	WK	key must be int or string
+17	array_multisort	0	untyped $array	WK	array probes only
+18	array_multisort	1	untyped $rest	WK	rest probes not arrays
+19	array_udiff_assoc	0	array $array	VAL	variadic callbacks not supplied
+20	array_udiff_assoc	1	untyped $rest	WK	rest probes not callables
+21	array_udiff_uassoc	1	untyped $rest	ARY	the variadic probe takes the place of the callbacks (known limit)
+22	array_udiff	0	array $array	VAL	variadic callbacks not supplied
+23	array_udiff	1	untyped $rest	WK	rest probes not callables
+24	array_uintersect_assoc	0	array $array	VAL	variadic callbacks not supplied
+25	array_uintersect_assoc	1	untyped $rest	WK	rest probes not callables
+26	array_uintersect_uassoc	1	untyped $rest	ARY	the variadic probe takes the place of the callbacks (known limit)
+27	array_uintersect	0	array $array	VAL	variadic callbacks not supplied
+28	array_uintersect	1	untyped $rest	WK	rest probes not callables
+29	array_unique	0	array $array	WK	closure element
+30	arrayiterator::__unserialize	0	array $data	VAL	serialised data needed
+31	arrayiterator::offsetexists	0	mixed $key	WK	offset must be int or string
+32	arrayiterator::offsetget	0	mixed $key	WK	offset must be int or string
+33	arrayiterator::offsetset	0	mixed $key	WK	offset must be int or string
+34	arrayiterator::offsetunset	0	mixed $key	WK	offset must be int or string
+35	arrayiterator::unserialize	0	string $data	VAL	serialised string needed
+36	arrayobject::__construct	2	string $iteratorClass	NAM	class name derived from ArrayIterator (a user class)
+37	arrayobject::__unserialize	0	array $data	VAL	serialised data needed
+38	arrayobject::offsetexists	0	mixed $key	WK	offset must be int or string
+39	arrayobject::offsetget	0	mixed $key	WK	offset must be int or string
+40	arrayobject::offsetset	0	mixed $key	WK	offset must be int or string
+41	arrayobject::offsetunset	0	mixed $key	WK	offset must be int or string
+42	arrayobject::setiteratorclass	0	string $iteratorClass	NAM	class name derived from ArrayIterator (a user class)
+43	arrayobject::unserialize	0	string $data	VAL	serialised string needed
+44	assert_options	1	mixed $value	WK	closure and iterator are not stringable
+45	base_convert	0	string $num	WK	url is not a number (from_base also a value)
+46	bcadd	0	string $num1	VAL	url is not a well-formed number
+47	bcadd	1	string $num2	VAL	url is not a well-formed number
+48	bcceil	0	string $num	VAL	url is not a well-formed number
+49	bccomp	0	string $num1	VAL	url is not a well-formed number
+50	bccomp	1	string $num2	VAL	url is not a well-formed number
+51	bcdivmod	0	string $num1	VAL	url is not a well-formed number
+52	bcdivmod	1	string $num2	VAL	url is not a well-formed number
+53	bcdiv	0	string $num1	VAL	url is not a well-formed number
+54	bcdiv	1	string $num2	VAL	url is not a well-formed number
+55	bcfloor	0	string $num	VAL	url is not a well-formed number
+56	bcmath\number::__construct	0	string|int $num	RCV	constructor run on an already constructed object (readonly)
+57	bcmath\number::__unserialize	0	array $data	VAL	serialised data needed
+58	bcmath\number::add	0	BcMath\Number|string|int $num	VAL	object and url are not well-formed numbers
+59	bcmath\number::compare	0	BcMath\Number|string|int $num	VAL	object and url are not well-formed numbers
+60	bcmath\number::divmod	0	BcMath\Number|string|int $num	VAL	object and url are not well-formed numbers
+61	bcmath\number::div	0	BcMath\Number|string|int $num	VAL	object and url are not well-formed numbers
+62	bcmath\number::mod	0	BcMath\Number|string|int $num	VAL	object and url are not well-formed numbers
+63	bcmath\number::mul	0	BcMath\Number|string|int $num	VAL	object and url are not well-formed numbers
+64	bcmath\number::powmod	0	BcMath\Number|string|int $exponent	VAL	object and url are not well-formed numbers
+65	bcmath\number::powmod	1	BcMath\Number|string|int $modulus	VAL	object and url are not well-formed numbers
+66	bcmath\number::pow	0	BcMath\Number|string|int $exponent	VAL	object and url are not well-formed numbers
+67	bcmath\number::sub	0	BcMath\Number|string|int $num	VAL	object and url are not well-formed numbers
+68	bcmod	0	string $num1	VAL	url is not a well-formed number
+69	bcmod	1	string $num2	VAL	url is not a well-formed number
+70	bcmul	0	string $num1	VAL	url is not a well-formed number
+71	bcmul	1	string $num2	VAL	url is not a well-formed number
+72	bcpowmod	0	string $num	VAL	url is not a well-formed number
+73	bcpowmod	1	string $exponent	VAL	url is not a well-formed number
+74	bcpowmod	2	string $modulus	VAL	url is not a well-formed number
+75	bcpow	0	string $num	VAL	url is not a well-formed number
+76	bcpow	1	string $exponent	VAL	url is not a well-formed number
+77	bcround	0	string $num	VAL	url is not a well-formed number
+78	bcsqrt	0	string $num	VAL	url is not a well-formed number
+79	bcsub	0	string $num1	VAL	url is not a well-formed number
+80	bcsub	1	string $num2	VAL	url is not a well-formed number
+81	cachingiterator::__construct	0	Iterator $iterator	RCV	getIterator must be called once per instance: the object made needs its state
+82	cachingiterator::offsetexists	0	untyped $key	WK	key must be string
+83	cachingiterator::offsetget	0	untyped $key	WK	key must be string
+84	cachingiterator::offsetset	0	untyped $key	WK	key must be string
+85	cachingiterator::offsetset	1	mixed $value	RCV	does not use a full cache: needs the constructor flags
+86	cachingiterator::offsetunset	0	untyped $key	WK	key must be string
+87	callbackfilteriterator::__construct	0	Iterator $iterator	RCV	getIterator once per instance
+88	callbackfilteriterator::__construct	1	callable $callback	RCV	getIterator once per instance
+89	checkdnsrr	1	string $type	WK	url is not a DNS record type
+90	class_implements	0	untyped $object_or_class	WK	array is not an object or string
+91	class_parents	0	untyped $object_or_class	WK	array is not an object or string
+92	class_uses	0	untyped $object_or_class	WK	array is not an object or string
+93	closedir	0	untyped $dir_handle	WK	closure is not a resource
+94	compact	0	untyped $var_name	WK	compact names must be literal
+95	compact	1	untyped $var_names	WK	compact names must be literal
+96	constant	0	string $name	WK	url is not a constant name
+97	copy	2	untyped $context	WK	closure is not a context
+98	curl_setopt_array	1	array $options	WK	options array of objects is not a valid options array
+99	curl_share_init_persistent	0	array $share_options	WK	share options must be ints
+100	datefmt_create	0	?string $locale	WK	url is not a locale
+101	datefmt_create	3	IntlTimeZone|DateTimeZone|string|null $timezone	WK	object and url are not zones
+102	datefmt_format_object	0	untyped $datetime	WK	datetime must be an object
+103	datefmt_format_object	1	untyped $format	WK	closure is not a format string
+104	datefmt_set_timezone	1	IntlTimeZone|DateTimeZone|string|null $timezone	WK	object and url are not zones
+105	datetime::__construct	0	string $datetime	WK	url is not a date string
+106	datetime::__unserialize	0	array $data	VAL	serialised data needed
+107	datetime::modify	0	string $modifier	WK	url is not a modifier
+108	datetimeimmutable::__construct	0	string $datetime	WK	url is not a date string
+109	datetimeimmutable::__unserialize	0	array $data	VAL	serialised data needed
+110	datetimeimmutable::modify	0	string $modifier	WK	url is not a modifier
+111	datetimezone::__construct	0	string $timezone	WK	url is not a timezone
+112	datetimezone::__unserialize	0	array $data	VAL	serialised data needed
+113	decimal\decimal::__construct	0	untyped $value	RCV	constructor run on an already constructed object (immutable)
+114	decimal\decimal::add	0	untyped $value	WK	closure is not a number
+115	decimal\decimal::div	0	untyped $value	WK	closure is not a number
+116	decimal\decimal::mod	0	untyped $value	WK	closure is not a number
+117	decimal\decimal::mul	0	untyped $value	WK	closure is not a number
+118	decimal\decimal::pow	0	untyped $value	WK	closure is not a number
+119	decimal\decimal::rem	0	untyped $value	WK	closure is not a number
+120	decimal\decimal::sub	0	untyped $value	WK	closure is not a number
+121	deprecated::__construct	0	?string $message	RCV	readonly property of an initialised object
+122	deprecated::__construct	1	?string $since	RCV	readonly property of an initialised object
+123	directoryiterator::__construct	0	string $directory	WK	url is not an existing directory
+124	directoryiterator::getbasename	0	string $suffix	RCV	the object is made from an invalid directory
+125	dir	1	untyped $context	WK	closure is not a context
+126	dns_check_record	1	string $type	WK	url is not a DNS record type
+127	dom\implementation::createdocumenttype	0	string $qualifiedName	WK	url is not a valid qualified name
+128	dom\implementation::createdocument	1	string $qualifiedName	WK	url is not a valid qualified name
+129	dom\import_simplexml	0	object $node	WK	object is not a SimpleXML node
+130	dom_import_simplexml	0	object $node	WK	object is not a SimpleXML node
+131	domattr::__construct	0	string $name	WK	url is not a valid name
+132	domcharacterdata::after	0	untyped $nodes	RCV	the maker makes no text node to act on
+133	domcharacterdata::appenddata	0	string $data	RCV	the maker makes no text node to act on
+134	domcharacterdata::before	0	untyped $nodes	RCV	the maker makes no text node to act on
+135	domcharacterdata::insertdata	1	string $data	RCV	the maker makes no text node to act on
+136	domcharacterdata::replacedata	2	string $data	RCV	the maker makes no text node to act on
+137	domcharacterdata::replacewith	0	untyped $nodes	RCV	the maker makes no text node to act on
+138	domdocument::append	0	untyped $nodes	WK	closure is not a node
+139	domdocument::createattribute	0	string $localName	WK	url is not a valid name
+140	domdocument::createelementns	1	string $qualifiedName	WK	url is not a valid qualified name
+141	domdocument::createelement	0	string $localName	WK	url is not a valid name
+142	domdocument::createentityreference	0	string $name	WK	url is not a valid name
+143	domdocument::createprocessinginstruction	0	string $target	WK	url is not a valid name
+144	domdocument::prepend	0	untyped $nodes	WK	closure is not a node
+145	domdocument::registernodeclass	0	string $baseClass	NAM	class name derived from DOMNode (a user class)
+146	domdocument::registernodeclass	1	?string $extendedClass	NAM	class name (a user class)
+147	domdocument::replacechildren	0	untyped $nodes	WK	closure is not a node
+148	domdocumentfragment::appendxml	0	string $data	RCV	the fragment is made without a document
+149	domdocumentfragment::append	0	untyped $nodes	WK	closure is not a node
+150	domdocumentfragment::prepend	0	untyped $nodes	WK	closure is not a node
+151	domdocumentfragment::replacechildren	0	untyped $nodes	WK	closure is not a node
+152	domelement::__construct	0	string $qualifiedName	WK	closure is not a node
+153	domelement::after	0	untyped $nodes	WK	closure is not a node
+154	domelement::append	0	untyped $nodes	WK	closure is not a node
+155	domelement::before	0	untyped $nodes	WK	closure is not a node
+156	domelement::insertadjacentelement	0	string $where	VAL	element must be a DOMElement value
+157	domelement::insertadjacenttext	0	string $where	WK	where or data is not valid
+158	domelement::insertadjacenttext	1	string $data	WK	where or data is not valid
+159	domelement::prepend	0	untyped $nodes	WK	closure is not a node
+160	domelement::replacechildren	0	untyped $nodes	WK	closure is not a node
+161	domelement::replacewith	0	untyped $nodes	WK	closure is not a node
+162	domelement::setattributens	1	string $qualifiedName	WK	url is not a valid name
+163	domelement::setattribute	0	string $qualifiedName	WK	url is not a valid name
+164	domelement::setidattributens	0	string $namespace	WK	url is not a valid name
+165	domelement::setidattributens	1	string $qualifiedName	WK	url is not a valid name
+166	domelement::setidattribute	0	string $qualifiedName	WK	url is not a valid name
+167	domelement::toggleattribute	0	string $qualifiedName	WK	url is not a valid name
+168	domentityreference::__construct	0	string $name	WK	url is not a valid name
+169	domimplementation::createdocument	1	string $qualifiedName	WK	url is not a valid qualified name
+170	domnode::c14nfile	0	string $uri	RCV	the node is not fetched: the object made has no node to act on
+171	domnode::c14nfile	3	?array $xpath	RCV	the node is not fetched: the object made has no node to act on
+172	domnode::c14nfile	4	?array $nsPrefixes	RCV	the node is not fetched: the object made has no node to act on
+173	domnode::c14n	2	?array $xpath	RCV	the node is not fetched: the object made has no node to act on
+174	domnode::c14n	3	?array $nsPrefixes	RCV	the node is not fetched: the object made has no node to act on
+175	domnode::getrootnode	0	?array $options	RCV	the node is not fetched: the object made has no node to act on
+176	domnode::isdefaultnamespace	0	string $namespace	RCV	the node is not fetched: the object made has no node to act on
+177	domnode::lookupnamespaceuri	0	?string $prefix	RCV	the node is not fetched: the object made has no node to act on
+178	domnode::lookupprefix	0	string $namespace	RCV	the node is not fetched: the object made has no node to act on
+179	domprocessinginstruction::__construct	0	string $name	WK	url is not a valid name
+180	ds\deque::__construct	0	untyped $values	WK	values must be an array or traversable
+181	ds\deque::insert	1	untyped $values	RCV	index out of range on an empty deque
+182	ds\deque::merge	0	untyped $values	WK	values must be an array or traversable
+183	ds\deque::offsetexists	0	untyped $offset	WK	offset must be int
+184	ds\deque::offsetget	0	mixed $offset	WK	offset must be int
+185	ds\deque::offsetset	0	mixed $offset	WK	offset must be int
+186	ds\deque::offsetset	1	mixed $value	RCV	index out of range on an empty deque
+187	ds\deque::offsetunset	0	mixed $offset	WK	offset must be int
+188	ds\deque::set	1	untyped $value	RCV	index out of range on an empty deque
+189	ds\map::__construct	0	untyped $values	WK	values must be an array or traversable
+190	ds\map::get	0	untyped $key	RCV	key not present in the map made
+191	ds\map::haskey	0	untyped $key	WK	a closure key cannot be serialised
+192	ds\map::merge	0	untyped $values	WK	values must be an array or traversable
+193	ds\map::offsetexists	0	untyped $offset	WK	a closure key cannot be serialised
+194	ds\map::offsetget	0	mixed $offset	RCV	key not present in the map made
+195	ds\map::offsetset	0	mixed $offset	WK	a closure key cannot be serialised
+196	ds\map::offsetunset	0	mixed $offset	RCV	key not present in the map made
+197	ds\map::putall	0	untyped $values	WK	values must be an array or traversable
+198	ds\map::put	0	untyped $key	WK	a closure key cannot be serialised
+199	ds\map::remove	0	untyped $key	RCV	key not present in the map made
+200	ds\map::union	0	untyped $map	WK	map must be a Ds\Map
+201	ds\queue::__construct	0	untyped $values	WK	values must be an array or traversable
+202	ds\queue::offsetexists	0	untyped $offset	WK	the class does not support array access
+203	ds\queue::offsetget	0	mixed $offset	WK	the class does not support array access
+204	ds\queue::offsetset	0	mixed $offset	WK	the class does not support array access
+205	ds\queue::offsetset	1	mixed $value	WK	the class does not support array access
+206	ds\queue::offsetunset	0	mixed $offset	WK	the class does not support array access
+207	ds\set::__construct	0	untyped $values	WK	values must be an array or traversable
+208	ds\set::add	0	untyped $values	WK	a closure value cannot be serialised
+209	ds\set::contains	0	untyped $values	WK	a closure value cannot be serialised
+210	ds\set::merge	0	untyped $values	WK	values must be an array or traversable
+211	ds\set::offsetexists	0	untyped $offset	WK	the class does not support array access
+212	ds\set::offsetget	0	mixed $offset	WK	offset must be int
+213	ds\set::offsetset	0	mixed $offset	WK	the class does not support array access
+214	ds\set::offsetset	1	mixed $value	WK	the class does not support array access
+215	ds\set::offsetunset	0	mixed $offset	WK	the class does not support array access
+216	ds\set::remove	0	untyped $values	WK	a closure value cannot be serialised
+217	ds\stack::__construct	0	untyped $values	WK	values must be an array or traversable
+218	ds\stack::offsetexists	0	untyped $offset	WK	the class does not support array access
+219	ds\stack::offsetget	0	mixed $offset	WK	the class does not support array access
+220	ds\stack::offsetset	0	mixed $offset	WK	the class does not support array access
+221	ds\stack::offsetset	1	mixed $value	WK	the class does not support array access
+222	ds\stack::offsetunset	0	mixed $offset	WK	the class does not support array access
+223	ds\vector::__construct	0	untyped $values	WK	values must be an array or traversable
+224	ds\vector::insert	1	untyped $values	RCV	index out of range on an empty vector
+225	ds\vector::merge	0	untyped $values	WK	values must be an array or traversable
+226	ds\vector::offsetexists	0	untyped $offset	WK	offset must be int
+227	ds\vector::offsetget	0	mixed $offset	WK	offset must be int
+228	ds\vector::offsetset	0	mixed $offset	WK	offset must be int
+229	ds\vector::offsetset	1	mixed $value	RCV	index out of range on an empty vector
+230	ds\vector::offsetunset	0	mixed $offset	WK	offset must be int
+231	ds\vector::set	1	untyped $value	RCV	index out of range on an empty vector
+232	excimerprofiler::seteventtype	0	untyped $event_type	WK	a closure is not a number
+233	excimerprofiler::setflushcallback	1	untyped $max_samples	WK	a closure is not a number
+234	excimerprofiler::setmaxdepth	0	untyped $max_depth	WK	a closure is not a number
+235	excimerprofiler::setperiod	0	untyped $period	WK	a closure is not a number
+236	excimertimer::seteventtype	0	untyped $event_type	WK	a closure is not a number
+237	excimertimer::setinterval	0	untyped $interval	WK	a closure is not a number
+238	excimertimer::setperiod	0	untyped $period	WK	a closure is not a number
+239	exif_read_data	0	untyped $file	WK	a closure or iterator is not a file name
+240	exif_thumbnail	0	untyped $file	WK	a closure or iterator is not a file name
+241	extract	0	array $array	WK	extract names must be literal
+242	extract	2	string $prefix	WK	prefix is not an identifier
+243	fclose	0	untyped $stream	WK	a closure is not a resource
+244	fdatasync	0	untyped $stream	WK	a closure is not a resource
+245	feof	0	untyped $stream	WK	a closure is not a resource
+246	fflush	0	untyped $stream	WK	a closure is not a resource
+247	fgetcsv	0	untyped $stream	WK	a closure is not a resource
+248	fgetcsv	2	string $separator	WK	url is not a single character
+249	fgetcsv	3	string $enclosure	WK	url is not a single character
+250	fgetcsv	4	string $escape	WK	url is not a single character
+251	fgetc	0	untyped $stream	WK	a closure is not a resource
+252	fgets	0	untyped $stream	WK	a closure is not a resource
+253	fiber::__construct	0	callable $callback	RCV	the fiber object made is already constructed
+254	fiber::resume	0	mixed $value	RCV	the fiber made is not suspended
+255	file_get_contents	2	untyped $context	WK	a closure is not a context
+256	file_put_contents	1	mixed $data	WK	a closure is not data
+257	file_put_contents	3	untyped $context	WK	a closure is not a context
+258	filesystemiterator::__construct	0	string $directory	WK	url is not an existing directory
+259	file	2	untyped $context	WK	a closure is not a context
+260	filter_var_array	1	array|int $options	WK	options must have string keys
+261	finfo::__construct	1	?string $magic_database	WK	url is not a magic database file
+262	finfo::buffer	2	untyped $context	WK	a closure is not a context
+263	finfo::file	2	untyped $context	WK	a closure is not a context
+264	finfo_buffer	0	finfo $finfo	WK	a stream is not a finfo object
+265	finfo_buffer	3	untyped $context	WK	a closure is not a context
+266	finfo_close	0	finfo $finfo	WK	a stream is not a finfo object
+267	finfo_file	0	finfo $finfo	WK	a stream is not a finfo object
+268	finfo_file	3	untyped $context	WK	a closure is not a context
+269	finfo_set_flags	0	finfo $finfo	WK	a stream is not a finfo object
+270	flock	0	untyped $stream	WK	a closure is not a resource
+271	fopen	3	untyped $context	WK	a closure is not a context
+272	forward_static_call	0	callable $callback	SCOPE	needs a class scope: a fixture class in the scratch experiment
+273	forward_static_call	1	mixed $args	SCOPE	needs a class scope: a fixture class in the scratch experiment
+274	fpassthru	0	untyped $stream	WK	a closure is not a resource
+275	fprintf	0	untyped $stream	WK	a closure is not a resource
+276	fputcsv	0	untyped $stream	WK	a closure is not a resource
+277	fputcsv	1	array $fields	WK	a closure is not stringable
+278	fputcsv	2	string $separator	WK	url is not a single character
+279	fputcsv	3	string $enclosure	WK	url is not a single character
+280	fputcsv	4	string $escape	WK	url is not a single character
+281	fputs	0	untyped $stream	WK	a closure is not a resource
+282	fread	0	untyped $stream	WK	a closure is not a resource
+283	fscanf	0	untyped $stream	WK	a closure is not a resource
+284	fseek	0	untyped $stream	WK	a closure is not a resource
+285	fstat	0	untyped $stream	WK	a closure is not a resource
+286	fsync	0	untyped $stream	WK	a closure is not a resource
+287	ftell	0	untyped $stream	WK	a closure is not a resource
+288	ftok	1	string $project_id	WK	url is not a single character
+289	ftp_alloc	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+290	ftp_alloc	2	untyped $response	SRV	an FTP connection is needed
+291	ftp_append	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+292	ftp_append	1	string $remote_filename	SRV	an FTP connection is needed
+293	ftp_append	2	string $local_filename	SRV	an FTP connection is needed
+294	ftp_cdup	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+295	ftp_chdir	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+296	ftp_chdir	1	string $directory	SRV	an FTP connection is needed
+297	ftp_chmod	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+298	ftp_chmod	2	string $filename	SRV	an FTP connection is needed
+299	ftp_close	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+300	ftp_delete	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+301	ftp_delete	1	string $filename	SRV	an FTP connection is needed
+302	ftp_exec	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+303	ftp_exec	1	string $command	SRV	an FTP connection is needed
+304	ftp_fget	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+305	ftp_fget	1	untyped $stream	SRV	an FTP connection is needed
+306	ftp_fget	2	string $remote_filename	SRV	an FTP connection is needed
+307	ftp_fput	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+308	ftp_fput	1	string $remote_filename	SRV	an FTP connection is needed
+309	ftp_fput	2	untyped $stream	SRV	an FTP connection is needed
+310	ftp_get_option	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+311	ftp_get	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+312	ftp_get	1	string $local_filename	SRV	an FTP connection is needed
+313	ftp_get	2	string $remote_filename	SRV	an FTP connection is needed
+314	ftp_login	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+315	ftp_login	1	string $username	SRV	an FTP connection is needed
+316	ftp_login	2	string $password	SRV	an FTP connection is needed
+317	ftp_mdtm	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+318	ftp_mdtm	1	string $filename	SRV	an FTP connection is needed
+319	ftp_mkdir	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+320	ftp_mkdir	1	string $directory	SRV	an FTP connection is needed
+321	ftp_mlsd	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+322	ftp_mlsd	1	string $directory	SRV	an FTP connection is needed
+323	ftp_nb_continue	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+324	ftp_nb_fget	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+325	ftp_nb_fget	1	untyped $stream	SRV	an FTP connection is needed
+326	ftp_nb_fget	2	string $remote_filename	SRV	an FTP connection is needed
+327	ftp_nb_fput	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+328	ftp_nb_fput	1	string $remote_filename	SRV	an FTP connection is needed
+329	ftp_nb_fput	2	untyped $stream	SRV	an FTP connection is needed
+330	ftp_nb_get	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+331	ftp_nb_get	1	string $local_filename	SRV	an FTP connection is needed
+332	ftp_nb_get	2	string $remote_filename	SRV	an FTP connection is needed
+333	ftp_nb_put	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+334	ftp_nb_put	1	string $remote_filename	SRV	an FTP connection is needed
+335	ftp_nb_put	2	string $local_filename	SRV	an FTP connection is needed
+336	ftp_nlist	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+337	ftp_nlist	1	string $directory	SRV	an FTP connection is needed
+338	ftp_pasv	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+339	ftp_put	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+340	ftp_put	1	string $remote_filename	SRV	an FTP connection is needed
+341	ftp_put	2	string $local_filename	SRV	an FTP connection is needed
+342	ftp_pwd	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+343	ftp_quit	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+344	ftp_rawlist	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+345	ftp_rawlist	1	string $directory	SRV	an FTP connection is needed
+346	ftp_raw	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+347	ftp_raw	1	string $command	SRV	an FTP connection is needed
+348	ftp_rename	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+349	ftp_rename	1	string $from	SRV	an FTP connection is needed
+350	ftp_rename	2	string $to	SRV	an FTP connection is needed
+351	ftp_rmdir	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+352	ftp_rmdir	1	string $directory	SRV	an FTP connection is needed
+353	ftp_set_option	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+354	ftp_set_option	2	untyped $value	SRV	an FTP connection is needed
+355	ftp_site	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+356	ftp_site	1	string $command	SRV	an FTP connection is needed
+357	ftp_size	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+358	ftp_size	1	string $filename	SRV	an FTP connection is needed
+359	ftp_systype	0	FTP\Connection $ftp	SRV	an FTP connection is needed
+360	ftruncate	0	untyped $stream	WK	a closure is not a resource
+361	fwrite	0	untyped $stream	WK	a closure is not a resource
+362	get_class_methods	0	object|string $object_or_class	WK	url is not a class name
+363	get_class_vars	0	string $class	WK	url is not a class name
+364	get_headers	2	untyped $context	WK	a closure is not a context
+365	get_parent_class	0	object|string $object_or_class	WK	url is not a class name
+366	get_resource_id	0	untyped $resource	WK	a closure is not a resource
+367	get_resource_type	0	untyped $resource	WK	a closure is not a resource
+368	get_resources	0	?string $type	WK	url is not a resource type
+369	getopt	1	array $long_options	WK	a closure is not a string
+370	globiterator::__construct	0	string $pattern	RCV	directory object already initialised
+371	gzclose	0	untyped $stream	WK	a closure is not a resource
+372	gzeof	0	untyped $stream	WK	a closure is not a resource
+373	gzgetc	0	untyped $stream	WK	a closure is not a resource
+374	gzgets	0	untyped $stream	WK	a closure is not a resource
+375	gzpassthru	0	untyped $stream	WK	a closure is not a resource
+376	gzputs	0	untyped $stream	WK	a closure is not a resource
+377	gzread	0	untyped $stream	WK	a closure is not a resource
+378	gzrewind	0	untyped $stream	WK	a closure is not a resource
+379	gzseek	0	untyped $stream	WK	a closure is not a resource
+380	gztell	0	untyped $stream	WK	a closure is not a resource
+381	gzwrite	0	untyped $stream	WK	a closure is not a resource
+382	hash_file	0	string $algo	WK	url is not a hashing algorithm
+383	hash_file	1	string $filename	VAL	the algorithm must be a valid name
+384	hash_file	3	array $options	VAL	the algorithm must be a valid name
+385	hash_hkdf	0	string $algo	WK	url is not a hashing algorithm
+386	hash_hkdf	1	string $key	VAL	the algorithm must be a valid name
+387	hash_hkdf	3	string $info	VAL	the algorithm must be a valid name
+388	hash_hkdf	4	string $salt	VAL	the algorithm must be a valid name
+389	hash_hmac_file	0	string $algo	WK	url is not a hashing algorithm
+390	hash_hmac_file	1	string $filename	VAL	the algorithm must be a valid name
+391	hash_hmac_file	2	string $key	VAL	the algorithm must be a valid name
+392	hash_hmac	0	string $algo	WK	url is not a hashing algorithm
+393	hash_hmac	1	string $data	VAL	the algorithm must be a valid name
+394	hash_hmac	2	string $key	VAL	the algorithm must be a valid name
+395	hash_init	0	string $algo	WK	url is not a hashing algorithm
+396	hash_init	2	string $key	VAL	the algorithm must be a valid name
+397	hash_init	3	array $options	VAL	the algorithm must be a valid name
+398	hash_pbkdf2	0	string $algo	WK	url is not a hashing algorithm
+399	hash_pbkdf2	1	string $password	VAL	the algorithm must be a valid name
+400	hash_pbkdf2	2	string $salt	VAL	the algorithm must be a valid name
+401	hash_pbkdf2	6	array $options	VAL	the algorithm must be a valid name
+402	hash_update_file	2	untyped $stream_context	WK	a closure is not a context
+403	hash_update_stream	1	untyped $stream	WK	a closure is not a resource
+404	hash	0	string $algo	WK	url is not a hashing algorithm
+405	hash	1	string $data	VAL	the algorithm must be a valid name
+406	hash	3	array $options	VAL	the algorithm must be a valid name
+407	igbinary_serialize	0	untyped $value	WK	a closure cannot be serialised
+408	igbinary_unserialize	0	untyped $str	WK	a closure is not a string
+409	imageaffinematrixconcat	0	array $matrix1	WK	arrays of the wrong shape
+410	imageaffinematrixconcat	1	array $matrix2	WK	arrays of the wrong shape
+411	imageaffinematrixget	1	untyped $options	WK	options must be an array for translate
+412	imageaffine	1	array $affine	WK	arrays of the wrong shape
+413	imageaffine	2	?array $clip	WK	arrays of the wrong shape
+414	imagebmp	1	untyped $file	WK	a closure is not a file or resource
+415	imageconvolution	1	array $matrix	WK	arrays of the wrong shape
+416	imagecrop	1	array $rectangle	WK	arrays of the wrong shape
+417	imagefilledpolygon	1	array $points	WK	points arrays of the wrong shape
+418	imagegif	1	untyped $file	WK	a closure is not a file or resource
+419	imagejpeg	1	untyped $file	WK	a closure is not a file or resource
+420	imageopenpolygon	1	array $points	WK	points arrays of the wrong shape
+421	imagepng	1	untyped $file	WK	a closure is not a file or resource
+422	imagepolygon	1	array $points	WK	points arrays of the wrong shape
+423	imagewbmp	1	untyped $file	WK	a closure is not a file or resource
+424	imagewebp	1	untyped $file	WK	a closure is not a file or resource
+425	imagick::__construct	0	array|string|int|float|null $files	WK	url is not an image file
+426	imagick::animateimages	0	string $x_server	RCV	an empty Imagick object: the receiver needs an image
+427	imagick::annotateimage	4	string $text	RCV	an empty Imagick object: the receiver needs an image
+428	imagick::blackthresholdimage	0	ImagickPixel|string $threshold_color	RCV	an empty Imagick object: the receiver needs an image
+429	imagick::borderimagewithcomposite	0	ImagickPixel|string $border_color	RCV	an empty Imagick object: the receiver needs an image
+430	imagick::borderimage	0	ImagickPixel|string $border_color	RCV	an empty Imagick object: the receiver needs an image
+431	imagick::channelfximage	0	string $expression	RCV	an empty Imagick object: the receiver needs an image
+432	imagick::clipimagepath	0	string $pathname	RCV	an empty Imagick object: the receiver needs an image
+433	imagick::clippathimage	0	string $pathname	RCV	an empty Imagick object: the receiver needs an image
+434	imagick::colordecisionlistimage	0	string $color_correction_collection	RCV	an empty Imagick object: the receiver needs an image
+435	imagick::colorizeimage	0	ImagickPixel|string $colorize_color	RCV	an empty Imagick object: the receiver needs an image
+436	imagick::colorizeimage	1	ImagickPixel|string|false $opacity_color	RCV	an empty Imagick object: the receiver needs an image
+437	imagick::colormatriximage	0	array $color_matrix	RCV	an empty Imagick object: the receiver needs an image
+438	imagick::colorthresholdimage	0	ImagickPixel|string $start_color	RCV	an empty Imagick object: the receiver needs an image
+439	imagick::colorthresholdimage	1	ImagickPixel|string $stop_color	RCV	an empty Imagick object: the receiver needs an image
+440	imagick::commentimage	0	string $comment	RCV	an empty Imagick object: the receiver needs an image
+441	imagick::decipherimage	0	string $passphrase	RCV	an empty Imagick object: the receiver needs an image
+442	imagick::deleteimageartifact	0	string $artifact	RCV	an empty Imagick object: the receiver needs an image
+443	imagick::deleteimageproperty	0	string $name	RCV	an empty Imagick object: the receiver needs an image
+444	imagick::deleteoption	0	string $option	RCV	an empty Imagick object: the receiver needs an image
+445	imagick::displayimages	0	string $servername	RCV	an empty Imagick object: the receiver needs an image
+446	imagick::displayimage	0	string $servername	RCV	an empty Imagick object: the receiver needs an image
+447	imagick::distortimage	1	array $arguments	RCV	an empty Imagick object: the receiver needs an image
+448	imagick::encipherimage	0	string $passphrase	RCV	an empty Imagick object: the receiver needs an image
+449	imagick::exportimagepixels	4	string $map	WK	url is not a valid pixel map
+450	imagick::floodfillpaintimage	0	ImagickPixel|string $fill_color	RCV	an empty Imagick object: the receiver needs an image
+451	imagick::floodfillpaintimage	2	ImagickPixel|string $border_color	RCV	an empty Imagick object: the receiver needs an image
+452	imagick::frameimagewithcomposite	0	ImagickPixel|string $matte_color	RCV	an empty Imagick object: the receiver needs an image
+453	imagick::frameimage	0	ImagickPixel|string $matte_color	RCV	an empty Imagick object: the receiver needs an image
+454	imagick::functionimage	1	array $parameters	RCV	an empty Imagick object: the receiver needs an image
+455	imagick::fximage	0	string $expression	RCV	an empty Imagick object: the receiver needs an image
+456	imagick::getimageartifact	0	string $artifact	RCV	an empty Imagick object: the receiver needs an image
+457	imagick::getimageprofiles	0	string $pattern	RCV	an empty Imagick object: the receiver needs an image
+458	imagick::getimageprofile	0	string $name	RCV	an empty Imagick object: the receiver needs an image
+459	imagick::getimageproperties	0	string $pattern	RCV	an empty Imagick object: the receiver needs an image
+460	imagick::getimageproperty	0	string $name	RCV	an empty Imagick object: the receiver needs an image
+461	imagick::identifyformat	0	string $format	RCV	an empty Imagick object: the receiver needs an image
+462	imagick::importimagepixels	4	string $map	RCV	an empty Imagick object: the receiver needs an image
+463	imagick::importimagepixels	6	array $pixels	RCV	an empty Imagick object: the receiver needs an image
+464	imagick::labelimage	0	string $label	RCV	an empty Imagick object: the receiver needs an image
+465	imagick::levelimagecolors	0	ImagickPixel|string $black_color	RCV	an empty Imagick object: the receiver needs an image
+466	imagick::levelimagecolors	1	ImagickPixel|string $white_color	RCV	an empty Imagick object: the receiver needs an image
+467	imagick::montageimage	1	string $tile_geometry	RCV	an empty Imagick object: the receiver needs an image
+468	imagick::montageimage	2	string $thumbnail_geometry	RCV	an empty Imagick object: the receiver needs an image
+469	imagick::montageimage	4	string $frame	RCV	an empty Imagick object: the receiver needs an image
+470	imagick::newimage	2	ImagickPixel|string $background_color	WK	colour probes are refused
+471	imagick::newimage	3	?string $format	WK	url is not a format
+472	imagick::newpseudoimage	2	string $pseudo_format	WK	url is not a pseudo format
+473	imagick::opaquepaintimage	0	ImagickPixel|string $target_color	RCV	an empty Imagick object: the receiver needs an image
+474	imagick::opaquepaintimage	1	ImagickPixel|string $fill_color	RCV	an empty Imagick object: the receiver needs an image
+475	imagick::orderedditherimage	0	string $dither_format	RCV	an empty Imagick object: the receiver needs an image
+476	imagick::pingimageblob	0	string $image	VAL	image data is needed
+477	imagick::pingimagefile	0	mixed $filehandle	WK	a closure is not a resource
+478	imagick::pingimage	0	string $filename	VAL	an image file is needed
+479	imagick::polaroidwithtextandmethod	2	string $caption	RCV	an empty Imagick object: the receiver needs an image
+480	imagick::polynomialimage	0	array $terms	RCV	an empty Imagick object: the receiver needs an image
+481	imagick::profileimage	0	string $name	RCV	an empty Imagick object: the receiver needs an image
+482	imagick::profileimage	1	?string $profile	RCV	an empty Imagick object: the receiver needs an image
+483	imagick::readimageblob	0	string $image	VAL	image data is needed
+484	imagick::readimageblob	1	?string $filename	VAL	image data is needed
+485	imagick::readimagefile	0	mixed $filehandle	WK	a closure is not a resource
+486	imagick::readimages	0	array $filenames	WK	array probes are refused
+487	imagick::readimage	0	string $filename	VAL	an image file is needed
+488	imagick::removeimageprofile	0	string $name	RCV	an empty Imagick object
+489	imagick::resetimagepage	0	string $page	RCV	an empty Imagick object
+490	imagick::rotateimage	0	ImagickPixel|string $background_color	RCV	an empty Imagick object: the receiver needs an image
+491	imagick::setbackgroundcolor	0	ImagickPixel|string $background_color	WK	colour probes are refused
+492	imagick::setfont	0	string $font	VAL	a font file is needed
+493	imagick::setformat	0	string $format	WK	url is not a format
+494	imagick::setimageartifact	0	string $artifact	RCV	an empty Imagick object: the receiver needs an image
+495	imagick::setimageartifact	1	?string $value	RCV	an empty Imagick object: the receiver needs an image
+496	imagick::setimagebackgroundcolor	0	ImagickPixel|string $background_color	RCV	an empty Imagick object: the receiver needs an image
+497	imagick::setimagebordercolor	0	ImagickPixel|string $border_color	RCV	an empty Imagick object: the receiver needs an image
+498	imagick::setimagecolormapcolor	1	ImagickPixel|string $color	RCV	an empty Imagick object: the receiver needs an image
+499	imagick::setimagefilename	0	string $filename	RCV	an empty Imagick object: the receiver needs an image
+500	imagick::setimageformat	0	string $format	RCV	an empty Imagick object: the receiver needs an image
+501	imagick::setimagemattecolor	0	ImagickPixel|string $matte_color	RCV	an empty Imagick object: the receiver needs an image
+502	imagick::setimagepixelcolor	2	ImagickPixel|string $color	WK	colour probes are refused
+503	imagick::setimageprofile	0	string $name	RCV	an empty Imagick object: the receiver needs an image
+504	imagick::setimageprofile	1	string $profile	RCV	an empty Imagick object: the receiver needs an image
+505	imagick::setimageprogressmonitor	0	string $filename	VAL	needs the progress-monitoring ini setting
+506	imagick::setimageproperty	0	string $name	RCV	an empty Imagick object: the receiver needs an image
+507	imagick::setimageproperty	1	string $value	RCV	an empty Imagick object: the receiver needs an image
+508	imagick::shearimage	0	ImagickPixel|string $background_color	RCV	an empty Imagick object: the receiver needs an image
+509	imagick::similarityimage	1	untyped $offset	RCV	an empty Imagick object: the receiver needs an image
+510	imagick::similarityimage	2	untyped $similarity	RCV	an empty Imagick object: the receiver needs an image
+511	imagick::sparsecolorimage	1	array $arguments	RCV	an empty Imagick object: the receiver needs an image
+512	imagick::subimagematch	1	untyped $offset	RCV	an empty Imagick object: the receiver needs an image
+513	imagick::subimagematch	2	untyped $similarity	RCV	an empty Imagick object: the receiver needs an image
+514	imagick::tintimage	0	ImagickPixel|string $tint_color	RCV	an empty Imagick object: the receiver needs an image
+515	imagick::tintimage	1	ImagickPixel|string $opacity_color	RCV	an empty Imagick object: the receiver needs an image
+516	imagick::transparentpaintimage	0	ImagickPixel|string $target_color	RCV	an empty Imagick object: the receiver needs an image
+517	imagick::whitethresholdimage	0	ImagickPixel|string $threshold_color	RCV	an empty Imagick object: the receiver needs an image
+518	imagick::writeimagefile	0	mixed $filehandle	WK	a closure is not a resource
+519	imagick::writeimagefile	1	?string $format	RCV	an empty Imagick object: the receiver needs an image
+520	imagick::writeimagesfile	0	mixed $filehandle	WK	a closure is not a resource
+521	imagick::writeimagesfile	1	?string $format	RCV	an empty Imagick object: the receiver needs an image
+522	imagick::writeimages	0	string $filename	RCV	an empty Imagick object: the receiver needs an image
+523	imagick::writeimage	0	?string $filename	RCV	an empty Imagick object: the receiver needs an image
+524	imagickdraw::bezier	0	array $coordinates	WK	points arrays of the wrong shape
+525	imagickdraw::polygon	0	array $coordinates	WK	points arrays of the wrong shape
+526	imagickdraw::polyline	0	array $coordinates	WK	points arrays of the wrong shape
+527	imagickdraw::setbordercolor	0	ImagickPixel|string $color	WK	colour probes are refused
+528	imagickdraw::setfillcolor	0	ImagickPixel|string $fill_color	WK	colour probes are refused
+529	imagickdraw::setfillpatternurl	0	string $fill_url	WK	url is not a pattern URL
+530	imagickdraw::setfontfamily	0	string $font_family	VAL	a configured font family is needed
+531	imagickdraw::setfont	0	string $font_name	VAL	a font file is needed
+532	imagickdraw::setstrokecolor	0	ImagickPixel|string $color	WK	colour probes are refused
+533	imagickdraw::setstrokepatternurl	0	string $stroke_url	WK	url is not a pattern URL
+534	imagickdraw::settextundercolor	0	ImagickPixel|string $under_color	WK	colour probes are refused
+535	imagickdraw::setvectorgraphics	0	string $xml	VAL	an XML document is needed
+536	imagickpixel::__construct	0	?string $color	WK	colour probes are refused
+537	imagickpixel::ispixelsimilarquantum	0	ImagickPixel|string $color	WK	colour probes are refused
+538	imagickpixel::ispixelsimilar	0	ImagickPixel|string $color	WK	colour probes are refused
+539	imagickpixel::issimilar	0	ImagickPixel|string $color	WK	colour probes are refused
+540	imagickpixel::setcolor	0	string $color	WK	colour probes are refused
+541	implode	0	array|string $separator	WK	a closure is not a string or array
+542	implode	1	?array $array	WK	a closure is not a string or array
+543	infiniteiterator::__construct	0	Iterator $iterator	VAL	a fresh iterator is needed per call
+544	inflate_init	1	object|array $options	VAL	a valid option array is needed
+545	ini_alter	1	string|int|float|bool|null $value	WK	an object is not a scalar value
+546	ini_set	1	string|int|float|bool|null $value	WK	an object is not a scalar value
+547	intlcal_create_instance	0	IntlTimeZone|DateTimeZone|string|null $timezone	VAL	a valid time zone is needed
+548	intlcal_create_instance	1	?string $locale	VAL	a valid time zone is needed
+549	intlcal_from_date_time	0	DateTime|string $datetime	VAL	a DateTime is needed
+550	intlcal_set_time_zone	1	IntlTimeZone|DateTimeZone|string|null $timezone	VAL	a valid time zone is needed
+551	intldatepatterngenerator::__construct	0	?string $locale	RCV	a constructor cannot run twice: a fresh object is needed
+552	intlgregcal_create_instance	0	untyped $timezoneOrYear	VAL	a valid time zone is needed
+553	intlgregcal_create_instance	1	untyped $localeOrMonth	VAL	valid scalar values are needed
+554	intlgregcal_create_instance	2	untyped $day	VAL	valid scalar values are needed
+555	intlgregcal_create_instance	3	untyped $hour	VAL	valid scalar values are needed
+556	intlgregcal_create_instance	4	untyped $minute	VAL	valid scalar values are needed
+557	intlgregcal_create_instance	5	untyped $second	VAL	valid scalar values are needed
+558	intlgregoriancalendar::__construct	0	untyped $timezoneOrYear	RCV	the constructor needs an unconstructed object
+559	intlgregoriancalendar::__construct	1	untyped $localeOrMonth	RCV	the constructor needs an unconstructed object
+560	intlgregoriancalendar::__construct	2	untyped $day	RCV	the constructor needs an unconstructed object
+561	intlgregoriancalendar::__construct	3	untyped $hour	RCV	the constructor needs an unconstructed object
+562	intlgregoriancalendar::__construct	4	untyped $minute	RCV	the constructor needs an unconstructed object
+563	intlgregoriancalendar::__construct	5	untyped $second	RCV	the constructor needs an unconstructed object
+564	iterator_apply	1	callable $callback	VAL	an iterator is needed at position 0
+565	iterator_apply	2	?array $args	VAL	an iterator is needed at position 0
+566	iteratoriterator::__construct	0	Traversable $iterator	VAL	an iterator is needed
+567	iteratoriterator::__construct	1	?string $class	VAL	an iterator is needed
+568	join	0	array|string $separator	WK	a closure is not a string or array
+569	join	1	?array $array	WK	a closure is not a string or array
+570	key_exists	0	untyped $key	WK	objects are not array offsets
+571	libxml_set_streams_context	0	untyped $context	VAL	a stream context is needed
+572	limititerator::__construct	0	Iterator $iterator	VAL	a fresh iterator is needed per call
+573	locale_compose	0	array $subtags	VAL	a valid locale value is needed
+574	locale_lookup	0	array $languageTag	VAL	a valid locale value is needed
+575	locale_lookup	1	string $locale	VAL	a valid locale value is needed
+576	locale_lookup	3	?string $defaultLocale	VAL	a valid locale value is needed
+577	mail	3	array|string $additional_headers	VAL	valid header values are needed
+578	max	0	mixed $value	VAL	an array value is needed
+579	mb_check_encoding	1	?string $encoding	VAL	a valid encoding or argument value is needed
+580	mb_chr	1	?string $encoding	VAL	a valid encoding or argument value is needed
+581	mb_convert_case	2	?string $encoding	VAL	a valid encoding or argument value is needed
+582	mb_convert_encoding	0	array|string $string	VAL	a valid encoding or argument value is needed
+583	mb_convert_encoding	1	string $to_encoding	VAL	a valid encoding or argument value is needed
+584	mb_convert_encoding	2	array|string|null $from_encoding	VAL	a valid encoding or argument value is needed
+585	mb_convert_kana	1	string $mode	VAL	a valid encoding or argument value is needed
+586	mb_convert_kana	2	?string $encoding	VAL	a valid encoding or argument value is needed
+587	mb_convert_variables	0	string $to_encoding	VAL	a valid encoding or argument value is needed
+588	mb_convert_variables	1	array|string $from_encoding	VAL	a valid encoding or argument value is needed
+589	mb_decode_numericentity	0	string $string	VAL	a valid encoding or argument value is needed
+590	mb_decode_numericentity	1	array $map	VAL	a valid encoding or argument value is needed
+591	mb_decode_numericentity	2	?string $encoding	VAL	a valid encoding or argument value is needed
+592	mb_detect_encoding	1	array|string|null $encodings	VAL	a valid encoding or argument value is needed
+593	mb_detect_order	0	array|string|null $encoding	VAL	a valid encoding or argument value is needed
+594	mb_encode_mimeheader	1	?string $charset	VAL	a valid encoding or argument value is needed
+595	mb_encode_mimeheader	2	?string $transfer_encoding	VAL	a valid encoding or argument value is needed
+596	mb_encode_mimeheader	3	string $newline	VAL	a valid encoding or argument value is needed
+597	mb_encode_numericentity	0	string $string	VAL	a valid encoding or argument value is needed
+598	mb_encode_numericentity	1	array $map	VAL	a valid encoding or argument value is needed
+599	mb_encode_numericentity	2	?string $encoding	VAL	a valid encoding or argument value is needed
+600	mb_encoding_aliases	0	string $encoding	VAL	a valid encoding or argument value is needed
+601	mb_ereg_match	2	?string $options	VAL	a valid option string is needed
+602	mb_ereg_replace_callback	3	?string $options	VAL	a valid option string is needed
+603	mb_ereg_replace	3	?string $options	VAL	a valid option string is needed
+604	mb_ereg_search_init	2	?string $options	VAL	a valid option string is needed
+605	mb_ereg_search_pos	0	?string $pattern	RCV	mb_ereg_search_init must run first
+606	mb_ereg_search_pos	1	?string $options	RCV	mb_ereg_search_init must run first
+607	mb_ereg_search_regs	0	?string $pattern	RCV	mb_ereg_search_init must run first
+608	mb_ereg_search_regs	1	?string $options	RCV	mb_ereg_search_init must run first
+609	mb_ereg_search	0	?string $pattern	RCV	mb_ereg_search_init must run first
+610	mb_ereg_search	1	?string $options	RCV	mb_ereg_search_init must run first
+611	mb_eregi_replace	3	?string $options	VAL	a valid option string is needed
+612	mb_http_input	0	?string $type	VAL	a valid type letter is needed
+613	mb_http_output	0	?string $encoding	VAL	a valid encoding or language is needed
+614	mb_internal_encoding	0	?string $encoding	VAL	a valid encoding or language is needed
+615	mb_language	0	?string $language	VAL	a valid encoding or language is needed
+616	mb_lcfirst	1	?string $encoding	VAL	a valid encoding or language is needed
+617	mb_ltrim	2	?string $encoding	VAL	a valid encoding or language is needed
+618	mb_ord	1	?string $encoding	VAL	a valid encoding or language is needed
+619	mb_preferred_mime_name	0	string $encoding	VAL	a valid encoding or language is needed
+620	mb_regex_encoding	0	?string $encoding	VAL	a valid encoding or language is needed
+621	mb_regex_set_options	0	?string $options	VAL	a valid option string is needed
+622	mb_rtrim	2	?string $encoding	VAL	a valid encoding is needed
+623	mb_scrub	1	?string $encoding	VAL	a valid encoding is needed
+624	mb_send_mail	3	array|string $additional_headers	VAL	valid header values are needed
+625	mb_str_pad	4	?string $encoding	VAL	a valid encoding is needed
+626	mb_str_split	2	?string $encoding	VAL	a valid encoding is needed
+627	mb_strcut	3	?string $encoding	VAL	a valid encoding is needed
+628	mb_strimwidth	4	?string $encoding	VAL	a valid encoding is needed
+629	mb_stripos	3	?string $encoding	VAL	a valid encoding is needed
+630	mb_stristr	3	?string $encoding	VAL	a valid encoding is needed
+631	mb_strlen	1	?string $encoding	VAL	a valid encoding is needed
+632	mb_strpos	3	?string $encoding	VAL	a valid encoding is needed
+633	mb_strrchr	3	?string $encoding	VAL	a valid encoding is needed
+634	mb_strrichr	3	?string $encoding	VAL	a valid encoding is needed
+635	mb_strripos	3	?string $encoding	VAL	a valid encoding is needed
+636	mb_strrpos	3	?string $encoding	VAL	a valid encoding is needed
+637	mb_strstr	3	?string $encoding	VAL	a valid encoding is needed
+638	mb_strtolower	1	?string $encoding	VAL	a valid encoding is needed
+639	mb_strtoupper	1	?string $encoding	VAL	a valid encoding is needed
+640	mb_strwidth	1	?string $encoding	VAL	a valid encoding is needed
+641	mb_substitute_character	0	string|int|null $substitute_character	VAL	a valid substitute character is needed
+642	mb_substr_count	2	?string $encoding	VAL	a valid encoding is needed
+643	mb_substr	3	?string $encoding	VAL	a valid encoding is needed
+644	mb_trim	2	?string $encoding	VAL	a valid encoding is needed
+645	mb_ucfirst	1	?string $encoding	VAL	a valid encoding is needed
+646	memcached::addbykey	2	mixed $value	WK	a closure cannot be serialised or converted to string
+647	memcached::add	1	mixed $value	WK	a closure cannot be serialised or converted to string
+648	memcached::casbykey	3	mixed $value	WK	a closure cannot be serialised or converted to string
+649	memcached::cas	2	mixed $value	WK	a closure cannot be serialised or converted to string
+650	memcached::deletemultibykey	1	array $keys	WK	a closure cannot be serialised or converted to string
+651	memcached::deletemulti	0	array $keys	WK	a closure cannot be serialised or converted to string
+652	memcached::getdelayedbykey	1	array $keys	WK	a closure cannot be serialised or converted to string
+653	memcached::getdelayed	0	array $keys	WK	a closure cannot be serialised or converted to string
+654	memcached::getmultibykey	1	array $keys	WK	a closure cannot be serialised or converted to string
+655	memcached::getmulti	0	array $keys	WK	a closure cannot be serialised or converted to string
+656	memcached::replacebykey	2	mixed $value	WK	a closure cannot be serialised or converted to string
+657	memcached::replace	1	mixed $value	WK	a closure cannot be serialised or converted to string
+658	memcached::setbykey	2	mixed $value	WK	a closure cannot be serialised or converted to string
+659	memcached::setmultibykey	1	array $items	WK	a closure cannot be serialised or converted to string
+660	memcached::setmulti	0	array $items	WK	a closure cannot be serialised or converted to string
+661	memcached::set	1	mixed $value	WK	a closure cannot be serialised or converted to string
+662	messageformatter::format	0	array $values	WK	a closure is not a string
+663	messagepack::__construct	0	untyped $opt	VAL	a bool is needed
+664	messagepack::pack	0	untyped $value	WK	a closure cannot be serialised
+665	messagepack::setoption	0	untyped $option	VAL	an int option is needed
+666	messagepack::unpack	0	untyped $str	VAL	a string is needed
+667	messagepack::unpack	1	untyped $object	VAL	an object is needed
+668	messagepackunpacker::__construct	0	untyped $opt	VAL	a bool is needed
+669	messagepackunpacker::execute	0	untyped $str	VAL	a string is needed
+670	messagepackunpacker::feed	0	untyped $str	VAL	a string is needed
+671	messagepackunpacker::setoption	0	untyped $option	VAL	an int option is needed
+672	method_exists	0	untyped $object_or_class	VAL	a class name or object is needed
+673	method_exists	1	string $method	VAL	a class name or object is needed
+674	mime_content_type	0	untyped $filename	VAL	a real file is needed
+675	min	0	mixed $value	VAL	an array value is needed
+676	mkdir	3	untyped $context	VAL	a context resource is needed
+677	msg_send	2	untyped $message	WK	a closure cannot be serialised
+678	msgfmt_format_message	2	array $values	WK	a closure is not a string
+679	msgfmt_format	1	array $values	WK	a closure is not a string
+680	msgpack_pack	0	untyped $value	WK	a closure cannot be serialised
+681	msgpack_serialize	0	untyped $value	WK	a closure cannot be serialised
+682	msgpack_unpack	0	untyped $str	VAL	a string is needed
+683	msgpack_unpack	1	untyped $object	VAL	an object is needed
+684	msgpack_unserialize	0	untyped $str	VAL	a string is needed
+685	msgpack_unserialize	1	untyped $object	VAL	an object is needed
+686	mysqli::__construct	0	?string $hostname	RCV	the constructor cannot run twice
+687	mysqli::__construct	1	?string $username	RCV	the constructor cannot run twice
+688	mysqli::__construct	2	?string $password	RCV	the constructor cannot run twice
+689	mysqli::__construct	3	?string $database	RCV	the constructor cannot run twice
+690	mysqli::__construct	5	?string $socket	RCV	the constructor cannot run twice
+691	mysqli::begin_transaction	1	?string $name	SRV	a live MySQL connection is needed
+692	mysqli::change_user	0	string $username	SRV	a live MySQL connection is needed
+693	mysqli::change_user	1	string $password	SRV	a live MySQL connection is needed
+694	mysqli::change_user	2	?string $database	SRV	a live MySQL connection is needed
+695	mysqli::commit	1	?string $name	SRV	a live MySQL connection is needed
+696	mysqli::connect	0	?string $hostname	SRV	a live MySQL server is needed
+697	mysqli::connect	1	?string $username	SRV	a live MySQL server is needed
+698	mysqli::connect	2	?string $password	SRV	a live MySQL server is needed
+699	mysqli::connect	3	?string $database	SRV	a live MySQL server is needed
+700	mysqli::connect	5	?string $socket	SRV	a live MySQL server is needed
+701	mysqli::escape_string	0	string $string	SRV	a live MySQL connection is needed
+702	mysqli::execute_query	0	string $query	SRV	a live MySQL connection is needed
+703	mysqli::execute_query	1	?array $params	SRV	a live MySQL connection is needed
+704	mysqli::multi_query	0	string $query	SRV	a live MySQL connection is needed
+705	mysqli::prepare	0	string $query	SRV	a live MySQL connection is needed
+706	mysqli::query	0	string $query	SRV	a live MySQL connection is needed
+707	mysqli::real_connect	0	?string $hostname	SRV	a live MySQL connection is needed
+708	mysqli::real_connect	1	?string $username	SRV	a live MySQL connection is needed
+709	mysqli::real_connect	2	?string $password	SRV	a live MySQL connection is needed
+710	mysqli::real_connect	3	?string $database	SRV	a live MySQL connection is needed
+711	mysqli::real_connect	5	?string $socket	SRV	a live MySQL connection is needed
+712	mysqli::real_escape_string	0	string $string	SRV	a live MySQL connection is needed
+713	mysqli::real_query	0	string $query	SRV	a live MySQL connection is needed
+714	mysqli::release_savepoint	0	string $name	SRV	a live MySQL connection is needed
+715	mysqli::rollback	1	?string $name	SRV	a live MySQL connection is needed
+716	mysqli::savepoint	0	string $name	SRV	a live MySQL connection is needed
+717	mysqli::select_db	0	string $database	SRV	a live MySQL connection is needed
+718	mysqli::set_charset	0	string $charset	SRV	a live MySQL connection is needed
+719	mysqli_begin_transaction	2	?string $name	SRV	a live MySQL connection is needed
+720	mysqli_change_user	1	string $username	SRV	a live MySQL connection is needed
+721	mysqli_change_user	2	string $password	SRV	a live MySQL connection is needed
+722	mysqli_change_user	3	?string $database	SRV	a live MySQL connection is needed
+723	mysqli_commit	2	?string $name	SRV	a live MySQL connection is needed
+724	mysqli_connect	0	?string $hostname	SRV	a live MySQL server is needed
+725	mysqli_connect	1	?string $username	SRV	a live MySQL server is needed
+726	mysqli_connect	2	?string $password	SRV	a live MySQL server is needed
+727	mysqli_connect	3	?string $database	SRV	a live MySQL server is needed
+728	mysqli_connect	5	?string $socket	SRV	a live MySQL server is needed
+729	mysqli_escape_string	1	string $string	SRV	a live MySQL connection is needed
+730	mysqli_execute_query	1	string $query	SRV	a live MySQL connection is needed
+731	mysqli_execute_query	2	?array $params	SRV	a live MySQL connection is needed
+732	mysqli_execute	1	?array $params	SRV	a live MySQL statement or result is needed
+733	mysqli_fetch_object	1	string $class	SRV	a live MySQL statement or result is needed
+734	mysqli_fetch_object	2	array $constructor_args	SRV	a live MySQL statement or result is needed
+735	mysqli_multi_query	1	string $query	SRV	a live MySQL statement or result is needed
+736	mysqli_poll	0	?array $read	SRV	a live MySQL connection is needed
+737	mysqli_poll	1	?array $error	SRV	a live MySQL connection is needed
+738	mysqli_poll	2	array $reject	SRV	a live MySQL connection is needed
+739	mysqli_prepare	1	string $query	SRV	a live MySQL connection is needed
+740	mysqli_query	1	string $query	SRV	a live MySQL connection is needed
+741	mysqli_real_connect	1	?string $hostname	SRV	a live MySQL server is needed
+742	mysqli_real_connect	2	?string $username	SRV	a live MySQL server is needed
+743	mysqli_real_connect	3	?string $password	SRV	a live MySQL server is needed
+744	mysqli_real_connect	4	?string $database	SRV	a live MySQL server is needed
+745	mysqli_real_connect	6	?string $socket	SRV	a live MySQL server is needed
+746	mysqli_real_escape_string	1	string $string	SRV	a live MySQL connection is needed
+747	mysqli_real_query	1	string $query	SRV	a live MySQL connection is needed
+748	mysqli_release_savepoint	1	string $name	SRV	a live MySQL connection is needed
+749	mysqli_rollback	2	?string $name	SRV	a live MySQL connection is needed
+750	mysqli_savepoint	1	string $name	SRV	a live MySQL connection is needed
+751	mysqli_select_db	1	string $database	SRV	a live MySQL connection is needed
+752	mysqli_set_charset	1	string $charset	SRV	a live MySQL connection is needed
+753	mysqli_stmt_bind_param	1	string $types	SRV	a live MySQL statement is needed
+754	mysqli_stmt_bind_param	2	mixed $vars	SRV	a live MySQL statement is needed
+755	mysqli_stmt_bind_result	1	mixed $vars	SRV	a live MySQL statement is needed
+756	mysqli_stmt_execute	1	?array $params	SRV	a live MySQL statement is needed
+757	mysqli_stmt_prepare	1	string $query	SRV	a live MySQL statement is needed
+758	mysqli_stmt_send_long_data	2	string $data	SRV	a live MySQL statement is needed
+759	natcasesort	0	array $array	WK	a closure is not a string
+760	natsort	0	array $array	WK	a closure is not a string
+761	nodiscard::__construct	0	?string $message	RCV	a fresh object is needed
+762	norewinditerator::__construct	0	Iterator $iterator	VAL	a fresh iterator is needed per call
+763	numfmt_create	0	string $locale	VAL	a valid locale is needed
+764	numfmt_create	2	?string $pattern	VAL	a valid locale is needed
+765	opendir	1	untyped $context	VAL	a context resource is needed
+766	openssl_cms_decrypt	2	untyped $certificate	VAL	a real key or certificate is needed
+767	openssl_cms_sign	3	untyped $private_key	VAL	a real key or certificate is needed
+768	openssl_csr_new	1	untyped $private_key	VAL	a real key or certificate is needed
+769	openssl_get_privatekey	0	untyped $private_key	VAL	a real key or certificate is needed
+770	openssl_get_publickey	0	untyped $public_key	VAL	a real key or certificate is needed
+771	openssl_open	3	untyped $private_key	VAL	a real key or certificate is needed
+772	openssl_pkcs7_decrypt	2	untyped $certificate	VAL	a real key or certificate is needed
+773	openssl_pkcs7_sign	3	untyped $private_key	VAL	a real key or certificate is needed
+774	openssl_pkcs7_verify	3	array $ca_info	VAL	valid CA strings are needed
+775	openssl_pkey_derive	1	untyped $private_key	VAL	a real key or certificate is needed
+776	openssl_pkey_export_to_file	0	untyped $key	VAL	a real key or certificate is needed
+777	openssl_pkey_export	0	untyped $key	VAL	a real key or certificate is needed
+778	openssl_pkey_get_private	0	untyped $private_key	VAL	a real key or certificate is needed
+779	openssl_pkey_get_public	0	untyped $public_key	VAL	a real key or certificate is needed
+780	openssl_private_decrypt	2	untyped $private_key	VAL	a real key or certificate is needed
+781	openssl_private_encrypt	2	untyped $private_key	VAL	a real key or certificate is needed
+782	openssl_public_decrypt	2	untyped $public_key	VAL	a real key or certificate is needed
+783	openssl_public_encrypt	2	untyped $public_key	VAL	a real key or certificate is needed
+784	openssl_sign	2	untyped $private_key	VAL	a real key or certificate is needed
+785	openssl_verify	2	untyped $public_key	VAL	a real key or certificate is needed
+786	openssl_x509_checkpurpose	2	array $ca_info	VAL	valid CA strings are needed
+787	pack	0	string $format	VAL	a valid format string is needed
+788	password_hash	1	string|int|null $algo	VAL	a valid algorithm is needed
+789	pclose	0	untyped $handle	VAL	a process resource is needed
+790	pdostatement::bindcolumn	0	string|int $column	RCV	a PDOStatement made by a query is needed
+791	pdostatement::bindcolumn	1	mixed $var	RCV	a PDOStatement made by a query is needed
+792	pdostatement::bindcolumn	4	mixed $driverOptions	RCV	a PDOStatement made by a query is needed
+793	pdostatement::bindparam	0	string|int $param	RCV	a PDOStatement made by a query is needed
+794	pdostatement::bindparam	1	mixed $var	RCV	a PDOStatement made by a query is needed
+795	pdostatement::bindparam	4	mixed $driverOptions	RCV	a PDOStatement made by a query is needed
+796	pdostatement::bindvalue	0	string|int $param	RCV	a PDOStatement made by a query is needed
+797	pdostatement::bindvalue	1	mixed $value	RCV	a PDOStatement made by a query is needed
+798	pdostatement::execute	0	?array $params	RCV	a PDOStatement made by a query is needed
+799	pdostatement::fetchall	1	mixed $args	RCV	a PDOStatement made by a query is needed
+800	pdostatement::fetchobject	0	?string $class	VAL	a class name is needed
+801	pdostatement::fetchobject	1	array $constructorArgs	VAL	a valid class name is needed
+802	pdostatement::setattribute	1	mixed $value	RCV	a PDOStatement made by a query is needed
+803	pdostatement::setfetchmode	1	mixed $args	RCV	a PDOStatement made by a query is needed
+804	pg_affected_rows	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+805	pg_cancel_query	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+806	pg_change_password	1	string $user	SRV	a live PostgreSQL connection or result is needed
+807	pg_change_password	2	string $password	SRV	a live PostgreSQL connection or result is needed
+808	pg_client_encoding	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+809	pg_close_stmt	1	string $statement_name	SRV	a live PostgreSQL connection or result is needed
+810	pg_close	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+811	pg_connect_poll	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+812	pg_connection_busy	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+813	pg_connection_reset	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+814	pg_connection_status	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+815	pg_convert	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+816	pg_convert	1	string $table_name	SRV	a live PostgreSQL connection or result is needed
+817	pg_convert	2	array $values	SRV	a live PostgreSQL connection or result is needed
+818	pg_copy_from	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+819	pg_copy_from	1	string $table_name	SRV	a live PostgreSQL connection or result is needed
+820	pg_copy_from	2	Traversable|array $rows	SRV	a live PostgreSQL connection or result is needed
+821	pg_copy_from	3	string $separator	SRV	a live PostgreSQL connection or result is needed
+822	pg_copy_from	4	string $null_as	SRV	a live PostgreSQL connection or result is needed
+823	pg_copy_to	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+824	pg_copy_to	1	string $table_name	SRV	a live PostgreSQL connection or result is needed
+825	pg_copy_to	2	string $separator	SRV	a live PostgreSQL connection or result is needed
+826	pg_copy_to	3	string $null_as	SRV	a live PostgreSQL connection or result is needed
+827	pg_dbname	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+828	pg_delete	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+829	pg_delete	1	string $table_name	SRV	a live PostgreSQL connection or result is needed
+830	pg_delete	2	array $conditions	SRV	a live PostgreSQL connection or result is needed
+831	pg_end_copy	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+832	pg_escape_bytea	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+833	pg_escape_bytea	1	string $string	SRV	a live PostgreSQL connection or result is needed
+834	pg_escape_identifier	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+835	pg_escape_identifier	1	string $string	SRV	a live PostgreSQL connection or result is needed
+836	pg_escape_literal	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+837	pg_escape_literal	1	string $string	SRV	a live PostgreSQL connection or result is needed
+838	pg_escape_string	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+839	pg_escape_string	1	string $string	SRV	a live PostgreSQL connection or result is needed
+840	pg_execute	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+841	pg_execute	1	untyped $statement_name	SRV	a live PostgreSQL connection or result is needed
+842	pg_execute	2	array $params	SRV	a live PostgreSQL connection or result is needed
+843	pg_exec	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+844	pg_exec	1	string $query	SRV	a live PostgreSQL connection or result is needed
+845	pg_fetch_all_columns	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+846	pg_fetch_all	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+847	pg_fetch_array	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+848	pg_fetch_assoc	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+849	pg_fetch_object	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+850	pg_fetch_object	2	string $class	SRV	a live PostgreSQL connection or result is needed
+851	pg_fetch_object	3	array $constructor_args	SRV	a live PostgreSQL connection or result is needed
+852	pg_fetch_result	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+853	pg_fetch_result	1	untyped $row	SRV	a live PostgreSQL connection or result is needed
+854	pg_fetch_result	2	string|int $field	SRV	a live PostgreSQL connection or result is needed
+855	pg_fetch_row	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+856	pg_field_is_null	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+857	pg_field_is_null	1	untyped $row	SRV	a live PostgreSQL connection or result is needed
+858	pg_field_is_null	2	string|int $field	SRV	a live PostgreSQL connection or result is needed
+859	pg_field_name	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+860	pg_field_num	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+861	pg_field_num	1	string $field	SRV	a live PostgreSQL connection or result is needed
+862	pg_field_prtlen	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+863	pg_field_prtlen	1	untyped $row	SRV	a live PostgreSQL connection or result is needed
+864	pg_field_prtlen	2	string|int $field	SRV	a live PostgreSQL connection or result is needed
+865	pg_field_size	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+866	pg_field_table	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+867	pg_field_type_oid	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+868	pg_field_type	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+869	pg_fieldisnull	1	untyped $row	SRV	a live PostgreSQL connection or result is needed
+870	pg_fieldisnull	2	string|int $field	SRV	a live PostgreSQL connection or result is needed
+871	pg_fieldnum	1	string $field	SRV	a live PostgreSQL connection or result is needed
+872	pg_fieldprtlen	1	untyped $row	SRV	a live PostgreSQL connection or result is needed
+873	pg_fieldprtlen	2	string|int $field	SRV	a live PostgreSQL connection or result is needed
+874	pg_free_result	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+875	pg_get_notify	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+876	pg_get_pid	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+877	pg_get_result	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+878	pg_host	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+879	pg_insert	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+880	pg_insert	1	string $table_name	SRV	a live PostgreSQL connection or result is needed
+881	pg_insert	2	array $values	SRV	a live PostgreSQL connection or result is needed
+882	pg_last_error	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+883	pg_last_notice	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+884	pg_last_oid	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+885	pg_lo_close	0	PgSql\Lob $lob	SRV	a live PostgreSQL connection or result is needed
+886	pg_lo_create	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+887	pg_lo_create	1	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+888	pg_lo_export	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+889	pg_lo_export	1	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+890	pg_lo_export	2	untyped $filename	SRV	a live PostgreSQL connection or result is needed
+891	pg_lo_import	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+892	pg_lo_import	1	untyped $filename	SRV	a live PostgreSQL connection or result is needed
+893	pg_lo_import	2	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+894	pg_lo_open	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+895	pg_lo_open	1	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+896	pg_lo_open	2	string $mode	SRV	a live PostgreSQL connection or result is needed
+897	pg_lo_read_all	0	PgSql\Lob $lob	SRV	a live PostgreSQL connection or result is needed
+898	pg_lo_read	0	PgSql\Lob $lob	SRV	a live PostgreSQL connection or result is needed
+899	pg_lo_seek	0	PgSql\Lob $lob	SRV	a live PostgreSQL connection or result is needed
+900	pg_lo_tell	0	PgSql\Lob $lob	SRV	a live PostgreSQL connection or result is needed
+901	pg_lo_truncate	0	PgSql\Lob $lob	SRV	a live PostgreSQL connection or result is needed
+902	pg_lo_unlink	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+903	pg_lo_unlink	1	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+904	pg_lo_write	0	PgSql\Lob $lob	SRV	a live PostgreSQL connection or result is needed
+905	pg_lo_write	1	string $data	SRV	a live PostgreSQL connection or result is needed
+906	pg_locreate	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+907	pg_locreate	1	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+908	pg_loexport	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+909	pg_loexport	1	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+910	pg_loexport	2	untyped $filename	SRV	a live PostgreSQL connection or result is needed
+911	pg_loimport	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+912	pg_loimport	1	untyped $filename	SRV	a live PostgreSQL connection or result is needed
+913	pg_loimport	2	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+914	pg_loopen	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+915	pg_loopen	1	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+916	pg_loopen	2	string $mode	SRV	a live PostgreSQL connection or result is needed
+917	pg_lounlink	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+918	pg_lounlink	1	untyped $oid	SRV	a live PostgreSQL connection or result is needed
+919	pg_lowrite	1	string $data	SRV	a live PostgreSQL connection or result is needed
+920	pg_meta_data	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+921	pg_meta_data	1	string $table_name	SRV	a live PostgreSQL connection or result is needed
+922	pg_num_fields	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+923	pg_num_rows	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+924	pg_options	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+925	pg_parameter_status	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+926	pg_parameter_status	1	string $name	SRV	a live PostgreSQL connection or result is needed
+927	pg_ping	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+928	pg_port	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+929	pg_prepare	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+930	pg_prepare	1	string $statement_name	SRV	a live PostgreSQL connection or result is needed
+931	pg_prepare	2	string $query	SRV	a live PostgreSQL connection or result is needed
+932	pg_put_copy_data	1	string $cmd	SRV	a live PostgreSQL connection or result is needed
+933	pg_put_copy_end	1	?string $error	SRV	a live PostgreSQL connection or result is needed
+934	pg_put_line	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+935	pg_put_line	1	string $query	SRV	a live PostgreSQL connection or result is needed
+936	pg_query_params	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+937	pg_query_params	1	untyped $query	SRV	a live PostgreSQL connection or result is needed
+938	pg_query_params	2	array $params	SRV	a live PostgreSQL connection or result is needed
+939	pg_query	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+940	pg_query	1	string $query	SRV	a live PostgreSQL connection or result is needed
+941	pg_result_error_field	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+942	pg_result_error	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+943	pg_result_seek	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+944	pg_result_status	0	PgSql\Result $result	SRV	a live PostgreSQL connection or result is needed
+945	pg_result	1	untyped $row	SRV	a live PostgreSQL connection or result is needed
+946	pg_result	2	string|int $field	SRV	a live PostgreSQL connection or result is needed
+947	pg_select	1	string $table_name	SRV	a live PostgreSQL connection or result is needed
+948	pg_select	2	array $conditions	SRV	a live PostgreSQL connection or result is needed
+949	pg_send_execute	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+950	pg_send_execute	1	string $statement_name	SRV	a live PostgreSQL connection or result is needed
+951	pg_send_execute	2	array $params	SRV	a live PostgreSQL connection or result is needed
+952	pg_send_prepare	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+953	pg_send_prepare	1	string $statement_name	SRV	a live PostgreSQL connection or result is needed
+954	pg_send_prepare	2	string $query	SRV	a live PostgreSQL connection or result is needed
+955	pg_send_query_params	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+956	pg_send_query_params	1	string $query	SRV	a live PostgreSQL connection or result is needed
+957	pg_send_query_params	2	array $params	SRV	a live PostgreSQL connection or result is needed
+958	pg_send_query	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+959	pg_send_query	1	string $query	SRV	a live PostgreSQL connection or result is needed
+960	pg_set_client_encoding	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+961	pg_set_client_encoding	1	string $encoding	SRV	a live PostgreSQL connection or result is needed
+962	pg_set_error_verbosity	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+963	pg_setclientencoding	0	untyped $connection	SRV	a live PostgreSQL connection or result is needed
+964	pg_setclientencoding	1	string $encoding	SRV	a live PostgreSQL connection or result is needed
+965	pg_socket_poll	0	untyped $socket	SRV	a live PostgreSQL connection or result is needed
+966	pg_socket	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+967	pg_trace	0	string $filename	SRV	a live PostgreSQL connection or result is needed
+968	pg_trace	1	string $mode	SRV	a live PostgreSQL connection or result is needed
+969	pg_trace	2	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+970	pg_transaction_status	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+971	pg_tty	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+972	pg_untrace	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+973	pg_update	0	PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+974	pg_update	1	string $table_name	SRV	a live PostgreSQL connection or result is needed
+975	pg_update	2	array $values	SRV	a live PostgreSQL connection or result is needed
+976	pg_update	3	array $conditions	SRV	a live PostgreSQL connection or result is needed
+977	pg_version	0	?PgSql\Connection $connection	SRV	a live PostgreSQL connection or result is needed
+978	php_uname	0	string $mode	VAL	a single character is needed
+979	php_user_filter::filter	0	untyped $in	RCV	a stream bucket brigade is needed
+980	php_user_filter::filter	1	untyped $out	RCV	a stream bucket brigade is needed
+981	phptoken::is	0	untyped $kind	VAL	a string, int or array kind is needed
+982	popen	0	string $command	VAL	a valid mode string is needed
+983	popen	1	string $mode	VAL	a valid mode string is needed
+984	pow	0	mixed $num	VAL	a number is needed next to the object
+985	pow	1	mixed $exponent	VAL	a number is needed next to the object
+986	preg_filter	0	array|string $pattern	WK	a closure is not a string
+987	preg_filter	1	array|string $replacement	VAL	a pattern array is needed
+988	preg_filter	2	array|string $subject	WK	a closure is not a string
+989	preg_replace_callback_array	0	array $pattern	VAL	a pattern array with string keys is needed
+990	preg_replace_callback_array	1	array|string $subject	VAL	a pattern array with string keys is needed
+991	preg_replace_callback_array	3	untyped $count	VAL	a pattern array with string keys is needed
+992	preg_replace_callback	0	array|string $pattern	WK	a closure is not a string
+993	preg_replace_callback	2	array|string $subject	WK	a closure is not a string
+994	preg_replace	0	array|string $pattern	WK	a closure is not a string
+995	preg_replace	1	array|string $replacement	VAL	a pattern array is needed
+996	preg_replace	2	array|string $subject	WK	a closure is not a string
+997	proc_close	0	untyped $process	VAL	a process resource is needed
+998	proc_get_status	0	untyped $process	VAL	a process resource is needed
+999	proc_open	0	array|string $command	VAL	a no-op command is needed
+1000	proc_open	1	array $descriptor_spec	VAL	a descriptor array is needed
+1001	proc_open	4	?array $env_vars	WK	a closure is not a string
+1002	proc_terminate	0	untyped $process	VAL	a process resource is needed
+1003	property_exists	0	untyped $object_or_class	VAL	a class name or object is needed
+1004	property_exists	1	string $property	VAL	a class name or object is needed
+1005	random\engine\mt19937::__unserialize	0	array $data	VAL	valid serialised data is needed
+1006	random\engine\pcgoneseq128xslrr64::__construct	0	string|int|null $seed	VAL	a seed of the right length is needed
+1007	random\engine\pcgoneseq128xslrr64::__unserialize	0	array $data	VAL	valid serialised data is needed
+1008	random\engine\xoshiro256starstar::__construct	0	string|int|null $seed	VAL	a seed of the right length is needed
+1009	random\engine\xoshiro256starstar::__unserialize	0	array $data	VAL	valid serialised data is needed
+1010	random\randomizer::__unserialize	0	array $data	VAL	valid serialised data is needed
+1011	readdir	0	untyped $dir_handle	VAL	a directory handle is needed
+1012	readfile	2	untyped $context	VAL	a context resource is needed
+1013	recursivedirectoryiterator::__construct	0	string $directory	VAL	a real directory is needed
+1014	redis::acl	0	string $subcmd	SRV	a live Redis server is needed
+1015	redis::acl	1	string $args	SRV	a live Redis server is needed
+1016	redis::append	0	string $key	SRV	a live Redis server is needed
+1017	redis::append	1	mixed $value	SRV	a live Redis server is needed
+1018	redis::auth	0	mixed $credentials	SRV	a live Redis server is needed
+1019	redis::bitcount	0	string $key	SRV	a live Redis server is needed
+1020	redis::bitop	0	string $operation	SRV	a live Redis server is needed
+1021	redis::bitop	1	string $deskey	SRV	a live Redis server is needed
+1022	redis::bitop	2	string $srckey	SRV	a live Redis server is needed
+1023	redis::bitop	3	string $other_keys	SRV	a live Redis server is needed
+1024	redis::bitpos	0	string $key	SRV	a live Redis server is needed
+1025	redis::blmove	0	string $src	SRV	a live Redis server is needed
+1026	redis::blmove	1	string $dst	SRV	a live Redis server is needed
+1027	redis::blmove	2	string $wherefrom	SRV	a live Redis server is needed
+1028	redis::blmove	3	string $whereto	SRV	a live Redis server is needed
+1029	redis::blmpop	1	array $keys	SRV	a live Redis server is needed
+1030	redis::blmpop	2	string $from	SRV	a live Redis server is needed
+1031	redis::blpop	0	array|string $key_or_keys	SRV	a live Redis server is needed
+1032	redis::blpop	1	string|int|float $timeout_or_key	SRV	a live Redis server is needed
+1033	redis::blpop	2	mixed $extra_args	SRV	a live Redis server is needed
+1034	redis::brpoplpush	0	string $src	SRV	a live Redis server is needed
+1035	redis::brpoplpush	1	string $dst	SRV	a live Redis server is needed
+1036	redis::brpop	0	array|string $key_or_keys	SRV	a live Redis server is needed
+1037	redis::brpop	1	string|int|float $timeout_or_key	SRV	a live Redis server is needed
+1038	redis::brpop	2	mixed $extra_args	SRV	a live Redis server is needed
+1039	redis::bzmpop	1	array $keys	SRV	a live Redis server is needed
+1040	redis::bzmpop	2	string $from	SRV	a live Redis server is needed
+1041	redis::bzpopmax	0	array|string $key	SRV	a live Redis server is needed
+1042	redis::bzpopmax	1	string|int $timeout_or_key	SRV	a live Redis server is needed
+1043	redis::bzpopmax	2	mixed $extra_args	SRV	a live Redis server is needed
+1044	redis::bzpopmin	0	array|string $key	SRV	a live Redis server is needed
+1045	redis::bzpopmin	1	string|int $timeout_or_key	SRV	a live Redis server is needed
+1046	redis::bzpopmin	2	mixed $extra_args	SRV	a live Redis server is needed
+1047	redis::client	0	string $opt	SRV	a live Redis server is needed
+1048	redis::client	1	mixed $args	SRV	a live Redis server is needed
+1049	redis::command	0	?string $opt	SRV	a live Redis server is needed
+1050	redis::command	1	mixed $args	SRV	a live Redis server is needed
+1051	redis::config	0	string $operation	SRV	a live Redis server is needed
+1052	redis::config	1	array|string|null $key_or_settings	SRV	a live Redis server is needed
+1053	redis::config	2	?string $value	SRV	a live Redis server is needed
+1054	redis::connect	0	string $host	SRV	a live Redis server is needed
+1055	redis::connect	3	?string $persistent_id	SRV	a live Redis server is needed
+1056	redis::connect	6	?array $context	SRV	a live Redis server is needed
+1057	redis::copy	0	string $src	SRV	a live Redis server is needed
+1058	redis::copy	1	string $dst	SRV	a live Redis server is needed
+1059	redis::copy	2	?array $options	SRV	a live Redis server is needed
+1060	redis::debug	0	string $key	SRV	a live Redis server is needed
+1061	redis::decrby	0	string $key	SRV	a live Redis server is needed
+1062	redis::decr	0	string $key	SRV	a live Redis server is needed
+1063	redis::delete	0	array|string $key	SRV	a live Redis server is needed
+1064	redis::delete	1	string $other_keys	SRV	a live Redis server is needed
+1065	redis::del	0	array|string $key	SRV	a live Redis server is needed
+1066	redis::del	1	string $other_keys	SRV	a live Redis server is needed
+1067	redis::dump	0	string $key	SRV	a live Redis server is needed
+1068	redis::echo	0	string $str	SRV	a live Redis server is needed
+1069	redis::eval_ro	0	string $script_sha	SRV	a live Redis server is needed
+1070	redis::eval_ro	1	array $args	SRV	a live Redis server is needed
+1071	redis::evalsha_ro	0	string $sha1	SRV	a live Redis server is needed
+1072	redis::evalsha_ro	1	array $args	SRV	a live Redis server is needed
+1073	redis::evalsha	0	string $sha1	SRV	a live Redis server is needed
+1074	redis::evalsha	1	array $args	SRV	a live Redis server is needed
+1075	redis::eval	0	string $script	SRV	a live Redis server is needed
+1076	redis::eval	1	array $args	SRV	a live Redis server is needed
+1077	redis::exists	0	mixed $key	SRV	a live Redis server is needed
+1078	redis::exists	1	mixed $other_keys	SRV	a live Redis server is needed
+1079	redis::expireat	0	string $key	SRV	a live Redis server is needed
+1080	redis::expireat	2	?string $mode	SRV	a live Redis server is needed
+1081	redis::expirememberat	0	string $key	SRV	a live Redis server is needed
+1082	redis::expirememberat	1	string $field	SRV	a live Redis server is needed
+1083	redis::expiremember	0	string $key	SRV	a live Redis server is needed
+1084	redis::expiremember	1	string $field	SRV	a live Redis server is needed
+1085	redis::expiremember	3	?string $unit	SRV	a live Redis server is needed
+1086	redis::expiretime	0	string $key	SRV	a live Redis server is needed
+1087	redis::expire	0	string $key	SRV	a live Redis server is needed
+1088	redis::expire	2	?string $mode	SRV	a live Redis server is needed
+1089	redis::failover	0	?array $to	SRV	a live Redis server is needed
+1090	redis::fcall_ro	0	string $fn	SRV	a live Redis server is needed
+1091	redis::fcall_ro	1	array $keys	SRV	a live Redis server is needed
+1092	redis::fcall_ro	2	array $args	SRV	a live Redis server is needed
+1093	redis::fcall	0	string $fn	SRV	a live Redis server is needed
+1094	redis::fcall	1	array $keys	SRV	a live Redis server is needed
+1095	redis::fcall	2	array $args	SRV	a live Redis server is needed
+1096	redis::function	0	string $operation	SRV	a live Redis server is needed
+1097	redis::function	1	mixed $args	SRV	a live Redis server is needed
+1098	redis::geoadd	0	string $key	SRV	a live Redis server is needed
+1099	redis::geoadd	3	string $member	SRV	a live Redis server is needed
+1100	redis::geoadd	4	mixed $other_triples_and_options	SRV	a live Redis server is needed
+1101	redis::geodist	0	string $key	SRV	a live Redis server is needed
+1102	redis::geodist	1	string $src	SRV	a live Redis server is needed
+1103	redis::geodist	2	string $dst	SRV	a live Redis server is needed
+1104	redis::geodist	3	?string $unit	SRV	a live Redis server is needed
+1105	redis::geohash	0	string $key	SRV	a live Redis server is needed
+1106	redis::geohash	1	string $member	SRV	a live Redis server is needed
+1107	redis::geohash	2	string $other_members	SRV	a live Redis server is needed
+1108	redis::geopos	0	string $key	SRV	a live Redis server is needed
+1109	redis::geopos	1	string $member	SRV	a live Redis server is needed
+1110	redis::geopos	2	string $other_members	SRV	a live Redis server is needed
+1111	redis::georadius_ro	0	string $key	SRV	a live Redis server is needed
+1112	redis::georadius_ro	4	string $unit	SRV	a live Redis server is needed
+1113	redis::georadius_ro	5	array $options	SRV	a live Redis server is needed
+1114	redis::georadiusbymember_ro	0	string $key	SRV	a live Redis server is needed
+1115	redis::georadiusbymember_ro	1	string $member	SRV	a live Redis server is needed
+1116	redis::georadiusbymember_ro	3	string $unit	SRV	a live Redis server is needed
+1117	redis::georadiusbymember_ro	4	array $options	SRV	a live Redis server is needed
+1118	redis::georadiusbymember	0	string $key	SRV	a live Redis server is needed
+1119	redis::georadiusbymember	1	string $member	SRV	a live Redis server is needed
+1120	redis::georadiusbymember	3	string $unit	SRV	a live Redis server is needed
+1121	redis::georadiusbymember	4	array $options	SRV	a live Redis server is needed
+1122	redis::georadius	0	string $key	SRV	a live Redis server is needed
+1123	redis::georadius	4	string $unit	SRV	a live Redis server is needed
+1124	redis::georadius	5	array $options	SRV	a live Redis server is needed
+1125	redis::geosearchstore	0	string $dst	SRV	a live Redis server is needed
+1126	redis::geosearchstore	1	string $src	SRV	a live Redis server is needed
+1127	redis::geosearchstore	2	array|string $position	SRV	a live Redis server is needed
+1128	redis::geosearchstore	3	array|int|float $shape	SRV	a live Redis server is needed
+1129	redis::geosearchstore	4	string $unit	SRV	a live Redis server is needed
+1130	redis::geosearchstore	5	array $options	SRV	a live Redis server is needed
+1131	redis::geosearch	0	string $key	SRV	a live Redis server is needed
+1132	redis::geosearch	1	array|string $position	SRV	a live Redis server is needed
+1133	redis::geosearch	2	array|int|float $shape	SRV	a live Redis server is needed
+1134	redis::geosearch	3	string $unit	SRV	a live Redis server is needed
+1135	redis::geosearch	4	array $options	SRV	a live Redis server is needed
+1136	redis::getbit	0	string $key	SRV	a live Redis server is needed
+1137	redis::getdel	0	string $key	SRV	a live Redis server is needed
+1138	redis::getex	0	string $key	SRV	a live Redis server is needed
+1139	redis::getex	1	array $options	SRV	a live Redis server is needed
+1140	redis::getrange	0	string $key	SRV	a live Redis server is needed
+1141	redis::getset	0	string $key	SRV	a live Redis server is needed
+1142	redis::getset	1	mixed $value	SRV	a live Redis server is needed
+1143	redis::getwithmeta	0	string $key	SRV	a live Redis server is needed
+1144	redis::get	0	string $key	SRV	a live Redis server is needed
+1145	redis::hdel	0	string $key	SRV	a live Redis server is needed
+1146	redis::hdel	1	string $field	SRV	a live Redis server is needed
+1147	redis::hdel	2	string $other_fields	SRV	a live Redis server is needed
+1148	redis::hexists	0	string $key	SRV	a live Redis server is needed
+1149	redis::hexists	1	string $field	SRV	a live Redis server is needed
+1150	redis::hgetall	0	string $key	SRV	a live Redis server is needed
+1151	redis::hget	0	string $key	SRV	a live Redis server is needed
+1152	redis::hget	1	string $member	SRV	a live Redis server is needed
+1153	redis::hincrbyfloat	0	string $key	SRV	a live Redis server is needed
+1154	redis::hincrbyfloat	1	string $field	SRV	a live Redis server is needed
+1155	redis::hincrby	0	string $key	SRV	a live Redis server is needed
+1156	redis::hincrby	1	string $field	SRV	a live Redis server is needed
+1157	redis::hkeys	0	string $key	SRV	a live Redis server is needed
+1158	redis::hlen	0	string $key	SRV	a live Redis server is needed
+1159	redis::hmget	0	string $key	SRV	a live Redis server is needed
+1160	redis::hmget	1	array $fields	SRV	a live Redis server is needed
+1161	redis::hmset	0	string $key	SRV	a live Redis server is needed
+1162	redis::hmset	1	array $fieldvals	SRV	a live Redis server is needed
+1163	redis::hrandfield	0	string $key	SRV	a live Redis server is needed
+1164	redis::hrandfield	1	?array $options	SRV	a live Redis server is needed
+1165	redis::hscan	0	string $key	SRV	a live Redis server is needed
+1166	redis::hscan	1	string|int|null $iterator	SRV	a live Redis server is needed
+1167	redis::hscan	2	?string $pattern	SRV	a live Redis server is needed
+1168	redis::hsetnx	0	string $key	SRV	a live Redis server is needed
+1169	redis::hsetnx	1	string $field	SRV	a live Redis server is needed
+1170	redis::hsetnx	2	mixed $value	SRV	a live Redis server is needed
+1171	redis::hset	0	string $key	SRV	a live Redis server is needed
+1172	redis::hset	1	mixed $fields_and_vals	SRV	a live Redis server is needed
+1173	redis::hstrlen	0	string $key	SRV	a live Redis server is needed
+1174	redis::hstrlen	1	string $field	SRV	a live Redis server is needed
+1175	redis::hvals	0	string $key	SRV	a live Redis server is needed
+1176	redis::incrbyfloat	0	string $key	SRV	a live Redis server is needed
+1177	redis::incrby	0	string $key	SRV	a live Redis server is needed
+1178	redis::incr	0	string $key	SRV	a live Redis server is needed
+1179	redis::info	0	string $sections	SRV	a live Redis server is needed
+1180	redis::keys	0	string $pattern	SRV	a live Redis server is needed
+1181	redis::lcs	0	string $key1	SRV	a live Redis server is needed
+1182	redis::lcs	1	string $key2	SRV	a live Redis server is needed
+1183	redis::lcs	2	?array $options	SRV	a live Redis server is needed
+1184	redis::lindex	0	string $key	SRV	a live Redis server is needed
+1185	redis::linsert	0	string $key	SRV	a live Redis server is needed
+1186	redis::linsert	1	string $pos	SRV	a live Redis server is needed
+1187	redis::linsert	2	mixed $pivot	SRV	a live Redis server is needed
+1188	redis::linsert	3	mixed $value	SRV	a live Redis server is needed
+1189	redis::llen	0	string $key	SRV	a live Redis server is needed
+1190	redis::lmove	0	string $src	SRV	a live Redis server is needed
+1191	redis::lmove	1	string $dst	SRV	a live Redis server is needed
+1192	redis::lmove	2	string $wherefrom	SRV	a live Redis server is needed
+1193	redis::lmove	3	string $whereto	SRV	a live Redis server is needed
+1194	redis::lmpop	0	array $keys	SRV	a live Redis server is needed
+1195	redis::lmpop	1	string $from	SRV	a live Redis server is needed
+1196	redis::lpop	0	string $key	SRV	a live Redis server is needed
+1197	redis::lpos	0	string $key	SRV	a live Redis server is needed
+1198	redis::lpos	1	mixed $value	SRV	a live Redis server is needed
+1199	redis::lpos	2	?array $options	SRV	a live Redis server is needed
+1200	redis::lpushx	0	string $key	SRV	a live Redis server is needed
+1201	redis::lpushx	1	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1202	redis::lpush	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1203	redis::lpush	1	mixed $elements	SRV	server-backed: Redis server N.N.N.N:N went away
+1204	redis::lrange	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1205	redis::lrem	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1206	redis::lrem	1	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1207	redis::lset	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1208	redis::lset	2	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1209	redis::ltrim	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1210	redis::mget	0	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1211	redis::migrate	0	string $host	SRV	server-backed: Redis server N.N.N.N:N went away
+1212	redis::migrate	2	array|string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1213	redis::migrate	7	mixed $credentials	SRV	server-backed: Redis server N.N.N.N:N went away
+1214	redis::move	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1215	redis::msetnx	0	array $key_values	SRV	server-backed: Redis server N.N.N.N:N went away
+1216	redis::mset	0	array $key_values	SRV	server-backed: Redis server N.N.N.N:N went away
+1217	redis::object	0	string $subcommand	SRV	server-backed: Redis server N.N.N.N:N went away
+1218	redis::object	1	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1219	redis::open	0	string $host	SRV	server-backed: Unable to find the socket transport "rec" - did yo
+1220	redis::open	3	?string $persistent_id	SRV	server-backed: php_network_getaddresses: getaddrinfo for x failed
+1221	redis::open	6	?array $context	SRV	server-backed: php_network_getaddresses: getaddrinfo for x failed
+1222	redis::pconnect	0	string $host	SRV	server-backed: Unable to find the socket transport "rec" - did yo
+1223	redis::pconnect	3	?string $persistent_id	SRV	server-backed: php_network_getaddresses: getaddrinfo for x failed
+1224	redis::pconnect	6	?array $context	SRV	server-backed: php_network_getaddresses: getaddrinfo for x failed
+1225	redis::persist	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1226	redis::pexpireat	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1227	redis::pexpireat	2	?string $mode	SRV	server-backed: Redis server N.N.N.N:N went away
+1228	redis::pexpiretime	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1229	redis::pexpire	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1230	redis::pexpire	2	?string $mode	SRV	server-backed: Redis server N.N.N.N:N went away
+1231	redis::pfadd	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1232	redis::pfadd	1	array $elements	SRV	server-backed: Redis server N.N.N.N:N went away
+1233	redis::pfcount	0	array|string $key_or_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1234	redis::pfmerge	0	string $dst	SRV	server-backed: Redis server N.N.N.N:N went away
+1235	redis::pfmerge	1	array $srckeys	SRV	server-backed: Redis server N.N.N.N:N went away
+1236	redis::ping	0	?string $message	SRV	server-backed: Redis server N.N.N.N:N went away
+1237	redis::popen	0	string $host	SRV	server-backed: Unable to find the socket transport "rec" - did yo
+1238	redis::popen	3	?string $persistent_id	SRV	server-backed: php_network_getaddresses: getaddrinfo for x failed
+1239	redis::popen	6	?array $context	SRV	server-backed: php_network_getaddresses: getaddrinfo for x failed
+1240	redis::psetex	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1241	redis::psetex	2	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1242	redis::psubscribe	0	array $patterns	SRV	server-backed: Redis server N.N.N.N:N went away
+1243	redis::psubscribe	1	callable $cb	SRV	server-backed: Redis server N.N.N.N:N went away
+1244	redis::pttl	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1245	redis::publish	0	string $channel	SRV	server-backed: Redis server N.N.N.N:N went away
+1246	redis::publish	1	string $message	SRV	server-backed: Redis server N.N.N.N:N went away
+1247	redis::pubsub	0	string $command	SRV	server-backed: Redis server N.N.N.N:N went away
+1248	redis::pubsub	1	mixed $arg	SRV	server-backed: Redis server N.N.N.N:N went away
+1249	redis::punsubscribe	0	array $patterns	SRV	server-backed: Redis server N.N.N.N:N went away
+1250	redis::rawcommand	0	string $command	SRV	server-backed: Redis server N.N.N.N:N went away
+1251	redis::rawcommand	1	mixed $args	SRV	server-backed: Redis server N.N.N.N:N went away
+1252	redis::renamenx	0	string $key_src	SRV	server-backed: Redis server N.N.N.N:N went away
+1253	redis::renamenx	1	string $key_dst	SRV	server-backed: Redis server N.N.N.N:N went away
+1254	redis::rename	0	string $old_name	SRV	server-backed: Redis server N.N.N.N:N went away
+1255	redis::rename	1	string $new_name	SRV	server-backed: Redis server N.N.N.N:N went away
+1256	redis::replicaof	0	?string $host	SRV	server-backed: Redis server N.N.N.N:N went away
+1257	redis::restore	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1258	redis::restore	2	string $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1259	redis::restore	3	?array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1260	redis::rpoplpush	0	string $srckey	SRV	server-backed: Redis server N.N.N.N:N went away
+1261	redis::rpoplpush	1	string $dstkey	SRV	server-backed: Redis server N.N.N.N:N went away
+1262	redis::rpop	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1263	redis::rpushx	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1264	redis::rpushx	1	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1265	redis::rpush	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1266	redis::rpush	1	mixed $elements	SRV	server-backed: Redis server N.N.N.N:N went away
+1267	redis::saddarray	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1268	redis::saddarray	1	array $values	SRV	server-backed: Redis server N.N.N.N:N went away
+1269	redis::sadd	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1270	redis::sadd	1	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1271	redis::sadd	2	mixed $other_values	SRV	server-backed: Redis server N.N.N.N:N went away
+1272	redis::scan	0	string|int|null $iterator	SRV	server-backed: Redis server N.N.N.N:N went away
+1273	redis::scan	1	?string $pattern	SRV	server-backed: Redis server N.N.N.N:N went away
+1274	redis::scan	3	?string $type	SRV	server-backed: Redis server N.N.N.N:N went away
+1275	redis::scard	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1276	redis::script	0	string $command	SRV	server-backed: Redis server N.N.N.N:N went away
+1277	redis::script	1	mixed $args	SRV	server-backed: Redis server N.N.N.N:N went away
+1278	redis::sdiffstore	0	string $dst	SRV	server-backed: Redis server N.N.N.N:N went away
+1279	redis::sdiffstore	1	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1280	redis::sdiffstore	2	string $other_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1281	redis::sdiff	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1282	redis::sdiff	1	string $other_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1283	redis::setbit	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1284	redis::setex	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1285	redis::setex	2	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1286	redis::setnx	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1287	redis::setnx	1	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1288	redis::setrange	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1289	redis::setrange	2	string $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1290	redis::set	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1291	redis::set	1	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1292	redis::set	2	mixed $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1293	redis::sintercard	0	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1294	redis::sinterstore	0	array|string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1295	redis::sinterstore	1	string $other_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1296	redis::sinter	0	array|string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1297	redis::sinter	1	string $other_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1298	redis::sismember	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1299	redis::sismember	1	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1300	redis::slaveof	0	?string $host	SRV	server-backed: Redis server N.N.N.N:N went away
+1301	redis::slowlog	0	string $operation	SRV	server-backed: Redis server N.N.N.N:N went away
+1302	redis::smembers	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1303	redis::smismember	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1304	redis::smismember	1	string $member	SRV	server-backed: Redis server N.N.N.N:N went away
+1305	redis::smismember	2	string $other_members	SRV	server-backed: Redis server N.N.N.N:N went away
+1306	redis::smove	0	string $src	SRV	server-backed: Redis server N.N.N.N:N went away
+1307	redis::smove	1	string $dst	SRV	server-backed: Redis server N.N.N.N:N went away
+1308	redis::smove	2	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1309	redis::sort_ro	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1310	redis::sort_ro	1	?array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1311	redis::sortascalpha	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1312	redis::sortascalpha	1	?string $pattern	SRV	server-backed: Redis server N.N.N.N:N went away
+1313	redis::sortascalpha	2	mixed $get	SRV	server-backed: Redis server N.N.N.N:N went away
+1314	redis::sortascalpha	5	?string $store	SRV	server-backed: Redis server N.N.N.N:N went away
+1315	redis::sortasc	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1316	redis::sortasc	1	?string $pattern	SRV	server-backed: Redis server N.N.N.N:N went away
+1317	redis::sortasc	2	mixed $get	SRV	server-backed: Redis server N.N.N.N:N went away
+1318	redis::sortasc	5	?string $store	SRV	server-backed: Redis server N.N.N.N:N went away
+1319	redis::sortdescalpha	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1320	redis::sortdescalpha	1	?string $pattern	SRV	server-backed: Redis server N.N.N.N:N went away
+1321	redis::sortdescalpha	2	mixed $get	SRV	server-backed: Redis server N.N.N.N:N went away
+1322	redis::sortdescalpha	5	?string $store	SRV	server-backed: Redis server N.N.N.N:N went away
+1323	redis::sortdesc	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1324	redis::sortdesc	1	?string $pattern	SRV	server-backed: Redis server N.N.N.N:N went away
+1325	redis::sortdesc	2	mixed $get	SRV	server-backed: Redis server N.N.N.N:N went away
+1326	redis::sortdesc	5	?string $store	SRV	server-backed: Redis server N.N.N.N:N went away
+1327	redis::sort	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1328	redis::sort	1	?array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1329	redis::spop	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1330	redis::srandmember	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1331	redis::srem	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1332	redis::srem	1	mixed $value	SRV	server-backed: Redis server N.N.N.N:N went away
+1333	redis::srem	2	mixed $other_values	SRV	server-backed: Redis server N.N.N.N:N went away
+1334	redis::sscan	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1335	redis::sscan	1	string|int|null $iterator	SRV	server-backed: Redis server N.N.N.N:N went away
+1336	redis::sscan	2	?string $pattern	SRV	server-backed: Redis server N.N.N.N:N went away
+1337	redis::ssubscribe	0	array $channels	SRV	server-backed: Redis server N.N.N.N:N went away
+1338	redis::ssubscribe	1	callable $cb	SRV	server-backed: Redis server N.N.N.N:N went away
+1339	redis::strlen	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1340	redis::subscribe	0	array $channels	SRV	server-backed: Redis server N.N.N.N:N went away
+1341	redis::subscribe	1	callable $cb	SRV	server-backed: Redis server N.N.N.N:N went away
+1342	redis::sunionstore	0	string $dst	SRV	server-backed: Redis server N.N.N.N:N went away
+1343	redis::sunionstore	1	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1344	redis::sunionstore	2	string $other_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1345	redis::sunion	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1346	redis::sunion	1	string $other_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1347	redis::sunsubscribe	0	array $channels	SRV	server-backed: Redis server N.N.N.N:N went away
+1348	redis::touch	0	array|string $key_or_array	SRV	server-backed: Redis server N.N.N.N:N went away
+1349	redis::touch	1	string $more_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1350	redis::ttl	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1351	redis::type	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1352	redis::unlink	0	array|string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1353	redis::unlink	1	string $other_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1354	redis::unsubscribe	0	array $channels	SRV	server-backed: Redis server N.N.N.N:N went away
+1355	redis::watch	0	array|string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1356	redis::watch	1	string $other_keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1357	redis::xack	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1358	redis::xack	1	string $group	SRV	server-backed: Redis server N.N.N.N:N went away
+1359	redis::xack	2	array $ids	SRV	server-backed: Redis server N.N.N.N:N went away
+1360	redis::xadd	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1361	redis::xadd	1	string $id	SRV	server-backed: Redis server N.N.N.N:N went away
+1362	redis::xadd	2	array $values	SRV	server-backed: Redis server N.N.N.N:N went away
+1363	redis::xautoclaim	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1364	redis::xautoclaim	1	string $group	SRV	server-backed: Redis server N.N.N.N:N went away
+1365	redis::xautoclaim	2	string $consumer	SRV	server-backed: Redis server N.N.N.N:N went away
+1366	redis::xautoclaim	4	string $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1367	redis::xclaim	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1368	redis::xclaim	1	string $group	SRV	server-backed: Redis server N.N.N.N:N went away
+1369	redis::xclaim	2	string $consumer	SRV	server-backed: Redis server N.N.N.N:N went away
+1370	redis::xclaim	4	array $ids	SRV	server-backed: Redis server N.N.N.N:N went away
+1371	redis::xclaim	5	array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1372	redis::xdel	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1373	redis::xdel	1	array $ids	SRV	server-backed: Redis server N.N.N.N:N went away
+1374	redis::xgroup	0	string $operation	SRV	server-backed: Redis server N.N.N.N:N went away
+1375	redis::xgroup	1	?string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1376	redis::xgroup	2	?string $group	SRV	server-backed: Redis server N.N.N.N:N went away
+1377	redis::xgroup	3	?string $id_or_consumer	SRV	server-backed: Redis server N.N.N.N:N went away
+1378	redis::xinfo	0	string $operation	SRV	server-backed: Redis server N.N.N.N:N went away
+1379	redis::xinfo	1	?string $arg1	SRV	server-backed: Redis server N.N.N.N:N went away
+1380	redis::xinfo	2	?string $arg2	SRV	server-backed: Redis server N.N.N.N:N went away
+1381	redis::xlen	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1382	redis::xpending	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1383	redis::xpending	1	string $group	SRV	server-backed: Redis server N.N.N.N:N went away
+1384	redis::xpending	2	?string $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1385	redis::xpending	3	?string $end	SRV	server-backed: Redis server N.N.N.N:N went away
+1386	redis::xpending	5	?string $consumer	SRV	server-backed: Redis server N.N.N.N:N went away
+1387	redis::xrange	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1388	redis::xrange	1	string $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1389	redis::xrange	2	string $end	SRV	server-backed: Redis server N.N.N.N:N went away
+1390	redis::xreadgroup	0	string $group	SRV	server-backed: Redis server N.N.N.N:N went away
+1391	redis::xreadgroup	1	string $consumer	SRV	server-backed: Redis server N.N.N.N:N went away
+1392	redis::xreadgroup	2	array $streams	SRV	server-backed: Redis server N.N.N.N:N went away
+1393	redis::xread	0	array $streams	SRV	server-backed: Redis server N.N.N.N:N went away
+1394	redis::xrevrange	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1395	redis::xrevrange	1	string $end	SRV	server-backed: Redis server N.N.N.N:N went away
+1396	redis::xrevrange	2	string $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1397	redis::xtrim	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1398	redis::xtrim	1	string $threshold	SRV	server-backed: Redis server N.N.N.N:N went away
+1399	redis::zadd	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1400	redis::zadd	1	array|float $score_or_options	SRV	server-backed: Redis server N.N.N.N:N went away
+1401	redis::zadd	2	mixed $more_scores_and_mems	SRV	server-backed: Redis server N.N.N.N:N went away
+1402	redis::zcard	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1403	redis::zcount	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1404	redis::zcount	1	string|int $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1405	redis::zcount	2	string|int $end	SRV	server-backed: Redis server N.N.N.N:N went away
+1406	redis::zdiffstore	0	string $dst	SRV	server-backed: Redis server N.N.N.N:N went away
+1407	redis::zdiffstore	1	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1408	redis::zdiff	0	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1409	redis::zdiff	1	?array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1410	redis::zincrby	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1411	redis::zincrby	2	mixed $member	SRV	server-backed: Redis server N.N.N.N:N went away
+1412	redis::zintercard	0	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1413	redis::zinterstore	0	string $dst	SRV	server-backed: Redis server N.N.N.N:N went away
+1414	redis::zinterstore	1	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1415	redis::zinterstore	2	?array $weights	SRV	server-backed: Redis server N.N.N.N:N went away
+1416	redis::zinterstore	3	?string $aggregate	SRV	server-backed: Redis server N.N.N.N:N went away
+1417	redis::zinter	0	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1418	redis::zinter	1	?array $weights	SRV	server-backed: Redis server N.N.N.N:N went away
+1419	redis::zinter	2	?array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1420	redis::zlexcount	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1421	redis::zlexcount	1	string $min	SRV	server-backed: Redis server N.N.N.N:N went away
+1422	redis::zlexcount	2	string $max	SRV	server-backed: Redis server N.N.N.N:N went away
+1423	redis::zmpop	0	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1424	redis::zmpop	1	string $from	SRV	server-backed: Redis server N.N.N.N:N went away
+1425	redis::zmscore	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1426	redis::zmscore	1	mixed $member	SRV	server-backed: Redis server N.N.N.N:N went away
+1427	redis::zmscore	2	mixed $other_members	SRV	server-backed: Redis server N.N.N.N:N went away
+1428	redis::zpopmax	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1429	redis::zpopmin	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1430	redis::zrandmember	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1431	redis::zrandmember	1	?array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1432	redis::zrangebylex	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1433	redis::zrangebylex	1	string $min	SRV	server-backed: Redis server N.N.N.N:N went away
+1434	redis::zrangebylex	2	string $max	SRV	server-backed: Redis server N.N.N.N:N went away
+1435	redis::zrangebyscore	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1436	redis::zrangebyscore	1	string $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1437	redis::zrangebyscore	2	string $end	SRV	server-backed: Redis server N.N.N.N:N went away
+1438	redis::zrangebyscore	3	array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1439	redis::zrangestore	0	string $dstkey	SRV	server-backed: Redis server N.N.N.N:N went away
+1440	redis::zrangestore	1	string $srckey	SRV	server-backed: Redis server N.N.N.N:N went away
+1441	redis::zrangestore	2	string $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1442	redis::zrangestore	3	string $end	SRV	server-backed: Redis server N.N.N.N:N went away
+1443	redis::zrangestore	4	array|bool|null $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1444	redis::zrange	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1445	redis::zrange	1	string|int $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1446	redis::zrange	2	string|int $end	SRV	server-backed: Redis server N.N.N.N:N went away
+1447	redis::zrange	3	array|bool|null $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1448	redis::zrank	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1449	redis::zrank	1	mixed $member	SRV	server-backed: Redis server N.N.N.N:N went away
+1450	redis::zremrangebylex	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1451	redis::zremrangebylex	1	string $min	SRV	server-backed: Redis server N.N.N.N:N went away
+1452	redis::zremrangebylex	2	string $max	SRV	server-backed: Redis server N.N.N.N:N went away
+1453	redis::zremrangebyrank	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1454	redis::zremrangebyscore	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1455	redis::zremrangebyscore	1	string $start	SRV	server-backed: Redis server N.N.N.N:N went away
+1456	redis::zremrangebyscore	2	string $end	SRV	server-backed: Redis server N.N.N.N:N went away
+1457	redis::zrem	0	mixed $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1458	redis::zrem	1	mixed $member	SRV	server-backed: Redis server N.N.N.N:N went away
+1459	redis::zrem	2	mixed $other_members	SRV	server-backed: Redis server N.N.N.N:N went away
+1460	redis::zrevrangebylex	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1461	redis::zrevrangebylex	1	string $max	SRV	server-backed: Redis server N.N.N.N:N went away
+1462	redis::zrevrangebylex	2	string $min	SRV	server-backed: Redis server N.N.N.N:N went away
+1463	redis::zrevrangebyscore	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1464	redis::zrevrangebyscore	1	string $max	SRV	server-backed: Redis server N.N.N.N:N went away
+1465	redis::zrevrangebyscore	2	string $min	SRV	server-backed: Redis server N.N.N.N:N went away
+1466	redis::zrevrangebyscore	3	array|bool $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1467	redis::zrevrange	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1468	redis::zrevrange	3	mixed $scores	SRV	server-backed: Redis server N.N.N.N:N went away
+1469	redis::zrevrank	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1470	redis::zrevrank	1	mixed $member	SRV	server-backed: Redis server N.N.N.N:N went away
+1471	redis::zscan	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1472	redis::zscan	1	string|int|null $iterator	SRV	server-backed: Redis server N.N.N.N:N went away
+1473	redis::zscan	2	?string $pattern	SRV	server-backed: Redis server N.N.N.N:N went away
+1474	redis::zscore	0	string $key	SRV	server-backed: Redis server N.N.N.N:N went away
+1475	redis::zscore	1	mixed $member	SRV	server-backed: Redis server N.N.N.N:N went away
+1476	redis::zunionstore	0	string $dst	SRV	server-backed: Redis server N.N.N.N:N went away
+1477	redis::zunionstore	1	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1478	redis::zunionstore	2	?array $weights	SRV	server-backed: Redis server N.N.N.N:N went away
+1479	redis::zunionstore	3	?string $aggregate	SRV	server-backed: Redis server N.N.N.N:N went away
+1480	redis::zunion	0	array $keys	SRV	server-backed: Redis server N.N.N.N:N went away
+1481	redis::zunion	1	?array $weights	SRV	server-backed: Redis server N.N.N.N:N went away
+1482	redis::zunion	2	?array $options	SRV	server-backed: Redis server N.N.N.N:N went away
+1483	redisarray::__construct	0	array|string $name_or_hosts	WK	a closure or recording object is refused
+1484	redissentinel::ckquorum	0	string $master	SRV	server-backed: Redis server N.N.N.N:N went away
+1485	redissentinel::failover	0	string $master	SRV	server-backed: Redis server N.N.N.N:N went away
+1486	redissentinel::getmasteraddrbyname	0	string $master	SRV	server-backed: Redis server N.N.N.N:N went away
+1487	redissentinel::master	0	string $master	SRV	server-backed: Redis server N.N.N.N:N went away
+1488	redissentinel::reset	0	string $pattern	SRV	server-backed: Redis server N.N.N.N:N went away
+1489	redissentinel::sentinels	0	string $master	SRV	server-backed: Redis server N.N.N.N:N went away
+1490	redissentinel::slaves	0	string $master	SRV	server-backed: Redis server N.N.N.N:N went away
+1491	reflectionclass::__construct	0	object|string $objectOrClass	VAL	a class, function or member name is needed
+1492	reflectionclass::getattributes	0	?string $name	VAL	a class, function or member name is needed
+1493	reflectionclass::getconstant	0	string $name	VAL	a class, function or member name is needed
+1494	reflectionclass::getlazyinitializer	0	object $object	VAL	a class, function or member name is needed
+1495	reflectionclass::getmethod	0	string $name	VAL	a class, function or member name is needed
+1496	reflectionclass::getproperty	0	string $name	VAL	a class, function or member name is needed
+1497	reflectionclass::getreflectionconstant	0	string $name	VAL	a class, function or member name is needed
+1498	reflectionclass::getstaticpropertyvalue	0	string $name	VAL	a class, function or member name is needed
+1499	reflectionclass::getstaticpropertyvalue	1	mixed $default	VAL	a class, function or member name is needed
+1500	reflectionclass::hasconstant	0	string $name	VAL	a class, function or member name is needed
+1501	reflectionclass::hasmethod	0	string $name	VAL	a class, function or member name is needed
+1502	reflectionclass::hasproperty	0	string $name	VAL	a class, function or member name is needed
+1503	reflectionclass::implementsinterface	0	ReflectionClass|string $interface	VAL	a class, function or member name is needed
+1504	reflectionclass::initializelazyobject	0	object $object	VAL	a class, function or member name is needed
+1505	reflectionclass::isinstance	0	object $object	VAL	a class, function or member name is needed
+1506	reflectionclass::issubclassof	0	ReflectionClass|string $class	VAL	a class, function or member name is needed
+1507	reflectionclass::isuninitializedlazyobject	0	object $object	VAL	a class, function or member name is needed
+1508	reflectionclass::marklazyobjectasinitialized	0	object $object	VAL	a class, function or member name is needed
+1509	reflectionclass::newinstanceargs	0	array $args	VAL	a class, function or member name is needed
+1510	reflectionclass::newinstance	0	mixed $args	VAL	a class, function or member name is needed
+1511	reflectionclass::newlazyghost	0	callable $initializer	VAL	a class, function or member name is needed
+1512	reflectionclass::newlazyproxy	0	callable $factory	VAL	a class, function or member name is needed
+1513	reflectionclass::resetaslazyghost	0	object $object	VAL	a class, function or member name is needed
+1514	reflectionclass::resetaslazyghost	1	callable $initializer	VAL	a class, function or member name is needed
+1515	reflectionclass::resetaslazyproxy	0	object $object	VAL	a class, function or member name is needed
+1516	reflectionclass::resetaslazyproxy	1	callable $factory	VAL	a class, function or member name is needed
+1517	reflectionclass::setstaticpropertyvalue	0	string $name	VAL	a class, function or member name is needed
+1518	reflectionclass::setstaticpropertyvalue	1	mixed $value	VAL	a class, function or member name is needed
+1519	reflectionclassconstant::__construct	0	object|string $class	VAL	a class, function or member name is needed
+1520	reflectionclassconstant::__construct	1	string $constant	VAL	a class, function or member name is needed
+1521	reflectionextension::__construct	0	string $name	VAL	a class, function or member name is needed
+1522	reflectionfunction::__construct	0	Closure|string $function	VAL	a class, function or member name is needed
+1523	reflectionfunction::invokeargs	0	array $args	VAL	a class, function or member name is needed
+1524	reflectionfunction::invoke	0	mixed $args	VAL	a class, function or member name is needed
+1525	reflectionmethod::__construct	0	object|string $objectOrMethod	VAL	a valid value or object is needed
+1526	reflectionmethod::__construct	1	?string $method	VAL	a class, function or member name is needed
+1527	reflectionmethod::getclosure	0	?object $object	VAL	an object of the declaring class is needed
+1528	reflectionmethod::invokeargs	0	?object $object	VAL	an object of the declaring class is needed
+1529	reflectionmethod::invokeargs	1	array $args	WK	a closure or recording object is refused
+1530	reflectionmethod::invoke	0	?object $object	VAL	an object of the declaring class is needed
+1531	reflectionmethod::invoke	1	mixed $args	WK	a closure or recording object is refused
+1532	reflectionparameter::__construct	0	untyped $function	VAL	a class, function or member name is needed
+1533	reflectionparameter::__construct	1	string|int $param	VAL	a valid value or object is needed
+1534	reflectionproperty::__construct	0	object|string $class	VAL	a class, function or member name is needed
+1535	reflectionproperty::__construct	1	string $property	VAL	a class, function or member name is needed
+1536	reflectionproperty::getrawvalue	0	object $object	VAL	an object of the declaring class is needed
+1537	reflectionproperty::getvalue	0	?object $object	VAL	an object of the declaring class is needed
+1538	reflectionproperty::isinitialized	0	?object $object	VAL	an object of the declaring class is needed
+1539	reflectionproperty::islazy	0	object $object	WK	a closure or recording object is refused
+1540	reflectionproperty::setrawvaluewithoutlazyinitialization	0	object $object	VAL	a real object is needed
+1541	reflectionproperty::setrawvaluewithoutlazyinitialization	1	mixed $value	WK	a closure or recording object is refused
+1542	reflectionproperty::setvalue	0	mixed $objectOrValue	VAL	a real object is needed
+1543	reflectionproperty::setvalue	1	mixed $value	VAL	a real object is needed
+1544	reflectionproperty::skiplazyinitialization	0	object $object	VAL	a real object is needed
+1545	rename	2	untyped $context	VAL	a resource value is needed
+1546	request_parse_body	0	?array $options	VAL	a valid value is needed
+1547	rewinddir	0	untyped $dir_handle	VAL	a resource value is needed
+1548	rewind	0	untyped $stream	VAL	a resource value is needed
+1549	rmdir	1	untyped $context	VAL	a resource value is needed
+1550	scandir	2	untyped $context	VAL	a resource value is needed
+1551	sensitiveparametervalue::__construct	0	mixed $value	RCV	a fresh object is needed
+1552	serialize	0	mixed $value	WK	a closure cannot be serialised
+1553	session_set_cookie_params	0	array|int $lifetime_or_options	VAL	a valid value is needed
+1554	session_set_save_handler	0	untyped $open	VAL	a plain callable is needed
+1555	session_set_save_handler	1	untyped $close	WK	a closure or recording object is refused
+1556	session_set_save_handler	2	callable $read	VAL	a plain callable is needed
+1557	session_set_save_handler	3	callable $write	VAL	a plain callable is needed
+1558	session_set_save_handler	4	callable $destroy	VAL	a plain callable is needed
+1559	session_set_save_handler	5	callable $gc	VAL	a plain callable is needed
+1560	session_set_save_handler	6	?callable $create_sid	VAL	a plain callable is needed
+1561	session_set_save_handler	7	?callable $validate_sid	VAL	a plain callable is needed
+1562	session_set_save_handler	8	?callable $update_timestamp	VAL	a plain callable is needed
+1563	session_start	0	array $options	VAL	a valid value is needed
+1564	sessionhandler::destroy	0	string $id	RCV	an active session is needed
+1565	sessionhandler::open	0	string $path	RCV	an active session is needed
+1566	sessionhandler::open	1	string $name	RCV	an active session is needed
+1567	sessionhandler::read	0	string $id	RCV	an active session is needed
+1568	sessionhandler::write	0	string $id	RCV	an active session is needed
+1569	sessionhandler::write	1	string $data	RCV	an active session is needed
+1570	set_file_buffer	0	untyped $stream	VAL	a resource value is needed
+1571	setcookie	2	array|int $expires_or_options	VAL	a valid value is needed
+1572	setlocale	1	untyped $locales	VAL	a valid value is needed
+1573	setlocale	2	untyped $rest	VAL	a valid value is needed
+1574	setrawcookie	2	array|int $expires_or_options	VAL	a valid value is needed
+1575	settype	1	string $type	VAL	a valid value is needed
+1576	shm_put_var	2	mixed $value	WK	a closure cannot be serialised
+1577	shmop_open	1	string $mode	VAL	a valid value is needed
+1578	simplexml_import_dom	0	object $node	VAL	a valid value is needed
+1579	simplexml_import_dom	1	?string $class_name	VAL	a valid value is needed
+1580	simplexml_load_file	1	?string $class_name	VAL	a valid value is needed
+1581	simplexml_load_string	1	?string $class_name	VAL	a valid value is needed
+1582	simplexmlelement::__construct	0	string $data	VAL	a valid value is needed
+1583	simplexmlelement::__construct	3	string $namespaceOrPrefix	VAL	a valid value is needed
+1584	simplexmlelement::addattribute	0	string $qualifiedName	VAL	a valid value is needed
+1585	simplexmlelement::addattribute	1	string $value	VAL	a valid value is needed
+1586	simplexmlelement::addattribute	2	?string $namespace	VAL	a valid value is needed
+1587	simplexmlelement::addchild	0	string $qualifiedName	VAL	a valid value is needed
+1588	simplexmlelement::addchild	1	?string $value	VAL	a valid value is needed
+1589	simplexmlelement::addchild	2	?string $namespace	VAL	a valid value is needed
+1590	simplexmlelement::asxml	0	?string $filename	VAL	a valid value is needed
+1591	simplexmlelement::attributes	0	?string $namespaceOrPrefix	VAL	a valid value is needed
+1592	simplexmlelement::children	0	?string $namespaceOrPrefix	VAL	a valid value is needed
+1593	simplexmlelement::registerxpathnamespace	0	string $prefix	VAL	a valid value is needed
+1594	simplexmlelement::registerxpathnamespace	1	string $namespace	VAL	a valid value is needed
+1595	simplexmlelement::savexml	0	?string $filename	VAL	a valid value is needed
+1596	simplexmlelement::xpath	0	string $expression	VAL	a valid value is needed
+1597	socket_addrinfo_lookup	2	array $hints	VAL	a valid value or object is needed
+1598	socket_get_status	0	untyped $stream	VAL	a resource value is needed
+1599	socket_import_stream	0	untyped $stream	VAL	a resource value is needed
+1600	socket_select	0	?array $read	VAL	a valid value or object is needed
+1601	socket_select	1	?array $write	VAL	a valid value or object is needed
+1602	socket_select	2	?array $except	VAL	a valid value or object is needed
+1603	socket_set_blocking	0	untyped $stream	VAL	a resource value is needed
+1604	socket_set_timeout	0	untyped $stream	VAL	a resource value is needed
+1605	sodium_add	0	string $string1	VAL	a valid value is needed
+1606	sodium_add	1	string $string2	VAL	a valid value is needed
+1607	sodium_base642bin	0	string $string	VAL	a valid value or object is needed
+1608	sodium_base642bin	2	string $ignore	VAL	a valid value or object is needed
+1609	sodium_compare	0	string $string1	VAL	a valid value is needed
+1610	sodium_compare	1	string $string2	VAL	a valid value is needed
+1611	sodium_crypto_aead_aes256gcm_decrypt	0	string $ciphertext	VAL	a value of the required length is needed
+1612	sodium_crypto_aead_aes256gcm_decrypt	1	string $additional_data	VAL	a value of the required length is needed
+1613	sodium_crypto_aead_aes256gcm_decrypt	2	string $nonce	VAL	a value of the required length is needed
+1614	sodium_crypto_aead_aes256gcm_decrypt	3	string $key	VAL	a value of the required length is needed
+1615	sodium_crypto_aead_aes256gcm_encrypt	0	string $message	VAL	a value of the required length is needed
+1616	sodium_crypto_aead_aes256gcm_encrypt	1	string $additional_data	VAL	a value of the required length is needed
+1617	sodium_crypto_aead_aes256gcm_encrypt	2	string $nonce	VAL	a value of the required length is needed
+1618	sodium_crypto_aead_aes256gcm_encrypt	3	string $key	VAL	a value of the required length is needed
+1619	sodium_crypto_aead_chacha20poly1305_decrypt	0	string $ciphertext	VAL	a value of the required length is needed
+1620	sodium_crypto_aead_chacha20poly1305_decrypt	1	string $additional_data	VAL	a value of the required length is needed
+1621	sodium_crypto_aead_chacha20poly1305_decrypt	2	string $nonce	VAL	a value of the required length is needed
+1622	sodium_crypto_aead_chacha20poly1305_decrypt	3	string $key	VAL	a value of the required length is needed
+1623	sodium_crypto_aead_chacha20poly1305_encrypt	0	string $message	VAL	a value of the required length is needed
+1624	sodium_crypto_aead_chacha20poly1305_encrypt	1	string $additional_data	VAL	a value of the required length is needed
+1625	sodium_crypto_aead_chacha20poly1305_encrypt	2	string $nonce	VAL	a value of the required length is needed
+1626	sodium_crypto_aead_chacha20poly1305_encrypt	3	string $key	VAL	a value of the required length is needed
+1627	sodium_crypto_aead_chacha20poly1305_ietf_decrypt	0	string $ciphertext	VAL	a value of the required length is needed
+1628	sodium_crypto_aead_chacha20poly1305_ietf_decrypt	1	string $additional_data	VAL	a value of the required length is needed
+1629	sodium_crypto_aead_chacha20poly1305_ietf_decrypt	2	string $nonce	VAL	a value of the required length is needed
+1630	sodium_crypto_aead_chacha20poly1305_ietf_decrypt	3	string $key	VAL	a value of the required length is needed
+1631	sodium_crypto_aead_chacha20poly1305_ietf_encrypt	0	string $message	VAL	a value of the required length is needed
+1632	sodium_crypto_aead_chacha20poly1305_ietf_encrypt	1	string $additional_data	VAL	a value of the required length is needed
+1633	sodium_crypto_aead_chacha20poly1305_ietf_encrypt	2	string $nonce	VAL	a value of the required length is needed
+1634	sodium_crypto_aead_chacha20poly1305_ietf_encrypt	3	string $key	VAL	a value of the required length is needed
+1635	sodium_crypto_aead_xchacha20poly1305_ietf_decrypt	0	string $ciphertext	VAL	a value of the required length is needed
+1636	sodium_crypto_aead_xchacha20poly1305_ietf_decrypt	1	string $additional_data	VAL	a value of the required length is needed
+1637	sodium_crypto_aead_xchacha20poly1305_ietf_decrypt	2	string $nonce	VAL	a value of the required length is needed
+1638	sodium_crypto_aead_xchacha20poly1305_ietf_decrypt	3	string $key	VAL	a value of the required length is needed
+1639	sodium_crypto_aead_xchacha20poly1305_ietf_encrypt	0	string $message	VAL	a value of the required length is needed
+1640	sodium_crypto_aead_xchacha20poly1305_ietf_encrypt	1	string $additional_data	VAL	a value of the required length is needed
+1641	sodium_crypto_aead_xchacha20poly1305_ietf_encrypt	2	string $nonce	VAL	a value of the required length is needed
+1642	sodium_crypto_aead_xchacha20poly1305_ietf_encrypt	3	string $key	VAL	a value of the required length is needed
+1643	sodium_crypto_auth_verify	0	string $mac	VAL	a value of the required length is needed
+1644	sodium_crypto_auth_verify	1	string $message	VAL	a value of the required length is needed
+1645	sodium_crypto_auth_verify	2	string $key	VAL	a value of the required length is needed
+1646	sodium_crypto_auth	0	string $message	VAL	a value of the required length is needed
+1647	sodium_crypto_auth	1	string $key	VAL	a value of the required length is needed
+1648	sodium_crypto_box_keypair_from_secretkey_and_publickey	0	string $secret_key	VAL	a value of the required length is needed
+1649	sodium_crypto_box_keypair_from_secretkey_and_publickey	1	string $public_key	VAL	a value of the required length is needed
+1650	sodium_crypto_box_open	0	string $ciphertext	VAL	a value of the required length is needed
+1651	sodium_crypto_box_open	1	string $nonce	VAL	a value of the required length is needed
+1652	sodium_crypto_box_open	2	string $key_pair	VAL	a value of the required length is needed
+1653	sodium_crypto_box_publickey_from_secretkey	0	string $secret_key	VAL	a value of the required length is needed
+1654	sodium_crypto_box_publickey	0	string $key_pair	VAL	a value of the required length is needed
+1655	sodium_crypto_box_seal_open	0	string $ciphertext	VAL	a value of the required length is needed
+1656	sodium_crypto_box_seal_open	1	string $key_pair	VAL	a value of the required length is needed
+1657	sodium_crypto_box_seal	0	string $message	VAL	a value of the required length is needed
+1658	sodium_crypto_box_seal	1	string $public_key	VAL	a value of the required length is needed
+1659	sodium_crypto_box_secretkey	0	string $key_pair	VAL	a value of the required length is needed
+1660	sodium_crypto_box_seed_keypair	0	string $seed	VAL	a value of the required length is needed
+1661	sodium_crypto_box	0	string $message	VAL	a value of the required length is needed
+1662	sodium_crypto_box	1	string $nonce	VAL	a value of the required length is needed
+1663	sodium_crypto_box	2	string $key_pair	VAL	a value of the required length is needed
+1664	sodium_crypto_core_ristretto255_add	0	string $p	VAL	a value of the required length is needed
+1665	sodium_crypto_core_ristretto255_add	1	string $q	VAL	a value of the required length is needed
+1666	sodium_crypto_core_ristretto255_from_hash	0	string $s	VAL	a value of the required length is needed
+1667	sodium_crypto_core_ristretto255_is_valid_point	0	string $s	VAL	a value of the required length is needed
+1668	sodium_crypto_core_ristretto255_scalar_add	0	string $x	VAL	a value of the required length is needed
+1669	sodium_crypto_core_ristretto255_scalar_add	1	string $y	VAL	a value of the required length is needed
+1670	sodium_crypto_core_ristretto255_scalar_complement	0	string $s	VAL	a value of the required length is needed
+1671	sodium_crypto_core_ristretto255_scalar_invert	0	string $s	VAL	a value of the required length is needed
+1672	sodium_crypto_core_ristretto255_scalar_mul	0	string $x	VAL	a value of the required length is needed
+1673	sodium_crypto_core_ristretto255_scalar_mul	1	string $y	VAL	a value of the required length is needed
+1674	sodium_crypto_core_ristretto255_scalar_negate	0	string $s	VAL	a value of the required length is needed
+1675	sodium_crypto_core_ristretto255_scalar_reduce	0	string $s	VAL	a value of the required length is needed
+1676	sodium_crypto_core_ristretto255_scalar_sub	0	string $x	VAL	a value of the required length is needed
+1677	sodium_crypto_core_ristretto255_scalar_sub	1	string $y	VAL	a value of the required length is needed
+1678	sodium_crypto_core_ristretto255_sub	0	string $p	VAL	a value of the required length is needed
+1679	sodium_crypto_core_ristretto255_sub	1	string $q	VAL	a value of the required length is needed
+1680	sodium_crypto_generichash_final	0	string $state	VAL	a value of the required length is needed
+1681	sodium_crypto_generichash_init	0	string $key	VAL	a value of the required length is needed
+1682	sodium_crypto_generichash_update	0	string $state	VAL	a value of the required length is needed
+1683	sodium_crypto_generichash	1	string $key	VAL	a value of the required length is needed
+1684	sodium_crypto_kdf_derive_from_key	2	string $context	VAL	a value of the required length is needed
+1685	sodium_crypto_kdf_derive_from_key	3	string $key	VAL	a value of the required length is needed
+1686	sodium_crypto_kx_client_session_keys	0	string $client_key_pair	VAL	a value of the required length is needed
+1687	sodium_crypto_kx_client_session_keys	1	string $server_key	VAL	a value of the required length is needed
+1688	sodium_crypto_kx_publickey	0	string $key_pair	VAL	a value of the required length is needed
+1689	sodium_crypto_kx_secretkey	0	string $key_pair	VAL	a value of the required length is needed
+1690	sodium_crypto_kx_seed_keypair	0	string $seed	VAL	a value of the required length is needed
+1691	sodium_crypto_kx_server_session_keys	0	string $server_key_pair	VAL	a value of the required length is needed
+1692	sodium_crypto_kx_server_session_keys	1	string $client_key	VAL	a value of the required length is needed
+1693	sodium_crypto_pwhash_scryptsalsa208sha256_str	0	string $password	VAL	a value of the required length is needed
+1694	sodium_crypto_pwhash_scryptsalsa208sha256	1	string $password	VAL	a value of the required length is needed
+1695	sodium_crypto_pwhash_scryptsalsa208sha256	2	string $salt	VAL	a value of the required length is needed
+1696	sodium_crypto_pwhash_str	0	string $password	VAL	a value of the required length is needed
+1697	sodium_crypto_pwhash	1	string $password	VAL	a value of the required length is needed
+1698	sodium_crypto_pwhash	2	string $salt	VAL	a value of the required length is needed
+1699	sodium_crypto_scalarmult_base	0	string $secret_key	VAL	a value of the required length is needed
+1700	sodium_crypto_scalarmult_ristretto255_base	0	string $n	VAL	a value of the required length is needed
+1701	sodium_crypto_scalarmult_ristretto255	0	string $n	VAL	a value of the required length is needed
+1702	sodium_crypto_scalarmult_ristretto255	1	string $p	VAL	a value of the required length is needed
+1703	sodium_crypto_scalarmult	0	string $n	VAL	a value of the required length is needed
+1704	sodium_crypto_scalarmult	1	string $p	VAL	a value of the required length is needed
+1705	sodium_crypto_secretbox_open	0	string $ciphertext	VAL	a value of the required length is needed
+1706	sodium_crypto_secretbox_open	1	string $nonce	VAL	a value of the required length is needed
+1707	sodium_crypto_secretbox_open	2	string $key	VAL	a value of the required length is needed
+1708	sodium_crypto_secretbox	0	string $message	VAL	a value of the required length is needed
+1709	sodium_crypto_secretbox	1	string $nonce	VAL	a value of the required length is needed
+1710	sodium_crypto_secretbox	2	string $key	VAL	a value of the required length is needed
+1711	sodium_crypto_secretstream_xchacha20poly1305_init_pull	0	string $header	VAL	a value of the required length is needed
+1712	sodium_crypto_secretstream_xchacha20poly1305_init_pull	1	string $key	VAL	a value of the required length is needed
+1713	sodium_crypto_secretstream_xchacha20poly1305_init_push	0	string $key	VAL	a value of the required length is needed
+1714	sodium_crypto_secretstream_xchacha20poly1305_pull	0	string $state	VAL	a value of the required length is needed
+1715	sodium_crypto_secretstream_xchacha20poly1305_push	0	string $state	VAL	a valid value is needed
+1716	sodium_crypto_secretstream_xchacha20poly1305_rekey	0	string $state	VAL	a value of the required length is needed
+1717	sodium_crypto_shorthash	0	string $message	VAL	a value of the required length is needed
+1718	sodium_crypto_shorthash	1	string $key	VAL	a value of the required length is needed
+1719	sodium_crypto_sign_detached	0	string $message	VAL	a value of the required length is needed
+1720	sodium_crypto_sign_detached	1	string $secret_key	VAL	a value of the required length is needed
+1721	sodium_crypto_sign_ed25519_pk_to_curve25519	0	string $public_key	VAL	a value of the required length is needed
+1722	sodium_crypto_sign_ed25519_sk_to_curve25519	0	string $secret_key	VAL	a value of the required length is needed
+1723	sodium_crypto_sign_keypair_from_secretkey_and_publickey	0	string $secret_key	VAL	a value of the required length is needed
+1724	sodium_crypto_sign_keypair_from_secretkey_and_publickey	1	string $public_key	VAL	a value of the required length is needed
+1725	sodium_crypto_sign_open	0	string $signed_message	VAL	a value of the required length is needed
+1726	sodium_crypto_sign_open	1	string $public_key	VAL	a value of the required length is needed
+1727	sodium_crypto_sign_publickey_from_secretkey	0	string $secret_key	VAL	a value of the required length is needed
+1728	sodium_crypto_sign_publickey	0	string $key_pair	VAL	a value of the required length is needed
+1729	sodium_crypto_sign_secretkey	0	string $key_pair	VAL	a value of the required length is needed
+1730	sodium_crypto_sign_seed_keypair	0	string $seed	VAL	a value of the required length is needed
+1731	sodium_crypto_sign_verify_detached	0	string $signature	VAL	a value of the required length is needed
+1732	sodium_crypto_sign_verify_detached	1	string $message	VAL	a value of the required length is needed
+1733	sodium_crypto_sign_verify_detached	2	string $public_key	VAL	a value of the required length is needed
+1734	sodium_crypto_sign	0	string $message	VAL	a value of the required length is needed
+1735	sodium_crypto_sign	1	string $secret_key	VAL	a value of the required length is needed
+1736	sodium_crypto_stream_xchacha20_xor_ic	0	string $message	VAL	a value of the required length is needed
+1737	sodium_crypto_stream_xchacha20_xor_ic	1	string $nonce	VAL	a value of the required length is needed
+1738	sodium_crypto_stream_xchacha20_xor_ic	3	string $key	VAL	a value of the required length is needed
+1739	sodium_crypto_stream_xchacha20_xor	0	string $message	VAL	a value of the required length is needed
+1740	sodium_crypto_stream_xchacha20_xor	1	string $nonce	VAL	a value of the required length is needed
+1741	sodium_crypto_stream_xchacha20_xor	2	string $key	VAL	a value of the required length is needed
+1742	sodium_crypto_stream_xchacha20	1	string $nonce	VAL	a value of the required length is needed
+1743	sodium_crypto_stream_xchacha20	2	string $key	VAL	a value of the required length is needed
+1744	sodium_crypto_stream_xor	0	string $message	VAL	a value of the required length is needed
+1745	sodium_crypto_stream_xor	1	string $nonce	VAL	a value of the required length is needed
+1746	sodium_crypto_stream_xor	2	string $key	VAL	a value of the required length is needed
+1747	sodium_crypto_stream	1	string $nonce	VAL	a value of the required length is needed
+1748	sodium_crypto_stream	2	string $key	VAL	a value of the required length is needed
+1749	sodium_hex2bin	0	string $string	VAL	a valid value or object is needed
+1750	sodium_hex2bin	1	string $ignore	VAL	a valid value or object is needed
+1751	sodium_memcmp	0	string $string1	VAL	a valid value is needed
+1752	sodium_memcmp	1	string $string2	VAL	a valid value is needed
+1753	sodium_unpad	0	string $string	VAL	a valid value is needed
+1754	spldoublylinkedlist::__unserialize	0	array $data	VAL	a valid value is needed
+1755	spldoublylinkedlist::offsetexists	0	untyped $index	VAL	a valid value is needed
+1756	spldoublylinkedlist::offsetget	0	untyped $index	VAL	a valid value is needed
+1757	spldoublylinkedlist::offsetset	0	untyped $index	VAL	a valid value is needed
+1758	spldoublylinkedlist::offsetset	1	mixed $value	RCV	an object in a state the methods need is required
+1759	spldoublylinkedlist::offsetunset	0	untyped $index	VAL	a valid value is needed
+1760	spldoublylinkedlist::unserialize	0	string $data	VAL	a valid value is needed
+1761	splfileinfo::getfileinfo	0	?string $class	VAL	a valid value is needed
+1762	splfileinfo::getpathinfo	0	?string $class	VAL	a class, function or member name is needed
+1763	splfileinfo::openfile	0	string $mode	RCV	an object in a state the methods need is required
+1764	splfileinfo::openfile	2	untyped $context	VAL	a resource value is needed
+1765	splfileinfo::setfileclass	0	string $class	VAL	a valid value is needed
+1766	splfileinfo::setinfoclass	0	string $class	VAL	a valid value is needed
+1767	splfileobject::__construct	0	string $filename	RCV	an object in a state the methods need is required
+1768	splfileobject::__construct	1	string $mode	RCV	an object in a state the methods need is required
+1769	splfileobject::__construct	3	untyped $context	RCV	an object in a state the methods need is required
+1770	splfileobject::fgetcsv	0	string $separator	RCV	an object in a state the methods need is required
+1771	splfileobject::fgetcsv	1	string $enclosure	RCV	an object in a state the methods need is required
+1772	splfileobject::fgetcsv	2	string $escape	RCV	an object in a state the methods need is required
+1773	splfileobject::flock	1	untyped $wouldBlock	RCV	an object in a state the methods need is required
+1774	splfileobject::fputcsv	0	array $fields	RCV	an object in a state the methods need is required
+1775	splfileobject::fputcsv	1	string $separator	RCV	an object in a state the methods need is required
+1776	splfileobject::fputcsv	2	string $enclosure	RCV	an object in a state the methods need is required
+1777	splfileobject::fputcsv	3	string $escape	RCV	an object in a state the methods need is required
+1778	splfileobject::fputcsv	4	string $eol	RCV	an object in a state the methods need is required
+1779	splfileobject::fscanf	0	string $format	RCV	an object in a state the methods need is required
+1780	splfileobject::fscanf	1	mixed $vars	RCV	an object in a state the methods need is required
+1781	splfileobject::fwrite	0	string $data	RCV	an object in a state the methods need is required
+1782	splfileobject::setcsvcontrol	0	string $separator	RCV	an object in a state the methods need is required
+1783	splfileobject::setcsvcontrol	1	string $enclosure	RCV	an object in a state the methods need is required
+1784	splfileobject::setcsvcontrol	2	string $escape	RCV	an object in a state the methods need is required
+1785	splfixedarray::offsetexists	0	untyped $index	VAL	a valid value is needed
+1786	splfixedarray::offsetget	0	untyped $index	VAL	a valid value is needed
+1787	splfixedarray::offsetset	0	untyped $index	VAL	a valid value is needed
+1788	splfixedarray::offsetset	1	mixed $value	RCV	an object in a state the methods need is required
+1789	splfixedarray::offsetunset	0	untyped $index	VAL	a valid value is needed
+1790	splobjectstorage::__unserialize	0	array $data	VAL	a valid value is needed
+1791	splobjectstorage::offsetexists	0	untyped $object	VAL	a real object is needed
+1792	splobjectstorage::offsetget	0	untyped $object	VAL	a real object is needed
+1793	splobjectstorage::offsetset	0	untyped $object	VAL	a real object is needed
+1794	splobjectstorage::offsetunset	0	untyped $object	VAL	a real object is needed
+1795	splobjectstorage::unserialize	0	string $data	VAL	a valid value is needed
+1796	splpriorityqueue::__unserialize	0	array $data	VAL	a valid value is needed
+1797	spoofchecker::setallowedchars	0	string $pattern	VAL	a valid value or object is needed
+1798	sqlite3::__construct	0	string $filename	RCV	an object in a state the methods need is required
+1799	sqlite3::__construct	2	string $encryptionKey	RCV	an object in a state the methods need is required
+1800	sqlite3::backup	1	string $sourceDatabase	WK	a closure or recording object is refused
+1801	sqlite3::backup	2	string $destinationDatabase	WK	a closure or recording object is refused
+1802	sqlite3::open	0	string $filename	RCV	an object in a state the methods need is required
+1803	sqlite3::open	2	string $encryptionKey	RCV	an object in a state the methods need is required
+1804	sscanf	2	mixed $vars	VAL	a valid value is needed
+1805	str_decrement	0	string $string	VAL	a valid value is needed
+1806	str_getcsv	1	string $separator	VAL	a valid value is needed
+1807	str_getcsv	2	string $enclosure	VAL	a valid value is needed
+1808	str_getcsv	3	string $escape	VAL	a valid value is needed
+1809	str_increment	0	string $string	VAL	a valid value is needed
+1810	str_ireplace	0	array|string $search	WK	a closure or recording object is refused
+1811	str_ireplace	1	array|string $replace	VAL	a valid value is needed
+1812	str_ireplace	2	array|string $subject	WK	a closure or recording object is refused
+1813	str_replace	0	array|string $search	WK	a closure or recording object is refused
+1814	str_replace	1	array|string $replace	VAL	a valid value is needed
+1815	str_replace	2	array|string $subject	WK	a closure or recording object is refused
+1816	stream_bucket_append	0	untyped $brigade	VAL	a resource value is needed
+1817	stream_bucket_make_writeable	0	untyped $brigade	VAL	a resource value is needed
+1818	stream_bucket_new	0	untyped $stream	VAL	a resource value is needed
+1819	stream_bucket_prepend	0	untyped $brigade	VAL	a resource value is needed
+1820	stream_context_create	0	?array $options	VAL	a valid value is needed
+1821	stream_context_get_default	0	?array $options	VAL	a valid value is needed
+1822	stream_context_get_options	0	untyped $stream_or_context	VAL	a resource value is needed
+1823	stream_context_get_params	0	untyped $context	VAL	a resource value is needed
+1824	stream_context_set_default	0	array $options	VAL	a valid value is needed
+1825	stream_context_set_options	0	untyped $context	VAL	a resource value is needed
+1826	stream_context_set_options	1	array $options	VAL	a valid value is needed
+1827	stream_context_set_option	0	untyped $context	VAL	a resource value is needed
+1828	stream_context_set_option	1	array|string $wrapper_or_options	VAL	a valid value or object is needed
+1829	stream_context_set_option	2	?string $option_name	VAL	a valid value is needed
+1830	stream_context_set_params	0	untyped $context	VAL	a resource value is needed
+1831	stream_copy_to_stream	0	untyped $from	VAL	a resource value is needed
+1832	stream_copy_to_stream	1	untyped $to	VAL	a resource value is needed
+1833	stream_filter_append	0	untyped $stream	VAL	a resource value is needed
+1834	stream_filter_prepend	0	untyped $stream	VAL	a resource value is needed
+1835	stream_filter_remove	0	untyped $stream_filter	VAL	a resource value is needed
+1836	stream_get_contents	0	untyped $stream	VAL	a resource value is needed
+1837	stream_get_line	0	untyped $stream	VAL	a resource value is needed
+1838	stream_get_meta_data	0	untyped $stream	VAL	a resource value is needed
+1839	stream_is_local	0	untyped $stream	WK	a closure or recording object is refused
+1840	stream_isatty	0	untyped $stream	VAL	a resource value is needed
+1841	stream_register_wrapper	0	string $protocol	VAL	a class, function or member name is needed
+1842	stream_register_wrapper	1	string $class	VAL	a class, function or member name is needed
+1843	stream_select	0	?array $read	SRV	server-backed: No stream arrays were passed
+1844	stream_select	1	?array $write	SRV	server-backed: No stream arrays were passed
+1845	stream_select	2	?array $except	SRV	server-backed: No stream arrays were passed
+1846	stream_set_blocking	0	untyped $stream	VAL	a resource value is needed
+1847	stream_set_chunk_size	0	untyped $stream	VAL	a resource value is needed
+1848	stream_set_read_buffer	0	untyped $stream	VAL	a resource value is needed
+1849	stream_set_timeout	0	untyped $stream	VAL	a resource value is needed
+1850	stream_set_write_buffer	0	untyped $stream	VAL	a resource value is needed
+1851	stream_socket_accept	0	untyped $socket	VAL	a resource value is needed
+1852	stream_socket_client	5	untyped $context	VAL	a resource value is needed
+1853	stream_socket_enable_crypto	0	untyped $stream	VAL	a resource value is needed
+1854	stream_socket_enable_crypto	3	untyped $session_stream	VAL	a resource value is needed
+1855	stream_socket_get_name	0	untyped $socket	VAL	a resource value is needed
+1856	stream_socket_recvfrom	0	untyped $socket	VAL	a resource value is needed
+1857	stream_socket_sendto	0	untyped $socket	VAL	a resource value is needed
+1858	stream_socket_server	4	untyped $context	VAL	a resource value is needed
+1859	stream_socket_shutdown	0	untyped $stream	VAL	a resource value is needed
+1860	stream_supports_lock	0	untyped $stream	VAL	a resource value is needed
+1861	stream_wrapper_register	0	string $protocol	VAL	a class, function or member name is needed
+1862	stream_wrapper_register	1	string $class	VAL	a class, function or member name is needed
+1863	strip_tags	1	array|string|null $allowed_tags	WK	a closure or recording object is refused
+1864	strtr	1	array|string $from	VAL	a valid value is needed
+1865	strval	0	mixed $value	WK	a closure or recording object is refused
+1866	substr_replace	0	array|string $string	WK	a closure or recording object is refused
+1867	substr_replace	1	array|string $replace	WK	a closure or recording object is refused
+1868	substr_replace	2	array|int $offset	VAL	a valid value is needed
+1869	substr_replace	3	array|int|null $length	VAL	a valid value is needed
+1870	uconverter::__construct	0	?string $destination_encoding	VAL	a valid value is needed
+1871	uconverter::__construct	1	?string $source_encoding	VAL	a valid value is needed
+1872	unlink	1	untyped $context	VAL	a resource value is needed
+1873	unpack	0	string $format	VAL	a valid value is needed
+1874	uri\rfc3986\uri::__construct	0	string $uri	RCV	a fresh object is needed
+1875	uri\rfc3986\uri::__unserialize	0	array $data	VAL	a valid value is needed
+1876	uri\rfc3986\uri::resolve	0	string $uri	VAL	a valid value is needed
+1877	uri\rfc3986\uri::withhost	0	?string $host	VAL	a valid value is needed
+1878	uri\rfc3986\uri::withscheme	0	?string $scheme	VAL	a valid value is needed
+1879	uri\rfc3986\uri::withuserinfo	0	?string $userinfo	VAL	a valid value is needed
+1880	uri\whatwg\invalidurlexception::__construct	0	string $message	RCV	a fresh object is needed
+1881	uri\whatwg\invalidurlexception::__construct	1	array $errors	VAL	a valid value is needed
+1882	uri\whatwg\url::__construct	0	string $uri	VAL	a valid value is needed
+1883	uri\whatwg\url::__construct	2	untyped $softErrors	VAL	a valid value is needed
+1884	uri\whatwg\url::__unserialize	0	array $data	VAL	a valid value is needed
+1885	uri\whatwg\url::resolve	0	string $uri	VAL	a valid value is needed
+1886	uri\whatwg\url::resolve	1	untyped $softErrors	VAL	a valid value is needed
+1887	uri\whatwg\url::withfragment	0	?string $fragment	VAL	a valid value is needed
+1888	uri\whatwg\url::withhost	0	?string $host	VAL	a valid value is needed
+1889	uri\whatwg\url::withpassword	0	?string $password	VAL	a valid value is needed
+1890	uri\whatwg\url::withpath	0	string $path	VAL	a valid value is needed
+1891	uri\whatwg\url::withquery	0	?string $query	VAL	a valid value is needed
+1892	uri\whatwg\url::withscheme	0	string $scheme	VAL	a valid value is needed
+1893	uri\whatwg\url::withusername	0	?string $username	VAL	a valid value is needed
+1894	version_compare	2	?string $operator	VAL	a valid value or object is needed
+1895	vfprintf	0	untyped $stream	VAL	a resource value is needed
+1896	weakmap::offsetexists	0	untyped $object	VAL	a valid value is needed
+1897	weakmap::offsetget	0	untyped $object	WK	a closure or recording object is refused
+1898	weakmap::offsetset	0	untyped $object	VAL	a valid value is needed
+1899	weakmap::offsetunset	0	untyped $object	VAL	a valid value is needed
+1900	xhprof_enable	0	untyped $flags	VAL	a valid value is needed
+1901	xml_parser_create_ns	0	?string $encoding	VAL	a valid value is needed
+1902	xml_parser_create_ns	1	string $separator	VAL	a valid value is needed
+1903	xml_parser_create	0	?string $encoding	VAL	a valid value is needed
+1904	xml_set_character_data_handler	1	callable|string|null $handler	RCV	an object in a state the methods need is required
+1905	xml_set_default_handler	1	callable|string|null $handler	RCV	an object in a state the methods need is required
+1906	xml_set_element_handler	1	callable|string|null $start_handler	RCV	an object in a state the methods need is required
+1907	xml_set_element_handler	2	callable|string|null $end_handler	RCV	an object in a state the methods need is required
+1908	xml_set_end_namespace_decl_handler	1	callable|string|null $handler	RCV	an object in a state the methods need is required
+1909	xml_set_external_entity_ref_handler	1	callable|string|null $handler	RCV	an object in a state the methods need is required
+1910	xml_set_notation_decl_handler	1	callable|string|null $handler	RCV	an object in a state the methods need is required
+1911	xml_set_processing_instruction_handler	1	callable|string|null $handler	RCV	an object in a state the methods need is required
+1912	xml_set_start_namespace_decl_handler	1	callable|string|null $handler	RCV	an object in a state the methods need is required
+1913	xml_set_unparsed_entity_decl_handler	1	callable|string|null $handler	RCV	an object in a state the methods need is required
+1914	xmlreader::next	0	?string $name	RCV	an object in a state the methods need is required
+1915	xmlreader::setrelaxngschemasource	0	?string $source	RCV	an object in a state the methods need is required
+1916	xmlreader::setrelaxngschema	0	?string $filename	RCV	an object in a state the methods need is required
+1917	xmlreader::setschema	0	?string $filename	RCV	an object in a state the methods need is required
+1918	xmlwriter::setindentstring	0	string $indentation	RCV	an object in a state the methods need is required
+1919	xmlwriter::startattributens	0	?string $prefix	RCV	an object in a state the methods need is required
+1920	xmlwriter::startattributens	1	string $name	RCV	an object in a state the methods need is required
+1921	xmlwriter::startattributens	2	?string $namespace	RCV	an object in a state the methods need is required
+1922	xmlwriter::startattribute	0	string $name	RCV	an object in a state the methods need is required
+1923	xmlwriter::startdocument	0	?string $version	RCV	an object in a state the methods need is required
+1924	xmlwriter::startdocument	1	?string $encoding	RCV	an object in a state the methods need is required
+1925	xmlwriter::startdocument	2	?string $standalone	RCV	an object in a state the methods need is required
+1926	xmlwriter::startdtdattlist	0	string $name	RCV	an object in a state the methods need is required
+1927	xmlwriter::startdtdelement	0	string $qualifiedName	RCV	an object in a state the methods need is required
+1928	xmlwriter::startdtdentity	0	string $name	RCV	an object in a state the methods need is required
+1929	xmlwriter::startdtd	0	string $qualifiedName	RCV	an object in a state the methods need is required
+1930	xmlwriter::startdtd	1	?string $publicId	RCV	an object in a state the methods need is required
+1931	xmlwriter::startdtd	2	?string $systemId	RCV	an object in a state the methods need is required
+1932	xmlwriter::startelementns	0	?string $prefix	RCV	an object in a state the methods need is required
+1933	xmlwriter::startelementns	1	string $name	RCV	an object in a state the methods need is required
+1934	xmlwriter::startelementns	2	?string $namespace	RCV	an object in a state the methods need is required
+1935	xmlwriter::startelement	0	string $name	RCV	an object in a state the methods need is required
+1936	xmlwriter::startpi	0	string $target	RCV	an object in a state the methods need is required
+1937	xmlwriter::text	0	string $content	RCV	an object in a state the methods need is required
+1938	xmlwriter::writeattributens	0	?string $prefix	RCV	an object in a state the methods need is required
+1939	xmlwriter::writeattributens	1	string $name	RCV	an object in a state the methods need is required
+1940	xmlwriter::writeattributens	2	?string $namespace	RCV	an object in a state the methods need is required
+1941	xmlwriter::writeattributens	3	string $value	RCV	an object in a state the methods need is required
+1942	xmlwriter::writeattribute	0	string $name	RCV	an object in a state the methods need is required
+1943	xmlwriter::writeattribute	1	string $value	RCV	an object in a state the methods need is required
+1944	xmlwriter::writecdata	0	string $content	RCV	an object in a state the methods need is required
+1945	xmlwriter::writecomment	0	string $content	RCV	an object in a state the methods need is required
+1946	xmlwriter::writedtdattlist	0	string $name	RCV	an object in a state the methods need is required
+1947	xmlwriter::writedtdattlist	1	string $content	RCV	an object in a state the methods need is required
+1948	xmlwriter::writedtdelement	0	string $name	RCV	an object in a state the methods need is required
+1949	xmlwriter::writedtdelement	1	string $content	RCV	an object in a state the methods need is required
+1950	xmlwriter::writedtdentity	0	string $name	RCV	an object in a state the methods need is required
+1951	xmlwriter::writedtdentity	1	string $content	RCV	an object in a state the methods need is required
+1952	xmlwriter::writedtdentity	3	?string $publicId	RCV	an object in a state the methods need is required
+1953	xmlwriter::writedtdentity	4	?string $systemId	RCV	an object in a state the methods need is required
+1954	xmlwriter::writedtdentity	5	?string $notationData	RCV	an object in a state the methods need is required
+1955	xmlwriter::writedtd	0	string $name	RCV	an object in a state the methods need is required
+1956	xmlwriter::writedtd	1	?string $publicId	RCV	an object in a state the methods need is required
+1957	xmlwriter::writedtd	2	?string $systemId	RCV	an object in a state the methods need is required
+1958	xmlwriter::writedtd	3	?string $content	RCV	an object in a state the methods need is required
+1959	xmlwriter::writeelementns	0	?string $prefix	RCV	an object in a state the methods need is required
+1960	xmlwriter::writeelementns	1	string $name	RCV	an object in a state the methods need is required
+1961	xmlwriter::writeelementns	2	?string $namespace	RCV	an object in a state the methods need is required
+1962	xmlwriter::writeelementns	3	?string $content	RCV	an object in a state the methods need is required
+1963	xmlwriter::writeelement	0	string $name	RCV	an object in a state the methods need is required
+1964	xmlwriter::writeelement	1	?string $content	RCV	an object in a state the methods need is required
+1965	xmlwriter::writepi	0	string $target	RCV	an object in a state the methods need is required
+1966	xmlwriter::writepi	1	string $content	RCV	an object in a state the methods need is required
+1967	xmlwriter::writeraw	0	string $content	RCV	an object in a state the methods need is required
+1968	xmlwriter_start_attribute_ns	2	string $name	VAL	a valid value or object is needed
+1969	xmlwriter_start_attribute	1	string $name	VAL	a valid value or object is needed
+1970	xmlwriter_start_dtd_attlist	1	string $name	VAL	a valid value or object is needed
+1971	xmlwriter_start_dtd_element	1	string $qualifiedName	VAL	a valid value or object is needed
+1972	xmlwriter_start_dtd_entity	1	string $name	VAL	a valid value or object is needed
+1973	xmlwriter_start_element_ns	2	string $name	VAL	a valid value or object is needed
+1974	xmlwriter_start_element	1	string $name	VAL	a valid value or object is needed
+1975	xmlwriter_start_pi	1	string $target	VAL	a valid value or object is needed
+1976	xmlwriter_write_attribute_ns	2	string $name	VAL	a valid value or object is needed
+1977	xmlwriter_write_attribute	1	string $name	VAL	a valid value or object is needed
+1978	xmlwriter_write_dtd_attlist	1	string $name	VAL	a valid value or object is needed
+1979	xmlwriter_write_dtd_element	1	string $name	VAL	a valid value or object is needed
+1980	xmlwriter_write_dtd_entity	1	string $name	VAL	a valid value or object is needed
+1981	xmlwriter_write_element_ns	2	string $name	VAL	a valid value or object is needed
+1982	xmlwriter_write_element	1	string $name	VAL	a valid value or object is needed
+1983	xmlwriter_write_pi	1	string $target	VAL	a valid value or object is needed
+1984	xsltprocessor::getparameter	1	string $name	VAL	a valid name is needed
+1985	xsltprocessor::importstylesheet	0	object $stylesheet	VAL	a valid value is needed
+1986	xsltprocessor::registerphpfunctionns	1	string $name	VAL	a plain callable is needed
+1987	xsltprocessor::registerphpfunctions	0	array|string|null $functions	VAL	a valid callable name is needed
+1988	xsltprocessor::removeparameter	1	string $name	VAL	a valid name is needed
+1989	xsltprocessor::setparameter	0	string $namespace	VAL	a valid value or object is needed
+1990	xsltprocessor::setparameter	1	array|string $name	VAL	a valid value or object is needed
+1991	xsltprocessor::transformtodoc	0	object $document	VAL	a valid value is needed
+1992	xsltprocessor::transformtodoc	1	?string $returnClass	VAL	a class, function or member name is needed
+1993	xsltprocessor::transformtouri	0	object $document	VAL	a valid value is needed
+1994	xsltprocessor::transformtouri	1	string $uri	RCV	a stylesheet must be imported first
+1995	xsltprocessor::transformtoxml	0	object $document	VAL	a valid value is needed
+1996	zip_close	0	untyped $zip	VAL	a resource value is needed
+1997	zip_entry_close	0	untyped $zip_entry	VAL	a resource value is needed
+1998	zip_entry_compressedsize	0	untyped $zip_entry	VAL	a resource value is needed
+1999	zip_entry_compressionmethod	0	untyped $zip_entry	VAL	a resource value is needed
+2000	zip_entry_filesize	0	untyped $zip_entry	VAL	a resource value is needed
+2001	zip_entry_name	0	untyped $zip_entry	VAL	a resource value is needed
+2002	zip_entry_open	0	untyped $zip_dp	VAL	a resource value is needed
+2003	zip_entry_open	1	untyped $zip_entry	VAL	a resource value is needed
+2004	zip_entry_read	0	untyped $zip_entry	VAL	a resource value is needed
+2005	zip_read	0	untyped $zip	VAL	a resource value is needed
+2006	ziparchive::addemptydir	0	string $dirname	RCV	a zip archive must be opened first
+2007	ziparchive::addfromstring	0	string $name	RCV	a zip archive must be opened first
+2008	ziparchive::addfromstring	1	string $content	RCV	a zip archive must be opened first
+2009	ziparchive::deletename	0	string $name	RCV	a zip archive must be opened first
+2010	ziparchive::extractto	0	string $pathto	RCV	a zip archive must be opened first
+2011	ziparchive::extractto	1	array|string|null $files	RCV	a zip archive must be opened first
+2012	ziparchive::getcommentname	0	string $name	RCV	a zip archive must be opened first
+2013	ziparchive::getexternalattributesindex	1	untyped $opsys	RCV	a zip archive must be opened first
+2014	ziparchive::getexternalattributesindex	2	untyped $attr	RCV	a zip archive must be opened first
+2015	ziparchive::getexternalattributesname	0	string $name	RCV	a zip archive must be opened first
+2016	ziparchive::getexternalattributesname	1	untyped $opsys	RCV	a zip archive must be opened first
+2017	ziparchive::getexternalattributesname	2	untyped $attr	RCV	a zip archive must be opened first
+2018	ziparchive::getfromname	0	string $name	RCV	a zip archive must be opened first
+2019	ziparchive::getstreamname	0	string $name	RCV	a zip archive must be opened first
+2020	ziparchive::getstream	0	string $name	RCV	a zip archive must be opened first
+2021	ziparchive::locatename	0	string $name	RCV	a zip archive must be opened first
+2022	ziparchive::registercancelcallback	0	callable $callback	RCV	a zip archive must be opened first
+2023	ziparchive::registerprogresscallback	1	callable $callback	RCV	a zip archive must be opened first
+2024	ziparchive::renameindex	1	string $new_name	RCV	a zip archive must be opened first
+2025	ziparchive::renamename	0	string $name	RCV	a zip archive must be opened first
+2026	ziparchive::renamename	1	string $new_name	RCV	a zip archive must be opened first
+2027	ziparchive::setarchivecomment	0	string $comment	RCV	a zip archive must be opened first
+2028	ziparchive::setcommentindex	1	string $comment	RCV	a zip archive must be opened first
+2029	ziparchive::setcommentname	0	string $name	RCV	a zip archive must be opened first
+2030	ziparchive::setcommentname	1	string $comment	RCV	a zip archive must be opened first
+2031	ziparchive::setcompressionname	0	string $name	RCV	a zip archive must be opened first
+2032	ziparchive::setencryptionindex	2	?string $password	RCV	a zip archive must be opened first
+2033	ziparchive::setencryptionname	0	string $name	RCV	a zip archive must be opened first
+2034	ziparchive::setencryptionname	2	?string $password	RCV	a zip archive must be opened first
+2035	ziparchive::setexternalattributesname	0	string $name	RCV	a zip archive must be opened first
+2036	ziparchive::setmtimename	0	string $name	RCV	a zip archive must be opened first
+2037	ziparchive::setpassword	0	string $password	RCV	a zip archive must be opened first
+2038	ziparchive::statname	0	string $name	RCV	a zip archive must be opened first
+2039	ziparchive::unchangename	0	string $name	RCV	a zip archive must be opened first
+2040	zlib_encode	0	string $data	VAL	a valid encoding value is needed

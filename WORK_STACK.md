@@ -39,6 +39,9 @@ State as of 2026-10-11, `master` at `2783a866`.
    (`Redis::set` reads `0` where its serializer runs), and an autoloader or a
    user class's constructor can run user code the table's grammar cannot name.
    Plan: `/home/torres/.claude/plans/1-in-this-plan-woolly-dragon.md`, steps 0-10.
+   Step 1 is not closed: its closing verdicts are in
+   `tools/builtin-runs/scan/closing-verdicts.tsv`; next is V1-V4 (valid values,
+   631 groups). See the plan's closing section.
    Step 0 added the passing controls `redis_get_precise` and
    `memcached_getdelayed_callback`; each failing fixture comes with the step
    that makes it pass. Resume at the first step the plan does not mark done.
