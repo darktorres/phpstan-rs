@@ -207,6 +207,7 @@ function valid_value(?ReflectionType $type): ?Closure
         'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
         'simplexmlelement' => static fn (): SimpleXMLElement => new SimpleXMLElement('<a><b/></a>'),
         'intlgregoriancalendar' => static fn (): IntlGregorianCalendar => IntlGregorianCalendar::createInstance('UTC', 'en'),
+        'imagickkernel' => static fn (): ImagickKernel => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         'traversable' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
         'domelement' => static function (): DOMElement {
             $document = new DOMDocument();
@@ -409,6 +410,15 @@ function xml_value(ReflectionParameter $param): ?Closure
     return null;
 }
 
+/** A PNG image, as the bytes of a small one that Imagick writes. */
+function imagick_blob_sample(): string
+{
+    $image = new Imagick();
+    $image->newImage(2, 2, new ImagickPixel('white'));
+    $image->setImageFormat('png');
+    return $image->getImageBlob();
+}
+
 /** The valid value of an Imagick colour or a PDO fetch mode. */
 function imagick_value(ReflectionParameter $param): ?Closure
 {
@@ -424,6 +434,27 @@ function imagick_value(ReflectionParameter $param): ?Closure
     }
     if ($name === 'geometry') {
         return static fn (): string => '1x1';
+    }
+    // Integers of a method on the sixteen-pixel image the recipes make: offsets at the origin, sizes that fit it.
+    if ($class === 'imagick' && $name === 'map') {
+        return static fn (): string => 'RGB';
+    }
+    if ($class === 'imagick' && in_array($name, ['x_resolution', 'y_resolution'], true)) {
+        return static fn (): float => 72.0;
+    }
+    if ($class === 'imagick' && $name === 'pseudo_format') {
+        return static fn (): string => 'xc:white';
+    }
+    if ($class === 'imagick' && $name === 'image' && $function->getName() === 'readimageblob' || $class === 'imagick' && $function->getName() === 'pingimageblob') {
+        return static fn (): string => imagick_blob_sample();
+    }
+    if ($class === 'imagick' && !admits($param->getType(), 'string')) {
+        return match ($name) {
+            'x', 'y', 'left', 'top', 'offset', 'index' => static fn (): int => 0,
+            'width', 'height', 'columns', 'rows' => static fn (): int => 4,
+            'inner_bevel', 'outer_bevel', 'x_bevel', 'y_bevel' => static fn (): int => 1,
+            default => null,
+        };
     }
     // A file the image is written to, named with a format the image writers know.
     if ($name === 'filename' || $name === 'file') {

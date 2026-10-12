@@ -53,7 +53,7 @@ function recipe(string $class): ?Closure
         // Imagick's methods throw on an empty object: one image is read first.
         'imagick' => static function (): object {
             $image = new Imagick();
-            $image->newImage(1, 1, new ImagickPixel('white'));
+            $image->newImage(16, 16, new ImagickPixel('white'));
             return $image;
         },
         'ziparchive' => static function (): object {
