@@ -4,6 +4,7 @@
 //! and with the direct versions in `reference`.
 
 use super::*;
+use crate::registry::bodies::NoBodies;
 use syntax::{lexer::Lexer, parser::Parser};
 
 fn registry(source: &str) -> Registry {
@@ -522,4 +523,51 @@ fn advancing_the_generation_clears_the_destroyed_holders() {
     }
     .destroy_held(&Name::from("A"));
     assert_eq!(first, again);
+}
+
+#[test]
+fn beginning_declaration_changes_clears_the_destroyed_holders() {
+    let mut registry = registry("<?php class B {} class A { public B $p; }");
+    let first = {
+        let reach = Reach {
+            registry: &registry,
+            ctx: &NoContext,
+        };
+        reach.destroy_held(&Name::from("A"))
+    };
+    assert!(registry.reach_memo.destroy_held.is_used());
+    registry.begin_declaration_changes();
+    assert!(!registry.reach_memo.destroy_held.is_used());
+    let again = Reach {
+        registry: &registry,
+        ctx: &NoContext,
+    }
+    .destroy_held(&Name::from("A"));
+    assert_eq!(first, again);
+}
+
+#[test]
+fn rebuilding_the_methods_by_name_clears_the_destroyed_holders() {
+    let mut registry = registry("<?php class B {} class A { public B $p; }");
+    Reach {
+        registry: &registry,
+        ctx: &NoContext,
+    }
+    .destroy_held(&Name::from("A"));
+    assert!(registry.reach_memo.destroy_held.is_used());
+    registry.rebuild_methods_by_name();
+    assert!(!registry.reach_memo.destroy_held.is_used());
+}
+
+#[test]
+fn resolving_effects_clears_the_destroyed_holders_it_started_with() {
+    let mut registry = registry("<?php class B {} class A { public B $p; }");
+    Reach {
+        registry: &registry,
+        ctx: &NoContext,
+    }
+    .destroy_held(&Name::from("A"));
+    assert!(registry.reach_memo.destroy_held.is_used());
+    registry.resolve_effects(&NoBodies);
+    assert!(!registry.reach_memo.destroy_held.is_used());
 }
