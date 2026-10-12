@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import posixpath
 from pathlib import Path
 import re
 
@@ -18,6 +19,7 @@ def load(path: Path):
 
 CHECKOUT_MARKER = '/tools/php-catalog/'
 REPOSITORY = Path(__file__).resolve().parents[3]
+HERE = Path(__file__).resolve().parent
 
 
 def portable(path):
@@ -39,6 +41,30 @@ def local_path(recorded):
     if text.startswith('/') and CHECKOUT_MARKER in text:
         return REPOSITORY / portable(text)
     return Path(text)
+
+
+SOURCE_RELATIVE = "php-src/Zend/zend_builtin_functions.c"
+
+
+def root_relative(path, recorded_root):
+    """The part of a recorded path below the root the evidence was recorded under,
+    or None when the path is outside that root. A path that leaves the root
+    after normalisation is refused, so `..` cannot reach another tree."""
+    root = recorded_root.rstrip("/")
+    text = str(path)
+    if text != root and not text.startswith(root + "/"):
+        return None
+    normalized = posixpath.normpath(text)
+    if normalized != root and not normalized.startswith(root + "/"):
+        raise ValueError(f"recorded path escapes its root: {text}")
+    return normalized[len(root) + 1:]
+
+
+def names_recorded_file(command, relative, recorded_root):
+    """Whether a recorded command names the file at `relative` below the recorded root."""
+    if relative is None:
+        return False
+    return any(root_relative(argument, recorded_root) == relative for argument in command)
 
 
 def validate_measurement_output(measurements, run_name, artifact_path):
@@ -120,7 +146,7 @@ def gcc_cfg_blocks(function_text):
     return blocks
 
 
-def main() -> None:
+def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--clang-ast", type=Path, required=True)
@@ -138,13 +164,24 @@ def main() -> None:
     parser.add_argument("--cleanup-gimple", type=Path, required=True)
     parser.add_argument("--cleanup-llvm", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    parser.add_argument("--lock", type=Path, default=HERE / "results" / "lock.json")
+    parser.add_argument("--recorded-root",
+                        help="root the recorded command paths were made under (default: the lock's recorded_root)")
+    return parser.parse_args(argv)
 
+
+def verify_inputs(args, lock):
+    """Refuse any input whose digest differs from the lock, before anything is parsed."""
+    for name, digest in lock["representation_correspondence_inputs"].items():
+        path = getattr(args, name)
+        if sha(path) != digest:
+            raise SystemExit(f"{name} differs from its locked digest: {path}")
+
+
+def build_report(args, lock):
+    root = args.recorded_root or lock["recorded_root"]
     source = args.source.read_text()
     source_hash = sha(args.source)
-    expected_source_hash = "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
-    if source_hash != expected_source_hash:
-        raise SystemExit(f"unexpected locked PHP source digest: {source_hash}")
     if "ZEND_FUNCTION(strlen)" not in source or "RETVAL_LONG(ZSTR_LEN(s));" not in source:
         raise SystemExit("source lacks the locked strlen registration/return expression")
     campaign_inputs = load(args.campaign_inputs)
@@ -185,12 +222,13 @@ def main() -> None:
     validate_measurement_output(clang_measurements, "php-type-llvm-read-0", args.clang_llvm)
     ast_command = ast_runs[0].get("command", [])
     llvm_emit_command = llvm_emit_runs[0].get("command", [])
-    source_path = str(args.source.resolve())
     llvm_read_command = llvm_read_runs[0].get("command", [])
     emitted_ir = next((str(llvm_emit_command[index + 1])
                        for index, arg in enumerate(llvm_emit_command[:-1]) if arg == "-o"), None)
-    if (source_path not in ast_command or source_path not in llvm_emit_command
-            or emitted_ir is None or emitted_ir not in llvm_read_command):
+    if (not names_recorded_file(ast_command, SOURCE_RELATIVE, root)
+            or not names_recorded_file(llvm_emit_command, SOURCE_RELATIVE, root)
+            or emitted_ir is None
+            or not names_recorded_file(llvm_read_command, root_relative(emitted_ir, root), root)):
         raise SystemExit("Clang AST campaign command does not name the pinned PHP source")
     llvm_blocks = llvm_fn.get("blocks", [])
     llvm_text = "\n".join(s.get("text", "") for b in llvm_blocks
@@ -248,7 +286,7 @@ def main() -> None:
     validate_measurement_output(gcc_measurements, "php-type-gimple", args.gcc_cfg)
     gcc_command = gcc_runs[0].get("command", [])
     if ("-fdump-tree-gimple" not in gcc_command or "-fdump-tree-cfg" not in gcc_command
-            or source_path not in gcc_command
+            or not names_recorded_file(gcc_command, SOURCE_RELATIVE, root)
             or not args.gcc_gimple.name.endswith(".007t.gimple")
             or not args.gcc_cfg.name.endswith(".016t.cfg")):
         raise SystemExit("GCC dumps do not match the successful pinned-source dump command")
@@ -315,9 +353,9 @@ def main() -> None:
         raise SystemExit("cleanup LLVM/GCC artifact lacks the expected exceptional cleanup")
 
     artifacts = {}
-    for label, path in vars(args).items():
-        if isinstance(path, Path) and label != "output":
-            artifacts[label] = {"sha256": sha(path), "bytes": path.stat().st_size}
+    for label in lock["representation_correspondence_inputs"]:
+        path = getattr(args, label)
+        artifacts[label] = {"sha256": sha(path), "bytes": path.stat().st_size}
     report = {
         "schema": 1,
         "source_sha256": source_hash,
@@ -359,6 +397,14 @@ def main() -> None:
         ],
         "artifacts": artifacts,
     }
+    return report
+
+
+def main(argv=None) -> None:
+    args = parse_arguments(argv)
+    lock = load(args.lock)
+    verify_inputs(args, lock)
+    report = build_report(args, lock)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 

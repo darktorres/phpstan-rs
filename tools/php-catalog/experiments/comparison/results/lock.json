@@ -35,5 +35,23 @@
   "resource_acceptance": "Observed peaks; kernel-enforced aggregate 10 GiB acceptance remains OPEN",
   "coverage": "Native representation and pointer prerequisites; no closed PHP BehaviorGraph or full Phase F completion",
   "runtime_fixture_scope": "hybrid-call-8.5.4.json uses runtime-hybrid-call-13.php; runtime.php current 16-sentinel evidence is separately pinned by tailcall-call-reference-8.5.4.json",
-  "link_manifest_sha256": "42cce39683efc9854bf0708fcf741689e29d2b2858152f3475ceea2dd2402324"
+  "link_manifest_sha256": "42cce39683efc9854bf0708fcf741689e29d2b2858152f3475ceea2dd2402324",
+  "recorded_root": "/tmp/php-catalog-comparison",
+  "representation_correspondence_inputs": {
+    "campaign_inputs": "95626baaaf5bc6627b93acb3f7d94b723de23fb5b5a1a54d1fab72f8f2c9d30f",
+    "cir_log": "43fb1371160e9346f669dfad71350b2d0dd228517784e78700c5cdd81ea4167a",
+    "clang_ast": "171e07cc66fc96dd1a06c7c9819f510c1588ae66ea6a01ddb859dee5a9ef4067",
+    "clang_llvm": "0eb860e7f92006a58f432214d735136f80d1e8f26c28f7d6eb8e829d6491977f",
+    "clang_manifest": "86a9b25c1abc529b455992da2f1c6ec8883f11cb6b783fd29204ce203bfed875",
+    "clang_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+    "cleanup_ast": "10930dda7df33efc34702a8622798154c1210a283a9348da0d73417da599a242",
+    "cleanup_gimple": "13382af7b554b6311ec0c5b19607898badc21692f60f1c3ea91faf982e81b254",
+    "cleanup_llvm": "c14b191d7258c8921f6518b7514e6f6038d496f4a91f13bf578424a889bab672",
+    "cleanup_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+    "cleanup_source": "3e346ddb906205cd64506bd98e1a232d6ecfa8d6abdc6a1453150342534777d6",
+    "gcc_cfg": "16fd020bcfd952490217b6d24ddb2b76c420aa59df10fd37d77de68a83deaab9",
+    "gcc_gimple": "dc5f0925d499ef295b3d0beee4ede3ba7510ea7b3387debd210e65a2361ca4d2",
+    "gcc_measurements": "17698f84cf978397ed4e2a26000fda5232c46bc56f4cf2734af967de0853fc5a",
+    "source": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
+  }
 }

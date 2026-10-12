@@ -145,6 +145,29 @@ field load to the caller's return-zval payload. The catalog builder validates
 that slot chain and keeps effects and non-normal outcomes open; it does not
 claim a reusable native CFG or memory solver.
 
+## `strlen` representation correspondence
+
+`results/evaluation/strlen-representation-correspondence.json` is regenerated
+from the checked-in evidence and the locked PHP 8.5.4 source:
+
+```bash
+python3 -m unittest tools/php-catalog/experiments/comparison/test_representation_output_binding.py
+python3 tools/php-catalog/experiments/comparison/regenerate_correspondence.py \
+  --source ~/.cache/php-catalog-evaluation/php-src-gcc/Zend/zend_builtin_functions.c \
+  --output $ROOT/correspondence/strlen-representation-correspondence.json
+cmp $ROOT/correspondence/strlen-representation-correspondence.json \
+  tools/php-catalog/experiments/comparison/results/evaluation/strlen-representation-correspondence.json
+```
+
+The builder refuses any input whose digest differs from
+`representation_correspondence_inputs` in `results/lock.json` before it parses
+anything, and the source is identified by its digest. The recorded command
+paths are mapped to their location under `recorded_root` in the lock (the root
+the evidence was recorded under); `--recorded-root` names another root for
+outputs recorded elsewhere. Paths are compared relative to that root, so the
+same evidence checks under any location, and a path that leaves the root after
+normalisation is refused.
+
 ## `strlen` SVF fallback regression
 
 Replay the bounded indirect-call query against the linked PHP 8.5.4 module:
