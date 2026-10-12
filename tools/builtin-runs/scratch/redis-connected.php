@@ -2,8 +2,8 @@
 // Connected Redis facts: each method, against a scratch server, under each serializer, with an object at each
 // parameter. Run: php redis-connected.php OUT.tsv, with a Redis server on 127.0.0.1:16379 (see README.md).
 // The hooks are counted in the object, so user code that runs is the only thing recorded.
-// object, the object is passed there and the other parameters get plain values. The hooks the
-// object's class runs (__serialize, __sleep, __toString, jsonSerialize) are counted per serializer.
+// Each parameter that can take an object gets one, and the other parameters get plain values. The hooks
+// the object's class runs (__serialize, __sleep, __toString, jsonSerialize) are counted per serializer.
 // Blocking and server-changing methods are not called.
 
 final class Counter implements JsonSerializable
