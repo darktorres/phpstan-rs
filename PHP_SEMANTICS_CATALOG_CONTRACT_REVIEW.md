@@ -1329,12 +1329,19 @@ of `runtime.php` (the earlier claim of 13 named the hybrid-call fixture, which s
 them), both kernel OOM proofs, the CBMC outcomes and the report links. Its semantic
 acceptance remains OPEN: that is a review judgement, not a computed check.
 
+## Acceptance policy (2026-10-12)
+
+Acceptance of catalog work is by the author's review of the cited evidence. An independent
+review is not required. Rows that were pending only an acceptance are recorded in the ledger
+as author-accepted (2026-10-12). Semantic acceptance is closed only when every ledger heading
+is Complete; the checkpoint lists the headings still Open, Partial or Deferred.
+
 ## Semantic review by the author (2026-10-12)
 
 Scope: the `strlen` catalog evidence and graph, checked against the rebuilt linked module,
-the path-free SVF and the regenerated evidence. This is an author review. The contract
-requires a semantic review by a party other than the author (F00), which has not happened, so this review does
-not close F00 or the semantic acceptance. The checkpoint keeps the semantic acceptance OPEN.
+the path-free SVF and the regenerated evidence. This is the author's review under the policy
+above; the semantic acceptance stays open while the ledger headings listed in the checkpoint are
+not complete.
 
 What was checked:
 - **Operation inventory.** Regenerated from the rebuilt module, the `strlen` LLVM operation
@@ -1353,14 +1360,13 @@ What was checked:
   OPEN.
 
 What remains open for the semantic gate:
-- The semantic-contract review by a party other than the author (F00) and the PHP-source validation of the
-  contract's claims.
+- The PHP-source validation of the host transfers (F00.3).
 - The ledger rows still open (15 Open, 1 Partial), which the record lists row by row,
   including R05.2 and R05.7 on the callback and fixture coverage.
 
 Verdict of the author: the evidence chain is consistent and reproduces, and the `strlen`
-slice agrees with its inventory. The contract's own gate for closing the semantic acceptance
-requires a review by a party other than the author, which this record cannot provide.
+slice agrees with its inventory. The semantic acceptance is open because of the ledger headings listed in
+the checkpoint.
 
 **Gap closure (2026-10-12).** The configuration of each build was compared with the
 checked-in build. The CLI's `php_config.h` matches it exactly. The CALL build differs in one

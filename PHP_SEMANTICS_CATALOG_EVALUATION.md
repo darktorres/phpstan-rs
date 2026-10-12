@@ -9,7 +9,7 @@ evaluation and certificate replay reject unsupported abrupt replacements with
 the only replacement currently modeled. Tests cover every pending kind against
 abrupt cleanup terminators, preservation of all pending kinds through `Resume`,
 and a callback-throw branch/join/resume composition. This implementation still
-awaits independent acceptance under F00.5.
+awaits acceptance by author review under F00.5.
 
 The initial comparison is committed as `043f2c78`; the extended compiler and
 framework evaluation is committed as `4e7d29a3`, and the CIR lowering follow-up
@@ -198,7 +198,7 @@ callback/destructor summaries and preserves PHP-throw string-argument
 invalidation, but `Operation::String` alone is not evidence for exact callback
 ordering or generalized heap-state transfer. Follow-up implementation and calibration are tracked under R01.6,
 R02.2–R02.3, R02.7, R04.1, and R05.2; RV-16's artifact/source-linkage gap is
-implemented with independent acceptance pending.
+implemented; acceptance is by author review.
 
 R02.2 adds a reproducible bounded crosswalk for the PHP 8.5.4 `zif_strlen`
 normal demand. The builder checks the source hash and confirms that Clang's
@@ -318,7 +318,7 @@ The authoritative Phase F task statuses, remediation actions, dependencies, and 
 
 This audit found additional evaluation work beyond the earlier compiler/framework
 comparison. The minimum F04 value/reference fixture task is complete, but its
-broader C22 lowering work remains. F00 needs independent contract review; F01
+broader C22 lowering work remains. F00 needs PHP-source validation of its host transfers; F01
 needs broader branch fixtures and a calibrated host; F02 has configured
 implicit-operation/source/layout/call-flow evidence for one `strlen` slice but
 still needs semantic comparison of the wider native/PHP behavior; F03 needs

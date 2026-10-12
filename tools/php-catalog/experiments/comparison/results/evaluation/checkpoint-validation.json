@@ -4,7 +4,7 @@
     {
       "check": "Python syntax",
       "status": "passed",
-      "detail": "29 files; failing: []"
+      "detail": "31 files; failing: []"
     },
     {
       "check": "JSON/compressed measurements",
@@ -42,5 +42,5 @@
       "detail": "broken: []"
     }
   ],
-  "semantic_acceptance": "OPEN"
+  "semantic_acceptance": "OPEN: F00.1 (Partial), F00.2 (Partial), F00.3 (Partial), F00.4 (Partial), F01.1 (Partial), F01.2 (Partial), F01.4 (Partial), F01.5 (Open), F02.1 (Partial), F02.3 (Partial), F02.4 (Partial), F02.5 (Open), F03.2 (Partial), F03.3 (Open), F03.4 (Open), F04.2 (Deferred), F05.1 (Partial), F05.3 (Partial), F05.4 (Partial), F05.6 (Open), F05.7 (Open), F06.1 (Partial), F06.3 (Open), F06.4 (Open), F06.5 (Open)"
 }

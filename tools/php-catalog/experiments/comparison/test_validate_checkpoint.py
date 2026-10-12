@@ -18,7 +18,7 @@ class CheckpointTests(unittest.TestCase):
             self.assertEqual(CHECKPOINT.main(["--output", str(output)]), 0)
             document = json.loads(output.read_text())
         self.assertEqual(document["status"], "passed")
-        self.assertEqual(document["semantic_acceptance"], "OPEN")
+        self.assertTrue(document["semantic_acceptance"].startswith("OPEN: "))
         self.assertTrue(all(item["status"] == "passed" for item in document["checks"]))
 
 

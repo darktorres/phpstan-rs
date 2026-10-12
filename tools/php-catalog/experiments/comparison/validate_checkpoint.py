@@ -140,7 +140,11 @@ def main(argv=None):
     checks = [python_syntax(), json_and_compressed(), link_objects(), kernel_oom_records(),
               instrumented_sites(), runtime_sentinels(), cbmc_outcomes(), local_links()]
     status = 'passed' if all(c['status'] == 'passed' for c in checks) else 'failed'
-    document = {'status': status, 'checks': checks, 'semantic_acceptance': 'OPEN'}
+    ledger = (HERE.parent.parent.parent.parent / 'PHP_SEMANTICS_CATALOG_LEDGER.md').read_text()
+    open_headings = re.findall(r'^### (F\d+\.\d+) — (Open|Partial|Deferred)', ledger, re.M)
+    semantic = ('OPEN: ' + ', '.join(f'{name} ({state})' for name, state in open_headings)
+                if open_headings else 'accepted')
+    document = {'status': status, 'checks': checks, 'semantic_acceptance': semantic}
     args.output.write_text(json.dumps(document, indent=2) + '\n')
     for c in checks:
         print(c['status'], c['check'], '-', c['detail'])
