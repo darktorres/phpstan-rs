@@ -27,7 +27,7 @@ cd "$ROOT/php-src"
 if [ "${4:-}" = CALL ]; then
   export php_cv_preserve_none=no
 fi
-CC=clang-21 CXX=clang++-21 \
+CC=${PHP_CC:-clang-21} CXX=${PHP_CXX:-clang++-21} \
 CFLAGS="-O0 -g -ffile-prefix-map=$ROOT=. -include $HERE/php-fixed-time.h" \
   ./configure --disable-all --disable-cgi --disable-phpdbg --without-pear \
   --enable-cli --enable-session

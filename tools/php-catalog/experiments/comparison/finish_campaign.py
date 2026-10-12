@@ -10,7 +10,7 @@ import time
 
 from evaluation import EnforcedRunner, recipes
 from campaign import expected_outcome, step_passed
-from run import HERE, digest, svf_command
+from run import HERE, digest, recorded, svf_command
 
 
 def require_success(success, name):
@@ -99,8 +99,8 @@ def validate_finish_completion(output, cir_results):
         raise ValueError(f'finish campaign contains failed steps: {failures}')
 
 
-def instrumented(cache, runner, php_source):
-    whole = cache/'whole-clang/php-cli.bc'
+def instrumented(cache, runner, php_source, evaluation):
+    whole = evaluation/'php-cli.bc'
     helper = runner.output/'instrument'
     for name in ['instrument', 'closure']:
         command = ['clang++-21', '-std=c++17', '-O1', '-I/usr/lib/llvm-21/include', HERE/(name+'.cpp'),
@@ -109,7 +109,7 @@ def instrumented(cache, runner, php_source):
     modified, sites = runner.output/'php-instrumented.bc', runner.output/'sites.json'
     require_success(runner.run('instrument-whole', [helper, whole, modified, sites], timeout=600), 'instrument-whole')
     require_success(runner.run('instrument-verify', ['opt-21', '-passes=verify', '-disable-output', modified], timeout=600), 'instrument-verify')
-    manifest = json.loads((cache/'whole-clang/link-manifest.json').read_text())
+    manifest = json.loads((evaluation/'link-manifest.json').read_text())
     php = php_source
     asm = [php/x['object'] for x in manifest['objects'] if x.get('reason') == 'native-assembly-boundary']
     binary = runner.output/'php-instrumented'
@@ -142,16 +142,17 @@ def instrumented(cache, runner, php_source):
 
 
 def gcc_profile(cache, runner):
-    php = cache/'php-src-gcc'
-    environment = dict(os.environ)
-    environment['PATH'] = str(cache/'deps/usr/bin') + ':' + environment['PATH']
-    environment['BISON_PKGDATADIR'] = str(cache/'deps/usr/share/bison')
-    require_success(runner.run('gcc-buildconf', ['./buildconf', '--force'], cwd=php, env=environment), 'gcc-buildconf')
-    environment.update(CC='gcc', CXX='g++', CFLAGS='-O0 -g')
-    require_success(runner.run('gcc-configure', ['./configure', '--disable-all', '--disable-cgi', '--disable-phpdbg',
-        '--without-pear', '--enable-cli', '--enable-session'], cwd=php, env=environment, timeout=600), 'gcc-configure')
-    require_success(runner.run('gcc-build', ['make', '-j2'], cwd=php, env=environment, timeout=1800), 'gcc-build')
-    require_success(runner.run('gcc-runtime', [php/'sapi/cli/php', '-n', HERE/'runtime.php']), 'gcc-runtime')
+    """GCC dumps for the path-free PHP tree: the tree is built by build_php_pathfree.sh with gcc.
+
+    Each unit is compiled from the spelling make used, with the tree as the working
+    directory, so the dumps name sources relative to the tree.
+    """
+    php = cache / 'root/php-gcc'
+    environment = dict(os.environ, PHP_CC='gcc', PHP_CXX='g++')
+    environment['LD_LIBRARY_PATH'] = str(cache / 'root/deps/usr/lib/x86_64-linux-gnu')
+    require_success(runner.run('gcc-tree', [HERE/'build_php_pathfree.sh', php, cache/'root/php-src',
+        cache/'root/deps/usr'], env=environment, timeout=3600), 'gcc-tree')
+    require_success(runner.run('gcc-runtime', [php/'sapi/cli/php', '-n', HERE/'runtime.php'], env=environment), 'gcc-runtime')
     commands, linked, link = recipes(php)
     manifest = dict(link_command=link, php_config_sha256=digest(php/'main/php_config.h'),
         vm_header_sha256=digest(php/'Zend/zend_vm_execute.h'), binary_sha256=digest(php/'sapi/cli/php'),
@@ -164,11 +165,11 @@ def gcc_profile(cache, runner):
         flags=recipe['command'][1:recipe['command'].index('-c')]
         output=runner.output/('gcc-'+str(i)+'.o')
         success=runner.run('gcc-'+str(i)+'-gimple', ['gcc','-fdump-tree-gimple','-fdump-tree-cfg','-fdump-tree-eh',
-            *flags,'-c',source,'-o',output],cwd=php,timeout=600)
+            *flags,'-c',recipe['source_arg'],'-o',output],cwd=php,timeout=600)
         require_success(success, 'gcc-'+str(i)+'-gimple')
         manifest['objects'].append(dict(object=target,source=str(source),source_sha256=digest(source),
             imported=success,command=recipe['command']))
-        (runner.output/'gcc-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+        (runner.output/'gcc-manifest.json').write_text(json.dumps(recorded(manifest),indent=2)+'\n')
 
 
 def cir_profile(cache, runner, php_source):
@@ -176,20 +177,21 @@ def cir_profile(cache, runner, php_source):
     if not runner.run('cir-build', ['cmake','--build',build,'--target','clang','--parallel','8'],timeout=14400):
         raise RuntimeError('CIR compiler build failed; source-level CIR rejections cannot be classified')
     compiler=build/'bin/clang'
-    fixture_inputs=[('dispatch',HERE/'dispatch.c',[]),('platform',HERE/'platform.c',[]),
-        ('cleanup',HERE/'cleanup.cpp',['-std=c++17']),
-        ('cleanup-windows',HERE/'cleanup.cpp',['-std=c++17','--target=x86_64-pc-windows-msvc','-fexceptions','-fcxx-exceptions'])]
+    # Each entry: name, source as the command names it, working directory, flags.
+    fixture_inputs=[('dispatch','dispatch.c',HERE,[]),('platform','platform.c',HERE,[]),
+        ('cleanup','cleanup.cpp',HERE,['-std=c++17']),
+        ('cleanup-windows','cleanup.cpp',HERE,['-std=c++17','--target=x86_64-pc-windows-msvc','-fexceptions','-fcxx-exceptions'])]
     php=php_source
     commands, linked, _=recipes(php)
     for target in linked:
-        recipe=commands[target]; source=Path(recipe['source'])
-        if source.suffix.lower() in ['.s','.asm']:continue
+        recipe=commands[target]
+        if Path(recipe['source']).suffix.lower() in ['.s','.asm']:continue
         flags=recipe['command'][1:recipe['command'].index('-c')]
-        fixture_inputs.append(('php-'+target.replace('/','-'),source,flags))
+        fixture_inputs.append(('php-'+target.replace('/','-'),recipe['source_arg'],php,flags))
     results=[]
-    for name, source, flags in fixture_inputs:
+    for name, source, directory, flags in fixture_inputs:
         result=runner.run(name+'-cir', [compiler,'-fclangir','-S','-Xclang','-emit-cir',*flags,
-            source,'-o',runner.output/(name+'.cir')],cwd=php,timeout=600)
+            source,'-o',runner.output/(name+'.cir')],cwd=directory,timeout=600)
         measurement=runner.measurements[-1]
         if not result and (measurement.get('stopped') is not None
                            or measurement.get('exit_code') != 1):
@@ -203,7 +205,7 @@ def cir_profile(cache, runner, php_source):
             stderr_sha256=digest(runner.output/(name+'-cir.err')),
             **(dict(output_path=str(cir_path.resolve()), output_sha256=digest(cir_path)) if result else {}),
         ))
-        (runner.output/'cir-imports.json').write_text(json.dumps(results,indent=2)+'\n')
+        (runner.output/'cir-imports.json').write_text(json.dumps(recorded(results),indent=2)+'\n')
 
 
 def main():
@@ -214,12 +216,14 @@ def main():
     parser.add_argument('--php-source',type=Path)
     parser.add_argument('--stock-dvf',type=Path)
     parser.add_argument('--campaign',type=Path,help='the campaign output directory (default: CACHE/campaign)')
+    parser.add_argument('--output',type=Path,help='the finish output directory (default: CACHE/finish)')
+    parser.add_argument('--evaluation',type=Path,help='the linked-module evaluation directory (php-cli.bc, link-manifest.json)')
     args=parser.parse_args();cache=args.cache.resolve()
     campaign=args.campaign.resolve() if args.campaign else cache/'campaign'
     ready=campaign/'completed.json'
     while not ready.exists():time.sleep(1)
     validate_campaign_completion(cache, campaign)
-    runner=EnforcedRunner(cache/('finish' if args.stage=='all' else 'finish-'+args.stage))
+    runner=EnforcedRunner(args.output.resolve() if args.output else cache/('finish' if args.stage=='all' else 'finish-'+args.stage))
     if args.stage=='gcc':
         gcc_profile(cache,runner)
         return
@@ -245,7 +249,7 @@ def main():
             step='layout-'+candidate+'-'+name
             require_success(runner.run(step, svf_command(binary,'-dfs','-query=funptr','-stat','-print-query-pts',
                 *flags,campaign/'layout_cases-promoted.bc')), step)
-    instrumented(cache,runner,php_source)
+    instrumented(cache,runner,php_source,args.evaluation.resolve() if args.evaluation else cache/'whole-clang')
     gcc_profile(cache,runner)
     cir_profile(cache,runner,php_source)
     measurements_path=runner.output/'measurements.json'
