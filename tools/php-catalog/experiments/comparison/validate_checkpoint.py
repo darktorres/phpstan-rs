@@ -133,6 +133,32 @@ def local_links():
     return check('local report links', not broken, f'broken: {broken}')
 
 
+OPEN_WORDS = re.compile(r'\b(open|remains?|pending|partial|deferred)\b', re.IGNORECASE)
+COMPLETE_STATUS = re.compile(r'(Implementation (and \w+ )?complete|Complete)\b')
+
+
+def r_row_accepted(status):
+    """An R row is accepted when its status records author acceptance, or a completed
+    implementation with no open-ended words. A status that says a part remains open is not
+    accepted, even when it begins with "Complete"."""
+    if OPEN_WORDS.search(status):
+        return False
+    return 'author-accepted' in status or bool(COMPLETE_STATUS.match(status))
+
+
+def semantic_acceptance(ledger):
+    headings = re.findall(r'^### (F\d+\.\d+) — (Open|Partial|Deferred)', ledger, re.M)
+    rows = [(rid, status) for rid, status in re.findall(r'^- \*\*(R\d+\.\d+) — (.*?)\*\*', ledger, re.M)
+            if not r_row_accepted(status)]
+    if not headings and not rows:
+        return {'status': 'accepted'}
+    return {
+        'status': 'OPEN',
+        'headings': [{'id': name, 'state': state} for name, state in headings],
+        'rows': [{'id': rid, 'status': status} for rid, status in rows],
+    }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=EVIDENCE / 'checkpoint-validation.json')
@@ -141,9 +167,7 @@ def main(argv=None):
               instrumented_sites(), runtime_sentinels(), cbmc_outcomes(), local_links()]
     status = 'passed' if all(c['status'] == 'passed' for c in checks) else 'failed'
     ledger = (HERE.parent.parent.parent.parent / 'PHP_SEMANTICS_CATALOG_LEDGER.md').read_text()
-    open_headings = re.findall(r'^### (F\d+\.\d+) — (Open|Partial|Deferred)', ledger, re.M)
-    semantic = ('OPEN: ' + ', '.join(f'{name} ({state})' for name, state in open_headings)
-                if open_headings else 'accepted')
+    semantic = semantic_acceptance(ledger)
     document = {'status': status, 'checks': checks, 'semantic_acceptance': semantic}
     args.output.write_text(json.dumps(document, indent=2) + '\n')
     for c in checks:

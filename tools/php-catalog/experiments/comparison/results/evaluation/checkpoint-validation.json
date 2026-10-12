@@ -42,5 +42,179 @@
       "detail": "broken: []"
     }
   ],
-  "semantic_acceptance": "OPEN: F00.1 (Partial), F00.2 (Partial), F00.3 (Partial), F00.4 (Partial), F01.1 (Partial), F01.2 (Partial), F01.4 (Partial), F01.5 (Open), F02.1 (Partial), F02.3 (Partial), F02.4 (Partial), F02.5 (Open), F03.2 (Partial), F03.3 (Open), F03.4 (Open), F04.2 (Deferred), F05.1 (Partial), F05.3 (Partial), F05.4 (Partial), F05.6 (Open), F05.7 (Open), F06.1 (Partial), F06.3 (Open), F06.4 (Open), F06.5 (Open)"
+  "semantic_acceptance": {
+    "status": "OPEN",
+    "headings": [
+      {
+        "id": "F00.1",
+        "state": "Partial"
+      },
+      {
+        "id": "F00.2",
+        "state": "Partial"
+      },
+      {
+        "id": "F00.3",
+        "state": "Partial"
+      },
+      {
+        "id": "F00.4",
+        "state": "Partial"
+      },
+      {
+        "id": "F01.1",
+        "state": "Partial"
+      },
+      {
+        "id": "F01.2",
+        "state": "Partial"
+      },
+      {
+        "id": "F01.4",
+        "state": "Partial"
+      },
+      {
+        "id": "F01.5",
+        "state": "Open"
+      },
+      {
+        "id": "F02.1",
+        "state": "Partial"
+      },
+      {
+        "id": "F02.3",
+        "state": "Partial"
+      },
+      {
+        "id": "F02.4",
+        "state": "Partial"
+      },
+      {
+        "id": "F02.5",
+        "state": "Open"
+      },
+      {
+        "id": "F03.2",
+        "state": "Partial"
+      },
+      {
+        "id": "F03.3",
+        "state": "Open"
+      },
+      {
+        "id": "F03.4",
+        "state": "Open"
+      },
+      {
+        "id": "F04.2",
+        "state": "Deferred"
+      },
+      {
+        "id": "F05.1",
+        "state": "Partial"
+      },
+      {
+        "id": "F05.3",
+        "state": "Partial"
+      },
+      {
+        "id": "F05.4",
+        "state": "Partial"
+      },
+      {
+        "id": "F05.6",
+        "state": "Open"
+      },
+      {
+        "id": "F05.7",
+        "state": "Open"
+      },
+      {
+        "id": "F06.1",
+        "state": "Partial"
+      },
+      {
+        "id": "F06.3",
+        "state": "Open"
+      },
+      {
+        "id": "F06.4",
+        "state": "Open"
+      },
+      {
+        "id": "F06.5",
+        "state": "Open"
+      }
+    ],
+    "rows": [
+      {
+        "id": "R00.2",
+        "status": "Complete (definition only; implementation conformance remains open)"
+      },
+      {
+        "id": "R00.3",
+        "status": "Complete (matrix/audit only; semantic gaps remain open)"
+      },
+      {
+        "id": "R02.3",
+        "status": "Partial: selected source-linked evidence only; broader acceptance open"
+      },
+      {
+        "id": "R02.5",
+        "status": "Evidence implemented; graph model remains open"
+      },
+      {
+        "id": "R02.7",
+        "status": "Implementation partial; cleanup/order integration remains open"
+      },
+      {
+        "id": "R03.1",
+        "status": "Open"
+      },
+      {
+        "id": "R03.4",
+        "status": "Implementation updated; identity checks validated; linked-module replay pending"
+      },
+      {
+        "id": "R03.2",
+        "status": "Open"
+      },
+      {
+        "id": "R03.3",
+        "status": "Open"
+      },
+      {
+        "id": "R22.1",
+        "status": "Deferred"
+      },
+      {
+        "id": "R05.4",
+        "status": "Open"
+      },
+      {
+        "id": "R05.2",
+        "status": "Implementation partial; acceptance open"
+      },
+      {
+        "id": "R05.7",
+        "status": "Open"
+      },
+      {
+        "id": "R06.1",
+        "status": "Open"
+      },
+      {
+        "id": "R06.2",
+        "status": "Open"
+      },
+      {
+        "id": "R06.4",
+        "status": "Open"
+      },
+      {
+        "id": "R06.3",
+        "status": "Open"
+      }
+    ]
+  }
 }
