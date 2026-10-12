@@ -1,0 +1,28 @@
+name: catalog-evidence
+
+on:
+  push:
+    paths:
+      - 'tools/php-catalog/experiments/comparison/**'
+  pull_request:
+    paths:
+      - 'tools/php-catalog/experiments/comparison/**'
+
+jobs:
+  comparison-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the locked PHP source by tag and check its digest
+        run: |
+          git clone --depth 1 --branch php-8.5.4 https://github.com/php/php-src.git "$RUNNER_TEMP/php-src"
+          test "$(git -C "$RUNNER_TEMP/php-src" rev-parse HEAD)" = "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03"
+          test "$(sha256sum "$RUNNER_TEMP/php-src/Zend/zend_builtin_functions.c" | cut -d' ' -f1)" = "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
+
+      - name: Run the comparison tests, including the byte-for-byte regeneration
+        env:
+          PHP_CATALOG_SOURCE: ${{ runner.temp }}/php-src/Zend/zend_builtin_functions.c
+          TMPDIR: ${{ runner.temp }}
+        working-directory: tools/php-catalog/experiments/comparison
+        run: python3 -m unittest discover -p 'test_*.py' -v
