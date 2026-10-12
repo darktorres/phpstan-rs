@@ -172,7 +172,7 @@ def main():
             if 'clang-21' not in words or '-c' not in words:
                 continue
             compiler_at, source_at = words.index('clang-21'), words.index('-c')
-            if words[source_at + 1] != str(php / path):
+            if (php / words[source_at + 1]).resolve() != (php / path).resolve():
                 continue
             flags = [x for x in words[compiler_at + 1:source_at] if not x.startswith('-O') and x != '-g']
             compile_recipes[path] = dict(command=words[compiler_at:], frontend_flags=flags)
@@ -183,7 +183,8 @@ def main():
              ('cleanup', HERE / 'cleanup.cpp', 'cleanup', ['-std=c++17'], 'clang++-21'),
              ('external', HERE / 'external.c', 'external_write_entry', [], 'clang-21'),
              ('platform', HERE / 'platform.c', '*', [], 'clang-21')]
-    units += [('php-' + key, php / path, entries, build_flags(path), 'clang-21')
+    # Sources are named relative to the tree, as make names them, so the outputs carry no build root.
+    units += [('php-' + key, Path(path), entries, build_flags(path), 'clang-21')
               for key, (path, entries) in PHP_UNITS.items()]
     summaries = []
     for name, source, entries, flags, compiler in units:
