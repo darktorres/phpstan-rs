@@ -4130,10 +4130,14 @@ impl Reach<'_> {
     /// properties, by their declared types, which die with it when nothing
     /// else holds them.
     fn destroy_held(&self, class: &Name) -> Holder {
-        self.registry
+        let held = self
+            .registry
             .reach_memo
             .destroy_held
-            .get_or_compute(class.clone(), || self.compute_destroy_held(class))
+            .get_or_compute(class.clone(), || self.compute_destroy_held(class));
+        #[cfg(debug_assertions)]
+        assert_eq!(held, self.compute_destroy_held(class));
+        held
     }
 
     fn compute_destroy_held(&self, class: &Name) -> Holder {
