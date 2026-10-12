@@ -1328,14 +1328,13 @@ acceptance remains OPEN: that is a review judgement, not a computed check.
 
 Acceptance of catalog work is by the author's review of the cited evidence. An independent
 review is not required. Rows that were pending only an acceptance are recorded in the ledger
-as author-accepted (2026-10-12). Semantic acceptance is closed only when every ledger heading
-is Complete and every R row is accepted. A row is accepted when its status records
-`author-accepted`, or a completed implementation with no open-ended words (open, remains,
-pending, partial, deferred). `checkpoint-validation.json` lists each heading and row that is
-not accepted, and `validate_checkpoint.py` derives the list from the ledger. A row that
-closes for a narrower scope than its topic says so in its status, and names the row that
-owns the rest (R00.2 closes as a definition with conformance under R01.5, as the review
-records).
+as author-accepted (2026-10-12). Semantic acceptance is closed only when every ledger heading is Complete and every R row
+is accepted. Each R row states its acceptance on the line under its title: `Acceptance:
+accepted` or `Acceptance: not accepted`. A row that closes for a narrower scope than its
+topic is accepted with a `Scope:` line and a `Remainder:` line naming the row or heading
+that owns the rest (R00.2 closes as a definition, with conformance under R01.5, as the
+review records). A row without such a line is not accepted. `validate_checkpoint.py` reads
+these lines and writes the open headings and rows to `checkpoint-validation.json`.
 
 ## Semantic review by the author (2026-10-12)
 
