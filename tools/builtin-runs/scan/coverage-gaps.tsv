@@ -231,7 +231,6 @@ imagickdraw::setfillpatternurl	0	value	threw:ImagickException:not a relative URL
 imagickdraw::setfont	0	file-or-font	threw:ImagickException:The path does not exist: /tmp/probe-scan-6089/rec:/probe
 imagickdraw::setfontfamily	0	file-or-font	threw:ImagickDrawException:Unable to set font family; parameter not found in the list of configured fonts
 imagickdraw::setstrokepatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetStrokePatternURL/5420
-imagickdraw::setvectorgraphics	0	value	threw:ImagickException:ParseError root tag missing @ warning/xml-tree.c/NewXMLTree/1915
 mb_ereg_search	0	state	threw:Error:No string was provided
 mb_ereg_search	1	state	threw:Error:No string was provided
 mb_ereg_search_pos	0	state	threw:Error:No string was provided
@@ -239,7 +238,6 @@ mb_ereg_search_pos	1	state	threw:Error:No string was provided
 mb_ereg_search_regs	0	state	threw:Error:No string was provided
 mb_ereg_search_regs	1	state	threw:Error:No string was provided
 memcached::__construct	2	value	no-output
-method_exists	1	value	threw:TypeError:method_exists(): Argument #1 ($object_or_class) must be of type object|string, int given
 mysqli::__construct	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
 mysqli::__construct	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
 mysqli::__construct	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
@@ -392,7 +390,6 @@ mysqli_store_result	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_thread_id	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_use_result	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_warning_count	0	server	threw:Error:mysqli object is not fully initialized
-pack	0	value	threw:ValueError:Type r: unknown format code
 pdostatement::fetchall	1	arity	threw:ArgumentCountError:PDOStatement::fetchAll() expects exactly 1 argument for the fetch mode provided, 2 given
 pdostatement::fetchobject	0	class-name	threw:TypeError:PDOStatement::fetchObject(): Argument #1 ($class) must be a valid class name, rec://probe given
 pdostatement::fetchobject	1	class-name	threw:TypeError:PDOStatement::fetchObject(): Argument #1 ($class) must be a valid class name, x given
@@ -594,9 +591,7 @@ pg_update	2	server	threw:TypeError:pg_update(): Argument #1 ($connection) must b
 pg_update	3	server	threw:TypeError:pg_update(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
 pg_update	4	server	threw:TypeError:pg_update(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
 pg_version	0	server	threw:TypeError:pg_version(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
-php_uname	0	value	threw:ValueError:php_uname(): Argument #1 ($mode) must be a single character
 proc_open	1	value	threw:ValueError:proc_open(): Argument #2 ($descriptor_spec) must only contain arrays and streams
-property_exists	1	value	threw:TypeError:property_exists(): Argument #1 ($object_or_class) must be of type object|string, int given
 random\engine\mt19937::__construct	0	state	threw:ReflectionException:Class Random\Engine\Mt19937 is an internal class marked as final that cannot be instantiated without invoking its constructor
 random\engine\mt19937::__construct	1	state	threw:ReflectionException:Class Random\Engine\Mt19937 is an internal class marked as final that cannot be instantiated without invoking its constructor
 random\engine\mt19937::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\Mt19937 object
@@ -1274,7 +1269,6 @@ sessionhandler::open	1	session	threw:Error:Session is not active
 sessionhandler::read	0	session	threw:Error:Session is not active
 sessionhandler::write	0	session	threw:Error:Session is not active
 sessionhandler::write	1	session	threw:Error:Session is not active
-settype	1	value	threw:ValueError:settype(): Argument #2 ($type) must be a valid type
 simplexml_import_dom	0	value	threw:TypeError:simplexml_import_dom(): Argument #1 ($node) must be a valid XML node
 simplexml_import_dom	1	class-name	threw:TypeError:simplexml_import_dom(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
 simplexml_load_file	1	class-name	threw:TypeError:simplexml_load_file(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
@@ -1327,10 +1321,8 @@ stream_wrapper_register	0	class-name	threw:TypeError:stream_wrapper_register(): 
 stream_wrapper_register	1	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, rec://probe given
 stream_wrapper_register	2	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
 substr_count	3	value	threw:ValueError:substr_count(): Argument #4 ($length) must be contained in argument #1 ($haystack)
-trigger_error	1	value	threw:ValueError:trigger_error(): Argument #2 ($error_level) must be one of E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, or E_USER_DEPRECATED
 uconverter::__construct	0	value	threw:IntlException:UConverter::__construct(): returned error 4: U_FILE_ACCESS_ERROR
 uconverter::__construct	1	value	threw:IntlException:UConverter::__construct(): returned error 4: U_FILE_ACCESS_ERROR
-unpack	0	value	threw:ValueError:Invalid format type r
 uri\rfc3986\uri::__construct	0	state	threw:ReflectionException:Class Uri\Rfc3986\Uri is an internal class marked as final that cannot be instantiated without invoking its constructor
 uri\rfc3986\uri::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\Rfc3986\Uri object
 uri\rfc3986\uri::equals	0	value	threw:TypeError:Uri\Rfc3986\Uri::equals(): Argument #1 ($uri) must be of type Uri\Rfc3986\Uri, string given
@@ -1339,8 +1331,6 @@ uri\whatwg\invalidurlexception::__construct	2	value	threw:ValueError:Uri\WhatWg\
 uri\whatwg\url::__construct	0	state	threw:ReflectionException:Class Uri\WhatWg\Url is an internal class marked as final that cannot be instantiated without invoking its constructor
 uri\whatwg\url::__construct	2	state	threw:ReflectionException:Class Uri\WhatWg\Url is an internal class marked as final that cannot be instantiated without invoking its constructor
 uri\whatwg\url::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\WhatWg\Url object
-user_error	1	value	threw:ValueError:user_error(): Argument #2 ($error_level) must be one of E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, or E_USER_DEPRECATED
-version_compare	2	value	threw:ValueError:version_compare(): Argument #3 ($operator) must be a valid comparison operator
 weakmap::offsetget	0	value	threw:Error:Object Closure#195 not contained in WeakMap
 xml_set_character_data_handler	0	state	threw:ValueError:xml_set_character_data_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
 xml_set_default_handler	0	state	threw:ValueError:xml_set_default_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
