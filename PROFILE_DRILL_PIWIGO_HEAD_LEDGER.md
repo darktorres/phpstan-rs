@@ -37,9 +37,9 @@ Each callgrind run is one process, `--separate-threads=yes`, on Piwigo with `che
 | M3 | callgrind cold-with-store | 56.24 G | 53.13 G (C8) | unpaired |
 | M4 | hyperfine off, 5 runs | 4.22 s ± 0.11 (`97df097c`) | 4.12 s ± 0.39 | unpaired; baseline is pre-fix, not `9071f48f` |
 | M5 | hyperfine warm, 5 runs | 3.56 s ± 0.04 (`97df097c`) | 3.77 s ± 0.29 | unpaired; baseline is pre-fix |
-| M6 | heap total allocated | 7.43 GB, 46.17 M blocks (`df603944`) | 7.41 GB, 43.00 M | stub state and settings not recorded for either |
-| M7 | heap peak retained | 0.88 GB (`df603944`) | 1.48 GB | as M6 |
-| M8 | heap retained at exit | 0.66 GB (`df603944`) | 1.13 GB | as M6 |
+| M6 | heap total allocated, both warm | — | 6.278 GB, 37.51 M blocks (HEAD, paired heap run H) | the unpaired 7.41 GB run is superseded: it had no recorded stub state, and warm HEAD allocates 15% less |
+| M7 | heap peak retained, both warm | — | 1.414 GB (7.75 M blocks) | the 1.48 GB run is superseded, as M6 |
+| M8 | heap retained at exit, both warm | — | 1.080 GB (6.54 M blocks) | the 1.13 GB run is superseded, as M6 |
 | M9 | heap, 2026-10-03 | 2.67 GB, 19.44 M (`5fb858c9`) | not comparable | different commit and settings |
 | M10 | Piwigo findings | 611 (reference, not on disk) | 613 | `97df097c` and `97b8f3f0` outputs are byte-identical; see F1 |
 | M11 | oracle corpus, debug assertions | 35 panics (`97df097c`) | 0 panics, exit 0 | fixed by fix A (`5ddb4436`) and fix T (`97b8f3f0`) |
@@ -64,6 +64,17 @@ Fitting wall = serial + parallel ÷ threads to the 1, 2 and 4 thread points give
 
 Both binaries stop scaling after four threads. The eight-thread points are about 5 s for both, which the fit does not predict. The load average was not logged for these runs, so I can't yet say whether the other sessions on this machine caused the flattening.
 
+## Heap runs, paired (T11)
+
+Both binaries ran with the file cache off, both stub caches warm, and each stub-file check passed (no rewrite during a run). Their outputs are byte-identical.
+
+| run | binary | total allocated | peak retained | at exit |
+|---|---|---|---|---|
+| H | HEAD (`97b8f3f0`) | 6.278 GB, 37.51 M blocks | 1.414 GB, 7.75 M blocks | 1.080 GB, 6.54 M blocks |
+| T | single-pass `callees_of` variant | 6.090 GB, 37.34 M blocks | 1.426 GB, 7.75 M blocks | 1.078 GB, 6.53 M blocks |
+
+The variant is a throwaway worktree (`~/.cache/prs-e2v/t11`), not committed.
+
 ## Open tasks
 
 The order is the suggested one. Each row gives the cause with its measured evidence, the status, the change, and what shows it worked. Tasks marked "needs approval" are runs or builds that the ground rules hold until approved.
@@ -77,7 +88,7 @@ The order is the suggested one. Each row gives the cause with its measured evide
 | O5 | `Memo<DocBlock>::get` (`tag_block`), 57.8 MB at peak. Probe: 211,804 requests, 115,886 misses (distinct texts), 95,918 hits (45%). The memo's bound is 16,384 entries, so it runs at that bound for most of the run. It held 8 MB at `df603944`. | open, needs approval for the parse-cost measurement | Reduce the bound or the entry size, measuring the parse cost against the 45% hit rate. Why it was nearly empty at `df603944` is not known. | Peak retained falls; parse cost measured against hit rate. |
 | O6 | `Parser::token_ref` (parser.rs:567) has no `#[inline]`, with 7.76 M calls from `parse_expr_bp_inner` and 0.48 G self cost in the dhat profile. The release profile is thin LTO with `codegen-units = 1`; dhat sets `lto = false`. | open, needs approval for the release measurement | Add `#[inline]`, then measure in the release build, not dhat. | `token_ref` self falls in release; output unchanged. |
 | O7 | 6,801 target sets reach the set path, each at exactly 12 entries (`SCANNED`, effects.rs:1505), receiving about 7.5 M pushes (about 1,100 per set). | open, needs approval to count duplicate pushes | Dedupe pushes before they reach the set, or reduce set sizes. | Pushes into the set path fall; output unchanged. |
-| O8 | `callees_of` (effects.rs:2692 to 2699) runs twice for each live classification: a count pass (effects.rs:2712) that sizes the caller lists exactly, then a fill pass (2727). The chain is 18.85 M calls, 0.81 G self. | built: the single-pass variant is in the throwaway worktree `~/.cache/prs-e2v/t11`, binary at `~/.cache/prs-e2v/t11-target/dhat/phpstan-rs`. Needs approval for the paired heap runs. | Measure the peak and instruction count of HEAD and the single-pass variant back to back, under the protocol. | Both heap runs recorded as a pair, and the trade chosen from them. |
+| O8 | `callees_of` ran twice per live classification (count pass, then fill pass). | done in `19f78c3e`. Checks on master: clippy clean; effects module tests 25 passed; fixtures 3999 passed; Piwigo output byte-identical to HEAD's (613 findings). Measured before the commit: callgrind −0.70 G (1.4%) warm; allocations −3.0% total, +0.8% peak. Wall time waived, because other agents' load makes it unreliable. | — | — |
 | O9 | Depends on 20G plan row 19.2 (a batch frees each analysed tree when its check ends), which is OPEN. It covers the expression arena (78.5 MB at peak), `FileTable::with_paths` (27.2 MB), `ReferenceIndex::from_file_refs` (19.3 MB), and the effect table's buckets (15.7 MB). | depends on 20G row 19.2 | None here. | Row 19.2 closed in the 20G ledger. |
 
 Measurement and question tasks:
