@@ -16,9 +16,6 @@ arrayobject::__construct	2	class-name	threw:TypeError:ArrayObject::__construct()
 arrayobject::__unserialize	0	serialised	threw:UnexpectedValueException:Incomplete or ill-typed serialization data
 arrayobject::setiteratorclass	0	class-name	threw:TypeError:ArrayObject::setIteratorClass(): Argument #1 ($iteratorClass) must be a class name derived from ArrayIterator, rec://probe given
 arrayobject::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
-base_convert	0	value	threw:ValueError:base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)
-base_convert	1	value	threw:ValueError:base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)
-base_convert	2	value	threw:ValueError:base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)
 bcmath\number::__unserialize	0	serialised	threw:Exception:Invalid serialization data for BcMath\Number object
 cachingiterator::__construct	0	value	threw:BadMethodCallException:CachingIterator::getIterator() must be called exactly once per instance
 cachingiterator::__construct	1	value	threw:BadMethodCallException:CachingIterator::getIterator() must be called exactly once per instance
@@ -91,8 +88,6 @@ ds\stack::offsetget	0	value	threw:Error:Array access by key is not supported
 ds\stack::offsetset	0	value	threw:Error:Array access by key is not supported
 ds\stack::offsetset	1	value	threw:Error:Array access by key is not supported
 ds\stack::offsetunset	0	value	threw:Error:Array access by key is not supported
-easter_date	0	value	threw:ValueError:easter_date(): Argument #1 ($year) must be a year after 1970 (inclusive)
-easter_date	1	value	threw:ValueError:easter_date(): Argument #1 ($year) must be a year after 1970 (inclusive)
 extract	0	value	threw:Error:Cannot call extract() dynamically
 extract	1	value	threw:Error:Cannot call extract() dynamically
 extract	2	value	threw:ValueError:extract(): Argument #3 ($prefix) must be a valid identifier
@@ -100,7 +95,7 @@ fiber::__construct	0	receiver	threw:FiberError:Cannot call constructor twice
 fiber::resume	0	value	threw:FiberError:Cannot resume a fiber that is not suspended
 filesystemiterator::__construct	0	receiver	threw:Error:Directory object is already initialized
 filesystemiterator::__construct	1	receiver	threw:Error:Directory object is already initialized
-finfo::__construct	1	value	threw:Exception:finfo::__construct(/tmp/probe-scan-3367/rec): Failed to open stream: No such file or directory
+finfo::__construct	1	value	threw:Exception:finfo::__construct(/tmp/probe-scan-3371/rec): Failed to open stream: No such file or directory
 forward_static_call	0	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
 forward_static_call	1	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
 ftok	1	value	threw:ValueError:ftok(): Argument #2 ($project_id) must be a single character
@@ -207,25 +202,6 @@ gzcompress	2	value	threw:ValueError:gzcompress(): Argument #3 ($encoding) must b
 gzdeflate	2	value	threw:ValueError:gzdeflate(): Argument #3 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
 gzencode	2	value	threw:ValueError:gzencode(): Argument #3 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
 hash_init	1	value	threw:ValueError:hash_init(): Argument #3 ($key) must not be empty when HMAC is requested
-imageaffine	1	value	threw:ValueError:imageaffine(): Argument #2 ($affine) must have 6 elements
-imageaffine	2	value	threw:ValueError:imageaffine(): Argument #3 ($clip) must have an "x" key
-imageaffinematrixconcat	0	value	threw:ValueError:imageaffinematrixconcat(): Argument #1 ($matrix1) must have 6 elements
-imageaffinematrixconcat	1	value	threw:ValueError:imageaffinematrixconcat(): Argument #1 ($matrix1) must have 6 elements
-imagebmp	2	value	threw:TypeError:imagebmp(): Argument #2 ($file) must be a file name or a stream resource, int given
-imagecolormatch	1	value	threw:ValueError:imagecolormatch(): Argument #2 ($image2) must be Palette
-imageconvolution	1	value	threw:ValueError:imageconvolution(): Argument #2 ($matrix) must be a 3x3 array
-imagecrop	1	value	threw:ValueError:imagecrop(): Argument #2 ($rectangle) must have an "x" key
-imagefilledpolygon	1	value	threw:ValueError:imagefilledpolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
-imagejpeg	2	value	threw:TypeError:imagejpeg(): Argument #2 ($file) must be a file name or a stream resource, int given
-imageopenpolygon	1	value	threw:ValueError:imageopenpolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
-imagepng	2	value	threw:TypeError:imagepng(): Argument #2 ($file) must be a file name or a stream resource, int given
-imagepng	3	value	threw:TypeError:imagepng(): Argument #2 ($file) must be a file name or a stream resource, int given
-imagepolygon	0	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
-imagepolygon	1	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
-imagepolygon	2	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
-imagepolygon	3	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
-imagewbmp	2	value	threw:TypeError:imagewbmp(): Argument #2 ($file) must be a file name or a stream resource, int given
-imagewebp	2	value	threw:TypeError:imagewebp(): Argument #2 ($file) must be a file name or a stream resource, int given
 imagick::animateimages	0	value	threw:ImagickException:unable to open X server `rec://probe' @ error/animate.c/AnimateImages/308
 imagick::channelfximage	0	value	threw:ImagickException:missing image channel `rec' @ error/channel.c/ChannelFxImage/318
 imagick::clipimagepath	0	value	threw:ImagickException:no clip path defined '': No such file or directory @ error/image.c/ClipImagePath/725
@@ -236,11 +212,6 @@ imagick::colordecisionlistimage	0	value	threw:ImagickException:ParseError root t
 imagick::colormatriximage	0	value	threw:ImagickException:Color matrix array must be 5x5 or 6x6
 imagick::compareimagelayers	0	value	killed:6
 imagick::compleximages	0	value	threw:ImagickException:image sequence is required `' @ error/fourier.c/ComplexImages/187
-imagick::convolveimage	1	value	threw:TypeError:Imagick::convolveImage(): Argument #1 ($kernel) must be of type ImagickKernel, stdClass given
-imagick::cropimage	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
-imagick::cropimage	1	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
-imagick::cropimage	2	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
-imagick::cropimage	3	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
 imagick::deleteimageartifact	0	value	threw:ImagickException:Unable to delete image artifact
 imagick::deleteoption	0	value	threw:ImagickException:Unable to deleteOption
 imagick::displayimage	0	value	threw:ImagickException:unable to open X server `rec://probe' @ error/display.c/DisplayImages/1654
@@ -249,104 +220,48 @@ imagick::distortimage	0	value	threw:ImagickException:invalid argument for option
 imagick::distortimage	1	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
 imagick::distortimage	2	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
 imagick::drawimage	0	value	threw:ImagickException:Unable to draw image
-imagick::exportimagepixels	0	value	threw:ImagickException:The map contains disallowed characters
-imagick::exportimagepixels	1	value	threw:ImagickException:The map contains disallowed characters
-imagick::exportimagepixels	2	value	threw:ImagickException:The map contains disallowed characters
-imagick::exportimagepixels	3	value	threw:ImagickException:The map contains disallowed characters
-imagick::exportimagepixels	4	value	threw:ImagickException:The map contains disallowed characters
-imagick::exportimagepixels	5	value	threw:ImagickException:The map contains disallowed characters
-imagick::floodfillpaintimage	0	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
-imagick::floodfillpaintimage	1	value	threw:ImagickException:Unable to floodfill paint image
-imagick::floodfillpaintimage	2	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
-imagick::floodfillpaintimage	3	value	threw:ImagickException:Unable to floodfill paint image
-imagick::floodfillpaintimage	4	value	threw:ImagickException:Unable to floodfill paint image
-imagick::floodfillpaintimage	5	value	threw:ImagickException:Unable to floodfill paint image
-imagick::floodfillpaintimage	6	value	threw:ImagickException:Unable to floodfill paint image
-imagick::frameimage	0	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
-imagick::frameimage	1	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
-imagick::frameimage	2	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
-imagick::frameimage	3	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
-imagick::frameimage	4	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
-imagick::frameimagewithcomposite	0	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
-imagick::frameimagewithcomposite	1	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
-imagick::frameimagewithcomposite	2	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
-imagick::frameimagewithcomposite	3	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
-imagick::frameimagewithcomposite	4	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
-imagick::frameimagewithcomposite	5	value	threw:ImagickException:frame is less than image size `' @ error/decorate.c/FrameImage/218
 imagick::fximage	0	value	threw:ImagickException:Expected assignment after new UserSymbol 'rec' at '//probe' @ error/fx.c/TranslateExpression/2722
 imagick::fximage	1	value	threw:ImagickException:Expected operand at 'x' @ error/fx.c/GetOperand/2495
 imagick::getimagecolormapcolor	0	value	threw:ImagickException:invalid colormap index `MagickWand-0' @ error/magick-image.c/MagickGetImageColormapColor/4605
 imagick::getimageprofile	0	value	threw:ImagickException:Can not get image profile
-imagick::getimageregion	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
-imagick::getimageregion	1	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
-imagick::getimageregion	2	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
-imagick::getimageregion	3	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
-imagick::importimagepixels	0	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
-imagick::importimagepixels	1	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
-imagick::importimagepixels	2	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
-imagick::importimagepixels	3	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
-imagick::importimagepixels	4	value	threw:ImagickException:The map contains incorrect number of elements. Expected 11, array has 2
-imagick::importimagepixels	5	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
-imagick::importimagepixels	6	value	threw:ImagickException:The map contains incorrect number of elements. Expected 1, array has 2
-imagick::morphology	0	value	threw:TypeError:Imagick::morphology(): Argument #3 ($kernel) must be of type ImagickKernel, stdClass given
-imagick::morphology	1	value	threw:TypeError:Imagick::morphology(): Argument #3 ($kernel) must be of type ImagickKernel, stdClass given
-imagick::morphology	3	value	threw:TypeError:Imagick::morphology(): Argument #3 ($kernel) must be of type ImagickKernel, stdClass given
+imagick::importimagepixels	0	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
+imagick::importimagepixels	1	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
+imagick::importimagepixels	2	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
+imagick::importimagepixels	3	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
+imagick::importimagepixels	4	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
+imagick::importimagepixels	5	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
+imagick::importimagepixels	6	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
 imagick::newimage	3	value	threw:ImagickException:Unable to set the image format
-imagick::newpseudoimage	0	value	threw:ImagickException:Invalid pseudo format string
-imagick::newpseudoimage	1	value	threw:ImagickException:Invalid pseudo format string
 imagick::orderedditherimage	0	value	threw:ImagickException:invalid argument for option ordered-dither : 'rec://probe' @ error/threshold.c/OrderedDitherImage/1948
-imagick::pingimage	0	value	threw:ImagickException:unable to open image '/tmp/rec-5378.png': No such file or directory @ error/blob.c/OpenBlob/3710
+imagick::pingimage	0	value	threw:ImagickException:unable to open image '/tmp/rec-5475.png': No such file or directory @ error/blob.c/OpenBlob/3710
 imagick::pingimageblob	0	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/PingBlob/3803
-imagick::raiseimage	0	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
-imagick::raiseimage	1	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
-imagick::raiseimage	2	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
-imagick::raiseimage	3	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
-imagick::raiseimage	4	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
-imagick::readimage	0	value	threw:ImagickException:unable to open image '/tmp/rec-5432.png': No such file or directory @ error/blob.c/OpenBlob/3710
+imagick::readimage	0	value	threw:ImagickException:unable to open image '/tmp/rec-5533.png': No such file or directory @ error/blob.c/OpenBlob/3710
 imagick::readimageblob	0	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/BlobToImage/481
 imagick::readimageblob	1	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/BlobToImage/481
 imagick::removeimageprofile	0	class-name	threw:ImagickException:The image profile does not exist
-imagick::resampleimage	0	value	threw:ImagickException:negative or zero image size `' @ error/resize.c/ResizeImage/3800
-imagick::resampleimage	1	value	threw:ImagickException:negative or zero image size `' @ error/resize.c/ResizeImage/3800
-imagick::resampleimage	2	value	threw:ImagickException:negative or zero image size `' @ error/resize.c/ResizeImage/3800
-imagick::resampleimage	3	value	threw:ImagickException:negative or zero image size `' @ error/resize.c/ResizeImage/3800
-imagick::roundcorners	0	value	threw:ImagickException:Unable to draw on image
-imagick::roundcorners	1	value	threw:ImagickException:Unable to draw on image
-imagick::roundcorners	2	value	threw:ImagickException:Unable to draw on image
-imagick::roundcorners	3	value	threw:ImagickException:Unable to draw on image
-imagick::roundcornersimage	0	value	threw:ImagickException:Unable to draw on image
-imagick::roundcornersimage	1	value	threw:ImagickException:Unable to draw on image
-imagick::roundcornersimage	2	value	threw:ImagickException:Unable to draw on image
-imagick::roundcornersimage	3	value	threw:ImagickException:Unable to draw on image
-imagick::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5509/rec:/probe
+imagick::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5620/rec:/probe
 imagick::setformat	0	value	threw:ImagickException:Unable to set format
 imagick::setimagecolormapcolor	0	value	threw:ImagickException:invalid colormap index `MagickWand-0' @ error/magick-image.c/MagickSetImageColormapColor/10112
 imagick::setimagecolormapcolor	1	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
 imagick::setimageformat	0	value	threw:ImagickException:Unable to set image format
-imagick::setimageindex	0	value	threw:ImagickException:Unable to set image index
-imagick::setimagepixelcolor	0	value	threw:ImagickException:pixels are not authentic `' @ error/cache.c/QueueAuthenticPixelCacheNexus/4304
-imagick::setimagepixelcolor	1	value	threw:ImagickException:pixels are not authentic `' @ error/cache.c/QueueAuthenticPixelCacheNexus/4304
-imagick::setimagepixelcolor	2	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
 imagick::setimageprogressmonitor	0	value	threw:ImagickException:Progress monitoring is disabled in ini-settings
 imagick::setimageproperty	1	value	threw:ImagickException:attempt to set read-only property `x' @ warning/property.c/SetImageProperty/4422
-imagick::setiteratorindex	0	value	threw:ImagickException:Unable to set iterator index
-imagick::shaveimage	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/ShaveImage/1653
-imagick::shaveimage	1	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/ShaveImage/1653
 imagick::sparsecolorimage	0	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
 imagick::sparsecolorimage	1	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
 imagick::sparsecolorimage	2	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
-imagick::trimimage	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
+imagick::stereoimage	0	value	threw:ImagickException:left and right image sizes differ `' @ error/visual-effects.c/StereoAnaglyphImage/2686
 imagick::writeimagefile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagick::writeimagesfile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagickdraw::bezier	0	value	threw:ImagickDrawException:Unable to read coordinate array
 imagickdraw::polygon	0	value	threw:ImagickDrawException:Unable to read coordinate array
 imagickdraw::polyline	0	value	threw:ImagickDrawException:Unable to read coordinate array
 imagickdraw::setfillpatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetFillPatternURL/4978
-imagickdraw::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5915/rec:/probe
+imagickdraw::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-6074/rec:/probe
 imagickdraw::setfontfamily	0	value	threw:ImagickDrawException:Unable to set font family; parameter not found in the list of configured fonts
 imagickdraw::setfontweight	0	value	threw:ImagickDrawException:Font weight valid range is 100-900
 imagickdraw::setstrokepatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetStrokePatternURL/5420
 imagickdraw::setvectorgraphics	0	value	threw:ImagickException:ParseError root tag missing @ warning/xml-tree.c/NewXMLTree/1915
+imagickkernel::addkernel	0	value	killed:11
 imagickkernel::addunitykernel	0	value	threw:ImagickKernelException:ImagickKernel is empty, cannot be used
 imagickkernel::scale	0	value	threw:ImagickKernelException:ImagickKernel is empty, cannot be used
 imagickkernel::scale	1	value	threw:ImagickKernelException:ImagickKernel is empty, cannot be used
@@ -362,10 +277,8 @@ inflate_init	1	value	threw:ValueError:Encoding mode must be ZLIB_ENCODING_RAW, Z
 intldatepatterngenerator::getbestpattern	0	value	threw:Error:Found unconstructed IntlDatePatternGenerator
 intlgregoriancalendar::isleapyear	0	value	threw:Error:Found unconstructed IntlCalendar
 intlgregoriancalendar::setgregorianchange	0	value	threw:Error:Found unconstructed IntlCalendar
-iterator_apply	1	value	threw:TypeError:iterator_apply(): Argument #1 ($iterator) must be of type Traversable, array given
-iterator_apply	2	value	threw:TypeError:iterator_apply(): Argument #1 ($iterator) must be of type Traversable, array given
-iteratoriterator::__construct	0	value	threw:TypeError:IteratorIterator::__construct(): Argument #1 ($iterator) must be of type Traversable, array given
-iteratoriterator::__construct	1	value	threw:TypeError:IteratorIterator::__construct(): Argument #1 ($iterator) must be of type Traversable, array given
+iteratoriterator::__construct	0	value	threw:BadMethodCallException:IteratorIterator::getIterator() must be called exactly once per instance
+iteratoriterator::__construct	1	value	threw:BadMethodCallException:IteratorIterator::getIterator() must be called exactly once per instance
 jdtounix	0	value	threw:ValueError:jday must be between 2440588 and 106751993607888
 json_validate	2	value	threw:ValueError:json_validate(): Argument #3 ($flags) must be a valid flag (allowed flags: JSON_INVALID_UTF8_IGNORE)
 limititerator::__construct	0	value	threw:BadMethodCallException:LimitIterator::getIterator() must be called exactly once per instance
@@ -535,9 +448,6 @@ nodiscard::__construct	0	value	threw:Error:Cannot modify readonly property NoDis
 norewinditerator::__construct	0	value	threw:BadMethodCallException:NoRewindIterator::getIterator() must be called exactly once per instance
 normalizer_is_normalized	1	value	threw:ValueError:normalizer_is_normalized(): Argument #2 ($form) must be a a valid normalization form
 normalizer_normalize	1	value	threw:ValueError:normalizer_normalize(): Argument #2 ($form) must be a a valid normalization form
-numfmt_create	0	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "rec://probe" is invalid
-numfmt_create	1	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "x" is invalid
-numfmt_create	2	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "x" is invalid
 pack	0	value	threw:ValueError:Type r: unknown format code
 pdostatement::fetchall	1	arity	threw:ArgumentCountError:PDOStatement::fetchAll() expects exactly 1 argument for the fetch mode provided, 2 given
 pdostatement::fetchcolumn	0	value	threw:ValueError:Invalid column index
@@ -742,16 +652,12 @@ pg_update	3	server	threw:TypeError:pg_update(): Argument #1 ($connection) must b
 pg_update	4	server	threw:TypeError:pg_update(): Argument #1 ($connection) must be of type PgSql\Connection, stdClass given
 pg_version	0	server	threw:TypeError:pg_version(): Argument #1 ($connection) must be of type ?PgSql\Connection, resource given
 php_uname	0	value	threw:ValueError:php_uname(): Argument #1 ($mode) must be a single character
-popen	0	value	threw:ValueError:popen(): Argument #2 ($mode) must be one of "r", "rb", "w", or "wb"
-popen	1	value	threw:ValueError:popen(): Argument #2 ($mode) must be one of "r", "rb", "w", or "wb"
 proc_open	1	value	threw:ValueError:proc_open(): Argument #2 ($descriptor_spec) must only contain arrays and streams
 property_exists	1	value	threw:TypeError:property_exists(): Argument #1 ($object_or_class) must be of type object|string, int given
 random\engine\mt19937::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\Mt19937 object
 random\engine\pcgoneseq128xslrr64::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\PcgOneseq128XslRr64 object
 random\engine\xoshiro256starstar::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\Xoshiro256StarStar object
 random\randomizer::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Randomizer object
-random\randomizer::getfloat	0	value	threw:ValueError:Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
-random\randomizer::getfloat	1	value	threw:ValueError:Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
 readdir	0	value	threw:TypeError:readdir(): Argument #1 ($dir_handle) must be of type resource or null, Closure given
 recursivedirectoryiterator::__construct	0	receiver	threw:Error:Directory object is already initialized
 recursivedirectoryiterator::__construct	1	receiver	threw:Error:Directory object is already initialized
@@ -1460,14 +1366,11 @@ socket_select	1	value	threw:TypeError:socket_select(): Argument #2 ($write) must
 socket_select	2	value	threw:TypeError:socket_select(): Argument #3 ($except) must only have elements of type Socket, RecordingObject given
 socket_select	3	value	threw:ValueError:socket_select(): At least one array argument must be passed
 socket_select	4	value	threw:ValueError:socket_select(): At least one array argument must be passed
-sodium_crypto_generichash	2	value	threw:SodiumException:unsupported output length
-sodium_crypto_generichash_final	1	value	threw:SodiumException:unsupported output length
-sodium_crypto_generichash_init	1	value	threw:SodiumException:unsupported output length
 spldoublylinkedlist::__unserialize	0	serialised	threw:UnexpectedValueException:Incomplete or ill-typed serialization data
 spldoublylinkedlist::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
 splfileinfo::getfileinfo	0	class-name	threw:TypeError:SplFileInfo::getFileInfo(): Argument #1 ($class) must be a class name derived from SplFileInfo or null, rec://probe given
 splfileinfo::getpathinfo	0	class-name	threw:TypeError:SplFileInfo::getPathInfo(): Argument #1 ($class) must be a valid class name or null, rec://probe given
-splfileinfo::openfile	1	value	threw:RuntimeException:SplFileInfo::openFile(/tmp/recd1s54t117hopeutWncA): Failed to open stream: File exists
+splfileinfo::openfile	1	value	threw:RuntimeException:SplFileInfo::openFile(/tmp/rect2kolo5m2pfbfZjRfDF): Failed to open stream: File exists
 splfileinfo::openfile	2	value	threw:TypeError:SplFileInfo::openFile(): Argument #3 ($context) must be of type resource or null, Closure given
 splfileinfo::setfileclass	0	class-name	threw:TypeError:SplFileInfo::setFileClass(): Argument #1 ($class) must be a class name derived from SplFileObject, rec://probe given
 splfileinfo::setinfoclass	0	class-name	threw:TypeError:SplFileInfo::setInfoClass(): Argument #1 ($class) must be a class name derived from SplFileInfo, rec://probe given
@@ -1485,8 +1388,6 @@ splobjectstorage::seek	0	receiver	threw:OutOfBoundsException:Seek position 1 is 
 splobjectstorage::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
 splpriorityqueue::__unserialize	0	serialised	threw:Exception:Invalid serialization data for SplPriorityQueue object
 spltempfileobject::__construct	0	receiver	threw:Error:Cannot call constructor twice
-spoofchecker::setallowedchars	0	value	threw:ValueError:Spoofchecker::setAllowedChars(): Argument #1 ($pattern) must be a valid regular expression character set pattern
-spoofchecker::setallowedchars	1	value	threw:ValueError:Spoofchecker::setAllowedChars(): Argument #1 ($pattern) must be a valid regular expression character set pattern
 spoofchecker::setrestrictionlevel	0	value	threw:ValueError:Spoofchecker::setRestrictionLevel(): Argument #1 ($level) must be one of Spoofchecker::ASCII, Spoofchecker::SINGLE_SCRIPT_RESTRICTIVE, Spoofche
 sqlite3::__construct	0	value	threw:Exception:Already initialised DB Object
 sqlite3::__construct	1	value	threw:Exception:Already initialised DB Object
@@ -1532,10 +1433,7 @@ uri\whatwg\url::__construct	2	value	threw:Error:Cannot modify readonly object of
 uri\whatwg\url::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\WhatWg\Url object
 user_error	1	value	threw:ValueError:user_error(): Argument #2 ($error_level) must be one of E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, or E_USER_DEPRECATED
 version_compare	2	value	threw:ValueError:version_compare(): Argument #3 ($operator) must be a valid comparison operator
-weakmap::offsetget	0	value	threw:Error:Object Closure#220 not contained in WeakMap
-xml_parser_create	0	value	threw:ValueError:xml_parser_create(): Argument #1 ($encoding) is not a supported source encoding
-xml_parser_create_ns	0	value	threw:ValueError:xml_parser_create_ns(): Argument #1 ($encoding) is not a supported source encoding
-xml_parser_create_ns	1	value	threw:ValueError:xml_parser_create_ns(): Argument #1 ($encoding) is not a supported source encoding
+weakmap::offsetget	0	value	threw:Error:Object Closure#127 not contained in WeakMap
 xml_set_character_data_handler	0	receiver	threw:ValueError:xml_set_character_data_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
 xml_set_default_handler	0	receiver	threw:ValueError:xml_set_default_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
 xml_set_element_handler	0	receiver	threw:ValueError:xml_set_element_handler(): Argument #2 ($start_handler) an object must be set via xml_set_object() to be able to lookup method
@@ -1556,6 +1454,3 @@ xsltprocessor::transformtodoc	0	value	threw:TypeError:XSLTProcessor::transformTo
 xsltprocessor::transformtodoc	1	class-name	threw:TypeError:XSLTProcessor::transformToDoc(): Argument #2 ($returnClass) must be a valid class name or null, rec://probe given
 xsltprocessor::transformtouri	0	value	threw:TypeError:XSLTProcessor::transformToUri(): Argument #1 ($document) must be a valid XML node
 xsltprocessor::transformtoxml	0	value	threw:TypeError:XSLTProcessor::transformToXml(): Argument #1 ($document) must be a valid XML node
-zlib_encode	0	value	threw:ValueError:zlib_encode(): Argument #2 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
-zlib_encode	1	value	threw:ValueError:zlib_encode(): Argument #2 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
-zlib_encode	2	value	threw:ValueError:zlib_encode(): Argument #2 ($encoding) must be one of ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP, or ZLIB_ENCODING_DEFLATE
