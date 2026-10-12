@@ -204,7 +204,7 @@ def main():
                         try:
                             data = json.loads(result.read_text())
                             summaries.append(dict(unit=name, backend=backend,
-                                definitions=data['definitions'], source_sha256=digest(source),
+                                definitions=data['definitions'], source_sha256=digest(php / source),
                                 artifact_bytes=result.stat().st_size,
                                 functions=[{k:v for k,v in f.items() if k != 'blocks'} for f in data['functions']],
                                 layouts=data.get('layouts', [])))
