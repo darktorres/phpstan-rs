@@ -187,8 +187,8 @@ def compact_build(cache, runner):
     and recorded; nothing is reused from an earlier build.
     """
     lock = json.loads((HERE / 'results/lock.json').read_text())
-    clone = cache / 'compact-svf-source'
-    build_root = cache / 'compact-svf'
+    clone = runner.output / 'compact-svf-source'
+    build_root = runner.output / 'compact-svf'
     shutil.rmtree(clone, ignore_errors=True)
     shutil.copytree(cache / 'root/SVF', clone, symlinks=True)
     subprocess.run(['git', '-C', str(clone), 'apply', str(HERE / 'svf-compact.patch')], check=True)

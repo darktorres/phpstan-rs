@@ -147,10 +147,10 @@ def gcc_profile(cache, runner):
     Each unit is compiled from the spelling make used, with the tree as the working
     directory, so the dumps name sources relative to the tree.
     """
-    php = cache / 'root/php-gcc/php-src'
+    php = runner.output / 'php-gcc/php-src'
     environment = dict(os.environ, PHP_CC='gcc', PHP_CXX='g++')
     environment['LD_LIBRARY_PATH'] = str(cache / 'root/deps/usr/lib/x86_64-linux-gnu')
-    require_success(runner.run('gcc-tree', [HERE/'build_php_pathfree.sh', cache/'root/php-gcc', cache/'root/php-src',
+    require_success(runner.run('gcc-tree', [HERE/'build_php_pathfree.sh', runner.output / 'php-gcc', cache/'root/php-src',
         cache/'root/deps/usr'], env=environment, timeout=3600), 'gcc-tree')
     require_success(runner.run('gcc-runtime', [php/'sapi/cli/php', '-n', HERE/'runtime.php'], env=environment), 'gcc-runtime')
     commands, linked, link = recipes(php)
@@ -242,7 +242,7 @@ def main():
     require_success(runner.run('binary-retry', [cache/'python/bin/python', HERE/'binary_cases.py', '--fixture', campaign/'layout-clang-21',
         '--php', php_binary, '--output', runner.output/'binary-results.json'], timeout=300), 'binary-retry')
     for candidate, binary in [('stock',stock_dvf),
-                              ('compact',cache/'compact-svf/svf-build/bin/dvf')]:
+                              ('compact',campaign/'compact-svf/svf-build/bin/dvf')]:
         for name, flags in [('constants',['-model-consts=true']),
                             ('arrays',['-model-arrays=true']),
                             ('constants-arrays',['-model-consts=true','-model-arrays=true'])]:
