@@ -65,7 +65,7 @@ foreach (array_keys($names) as $name) {
                         invoke_arguments($params, $at, $value, static fn (array $a): mixed => $fn(...$a));
                     } else {
                         // The recorder's own makers, so an object is made as the recorder makes it.
-                        $object = ($makers[0][1])();
+                        $object = method_receiver(new ReflectionClass($fn), $method, $makers[0][1]);
                         if ($object === null) {
                             throw new RuntimeException('no object');
                         }
