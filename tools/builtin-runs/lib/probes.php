@@ -117,6 +117,10 @@ function probes_for(ReflectionParameter $param): array
     } elseif (admits($type, 'string')) {
         $probes[] = ['url', static fn () => 'rec://probe'];
     }
+    // A scalar parameter takes a valid scalar, which the plain value of the parameter is.
+    if (admits($type, 'int') || admits($type, 'float') || admits($type, 'bool')) {
+        $probes[] = ['scalar', static fn () => plain_value($param)];
+    }
     if (admits($type, 'array')) {
         $probes[] = ['objects', static fn () => [new RecordingObject(), new RecordingObject()]];
         $probes[] = ['callables', static fn () => [recording_callable(), recording_callable()]];
