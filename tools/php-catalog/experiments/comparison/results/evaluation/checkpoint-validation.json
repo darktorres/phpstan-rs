@@ -1,14 +1,46 @@
 {
   "status": "passed",
   "checks": [
-    "Python syntax",
-    "JSON/compressed measurements",
-    "525 link objects / 523 C",
-    "both kernel OOM records",
-    "4642 sites / 529 observed / 307 targets",
-    "13 instrumented runtime sentinels",
-    "CBMC expected pass/fail outcomes",
-    "local report links"
+    {
+      "check": "Python syntax",
+      "status": "passed",
+      "detail": "29 files; failing: []"
+    },
+    {
+      "check": "JSON/compressed measurements",
+      "status": "passed",
+      "detail": "63 records; unreadable: []"
+    },
+    {
+      "check": "link objects",
+      "status": "passed",
+      "detail": "525 link objects, 523 C objects"
+    },
+    {
+      "check": "both kernel OOM records",
+      "status": "passed",
+      "detail": "whole-svf-dda (linked module): kernel_oom_kill=True, oom_kill=[1]; whole-compact-dda (campaign): kernel_oom_kill=True, oom_kill=[1]"
+    },
+    {
+      "check": "instrumented sites",
+      "status": "passed",
+      "detail": "4642 sites (expected 4642); the hybrid-call run observed 529 sites (expected 529) and 307 targets (expected 307)"
+    },
+    {
+      "check": "instrumented runtime sentinels",
+      "status": "passed",
+      "detail": "16 sentinels recorded for runtime.php, all named in it; the hybrid-call fixture (13 sentinels) shares 13 of them"
+    },
+    {
+      "check": "CBMC expected pass/fail outcomes",
+      "status": "passed",
+      "detail": "recorded exit codes {'cbmc-contracts': 0, 'cbmc-invalid-composition': 10, 'cbmc-low-budget': 10}; table lists ['whole-compact-dda']"
+    },
+    {
+      "check": "local report links",
+      "status": "passed",
+      "detail": "broken: []"
+    }
   ],
   "semantic_acceptance": "OPEN"
 }

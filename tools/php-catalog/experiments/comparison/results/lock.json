@@ -130,5 +130,6 @@
     "finish-measurements.json": "7713ce72a38769049ee1eba3330f1de2c42559323cc6d6db4b5d4b1e8127832f",
     "finish-completed.json": "a307bd4bd98028e83b32e150a056e6242eccb95053d19fabe5b0e73bb02e3848",
     "cir-imports.json": "c00ed242aa74b610a7831ab4fbdf8d20bdc4733a7102436fc9426b6c74f6e269"
-  }
+  },
+  "checkpoint_validation_sha256": "63631bd2b0c515804ce65b9a4e3af97efd7677d65a975f13df71fbc2eec2ba23"
 }
