@@ -284,7 +284,7 @@ function zip_entry_sample(): mixed
  */
 function known_parameter_value(ReflectionParameter $param): ?Closure
 {
-    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param);
+    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? pdo_value($param);
 }
 
 /** The valid value of a bcmath parameter: a number string, a modulus that is not zero, or a scale. */
@@ -302,6 +302,28 @@ function bcmath_value(ReflectionParameter $param): ?Closure
         'scale' => static fn (): int => 0,
         default => null,
     };
+}
+
+/** The valid value of an Imagick colour or a PDO fetch mode. */
+function imagick_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction();
+    $class = $function instanceof ReflectionMethod ? strtolower($function->getDeclaringClass()->getName()) : '';
+    $name = $param->getName();
+    if (!str_starts_with($class, 'imagick') || !(str_ends_with($name, 'color') || str_ends_with($name, 'colour'))) {
+        return null;
+    }
+    return static fn (): string => 'white';
+}
+
+/** The valid value of a PDO statement's fetch mode: an associative array. */
+function pdo_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction();
+    if (!$function instanceof ReflectionMethod || strtolower($function->getDeclaringClass()->getName()) !== 'pdostatement' || $param->getName() !== 'mode') {
+        return null;
+    }
+    return static fn (): int => PDO::FETCH_ASSOC;
 }
 
 /** The valid value of an openssl key parameter: a PEM private or public key of a generated RSA pair. */
