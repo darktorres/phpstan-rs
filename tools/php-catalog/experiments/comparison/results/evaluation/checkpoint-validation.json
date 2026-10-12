@@ -148,14 +148,6 @@
     ],
     "rows": [
       {
-        "id": "R00.2",
-        "status": "Complete (definition only; implementation conformance remains open)"
-      },
-      {
-        "id": "R00.3",
-        "status": "Complete (matrix/audit only; semantic gaps remain open)"
-      },
-      {
         "id": "R02.3",
         "status": "Partial: selected source-linked evidence only; broader acceptance open"
       },

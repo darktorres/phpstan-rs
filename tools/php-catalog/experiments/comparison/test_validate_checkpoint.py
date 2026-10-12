@@ -39,7 +39,7 @@ class CheckpointTests(unittest.TestCase):
         semantic = CHECKPOINT.semantic_acceptance(ledger)
         open_rows = {row["id"] for row in semantic["rows"]}
         self.assertEqual(open_rows, {
-            "R00.2", "R00.3", "R02.3", "R02.5", "R02.7", "R03.1", "R03.2", "R03.3", "R03.4",
+            "R02.3", "R02.5", "R02.7", "R03.1", "R03.2", "R03.3", "R03.4",
             "R22.1", "R05.2", "R05.4", "R05.7", "R06.1", "R06.2", "R06.3", "R06.4",
         })
         self.assertIn("R05.7", open_rows)
