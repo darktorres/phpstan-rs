@@ -394,6 +394,15 @@ function named_value(ReflectionParameter $param): ?Closure
         ['json_validate', 'flags'] => static fn (): int => 0,
         ['extract', 'prefix'] => static fn (): string => 'p',
         ['popen', 'mode'] => static fn (): string => 'r',
+        ['php_uname', 'mode'] => static fn (): string => 'a',
+        ['pack', 'format'] => static fn (): string => 'x',
+        ['unpack', 'format'] => static fn (): string => 'C',
+        ['version_compare', 'operator'] => static fn (): string => '>=',
+        ['settype', 'type'] => static fn (): string => 'int',
+        ['trigger_error', 'error_level'], ['user_error', 'error_level'] => static fn (): int => E_USER_NOTICE,
+        ['c14n', 'xpath'], ['c14nfile', 'xpath'] => static fn (): array => ['query' => '/'],
+        ['method_exists', 'object_or_class'], ['property_exists', 'object_or_class'] => static fn (): string => 'stdClass',
+        ['union', 'map'] => static fn (): mixed => $class === 'ds\\map' ? new Ds\Map() : null,
         ['sscanf', 'format'], ['fscanf', 'format'], ['splfileobject', 'format'] => static fn (): string => '%d',
         ['class_implements', 'autoload'], ['class_parents', 'autoload'], ['class_uses', 'autoload'] => static fn (): bool => false,
         ['normalizer_normalize', 'form'], ['normalizer_is_normalized', 'form'] => static fn (): int => Normalizer::FORM_C,
@@ -474,6 +483,10 @@ function imagick_value(ReflectionParameter $param): ?Closure
     $name = $param->getName();
     if (!str_starts_with($class, 'imagick')) {
         return null;
+    }
+    // The SVG a DrawVectorGraphics call parses.
+    if ($class === 'imagickdraw' && $name === 'xml') {
+        return static fn (): string => '<svg/>';
     }
     // A channel of an ImagickPixel is an int, not a colour.
     if ($class === 'imagickpixel' && $name === 'color' && admits($param->getType(), 'int')) {
