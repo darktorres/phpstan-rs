@@ -43,8 +43,6 @@ domelement::setidattributens	0	state	threw:DOMException:Not Found Error
 domelement::setidattributens	1	state	threw:DOMException:Not Found Error
 domelement::setidattributens	2	state	threw:DOMException:Not Found Error
 domnode::appendchild	0	state	threw:DOMException:Wrong Document Error
-domnode::c14n	2	value	threw:ValueError:DOMNode::C14N(): Argument #3 ($xpath) must have a "query" key
-domnode::c14nfile	3	value	threw:ValueError:DOMNode::C14NFile(): Argument #4 ($xpath) must have a "query" key
 domnode::insertbefore	0	state	threw:DOMException:Wrong Document Error
 domnode::insertbefore	1	state	threw:DOMException:Wrong Document Error
 domnode::removechild	0	state	threw:DOMException:Not Found Error
@@ -1220,13 +1218,9 @@ redissentinel::master	0	server	threw:RedisException:Redis server 127.0.0.1:26379
 redissentinel::reset	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
 redissentinel::sentinels	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
 redissentinel::slaves	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
-reflectionclass::getlazyinitializer	0	value	threw:TypeError:ReflectionClass::getLazyInitializer(): Argument #1 ($object) must be of type stdClass, RecordingObject given
 reflectionclass::getmethod	0	file-or-font	threw:ReflectionException:Method stdClass::rec://probe() does not exist
 reflectionclass::getproperty	0	file-or-font	threw:ReflectionException:Property stdClass::$rec://probe does not exist
 reflectionclass::getstaticpropertyvalue	0	file-or-font	threw:ReflectionException:Property stdClass::$rec://probe does not exist
-reflectionclass::initializelazyobject	0	value	threw:TypeError:ReflectionClass::initializeLazyObject(): Argument #1 ($object) must be of type stdClass, RecordingObject given
-reflectionclass::isuninitializedlazyobject	0	value	threw:TypeError:ReflectionClass::isUninitializedLazyObject(): Argument #1 ($object) must be of type stdClass, RecordingObject given
-reflectionclass::marklazyobjectasinitialized	0	value	threw:TypeError:ReflectionClass::markLazyObjectAsInitialized(): Argument #1 ($object) must be of type stdClass, RecordingObject given
 reflectionclass::newinstance	0	value	threw:ReflectionException:Class stdClass does not have a constructor, so you cannot pass any constructor arguments
 reflectionclass::newinstanceargs	0	value	threw:ReflectionException:Class stdClass does not have a constructor, so you cannot pass any constructor arguments
 reflectionclass::setstaticpropertyvalue	0	value	threw:ReflectionException:Class stdClass does not have a property named rec://probe
@@ -1246,16 +1240,6 @@ reflectionproperty::setrawvaluewithoutlazyinitialization	1	value	threw:TypeError
 reflectionproperty::setvalue	1	value	threw:TypeError:ReflectionProperty::setValue(): Argument #1 ($objectOrValue) must be of type object, int given
 request_parse_body	0	value	threw:ValueError:Invalid integer key in $options argument
 sem_acquire	1	value	threw:TypeError:sem_acquire(): Argument #1 ($semaphore) must be of type SysvSemaphore, stdClass given
-session_set_save_handler	0	value	threw:TypeError:session_set_save_handler(): Argument #1 ($open) must be of type SessionHandlerInterface, Closure given
-session_set_save_handler	1	value	threw:TypeError:session_set_save_handler(): Argument #1 ($open) must be of type SessionHandlerInterface, Closure given
-session_set_save_handler	2	value	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
-session_set_save_handler	3	value	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
-session_set_save_handler	4	value	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
-session_set_save_handler	5	value	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
-session_set_save_handler	6	value	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
-session_set_save_handler	7	value	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
-session_set_save_handler	8	value	threw:TypeError:session_set_save_handler(): Argument #2 ($close) must be a valid callback, no array or string given
-session_start	0	value	threw:ValueError:session_start(): Argument #1 ($options) must be of type array with keys as string
 sessionhandler::destroy	0	session	threw:Error:Session is not active
 sessionhandler::gc	0	session	threw:Error:Session is not active
 sessionhandler::open	0	session	threw:Error:Session is not active
@@ -1263,17 +1247,10 @@ sessionhandler::open	1	session	threw:Error:Session is not active
 sessionhandler::read	0	session	threw:Error:Session is not active
 sessionhandler::write	0	session	threw:Error:Session is not active
 sessionhandler::write	1	session	threw:Error:Session is not active
-socket_select	0	value	threw:TypeError:socket_select(): Argument #1 ($read) must only have elements of type Socket, RecordingObject given
-socket_select	1	value	threw:TypeError:socket_select(): Argument #2 ($write) must only have elements of type Socket, RecordingObject given
-socket_select	2	value	threw:TypeError:socket_select(): Argument #3 ($except) must only have elements of type Socket, RecordingObject given
-socket_select	3	state	threw:ValueError:socket_select(): At least one array argument must be passed
-socket_select	4	state	threw:ValueError:socket_select(): At least one array argument must be passed
 spldoublylinkedlist::__unserialize	0	serialised	threw:UnexpectedValueException:Incomplete or ill-typed serialization data
 spldoublylinkedlist::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
 splfileinfo::getfileinfo	0	class-name	threw:TypeError:SplFileInfo::getFileInfo(): Argument #1 ($class) must be a class name derived from SplFileInfo or null, rec://probe given
 splfileinfo::getpathinfo	0	class-name	threw:TypeError:SplFileInfo::getPathInfo(): Argument #1 ($class) must be a valid class name or null, rec://probe given
-splfileinfo::openfile	1	file-or-font	threw:RuntimeException:SplFileInfo::openFile(/tmp/recj9sjm9ib0e2hcovI1U8): Failed to open stream: File exists
-splfileinfo::openfile	2	value	threw:TypeError:SplFileInfo::openFile(): Argument #3 ($context) must be of type resource or null, Closure given
 splfileinfo::setfileclass	0	class-name	threw:TypeError:SplFileInfo::setFileClass(): Argument #1 ($class) must be a class name derived from SplFileObject, rec://probe given
 splfileinfo::setinfoclass	0	class-name	threw:TypeError:SplFileInfo::setInfoClass(): Argument #1 ($class) must be a class name derived from SplFileInfo, rec://probe given
 splfileobject::__construct	0	value	threw:Error:The parent constructor was not called: the object is in an invalid state
@@ -1302,11 +1279,6 @@ stream_filter_remove	0	value	threw:TypeError:stream_filter_remove(): Argument #1
 stream_register_wrapper	0	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, x given
 stream_register_wrapper	1	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, rec://probe given
 stream_register_wrapper	2	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, x given
-stream_select	0	state	threw:ValueError:No stream arrays were passed
-stream_select	1	state	threw:ValueError:No stream arrays were passed
-stream_select	2	state	threw:ValueError:No stream arrays were passed
-stream_select	3	state	threw:ValueError:No stream arrays were passed
-stream_select	4	state	threw:ValueError:No stream arrays were passed
 stream_wrapper_register	0	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
 stream_wrapper_register	1	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, rec://probe given
 stream_wrapper_register	2	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
@@ -1321,23 +1293,8 @@ uri\whatwg\url::__construct	0	state	threw:ReflectionException:Class Uri\WhatWg\U
 uri\whatwg\url::__construct	2	state	threw:ReflectionException:Class Uri\WhatWg\Url is an internal class marked as final that cannot be instantiated without invoking its constructor
 uri\whatwg\url::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\WhatWg\Url object
 weakmap::offsetget	0	value	threw:Error:Object Closure#195 not contained in WeakMap
-xml_set_character_data_handler	0	state	threw:ValueError:xml_set_character_data_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_default_handler	0	state	threw:ValueError:xml_set_default_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_element_handler	0	state	threw:ValueError:xml_set_element_handler(): Argument #2 ($start_handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_element_handler	1	state	threw:ValueError:xml_set_element_handler(): Argument #3 ($end_handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_element_handler	2	state	threw:ValueError:xml_set_element_handler(): Argument #2 ($start_handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_end_namespace_decl_handler	0	state	threw:ValueError:xml_set_end_namespace_decl_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_external_entity_ref_handler	0	state	threw:ValueError:xml_set_external_entity_ref_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_notation_decl_handler	0	state	threw:ValueError:xml_set_notation_decl_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_processing_instruction_handler	0	state	threw:ValueError:xml_set_processing_instruction_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_start_namespace_decl_handler	0	state	threw:ValueError:xml_set_start_namespace_decl_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
-xml_set_unparsed_entity_decl_handler	0	state	threw:ValueError:xml_set_unparsed_entity_decl_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
 xsltprocessor::getparameter	1	value	threw:ValueError:XSLTProcessor::getParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
-xsltprocessor::importstylesheet	0	value	threw:TypeError:XSLTProcessor::importStylesheet(): Argument #1 ($stylesheet) must be a valid XML node
 xsltprocessor::registerphpfunctionns	1	value	threw:ValueError:XSLTProcessor::registerPHPFunctionNS(): Argument #2 ($name) must be a valid callback name
 xsltprocessor::removeparameter	1	value	threw:ValueError:XSLTProcessor::removeParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
 xsltprocessor::setparameter	0	value	threw:ValueError:XSLTProcessor::setParameter(): Argument #3 ($value) cannot be null when argument #2 ($name) is a string
-xsltprocessor::transformtodoc	0	value	threw:TypeError:XSLTProcessor::transformToDoc(): Argument #1 ($document) must be a valid XML node
 xsltprocessor::transformtodoc	1	class-name	threw:TypeError:XSLTProcessor::transformToDoc(): Argument #2 ($returnClass) must be a valid class name or null, rec://probe given
-xsltprocessor::transformtouri	0	value	threw:TypeError:XSLTProcessor::transformToUri(): Argument #1 ($document) must be a valid XML node
-xsltprocessor::transformtoxml	0	value	threw:TypeError:XSLTProcessor::transformToXml(): Argument #1 ($document) must be a valid XML node
