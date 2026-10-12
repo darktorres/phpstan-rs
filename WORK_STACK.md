@@ -40,9 +40,9 @@ State as of 2026-10-11, `master` at `2783a866`.
    user class's constructor can run user code the table's grammar cannot name.
    Plan: `/home/torres/.claude/plans/1-in-this-plan-woolly-dragon.md`, steps 0-10.
    Step 1 is not closed. Coverage gaps, with a reason each, are in
-   `tools/builtin-runs/scan/coverage-gaps.tsv` (1,622 of 5,848 positions: 997 server,
-   480 value, 70 class-name, 25 receiver, 19 serialised, 17 session, 12 arity, 2 scope).
-   Next: the value gaps by family, then the receivers. See the plan's closing section.
+   `tools/builtin-runs/scan/coverage-gaps.tsv` (1,560 of 6,326 positions: 1,042 server,
+   364 value, 70 class-name, 34 receiver, 19 serialised, 17 session, 12 arity, 2 scope).
+   Next: the 364 value gaps by family, then the receivers. See the plan's closing section.
    Step 0 added the passing controls `redis_get_precise` and
    `memcached_getdelayed_callback`; each failing fixture comes with the step
    that makes it pass. Resume at the first step the plan does not mark done.

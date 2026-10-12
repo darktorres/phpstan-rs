@@ -50,38 +50,31 @@ deprecated::__construct	0	value	threw:Error:Cannot modify readonly property Depr
 deprecated::__construct	1	value	threw:Error:Cannot modify readonly property Deprecated::$message
 directoryiterator::__construct	0	receiver	threw:Error:Directory object is already initialized
 dns_check_record	1	value	threw:ValueError:dns_check_record(): Argument #2 ($type) must be a valid DNS record type
-dom\implementation::createdocument	1	value	threw:DOMException:Invalid Character Error
-dom\implementation::createdocumenttype	0	value	threw:DOMException:Namespace Error
 dom\import_simplexml	0	value	threw:TypeError:Dom\import_simplexml(): Argument #1 ($node) is not a valid node type
 dom_import_simplexml	0	value	threw:TypeError:dom_import_simplexml(): Argument #1 ($node) is not a valid node type
-domattr::__construct	0	value	threw:DOMException:Invalid Character Error
-domdocument::createattribute	0	value	threw:DOMException:Invalid Character Error
-domdocument::createelement	0	value	threw:DOMException:Invalid Character Error
-domdocument::createelementns	1	value	threw:DOMException:Namespace Error
-domdocument::createentityreference	0	value	threw:DOMException:Invalid Character Error
-domdocument::createprocessinginstruction	0	value	threw:DOMException:Invalid Character Error
-domdocument::importnode	1	value	threw:TypeError:DOMDocument::importNode(): Argument #1 ($node) must be of type DOMNode, stdClass given
 domdocument::registernodeclass	0	class-name	threw:TypeError:DOMDocument::registerNodeClass(): Argument #1 ($baseClass) must be a class name derived from DOMNode, rec://probe given
 domdocument::registernodeclass	1	class-name	threw:TypeError:DOMDocument::registerNodeClass(): Argument #2 ($extendedClass) must be a valid class name or null, rec://probe given
+domdocument::savehtml	0	value	threw:DOMException:Wrong Document Error
+domdocument::savexml	0	value	threw:DOMException:Wrong Document Error
 domdocumentfragment::appendxml	0	value	threw:DOMException:No Modification Allowed Error
-domelement::__construct	0	value	threw:DOMException:Invalid Character Error
-domelement::insertadjacentelement	0	value	threw:TypeError:DOMElement::insertAdjacentElement(): Argument #2 ($element) must be of type DOMElement, stdClass given
+domelement::insertadjacentelement	0	value	threw:DOMException:Syntax Error
+domelement::insertadjacentelement	1	value	threw:DOMException:Syntax Error
 domelement::insertadjacenttext	0	value	threw:DOMException:Syntax Error
 domelement::insertadjacenttext	1	value	threw:DOMException:Syntax Error
-domelement::setattribute	0	value	threw:DOMException:Invalid Character Error
-domelement::setattributens	1	value	threw:DOMException:Namespace Error
 domelement::setidattribute	0	value	threw:DOMException:Not Found Error
 domelement::setidattribute	1	value	threw:DOMException:Not Found Error
 domelement::setidattributenode	1	value	threw:TypeError:DOMElement::setIdAttributeNode(): Argument #1 ($attr) must be of type DOMAttr, stdClass given
 domelement::setidattributens	0	value	threw:DOMException:Not Found Error
 domelement::setidattributens	1	value	threw:DOMException:Not Found Error
 domelement::setidattributens	2	value	threw:DOMException:Not Found Error
-domelement::toggleattribute	0	value	threw:DOMException:Invalid Character Error
-domentityreference::__construct	0	value	threw:DOMException:Invalid Character Error
-domimplementation::createdocument	1	value	threw:DOMException:Namespace Error
+domnode::appendchild	0	value	threw:DOMException:Wrong Document Error
 domnode::c14n	2	value	threw:ValueError:DOMNode::C14N(): Argument #3 ($xpath) must have a "query" key
 domnode::c14nfile	3	value	threw:ValueError:DOMNode::C14NFile(): Argument #4 ($xpath) must have a "query" key
-domprocessinginstruction::__construct	0	value	threw:DOMException:Invalid Character Error
+domnode::insertbefore	0	value	threw:DOMException:Wrong Document Error
+domnode::insertbefore	1	value	threw:DOMException:Wrong Document Error
+domnode::removechild	0	value	threw:DOMException:Not Found Error
+domnode::replacechild	0	value	threw:DOMException:Wrong Document Error
+domnode::replacechild	1	value	threw:DOMException:Wrong Document Error
 ds\map::skip	0	receiver	threw:OutOfRangeException:Index out of range: 1
 ds\map::union	0	value	threw:TypeError:Ds\Map::union(): Argument #1 ($map) must be of type Ds\Map, Closure given
 ds\queue::offsetexists	0	value	threw:Error:Array access by key is not supported
@@ -103,23 +96,13 @@ easter_date	1	value	threw:ValueError:easter_date(): Argument #1 ($year) must be 
 extract	0	value	threw:Error:Cannot call extract() dynamically
 extract	1	value	threw:Error:Cannot call extract() dynamically
 extract	2	value	threw:ValueError:extract(): Argument #3 ($prefix) must be a valid identifier
-fgetcsv	2	value	threw:ValueError:fgetcsv(): Argument #3 ($separator) must be a single character
-fgetcsv	3	value	threw:ValueError:fgetcsv(): Argument #4 ($enclosure) must be a single character
-fgetcsv	4	value	threw:ValueError:fgetcsv(): Argument #5 ($escape) must be empty or a single character
 fiber::__construct	0	receiver	threw:FiberError:Cannot call constructor twice
 fiber::resume	0	value	threw:FiberError:Cannot resume a fiber that is not suspended
 filesystemiterator::__construct	0	receiver	threw:Error:Directory object is already initialized
 filesystemiterator::__construct	1	receiver	threw:Error:Directory object is already initialized
-finfo::__construct	1	value	threw:Exception:finfo::__construct(/tmp/probe-scan-3253/rec): Failed to open stream: No such file or directory
-finfo_buffer	0	value	threw:TypeError:finfo_buffer(): Argument #1 ($finfo) must be of type finfo, resource given
-finfo_close	0	value	threw:TypeError:finfo_close(): Argument #1 ($finfo) must be of type finfo, resource given
-finfo_file	0	value	threw:TypeError:finfo_file(): Argument #1 ($finfo) must be of type finfo, resource given
-finfo_set_flags	0	value	threw:TypeError:finfo_set_flags(): Argument #1 ($finfo) must be of type finfo, resource given
+finfo::__construct	1	value	threw:Exception:finfo::__construct(/tmp/probe-scan-3367/rec): Failed to open stream: No such file or directory
 forward_static_call	0	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
 forward_static_call	1	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
-fputcsv	2	value	threw:ValueError:fputcsv(): Argument #3 ($separator) must be a single character
-fputcsv	3	value	threw:ValueError:fputcsv(): Argument #4 ($enclosure) must be a single character
-fputcsv	4	value	threw:ValueError:fputcsv(): Argument #5 ($escape) must be empty or a single character
 ftok	1	value	threw:ValueError:ftok(): Argument #2 ($project_id) must be a single character
 ftp_alloc	0	server	threw:TypeError:ftp_alloc(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
 ftp_alloc	1	server	threw:TypeError:ftp_alloc(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
@@ -229,6 +212,7 @@ imageaffine	2	value	threw:ValueError:imageaffine(): Argument #3 ($clip) must hav
 imageaffinematrixconcat	0	value	threw:ValueError:imageaffinematrixconcat(): Argument #1 ($matrix1) must have 6 elements
 imageaffinematrixconcat	1	value	threw:ValueError:imageaffinematrixconcat(): Argument #1 ($matrix1) must have 6 elements
 imagebmp	2	value	threw:TypeError:imagebmp(): Argument #2 ($file) must be a file name or a stream resource, int given
+imagecolormatch	1	value	threw:ValueError:imagecolormatch(): Argument #2 ($image2) must be Palette
 imageconvolution	1	value	threw:ValueError:imageconvolution(): Argument #2 ($matrix) must be a 3x3 array
 imagecrop	1	value	threw:ValueError:imagecrop(): Argument #2 ($rectangle) must have an "x" key
 imagefilledpolygon	1	value	threw:ValueError:imagefilledpolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
@@ -236,6 +220,7 @@ imagejpeg	2	value	threw:TypeError:imagejpeg(): Argument #2 ($file) must be a fil
 imageopenpolygon	1	value	threw:ValueError:imageopenpolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
 imagepng	2	value	threw:TypeError:imagepng(): Argument #2 ($file) must be a file name or a stream resource, int given
 imagepng	3	value	threw:TypeError:imagepng(): Argument #2 ($file) must be a file name or a stream resource, int given
+imagepolygon	0	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
 imagepolygon	1	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
 imagepolygon	2	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
 imagepolygon	3	value	threw:ValueError:imagepolygon(): Argument #3 ($num_points_or_color) must be greater than or equal to 3
@@ -263,6 +248,7 @@ imagick::displayimages	0	value	threw:ImagickException:unable to open X server `r
 imagick::distortimage	0	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
 imagick::distortimage	1	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
 imagick::distortimage	2	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
+imagick::drawimage	0	value	threw:ImagickException:Unable to draw image
 imagick::exportimagepixels	0	value	threw:ImagickException:The map contains disallowed characters
 imagick::exportimagepixels	1	value	threw:ImagickException:The map contains disallowed characters
 imagick::exportimagepixels	2	value	threw:ImagickException:The map contains disallowed characters
@@ -309,12 +295,14 @@ imagick::newimage	3	value	threw:ImagickException:Unable to set the image format
 imagick::newpseudoimage	0	value	threw:ImagickException:Invalid pseudo format string
 imagick::newpseudoimage	1	value	threw:ImagickException:Invalid pseudo format string
 imagick::orderedditherimage	0	value	threw:ImagickException:invalid argument for option ordered-dither : 'rec://probe' @ error/threshold.c/OrderedDitherImage/1948
+imagick::pingimage	0	value	threw:ImagickException:unable to open image '/tmp/rec-5378.png': No such file or directory @ error/blob.c/OpenBlob/3710
 imagick::pingimageblob	0	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/PingBlob/3803
 imagick::raiseimage	0	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
 imagick::raiseimage	1	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
 imagick::raiseimage	2	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
 imagick::raiseimage	3	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
 imagick::raiseimage	4	value	threw:ImagickException:size must exceed bevel width `' @ error/decorate.c/RaiseImage/661
+imagick::readimage	0	value	threw:ImagickException:unable to open image '/tmp/rec-5432.png': No such file or directory @ error/blob.c/OpenBlob/3710
 imagick::readimageblob	0	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/BlobToImage/481
 imagick::readimageblob	1	value	threw:ImagickException:no decode delegate for this image format `' @ error/blob.c/BlobToImage/481
 imagick::removeimageprofile	0	class-name	threw:ImagickException:The image profile does not exist
@@ -330,7 +318,7 @@ imagick::roundcornersimage	0	value	threw:ImagickException:Unable to draw on imag
 imagick::roundcornersimage	1	value	threw:ImagickException:Unable to draw on image
 imagick::roundcornersimage	2	value	threw:ImagickException:Unable to draw on image
 imagick::roundcornersimage	3	value	threw:ImagickException:Unable to draw on image
-imagick::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5236/rec:/probe
+imagick::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5509/rec:/probe
 imagick::setformat	0	value	threw:ImagickException:Unable to set format
 imagick::setimagecolormapcolor	0	value	threw:ImagickException:invalid colormap index `MagickWand-0' @ error/magick-image.c/MagickSetImageColormapColor/10112
 imagick::setimagecolormapcolor	1	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
@@ -348,16 +336,13 @@ imagick::sparsecolorimage	0	value	threw:ImagickException:invalid argument for op
 imagick::sparsecolorimage	1	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
 imagick::sparsecolorimage	2	value	threw:ImagickException:invalid argument for option Affine : 'require at least 1 CPs' @ error/distort.c/GenerateCoefficients/514
 imagick::trimimage	0	value	threw:ImagickException:geometry does not contain image `' @ warning/transform.c/CropImage/653
-imagick::writeimage	0	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagick::writeimagefile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
-imagick::writeimages	0	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
-imagick::writeimages	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagick::writeimagesfile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagickdraw::bezier	0	value	threw:ImagickDrawException:Unable to read coordinate array
 imagickdraw::polygon	0	value	threw:ImagickDrawException:Unable to read coordinate array
 imagickdraw::polyline	0	value	threw:ImagickDrawException:Unable to read coordinate array
 imagickdraw::setfillpatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetFillPatternURL/4978
-imagickdraw::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5622/rec:/probe
+imagickdraw::setfont	0	class-name	threw:ImagickException:The path does not exist: /tmp/probe-scan-5915/rec:/probe
 imagickdraw::setfontfamily	0	value	threw:ImagickDrawException:Unable to set font family; parameter not found in the list of configured fonts
 imagickdraw::setfontweight	0	value	threw:ImagickDrawException:Font weight valid range is 100-900
 imagickdraw::setstrokepatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetStrokePatternURL/5420
@@ -374,10 +359,7 @@ imagickpixel::setcolorvaluequantum	1	value	threw:TypeError:ImagickPixel::setColo
 infiniteiterator::__construct	0	value	threw:BadMethodCallException:InfiniteIterator::getIterator() must be called exactly once per instance
 inflate_init	0	value	threw:ValueError:Encoding mode must be ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP or ZLIB_ENCODING_DEFLATE
 inflate_init	1	value	threw:ValueError:Encoding mode must be ZLIB_ENCODING_RAW, ZLIB_ENCODING_GZIP or ZLIB_ENCODING_DEFLATE
-intlcal_create_instance	1	value	threw:IntlException:intlcal_create_instance(): No such time zone: "x"
 intldatepatterngenerator::getbestpattern	0	value	threw:Error:Found unconstructed IntlDatePatternGenerator
-intlgregcal_is_leap_year	1	value	threw:TypeError:intlgregcal_is_leap_year(): Argument #1 ($calendar) must be of type IntlGregorianCalendar, stdClass given
-intlgregcal_set_gregorian_change	1	value	threw:TypeError:intlgregcal_set_gregorian_change(): Argument #1 ($calendar) must be of type IntlGregorianCalendar, stdClass given
 intlgregoriancalendar::isleapyear	0	value	threw:Error:Found unconstructed IntlCalendar
 intlgregoriancalendar::setgregorianchange	0	value	threw:Error:Found unconstructed IntlCalendar
 iterator_apply	1	value	threw:TypeError:iterator_apply(): Argument #1 ($iterator) must be of type Traversable, array given
@@ -389,10 +371,6 @@ json_validate	2	value	threw:ValueError:json_validate(): Argument #3 ($flags) mus
 limititerator::__construct	0	value	threw:BadMethodCallException:LimitIterator::getIterator() must be called exactly once per instance
 limititerator::__construct	1	value	threw:BadMethodCallException:LimitIterator::getIterator() must be called exactly once per instance
 limititerator::__construct	2	value	threw:BadMethodCallException:LimitIterator::getIterator() must be called exactly once per instance
-locale_compose	0	value	threw:ValueError:locale_compose(): Argument #1 ($subtags) must contain a "language" key
-locale_lookup	1	value	threw:TypeError:locale_lookup(): Argument #2 ($locale) must only contain string values
-locale_lookup	2	value	threw:TypeError:locale_lookup(): Argument #2 ($locale) must only contain string values
-locale_lookup	3	value	threw:TypeError:locale_lookup(): Argument #2 ($locale) must only contain string values
 mb_ereg_search	0	value	threw:Error:No string was provided
 mb_ereg_search	1	value	threw:Error:No string was provided
 mb_ereg_search_pos	0	value	threw:Error:No string was provided
@@ -445,12 +423,18 @@ mysqli::savepoint	0	server	threw:Error:mysqli object is not fully initialized
 mysqli::select_db	0	server	threw:Error:mysqli object is not fully initialized
 mysqli::set_charset	0	server	threw:Error:mysqli object is not fully initialized
 mysqli::store_result	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_affected_rows	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_autocommit	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_autocommit	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_begin_transaction	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_begin_transaction	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_begin_transaction	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_change_user	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_change_user	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_change_user	2	server	threw:Error:mysqli object is not fully initialized
 mysqli_change_user	3	server	threw:Error:mysqli object is not fully initialized
+mysqli_character_set_name	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_commit	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_commit	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_commit	2	server	threw:Error:mysqli object is not fully initialized
 mysqli_connect	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
@@ -460,8 +444,14 @@ mysqli_connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: get
 mysqli_connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
 mysqli_connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
 mysqli_data_seek	1	server	threw:TypeError:mysqli_data_seek(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_dump_debug_info	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_errno	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_error	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_error_list	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_escape_string	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_escape_string	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_execute	1	server	threw:TypeError:mysqli_execute(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_execute_query	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_execute_query	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_execute_query	2	server	threw:Error:mysqli object is not fully initialized
 mysqli_fetch_all	1	server	threw:TypeError:mysqli_fetch_all(): Argument #1 ($result) must be of type mysqli_result, stdClass given
@@ -470,17 +460,35 @@ mysqli_fetch_column	1	server	threw:TypeError:mysqli_fetch_column(): Argument #1 
 mysqli_fetch_field_direct	1	server	threw:TypeError:mysqli_fetch_field_direct(): Argument #1 ($result) must be of type mysqli_result, stdClass given
 mysqli_fetch_object	1	server	threw:TypeError:mysqli_fetch_object(): Argument #1 ($result) must be of type mysqli_result, stdClass given
 mysqli_fetch_object	2	server	threw:TypeError:mysqli_fetch_object(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_field_count	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_field_seek	1	server	threw:TypeError:mysqli_field_seek(): Argument #1 ($result) must be of type mysqli_result, stdClass given
+mysqli_get_charset	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_get_connection_stats	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_get_host_info	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_get_proto_info	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_get_server_info	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_get_server_version	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_get_warnings	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_info	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_insert_id	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_kill	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_kill	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_more_results	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_multi_query	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_multi_query	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_next_result	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_ping	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_poll	0	server	threw:TypeError:mysqli_poll(): Argument #1 ($read) must be an instance of mysqli, RecordingObject given
 mysqli_poll	1	server	threw:TypeError:mysqli_poll(): Argument #1 ($read) must be an instance of mysqli, RecordingObject given
 mysqli_poll	2	value	threw:ValueError:No stream arrays were passed
 mysqli_poll	3	value	threw:ValueError:No stream arrays were passed
 mysqli_poll	4	value	threw:ValueError:No stream arrays were passed
+mysqli_prepare	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_prepare	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_query	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_query	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_query	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_real_connect	0	server	threw:mysqli_sql_exception:No such file or directory
 mysqli_real_connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
 mysqli_real_connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
 mysqli_real_connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
@@ -488,14 +496,24 @@ mysqli_real_connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses
 mysqli_real_connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
 mysqli_real_connect	6	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
 mysqli_real_connect	7	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli_real_escape_string	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_real_escape_string	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_real_query	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_real_query	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_reap_async_query	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_release_savepoint	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_release_savepoint	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_rollback	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_rollback	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_rollback	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_savepoint	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_savepoint	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_select_db	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_select_db	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_set_charset	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_set_charset	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_sqlstate	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_stat	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_stmt_attr_get	1	server	threw:TypeError:mysqli_stmt_attr_get(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_attr_set	1	server	threw:TypeError:mysqli_stmt_attr_set(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_attr_set	2	server	threw:TypeError:mysqli_stmt_attr_set(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
@@ -504,10 +522,15 @@ mysqli_stmt_bind_param	2	server	threw:TypeError:mysqli_stmt_bind_param(): Argume
 mysqli_stmt_bind_result	1	server	threw:TypeError:mysqli_stmt_bind_result(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_data_seek	1	server	threw:TypeError:mysqli_stmt_data_seek(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_execute	1	server	threw:TypeError:mysqli_stmt_execute(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_stmt_init	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_stmt_prepare	1	server	threw:TypeError:mysqli_stmt_prepare(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_send_long_data	1	server	threw:TypeError:mysqli_stmt_send_long_data(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_send_long_data	2	server	threw:TypeError:mysqli_stmt_send_long_data(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
+mysqli_store_result	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_store_result	1	server	threw:Error:mysqli object is not fully initialized
+mysqli_thread_id	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_use_result	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_warning_count	0	server	threw:Error:mysqli object is not fully initialized
 nodiscard::__construct	0	value	threw:Error:Cannot modify readonly property NoDiscard::$message
 norewinditerator::__construct	0	value	threw:BadMethodCallException:NoRewindIterator::getIterator() must be called exactly once per instance
 normalizer_is_normalized	1	value	threw:ValueError:normalizer_is_normalized(): Argument #2 ($form) must be a a valid normalization form
@@ -515,19 +538,6 @@ normalizer_normalize	1	value	threw:ValueError:normalizer_normalize(): Argument #
 numfmt_create	0	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "rec://probe" is invalid
 numfmt_create	1	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "x" is invalid
 numfmt_create	2	value	threw:ValueError:numfmt_create(): Argument #1 ($locale) "x" is invalid
-openssl_dh_compute_key	0	value	threw:TypeError:openssl_dh_compute_key(): Argument #2 ($private_key) must be of type OpenSSLAsymmetricKey, string given
-openssl_dh_compute_key	1	value	threw:TypeError:openssl_dh_compute_key(): Argument #2 ($private_key) must be of type OpenSSLAsymmetricKey, string given
-openssl_free_key	0	value	threw:TypeError:openssl_free_key(): Argument #1 ($key) must be of type OpenSSLAsymmetricKey, string given
-openssl_pkey_free	0	value	threw:TypeError:openssl_pkey_free(): Argument #1 ($key) must be of type OpenSSLAsymmetricKey, string given
-openssl_pkey_get_details	0	value	threw:TypeError:openssl_pkey_get_details(): Argument #1 ($key) must be of type OpenSSLAsymmetricKey, string given
-openssl_seal	0	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
-openssl_seal	1	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
-openssl_seal	2	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
-openssl_seal	4	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
-openssl_seal	5	value	threw:TypeError:openssl_seal(): Argument #4 ($public_key) must be of type array, string given
-openssl_spki_new	0	value	threw:TypeError:openssl_spki_new(): Argument #1 ($private_key) must be of type OpenSSLAsymmetricKey, string given
-openssl_spki_new	1	value	threw:TypeError:openssl_spki_new(): Argument #1 ($private_key) must be of type OpenSSLAsymmetricKey, string given
-openssl_spki_new	2	value	threw:TypeError:openssl_spki_new(): Argument #1 ($private_key) must be of type OpenSSLAsymmetricKey, string given
 pack	0	value	threw:ValueError:Type r: unknown format code
 pdostatement::fetchall	1	arity	threw:ArgumentCountError:PDOStatement::fetchAll() expects exactly 1 argument for the fetch mode provided, 2 given
 pdostatement::fetchcolumn	0	value	threw:ValueError:Invalid column index
@@ -734,15 +744,7 @@ pg_version	0	server	threw:TypeError:pg_version(): Argument #1 ($connection) must
 php_uname	0	value	threw:ValueError:php_uname(): Argument #1 ($mode) must be a single character
 popen	0	value	threw:ValueError:popen(): Argument #2 ($mode) must be one of "r", "rb", "w", or "wb"
 popen	1	value	threw:ValueError:popen(): Argument #2 ($mode) must be one of "r", "rb", "w", or "wb"
-preg_replace_callback_array	0	value	threw:TypeError:preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
-preg_replace_callback_array	2	value	threw:TypeError:preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
-preg_replace_callback_array	3	value	threw:TypeError:preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
-preg_replace_callback_array	4	value	threw:TypeError:preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
-proc_close	0	value	threw:TypeError:proc_close(): Argument #1 ($process) must be of type resource, Closure given
-proc_get_status	0	value	threw:TypeError:proc_get_status(): Argument #1 ($process) must be of type resource, Closure given
 proc_open	1	value	threw:ValueError:proc_open(): Argument #2 ($descriptor_spec) must only contain arrays and streams
-proc_terminate	0	value	threw:TypeError:proc_terminate(): Argument #1 ($process) must be of type resource, Closure given
-proc_terminate	1	value	threw:TypeError:proc_terminate(): supplied resource is not a valid process resource
 property_exists	1	value	threw:TypeError:property_exists(): Argument #1 ($object_or_class) must be of type object|string, int given
 random\engine\mt19937::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\Mt19937 object
 random\engine\pcgoneseq128xslrr64::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\PcgOneseq128XslRr64 object
@@ -1449,38 +1451,10 @@ sessionhandler::read	0	session	threw:Error:Session is not active
 sessionhandler::write	0	session	threw:Error:Session is not active
 sessionhandler::write	1	session	threw:Error:Session is not active
 settype	1	value	threw:ValueError:settype(): Argument #2 ($type) must be a valid type
-shmop_open	0	value	threw:ValueError:shmop_open(): Argument #2 ($mode) must be a valid access mode
-shmop_open	1	value	threw:ValueError:shmop_open(): Argument #2 ($mode) must be a valid access mode
-shmop_open	2	value	threw:ValueError:shmop_open(): Argument #2 ($mode) must be a valid access mode
-shmop_open	3	value	threw:ValueError:shmop_open(): Argument #2 ($mode) must be a valid access mode
 simplexml_import_dom	0	value	threw:TypeError:simplexml_import_dom(): Argument #1 ($node) must be a valid XML node
 simplexml_import_dom	1	class-name	threw:TypeError:simplexml_import_dom(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
 simplexml_load_file	1	class-name	threw:TypeError:simplexml_load_file(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
 simplexml_load_string	1	class-name	threw:TypeError:simplexml_load_string(): Argument #2 ($class_name) must be a class name derived from SimpleXMLElement or null, rec://probe given
-simplexmlelement::__construct	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::__construct	1	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::__construct	2	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::__construct	3	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::__construct	4	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::addattribute	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::addattribute	1	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::addattribute	2	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::addchild	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::addchild	1	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::addchild	2	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::asxml	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::attributes	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::attributes	1	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::children	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::children	1	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::getdocnamespaces	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::getdocnamespaces	1	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::getnamespaces	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::registerxpathnamespace	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::registerxpathnamespace	1	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::savexml	0	value	threw:Exception:String could not be parsed as XML
-simplexmlelement::xpath	0	value	threw:Exception:String could not be parsed as XML
-socket_addrinfo_lookup	2	value	threw:ValueError:socket_addrinfo_lookup(): Argument #3 ($hints) must only contain array keys "ai_flags", "ai_socktype", "ai_protocol", or "ai_family"
 socket_select	0	value	threw:TypeError:socket_select(): Argument #1 ($read) must only have elements of type Socket, RecordingObject given
 socket_select	1	value	threw:TypeError:socket_select(): Argument #2 ($write) must only have elements of type Socket, RecordingObject given
 socket_select	2	value	threw:TypeError:socket_select(): Argument #3 ($except) must only have elements of type Socket, RecordingObject given
@@ -1493,7 +1467,7 @@ spldoublylinkedlist::__unserialize	0	serialised	threw:UnexpectedValueException:I
 spldoublylinkedlist::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
 splfileinfo::getfileinfo	0	class-name	threw:TypeError:SplFileInfo::getFileInfo(): Argument #1 ($class) must be a class name derived from SplFileInfo or null, rec://probe given
 splfileinfo::getpathinfo	0	class-name	threw:TypeError:SplFileInfo::getPathInfo(): Argument #1 ($class) must be a valid class name or null, rec://probe given
-splfileinfo::openfile	1	value	threw:RuntimeException:SplFileInfo::openFile(/tmp/recqfs6pkull28r7MlXAqv): Failed to open stream: File exists
+splfileinfo::openfile	1	value	threw:RuntimeException:SplFileInfo::openFile(/tmp/recd1s54t117hopeutWncA): Failed to open stream: File exists
 splfileinfo::openfile	2	value	threw:TypeError:SplFileInfo::openFile(): Argument #3 ($context) must be of type resource or null, Closure given
 splfileinfo::setfileclass	0	class-name	threw:TypeError:SplFileInfo::setFileClass(): Argument #1 ($class) must be a class name derived from SplFileObject, rec://probe given
 splfileinfo::setinfoclass	0	class-name	threw:TypeError:SplFileInfo::setInfoClass(): Argument #1 ($class) must be a class name derived from SplFileInfo, rec://probe given
@@ -1501,12 +1475,6 @@ splfileobject::__construct	0	receiver	threw:Error:Cannot call constructor twice
 splfileobject::__construct	1	receiver	threw:Error:Cannot call constructor twice
 splfileobject::__construct	2	receiver	threw:Error:Cannot call constructor twice
 splfileobject::__construct	3	value	threw:TypeError:SplFileObject::__construct(): Argument #4 ($context) must be of type resource or null, Closure given
-splfileobject::fgetcsv	0	value	threw:ValueError:SplFileObject::fgetcsv(): Argument #1 ($separator) must be a single character
-splfileobject::fgetcsv	1	value	threw:ValueError:SplFileObject::fgetcsv(): Argument #2 ($enclosure) must be a single character
-splfileobject::fgetcsv	2	value	threw:ValueError:SplFileObject::fgetcsv(): Argument #3 ($escape) must be empty or a single character
-splfileobject::fputcsv	1	value	threw:ValueError:SplFileObject::fputcsv(): Argument #2 ($separator) must be a single character
-splfileobject::fputcsv	2	value	threw:ValueError:SplFileObject::fputcsv(): Argument #3 ($enclosure) must be a single character
-splfileobject::fputcsv	3	value	threw:ValueError:SplFileObject::fputcsv(): Argument #4 ($escape) must be empty or a single character
 splfileobject::fscanf	1	receiver	threw:ValueError:Variable is not assigned by any conversion specifiers
 splfileobject::setcsvcontrol	0	value	threw:ValueError:SplFileObject::setCsvControl(): Argument #1 ($separator) must be a single character
 splfileobject::setcsvcontrol	1	value	threw:ValueError:SplFileObject::setCsvControl(): Argument #2 ($enclosure) must be a single character
@@ -1529,20 +1497,13 @@ sqlite3::open	0	value	threw:Exception:Already initialised DB Object
 sqlite3::open	1	value	threw:Exception:Already initialised DB Object
 sqlite3::open	2	value	threw:Exception:Already initialised DB Object
 sscanf	2	receiver	threw:ValueError:Variable is not assigned by any conversion specifiers
-str_decrement	0	value	threw:ValueError:str_decrement(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters
-str_getcsv	1	value	threw:ValueError:str_getcsv(): Argument #2 ($separator) must be a single character
-str_getcsv	2	value	threw:ValueError:str_getcsv(): Argument #3 ($enclosure) must be a single character
-str_getcsv	3	value	threw:ValueError:str_getcsv(): Argument #4 ($escape) must be empty or a single character
-str_increment	0	value	threw:ValueError:str_increment(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters
 stream_bucket_append	0	value	threw:TypeError:stream_bucket_append(): Argument #1 ($brigade) must be of type resource, Closure given
+stream_bucket_append	1	value	threw:TypeError:stream_bucket_append(): supplied resource is not a valid userfilter.bucket brigade resource
 stream_bucket_make_writeable	0	value	threw:TypeError:stream_bucket_make_writeable(): Argument #1 ($brigade) must be of type resource, Closure given
 stream_bucket_prepend	0	value	threw:TypeError:stream_bucket_prepend(): Argument #1 ($brigade) must be of type resource, Closure given
-stream_context_create	0	value	threw:ValueError:Options should have the form ["wrappername"]["optionname"] = $value
-stream_context_get_default	0	value	threw:ValueError:Options should have the form ["wrappername"]["optionname"] = $value
-stream_context_set_default	0	value	threw:ValueError:Options should have the form ["wrappername"]["optionname"] = $value
+stream_bucket_prepend	1	value	threw:TypeError:stream_bucket_prepend(): supplied resource is not a valid userfilter.bucket brigade resource
 stream_context_set_option	0	value	threw:TypeError:stream_context_set_option(): Argument #1 ($context) must be of type resource, Closure given
 stream_context_set_option	2	value	threw:ValueError:stream_context_set_option(): Argument #4 ($value) must be provided when argument #2 ($wrapper_or_options) is a string
-stream_context_set_options	1	value	threw:ValueError:Options should have the form ["wrappername"]["optionname"] = $value
 stream_filter_remove	0	value	threw:TypeError:stream_filter_remove(): Argument #1 ($stream_filter) must be of type resource, Closure given
 stream_register_wrapper	0	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, x given
 stream_register_wrapper	1	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, rec://probe given
@@ -1571,44 +1532,21 @@ uri\whatwg\url::__construct	2	value	threw:Error:Cannot modify readonly object of
 uri\whatwg\url::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\WhatWg\Url object
 user_error	1	value	threw:ValueError:user_error(): Argument #2 ($error_level) must be one of E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, or E_USER_DEPRECATED
 version_compare	2	value	threw:ValueError:version_compare(): Argument #3 ($operator) must be a valid comparison operator
-weakmap::offsetget	0	value	threw:Error:Object Closure#164 not contained in WeakMap
+weakmap::offsetget	0	value	threw:Error:Object Closure#220 not contained in WeakMap
 xml_parser_create	0	value	threw:ValueError:xml_parser_create(): Argument #1 ($encoding) is not a supported source encoding
 xml_parser_create_ns	0	value	threw:ValueError:xml_parser_create_ns(): Argument #1 ($encoding) is not a supported source encoding
 xml_parser_create_ns	1	value	threw:ValueError:xml_parser_create_ns(): Argument #1 ($encoding) is not a supported source encoding
+xml_set_character_data_handler	0	receiver	threw:ValueError:xml_set_character_data_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
+xml_set_default_handler	0	receiver	threw:ValueError:xml_set_default_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
+xml_set_element_handler	0	receiver	threw:ValueError:xml_set_element_handler(): Argument #2 ($start_handler) an object must be set via xml_set_object() to be able to lookup method
 xml_set_element_handler	1	receiver	threw:ValueError:xml_set_element_handler(): Argument #3 ($end_handler) an object must be set via xml_set_object() to be able to lookup method
 xml_set_element_handler	2	receiver	threw:ValueError:xml_set_element_handler(): Argument #2 ($start_handler) an object must be set via xml_set_object() to be able to lookup method
-xmlwriter::startattribute	0	value	threw:ValueError:XMLWriter::startAttribute(): Argument #2 must be a valid attribute name, "rec://probe" given
-xmlwriter::startattributens	1	value	threw:ValueError:XMLWriter::startAttributeNs(): Argument #3 ($namespace) must be a valid attribute name, "rec://probe" given
-xmlwriter::startdtdattlist	0	value	threw:ValueError:XMLWriter::startDtdAttlist(): Argument #2 must be a valid element name, "rec://probe" given
-xmlwriter::startdtdelement	0	value	threw:ValueError:XMLWriter::startDtdElement(): Argument #2 must be a valid element name, "rec://probe" given
-xmlwriter::startdtdentity	0	value	threw:ValueError:XMLWriter::startDtdEntity(): Argument #2 ($isParam) must be a valid attribute name, "rec://probe" given
-xmlwriter::startelement	0	value	threw:ValueError:XMLWriter::startElement(): Argument #2 must be a valid element name, "rec://probe" given
-xmlwriter::startelementns	1	value	threw:ValueError:XMLWriter::startElementNs(): Argument #3 ($namespace) must be a valid element name, "rec://probe" given
-xmlwriter::startpi	0	value	threw:ValueError:XMLWriter::startPi(): Argument #2 must be a valid PI target, "rec://probe" given
-xmlwriter::writeattribute	0	value	threw:ValueError:XMLWriter::writeAttribute(): Argument #2 ($value) must be a valid attribute name, "rec://probe" given
-xmlwriter::writeattributens	1	value	threw:ValueError:XMLWriter::writeAttributeNs(): Argument #3 ($namespace) must be a valid attribute name, "rec://probe" given
-xmlwriter::writedtdattlist	0	value	threw:ValueError:XMLWriter::writeDtdAttlist(): Argument #2 ($content) must be a valid element name, "rec://probe" given
-xmlwriter::writedtdelement	0	value	threw:ValueError:XMLWriter::writeDtdElement(): Argument #2 ($content) must be a valid element name, "rec://probe" given
-xmlwriter::writedtdentity	0	value	threw:ValueError:XMLWriter::writeDtdEntity(): Argument #2 ($content) must be a valid element name, "rec://probe" given
-xmlwriter::writeelement	0	value	threw:ValueError:XMLWriter::writeElement(): Argument #2 ($content) must be a valid element name, "rec://probe" given
-xmlwriter::writeelementns	1	value	threw:ValueError:XMLWriter::writeElementNs(): Argument #3 ($namespace) must be a valid element name, "rec://probe" given
-xmlwriter::writepi	0	value	threw:ValueError:XMLWriter::writePi(): Argument #2 ($content) must be a valid PI target, "rec://probe" given
-xmlwriter_start_attribute	1	value	threw:ValueError:xmlwriter_start_attribute(): Argument #2 ($name) must be a valid attribute name, "rec://probe" given
-xmlwriter_start_attribute_ns	2	value	threw:ValueError:xmlwriter_start_attribute_ns(): Argument #3 ($name) must be a valid attribute name, "rec://probe" given
-xmlwriter_start_dtd_attlist	1	value	threw:ValueError:xmlwriter_start_dtd_attlist(): Argument #2 ($name) must be a valid element name, "rec://probe" given
-xmlwriter_start_dtd_element	1	value	threw:ValueError:xmlwriter_start_dtd_element(): Argument #2 ($qualifiedName) must be a valid element name, "rec://probe" given
-xmlwriter_start_dtd_entity	1	value	threw:ValueError:xmlwriter_start_dtd_entity(): Argument #2 ($name) must be a valid attribute name, "rec://probe" given
-xmlwriter_start_element	1	value	threw:ValueError:xmlwriter_start_element(): Argument #2 ($name) must be a valid element name, "rec://probe" given
-xmlwriter_start_element_ns	2	value	threw:ValueError:xmlwriter_start_element_ns(): Argument #3 ($name) must be a valid element name, "rec://probe" given
-xmlwriter_start_pi	1	value	threw:ValueError:xmlwriter_start_pi(): Argument #2 ($target) must be a valid PI target, "rec://probe" given
-xmlwriter_write_attribute	1	value	threw:ValueError:xmlwriter_write_attribute(): Argument #2 ($name) must be a valid attribute name, "rec://probe" given
-xmlwriter_write_attribute_ns	2	value	threw:ValueError:xmlwriter_write_attribute_ns(): Argument #3 ($name) must be a valid attribute name, "rec://probe" given
-xmlwriter_write_dtd_attlist	1	value	threw:ValueError:xmlwriter_write_dtd_attlist(): Argument #2 ($name) must be a valid element name, "rec://probe" given
-xmlwriter_write_dtd_element	1	value	threw:ValueError:xmlwriter_write_dtd_element(): Argument #2 ($name) must be a valid element name, "rec://probe" given
-xmlwriter_write_dtd_entity	1	value	threw:ValueError:xmlwriter_write_dtd_entity(): Argument #2 ($name) must be a valid element name, "rec://probe" given
-xmlwriter_write_element	1	value	threw:ValueError:xmlwriter_write_element(): Argument #2 ($name) must be a valid element name, "rec://probe" given
-xmlwriter_write_element_ns	2	value	threw:ValueError:xmlwriter_write_element_ns(): Argument #3 ($name) must be a valid element name, "rec://probe" given
-xmlwriter_write_pi	1	value	threw:ValueError:xmlwriter_write_pi(): Argument #2 ($target) must be a valid PI target, "rec://probe" given
+xml_set_end_namespace_decl_handler	0	receiver	threw:ValueError:xml_set_end_namespace_decl_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
+xml_set_external_entity_ref_handler	0	receiver	threw:ValueError:xml_set_external_entity_ref_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
+xml_set_notation_decl_handler	0	receiver	threw:ValueError:xml_set_notation_decl_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
+xml_set_processing_instruction_handler	0	receiver	threw:ValueError:xml_set_processing_instruction_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
+xml_set_start_namespace_decl_handler	0	receiver	threw:ValueError:xml_set_start_namespace_decl_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
+xml_set_unparsed_entity_decl_handler	0	receiver	threw:ValueError:xml_set_unparsed_entity_decl_handler(): Argument #2 ($handler) an object must be set via xml_set_object() to be able to lookup method
 xsltprocessor::getparameter	1	value	threw:ValueError:XSLTProcessor::getParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
 xsltprocessor::importstylesheet	0	value	threw:TypeError:XSLTProcessor::importStylesheet(): Argument #1 ($stylesheet) must be a valid XML node
 xsltprocessor::registerphpfunctionns	1	value	threw:ValueError:XSLTProcessor::registerPHPFunctionNS(): Argument #2 ($name) must be a valid callback name
