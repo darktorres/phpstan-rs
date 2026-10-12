@@ -48,9 +48,68 @@ function recipe(string $class): ?Closure
         'reflectionparameter' => static fn (): object => new ReflectionParameter([RecordingObject::class, 'offsetGet'], 0),
         'reflectionclassconstant' => static fn (): object => new ReflectionClassConstant(Attribute::class, 'TARGET_CLASS'),
         'reflectionextension' => static fn (): object => new ReflectionExtension('standard'),
-        'splfileobject' => static fn (): object => new SplFileObject('x'),
+        'splfileobject' => static fn (): object => new SplFileObject(recipe_file(), 'w+'),
+        'splfileinfo' => static fn (): object => new SplFileInfo(recipe_file()),
+        // Imagick's methods throw on an empty object: one image is read first.
+        'imagick' => static function (): object {
+            $image = new Imagick();
+            $image->newImage(1, 1, new ImagickPixel('white'));
+            return $image;
+        },
+        'ziparchive' => static function (): object {
+            $zip = new ZipArchive();
+            $zip->open(recipe_file(), ZipArchive::CREATE);
+            $zip->addFromString('a.txt', 'x');
+            return $zip;
+        },
+        'xmlwriter' => static fn (): object => xmlwriter_open_memory(),
+        'xmlreader' => static fn (): object => XMLReader::XML('<a>x</a>'),
+        'xsltprocessor' => static function (): object {
+            $processor = new XSLTProcessor();
+            $stylesheet = new DOMDocument();
+            $stylesheet->loadXML('<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/"><xsl:copy-of select="."/></xsl:template></xsl:stylesheet>');
+            $processor->importStylesheet($stylesheet);
+            return $processor;
+        },
+        'pdostatement' => static fn (): object => (new PDO('sqlite::memory:'))->query('SELECT 1'),
+        // A DOM node of a document, and a text node of one.
+        'domnode' => static function (): object {
+            $document = new DOMDocument();
+            $document->loadXML('<a>x</a>');
+            return $document->documentElement;
+        },
+        'domcharacterdata' => static fn (): object => (new DOMDocument())->createTextNode('x'),
+        'spldoublylinkedlist' => static function (): object {
+            $list = new SplDoublyLinkedList();
+            $list->push(1);
+            $list->push(2);
+            return $list;
+        },
+        'splfixedarray' => static fn (): object => new SplFixedArray(2),
+        'ds\\vector' => static fn (): object => new Ds\Vector([1, 2]),
+        'ds\\deque' => static fn (): object => new Ds\Deque([1, 2]),
+        'ds\\queue' => static fn (): object => new Ds\Queue([1, 2]),
+        'ds\\stack' => static fn (): object => new Ds\Stack([1, 2]),
+        'ds\\set' => static fn (): object => new Ds\Set([1, 2]),
+        'directoryiterator' => static fn (): object => new DirectoryIterator(sys_get_temp_dir()),
+        'filesystemiterator' => static fn (): object => new FilesystemIterator(sys_get_temp_dir()),
+        'recursivedirectoryiterator' => static fn (): object => new RecursiveDirectoryIterator(sys_get_temp_dir()),
+        'globiterator' => static fn (): object => new GlobIterator(sys_get_temp_dir() . '/*'),
+        // Their constructors cannot run twice, so a method unit gets an object made without one.
+        'intlgregoriancalendar' => static fn (): object => (new ReflectionClass(IntlGregorianCalendar::class))->newInstanceWithoutConstructor(),
+        'intldatepatterngenerator' => static fn (): object => (new ReflectionClass(IntlDatePatternGenerator::class))->newInstanceWithoutConstructor(),
+        'finfo' => static fn (): object => new finfo(FILEINFO_MIME_TYPE),
+        'fiber' => static fn (): object => new Fiber(static fn (): int => 1),
+        'splobjectstorage' => static fn (): object => new SplObjectStorage(),
         default => null,
     };
+}
+
+/** A temporary file of the worker's own /tmp, which the sandbox makes private. */
+function recipe_file(): string
+{
+    $path = tempnam(sys_get_temp_dir(), 'rec');
+    return $path;
 }
 
 /**
