@@ -150,7 +150,7 @@ def gcc_profile(cache, runner):
     php = cache / 'root/php-gcc/php-src'
     environment = dict(os.environ, PHP_CC='gcc', PHP_CXX='g++')
     environment['LD_LIBRARY_PATH'] = str(cache / 'root/deps/usr/lib/x86_64-linux-gnu')
-    require_success(runner.run('gcc-tree', [HERE/'build_php_pathfree.sh', php, cache/'root/php-src',
+    require_success(runner.run('gcc-tree', [HERE/'build_php_pathfree.sh', cache/'root/php-gcc', cache/'root/php-src',
         cache/'root/deps/usr'], env=environment, timeout=3600), 'gcc-tree')
     require_success(runner.run('gcc-runtime', [php/'sapi/cli/php', '-n', HERE/'runtime.php'], env=environment), 'gcc-runtime')
     commands, linked, link = recipes(php)
