@@ -16,7 +16,15 @@ State as of 2026-10-11, `master` at `2783a866`.
 
 ## Where to resume
 
-0. **CI repair: done** (it blocked the `lint` and `fixtures` gates). Plan:
+0. **Level 9, the HEAD measurement drill: resume here.** Ledger:
+   `PROFILE_DRILL_PIWIGO_HEAD_LEDGER.md`. It holds the measurements taken at
+   `97b8f3f0` (callgrind in three modes, hyperfine, heap, the Piwigo output and
+   the oracle corpus), the tasks that follow from them, and the generated
+   instruction and allocation drill. Work one task at a time, in the ledger's
+   order, and keep a change only if it lowers instructions for its own targets
+   and wall time does not get worse under alternating timing. The batch's
+   output gate (task F1 in the ledger) is still open.
+   **CI repair: done** (it blocked the `lint` and `fixtures` gates). Plan:
    `/home/torres/.claude/plans/pure-jumping-wolf.md`. Parts 1 and 2 (items 1-9b)
    are on `origin/master`, and the latest CI on `8ad93491` is green: Rust CI run
    `38174223982` and Extension CI run `38174224048`, both on branch `master3`.
@@ -29,7 +37,7 @@ State as of 2026-10-11, `master` at `2783a866`.
    uncommitted E2.V edits to `registry/effects.rs` are not in any checkout; they
    survive only in a throwaway copy, `~/.cache/prs-profile/engine-new/`, which
    is not a git repository. Level 7's item E resumes at its E2.V gate.
-2. **Level 7, the 20 G profile: resume here.** Plan:
+2. **Level 7, the 20 G profile: paused behind level 9.** Plan:
    `PROFILE_DRILL_PIWIGO_20G.md`; rows in `PROFILE_DRILL_PIWIGO_20G_LEDGER.md`
    (items 0-19, each closed by its tests-only gate; full validation and O3 once
    after item 19). The ledger's first open row is 10.3: items 9 (including its
@@ -39,6 +47,15 @@ State as of 2026-10-11, `master` at `2783a866`.
    EG.2 (route (a), built after E2.V) and the E2.V gate itself. The E2 part 2
    batch is in `PROFILE_DRILL_PIWIGO_9071_BATCH_PLAN.md`; its verification runs
    once, after item 14.
+   **Deferred, E2.V step 3:** Piwigo gives 613 findings, not the batch's 611.
+   The two extra are `src/Piwigo/Search/SearchFilterRenderer.php:442`
+   (`array_intersect` given `list<int|string>|null`) and
+   `tools/openapi/ResponseBodyCallSiteVisitor.php:79` (`property.notFound` on
+   `PhpParser\Node\Expr::$name`). Both came in between `9071f48f` and
+   `97df097c`, not from the two fixes of this E2.V (`5ddb4436`, `97b8f3f0`),
+   which leave the output byte-identical. To do: find the commit that adds
+   them, and check whether each is a true positive. Until then the output gate
+   is open.
 3. **Level 7's deferred rows:** the PHP catalog, and every row of the 20 G plan
    that changes what the analysis finds beyond what the optimization needs,
    validated together (ledger row D.V). Both wait until after O3.
@@ -130,7 +147,7 @@ Not built, and placed in the 20 G ledger: P7's direct lowering (item 14), the
 `collect_throws` (row 18.3), P12 step 3 and the `InitFlow` fusion (row 13.4),
 and the `class_exists`-style guards (row EG.18).
 
-### 7. The 20 G Piwigo profile — `PROFILE_DRILL_PIWIGO_20G.md`  ← current
+### 7. The 20 G Piwigo profile — `PROFILE_DRILL_PIWIGO_20G.md`  (paused; see level 9)
 
 The callgrind drill-down of the 20.57 G run at `5fb858c9` (level 6's end state),
 and the dhat heap profile of the same run (2.67 GB, 19.4 M allocations), with
@@ -150,6 +167,17 @@ runtime oracle's reach.
 resolver reads. The recorder is sandboxed, resumable and observable, skips the
 forks that cannot record, and regenerates the table. Open items are in "Where
 to resume", item 1.
+
+### 9. The HEAD measurement drill — `PROFILE_DRILL_PIWIGO_HEAD_LEDGER.md`  ← current
+
+The measurements taken at `97b8f3f0` after the batch: callgrind in off, warm
+and cold-with-store modes, hyperfine in off and warm modes, the heap profile,
+the Piwigo output, and the oracle corpus. The ledger holds them with their
+baselines, the tasks that follow (each with a cause and the measure that shows
+it worked), and a generated drill of the instruction and allocation profiles.
+The batch's total instructions fell 8.8% in off mode, but its peak memory rose
+68% against `df603944`, and wall time showed no clear change. Level 7 is paused
+until the ledger's tasks settle what the batch should keep.
 
 ## Documents with no place in the stack
 
