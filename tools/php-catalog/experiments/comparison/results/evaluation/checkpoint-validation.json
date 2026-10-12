@@ -149,63 +149,115 @@
     "rows": [
       {
         "id": "R02.3",
-        "status": "Partial: selected source-linked evidence only; broader acceptance open"
+        "status": "Partial: selected source-linked evidence only; broader acceptance open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R02.5",
-        "status": "Evidence implemented; graph model remains open"
+        "status": "Evidence implemented; graph model remains open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R02.7",
-        "status": "Implementation partial; cleanup/order integration remains open"
+        "status": "Implementation partial; cleanup/order integration remains open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R03.1",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R03.4",
-        "status": "Implementation updated; identity checks validated; linked-module replay pending"
+        "status": "Implementation updated; identity checks validated; linked-module replay pending",
+        "acceptance": "not accepted"
       },
       {
         "id": "R03.2",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R03.3",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R22.1",
-        "status": "Deferred"
+        "status": "Deferred",
+        "acceptance": "not accepted"
       },
       {
         "id": "R05.4",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R05.2",
-        "status": "Implementation partial; acceptance open"
+        "status": "Implementation partial; acceptance open",
+        "acceptance": "not accepted"
+      },
+      {
+        "id": "R05.6",
+        "status": "Implementation complete; acceptance open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R05.7",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R06.1",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R06.2",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R06.4",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
       },
       {
         "id": "R06.3",
-        "status": "Open"
+        "status": "Open",
+        "acceptance": "not accepted"
+      }
+    ],
+    "scoped": [
+      {
+        "id": "R00.2",
+        "scope": "definition only",
+        "remainder": "R01.5"
+      },
+      {
+        "id": "R00.3",
+        "scope": "matrix and audit; the transfers and their unsupported outcomes",
+        "remainder": "F00.3, R02.5, R05.2"
+      },
+      {
+        "id": "R04.1",
+        "scope": "the selected slice",
+        "remainder": "F01.5"
+      },
+      {
+        "id": "R05.3",
+        "scope": "the audited strlen path",
+        "remainder": "F05.6"
+      },
+      {
+        "id": "R05.1",
+        "scope": "the locked runtime slice",
+        "remainder": "F05.6"
+      },
+      {
+        "id": "R05.5",
+        "scope": "the eight PHPDoc fixtures at 8ad93491",
+        "remainder": "R05.7"
       }
     ]
   }

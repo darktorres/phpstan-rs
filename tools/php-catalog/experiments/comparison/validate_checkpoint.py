@@ -133,29 +133,48 @@ def local_links():
     return check('local report links', not broken, f'broken: {broken}')
 
 
-OPEN_WORDS = re.compile(r'\b(open|remains?|pending|partial|deferred)\b', re.IGNORECASE)
-COMPLETE_STATUS = re.compile(r'(Implementation (and \w+ )?complete|Complete)\b')
+ROW_TITLE = re.compile(r'^- \*\*(R\d+\.\d+) — (.*?)\*\*')
+ACCEPTANCE_VALUES = ('accepted', 'not accepted')
 
 
-def r_row_accepted(status):
-    """An R row is accepted when its status records author acceptance, or a completed
-    implementation with no open-ended words. A status that says a part remains open is not
-    accepted, even when it begins with "Complete"."""
-    if OPEN_WORDS.search(status):
-        return False
-    return 'author-accepted' in status or bool(COMPLETE_STATUS.match(status))
+def r_rows(ledger):
+    """Read each R row's title and the lines that state its acceptance. The acceptance line
+    must directly follow the title; Scope and Remainder may follow it. A row whose acceptance
+    line is missing or has another value has no acceptance and is not accepted."""
+    lines = ledger.splitlines()
+    rows = []
+    for index, line in enumerate(lines):
+        match = ROW_TITLE.match(line)
+        if not match:
+            continue
+        row = {'id': match.group(1), 'status': match.group(2), 'acceptance': None,
+               'scope': None, 'remainder': None}
+        if index + 1 < len(lines) and lines[index + 1].startswith('  Acceptance: '):
+            value = lines[index + 1][len('  Acceptance: '):].strip()
+            if value in ACCEPTANCE_VALUES:
+                row['acceptance'] = value
+        for text in lines[index + 2:index + 4]:
+            for key, prefix in (('scope', '  Scope: '), ('remainder', '  Remainder: ')):
+                if text.startswith(prefix):
+                    row[key] = text[len(prefix):].strip()
+        rows.append(row)
+    return rows
 
 
 def semantic_acceptance(ledger):
     headings = re.findall(r'^### (F\d+\.\d+) — (Open|Partial|Deferred)', ledger, re.M)
-    rows = [(rid, status) for rid, status in re.findall(r'^- \*\*(R\d+\.\d+) — (.*?)\*\*', ledger, re.M)
-            if not r_row_accepted(status)]
-    if not headings and not rows:
-        return {'status': 'accepted'}
+    rows = r_rows(ledger)
+    open_rows = [{'id': row['id'], 'status': row['status'], 'acceptance': row['acceptance'] or 'unclassified'}
+                 for row in rows if row['acceptance'] != 'accepted']
+    scoped = [{'id': row['id'], 'scope': row['scope'], 'remainder': row['remainder']}
+              for row in rows if row['acceptance'] == 'accepted' and row['scope']]
+    if not headings and not open_rows:
+        return {'status': 'accepted', 'scoped': scoped}
     return {
         'status': 'OPEN',
         'headings': [{'id': name, 'state': state} for name, state in headings],
-        'rows': [{'id': rid, 'status': status} for rid, status in rows],
+        'rows': open_rows,
+        'scoped': scoped,
     }
 
 
