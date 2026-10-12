@@ -4130,6 +4130,13 @@ impl Reach<'_> {
     /// properties, by their declared types, which die with it when nothing
     /// else holds them.
     fn destroy_held(&self, class: &Name) -> Holder {
+        self.registry
+            .reach_memo
+            .destroy_held
+            .get_or_compute(class.clone(), || self.compute_destroy_held(class))
+    }
+
+    fn compute_destroy_held(&self, class: &Name) -> Holder {
         let registry = self.registry;
         let mut found = NameList::new();
         let names: Vec<&Name> = match registry.property_owners(class) {

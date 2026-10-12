@@ -171,6 +171,9 @@ pub(crate) struct ReachMemo {
     /// The methods PHP calls for an operation but a property's on an object
     /// of exactly a class.
     pub(crate) implicit_methods: OnceMap<(Name, OperationKey), Arc<[&'static Name]>>,
+    /// The holder of the objects an object of exactly a class holds in its
+    /// properties, which its destruction reaches, keyed by the name as written.
+    pub(crate) destroy_held: OnceMap<Name, Holder>,
     /// The table row a builtin declaration is looked up under.
     pub(crate) builtin_entries: OnceMap<DeclKey, Option<Arc<str>>>,
     /// The constructors of every class that has one.
