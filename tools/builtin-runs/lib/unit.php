@@ -23,7 +23,7 @@ function probe_function(string $function, array &$out): void
     probe_child($builtin, 'plain', static function () use ($function, $params): void {
         Seen::$where = 'plain';
         Seen::add('reached');
-        $function(...arguments($params, -1, null));
+        invoke_arguments($params, -1, null, static fn (array $args): mixed => $function(...$args));
         Seen::returned();
     }, $out);
     foreach ($params as $at => $param) {
@@ -40,14 +40,16 @@ function probe_function(string $function, array &$out): void
                     }
                     Seen::$entries = [];
                     Seen::$where = $where;
-                    $args = arguments($params, $at, $value);
                     $refs = [];
-                    foreach ($args as $i => $arg) {
-                        $refs[$i] = $arg;
-                        $args[$i] = &$refs[$i];
-                    }
                     Seen::add('reached');
-                    $result = call_user_func_array($function, $args);
+                    $result = invoke_arguments($params, $at, $value, static function (array $args) use ($function, &$refs): mixed {
+                        $refs = [];
+                        foreach ($args as $i => $arg) {
+                            $refs[$i] = $arg;
+                            $args[$i] = &$refs[$i];
+                        }
+                        return call_user_func_array($function, $args);
+                    });
                     Seen::returned();
                     unset($refs[$at]);
                     return [$result, $refs];
@@ -82,8 +84,7 @@ function probe_method(string $class, string $name, array &$out): void
         Seen::$entries = [];
         Seen::$where = 'plain';
         Seen::add('reached');
-        $args = arguments($params, -1, null);
-        $static ? $class::$name(...$args) : $object->$name(...$args);
+        invoke_arguments($params, -1, null, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args));
         Seen::returned();
     }, $out);
     // A probe at each of the method's parameters, on a plain object.
@@ -98,9 +99,8 @@ function probe_method(string $class, string $name, array &$out): void
                 $value = $make();
                 Seen::$entries = [];
                 Seen::$where = $where;
-                $args = arguments($params, $at, $value);
                 Seen::add('reached');
-                $static ? $class::$name(...$args) : $object->$name(...$args);
+                invoke_arguments($params, $at, $value, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args));
                 Seen::returned();
             }, $out);
         }
@@ -115,7 +115,7 @@ function probe_method(string $class, string $name, array &$out): void
             $object = $make();
             Seen::$entries = [];
             Seen::add('reached');
-            $object->$name(...arguments($params, -1, null));
+            invoke_arguments($params, -1, null, static fn (array $args): mixed => $object->$name(...$args));
             Seen::returned();
         }, $out);
     }
@@ -145,7 +145,7 @@ function held_first(callable $maker, string $firstName, array $firstParams, int 
         array_values(array_filter(is_array($value) ? $value : [$value], 'is_object')),
     );
     try {
-        $object->$firstName(...arguments($firstParams, $at, $value));
+        invoke_arguments($firstParams, $at, $value, static fn (array $args): mixed => $object->$firstName(...$args));
     } catch (Throwable) {
     }
     return [$object, $value, $witness];
@@ -262,7 +262,7 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
                     Seen::$entries = [];
                     Seen::$where = $where;
                     Seen::add('reached');
-                    $object->$thenName(...arguments($thenParams, -1, null));
+                    invoke_arguments($thenParams, -1, null, static fn (array $args): mixed => $object->$thenName(...$args));
                     Seen::returned();
                 }, $out);
             }

@@ -430,7 +430,7 @@ function plain_value(ReflectionParameter $param, int $probe = -1): mixed
  * @param list<ReflectionParameter> $params
  * @return list<mixed>
  */
-function arguments(array $params, int $at, mixed $probe): array
+function arguments(array $params, int $at, mixed $probe, bool $optional = false): array
 {
     $args = [];
     // The context probe's call reads the listener: its first string argument is the URL.
@@ -449,9 +449,11 @@ function arguments(array $params, int $at, mixed $probe): array
                 }
             }
         } elseif ($i > $at && $param->isOptional()) {
-            // The optional parameters after the probe are left out: a default passed in their place changes
-            // what the call runs.
-            break;
+            // Left out unless the call was refused for too few arguments (see invoke_arguments).
+            if (!$optional) {
+                break;
+            }
+            $args[$i] = $param->isDefaultValueAvailable() ? $param->getDefaultValue() : plain_value($param, $at);
         } else {
             $args[$i] = plain_value($param, $at);
         }
@@ -474,6 +476,20 @@ function declares_string(ReflectionParameter $param): bool
         }
     }
     return false;
+}
+
+/**
+ * Calls with the arguments of a probe. A call PHP refuses for too few arguments is made again with
+ * the optional parameters after the probe as well. PHP raises that error before any body runs, so
+ * the refused call records nothing the second one would not.
+ */
+function invoke_arguments(array $params, int $at, mixed $probe, Closure $call): mixed
+{
+    try {
+        return $call(arguments($params, $at, $probe));
+    } catch (ArgumentCountError) {
+        return $call(arguments($params, $at, $probe, true));
+    }
 }
 
 /** Where a probe is: its parameter's position, and `[]` for the elements of an array. */
