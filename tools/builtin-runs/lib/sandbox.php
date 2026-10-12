@@ -51,7 +51,9 @@ function worker_command(string $php, bool $zendMm, array $sandbox): array
         foreach ($variables as $name => $value) {
             array_push($command, '--setenv', $name, $value);
         }
-        array_push($command, '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/home');
+        // /run holds the host's listening sockets (Docker, containerd, the system bus, MySQL); a
+        // network namespace does not cut those off, so /run is hidden as /home is.
+        array_push($command, '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/home', '--tmpfs', '/run');
         $tools = dirname(__DIR__);
         array_push($command, '--ro-bind', $tools, $tools);
         $stubs = phpstorm_stubs_dir();
