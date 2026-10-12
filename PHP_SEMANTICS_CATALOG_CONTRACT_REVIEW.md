@@ -1328,3 +1328,36 @@ sites, the 529 observed sites and 307 targets of the recorded hybrid-call run, t
 of `runtime.php` (the earlier claim of 13 named the hybrid-call fixture, which shares 13 of
 them), both kernel OOM proofs, the CBMC outcomes and the report links. Its semantic
 acceptance remains OPEN: that is a review judgement, not a computed check.
+
+## Semantic review by the author (2026-10-12)
+
+Scope: the `strlen` catalog evidence and graph, checked against the rebuilt linked module,
+the path-free SVF and the regenerated evidence. This is an author review. The contract
+requires an independent semantic review (F00), which has not happened, so this review does
+not close F00 or the semantic acceptance. The checkpoint keeps the semantic acceptance OPEN.
+
+What was checked:
+- **Operation inventory.** Regenerated from the rebuilt module, the `strlen` LLVM operation
+  inventory has the same operations, the same helper calls and the same structure as the
+  checked-in one. Only two digests differ, both of extracted bitcode.
+- **Catalog content.** Regenerated from that inventory and the runtime witness, the catalog's
+  entries, graphs, assumptions and schema match the previous catalog exactly. Each section
+  matches as a set of records once the 32-byte evidence identifiers are masked. The
+  identifiers change because they are derived from the module digest, and the records are
+  sorted by identifier.
+- **Module pin.** The builder and the embedded-catalog test pinned the digest of the earlier
+  module as the measured Clang profile. The pin now names the rebuilt module, which the
+  manifest binds. The justification is the inventory equality above, not the digest alone.
+- **Tests.** The semantics crate passes (113 tests); the main library passes (1295 tests).
+- **Checkpoint.** `checkpoint-validation.json` passes every claim; its semantic acceptance is
+  OPEN.
+
+What remains open for the semantic gate:
+- The independent semantic-contract review (F00) and the PHP-source validation of the
+  contract's claims.
+- The ledger rows still open (15 Open, 1 Partial), which the record lists row by row,
+  including R05.2 and R05.7 on the callback and fixture coverage.
+
+Verdict of the author: the evidence chain is consistent and reproduces, and the `strlen`
+slice agrees with its inventory. The contract's own gate for closing the semantic acceptance
+is an independent review, which the author cannot provide.
