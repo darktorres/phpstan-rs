@@ -87,19 +87,22 @@ function names_callable(?ReflectionType $type): bool
 function probes_for(ReflectionParameter $param): array
 {
     $type = $param->getType();
+    // A parameter the stubs document as a resource takes a stream and nothing
+    // else: every other probe is a TypeError before any user code.
+    if (documented_resource($param)) {
+        return [['stream', static fn () => recording_stream()]];
+    }
     $probes = [];
     if (admits($type, 'callable') || admits($type, 'closure')) {
         $probes[] = ['callable', static fn () => recording_callable()];
     }
-    // A parameter the stubs document as a resource takes no object: only the stream probe reaches it.
-    $resource = documented_resource($param);
-    if (!$resource && accepts_value($type, RecordingObject::class)) {
+    if (accepts_value($type, RecordingObject::class)) {
         $probes[] = ['object', static fn () => new RecordingObject()];
     }
-    if (!$resource && accepts_value($type, RecordingIterator::class)) {
+    if (accepts_value($type, RecordingIterator::class)) {
         $probes[] = ['iterator', static fn () => new RecordingIterator()];
     }
-    if (!$resource && accepts_value($type, RecordingSleeper::class)) {
+    if (accepts_value($type, RecordingSleeper::class)) {
         $probes[] = ['sleeper', static fn () => new RecordingSleeper()];
     }
     if (admits($type, 'string')) {
