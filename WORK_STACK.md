@@ -60,6 +60,24 @@ State as of 2026-10-12, `master` at `e32fd95d`.
    `sprintf`/`printf`, and a recorder that proves a non-converting parameter with a converting object
    (item 1). Also fixed here: `array_map` with a named callable infers its declared return
    (`array<int>`, not `array`), which recovers part of that precision.
+   Investigated (evidence in `~/.cache/f00-3/census`, PHP 8.5.4 locked CLI):
+   - Precision, the union adds a `__toString` run at 699 positions in 467 functions. 402 are plain
+     `string` parameters: PHP always converts an object there in weak mode, so the run is real and
+     the cost is the unknown writes of that `__toString` (recoverable only by resolving its target).
+     82 are `mixed`, untyped or `object` parameters. 38 of those have only int, float, bool or null
+     companions, and for all 38 PHP shows no `__toString` call, neither on the argument, its elements,
+     nor an output value (`print_r`, `var_export`, `serialize`, `json_encode`, `is_*`, `gettype`,
+     `array_fill`, `end`, ...). Their table absence is complete evidence, so the union can skip them.
+     Not yet done. The other 44 have a companion that could gate a conversion (`in_array` compares,
+     `min`/`max` compare, `sprintf` formats).
+   - Coverage, every `__toString` row the table records for a function comes from a parameter that
+     admits a string, `mixed`, an object or an array (0 violations), so the union covers every
+     parameter-driven conversion by construction.
+   - Gap, state-driven conversions with flags: `ArrayObject::asort(SORT_STRING)` converts both held
+     objects (2 `__toString` calls, PHP), and the table records `arrayobject::asort` as `probed` with no
+     row, so the checker sees no user code. The probe always uses the default flag. The same holds for
+     `ArrayIterator`'s sorts. Fix: probe the sort-flag parameters with `SORT_STRING` in the recorder and
+     regenerate the table (about 40 minutes sandboxed), or gate such methods in the checker.
    Follow-ups from the same probe: a declared non-final class without `__toString` is reported at
    level 9 (decided, see the review), and the fixture harness now honours a fixture's `level`.
 1. **Level 8, the builtin-runs recorder: done** (`BUILTIN_RUNS_RECORDER_PLAN.md`,
