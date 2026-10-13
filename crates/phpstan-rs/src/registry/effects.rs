@@ -3202,6 +3202,11 @@ pub(crate) trait CallContext {
     /// The object an operation's operand, a value from `on` (from anywhere
     /// when `None`), is, and whether it is the caller's own `$this`.
     fn operand(&self, on: Option<&[Origin]>) -> (Holder, bool);
+    /// The object a held destroy's operand is, and whether it is the caller's
+    /// own `$this`; see `Held`.
+    fn held_operand(&self, _held: Held<'_>) -> (Holder, bool) {
+        (Holder::Unknown, false)
+    }
     /// Whether the calling code is a closure's, which may be bound to any
     /// class's scope.
     fn rebindable(&self) -> bool;
@@ -3808,6 +3813,12 @@ impl Reach<'_> {
     ) -> Option<Targets> {
         let (holder, same) = self.ctx.operand(on);
         self.implicit_holder_targets(holder, same, operation)
+    }
+
+    /// `implicit_call_targets` for a held destroy, whose operand is `held`.
+    fn implicit_held_targets(&self, held: Held<'_>) -> Option<Targets> {
+        let (holder, same) = self.ctx.held_operand(held);
+        self.implicit_holder_targets(holder, same, &Operation::Destroy)
     }
 
     /// `implicit_call_targets` for an operand already found to be `holder`.
@@ -5218,6 +5229,14 @@ impl CallContext for Level<'_> {
         true
     }
 
+    fn held_operand(&self, held: Held<'_>) -> (Holder, bool) {
+        match held {
+            Held::Returned(callee) => (self.returned_holder(callee), false),
+            Held::Elements(callee) => (self.returned_holder_of(callee, elements_holder_of), false),
+            Held::Origins(origins) => self.operand(Some(origins)),
+        }
+    }
+
     fn operand(&self, on: Option<&[Origin]>) -> (Holder, bool) {
         let Some(origins) = on else {
             return (Holder::Unknown, false);
@@ -5431,24 +5450,28 @@ impl<'r> Level<'r> {
             ctx: self,
         };
         #[cfg(debug_assertions)]
-        check_body_calls(facts, &body_calls(facts).collect::<Vec<_>>());
+        check_body_calls(facts, &body_calls(facts));
         let mut reached = Vec::with_capacity(facts.calls.len() + facts.dying_locals.len());
         let mut written_args: Vec<&'r Place> = Vec::new();
+        let held_record = held_call();
         for entry in body_calls(facts) {
-            let call = entry.call();
+            let call = entry.call(held_record);
             let ran = (self.runs.borrow().len(), self.params_run.borrow().len());
-            let targets = match &call.callee {
-                Callee::Implicit { on, operation } => {
-                    reach.implicit_call_targets(on.as_deref(), operation)?
-                }
-                callee => Targets::List(reach.call_targets(callee, Some(call))?),
+            let targets = match &entry {
+                CallEntry::Held(held) => reach.implicit_held_targets(*held)?,
+                CallEntry::Recorded(_) => match &call.callee {
+                    Callee::Implicit { on, operation } => {
+                        reach.implicit_call_targets(on.as_deref(), operation)?
+                    }
+                    callee => Targets::List(reach.call_targets(callee, Some(call))?),
+                },
             };
             // A closure the body wrote or a parameter's argument, called:
             // what it takes by reference is not looked up.
             let unknown_params = (self.runs.borrow().len(), self.params_run.borrow().len()) != ran;
             // The destroys a call result holds take no places.
             if let CallEntry::Recorded(recorded) = &entry {
-                let recorded: &'r CallWrites = *recorded;
+                let recorded: &'r CallWrites = recorded;
                 for (at, place) in recorded.places.iter() {
                     let filled = recorded.fills.contains(at);
                     if unknown_params
@@ -5495,8 +5518,9 @@ impl<'r> Level<'r> {
         let facts: &'r WriteFacts = self.facts;
         // The shared sets of declarations already taken.
         let mut taken: FxHashSet<usize> = FxHashSet::default();
-        for (entry, targets) in body_calls(facts).zip(reached) {
-            let call: &CallWrites = entry.call();
+        let held_record = held_call();
+        for (entry, targets) in body_calls(facts).into_iter().zip(reached) {
+            let call: &CallWrites = entry.call(held_record);
             let mut site: Option<u32> = None;
             let entries = match targets {
                 Targets::List(list) => list,
@@ -6820,73 +6844,95 @@ mod effect_id_tests {
 use crate::registry::summaries::{DIES_CONTENTS, DIES_SHADOW, DIES_TEMPORARY};
 
 /// A call of a body as the classifier reads it: a recorded call, or a destroy
-/// a call result or a dying variable holds, as the operation the body records.
+/// a call result or a dying variable holds, read as the operation the body
+/// records for it.
 enum CallEntry<'r> {
     Recorded(&'r CallWrites),
-    Held(Box<CallWrites>),
+    Held(Held<'r>),
 }
 
 impl CallEntry<'_> {
-    fn call(&self) -> &CallWrites {
+    /// The record the classifier asks about the call's arguments: a held
+    /// destroy takes none, so it has the empty record `held`.
+    fn call<'a>(&'a self, held: &'a CallWrites) -> &'a CallWrites {
         match self {
             CallEntry::Recorded(call) => call,
-            CallEntry::Held(call) => call,
+            CallEntry::Held(_) => held,
         }
     }
 }
 
+/// The empty record a held destroy is classified with.
+fn held_call() -> &'static CallWrites {
+    static HELD: std::sync::OnceLock<CallWrites> = std::sync::OnceLock::new();
+    HELD.get_or_init(|| CallWrites {
+        callee: Callee::Implicit {
+            on: None,
+            operation: Operation::Destroy,
+        },
+        arguments: Box::new([]),
+        places: Box::new([]),
+        objectless: Box::new([]),
+        callables: Box::new([]),
+        fills: Box::new([]),
+        dies: 0,
+    })
+}
+
+/// What a held destroy's operand is, borrowed from the body's facts: the
+/// callee a call result is of, the callee its contents are of, or a dying
+/// variable's origins. The origins are the facts' own, so their addresses
+/// are stable for the scope.
+#[derive(Clone, Copy)]
+pub(crate) enum Held<'a> {
+    Returned(&'a Callee),
+    Elements(&'a Callee),
+    Origins(&'a [Origin]),
+}
+
 /// The calls of `facts` in the order the classifier reads them: each recorded
-/// call, then the destroys its result and its contents hold.
-fn body_calls(facts: &WriteFacts) -> impl Iterator<Item = CallEntry<'_>> + '_ {
-    let calls = facts
-        .calls
-        .iter()
-        .filter(|call| call.dies & DIES_SHADOW == 0)
-        .flat_map(|call| {
-            std::iter::once(CallEntry::Recorded(call)).chain(
-                [(DIES_TEMPORARY, false), (DIES_CONTENTS, true)]
-                    .into_iter()
-                    .filter(move |(bit, _)| call.dies & bit != 0)
-                    .map(move |(_, contents)| {
-                        let mut origin = Origin::Returned(Arc::new(call.callee.clone()));
-                        if contents {
-                            origin = Origin::Elements(Arc::new(origin));
-                        }
-                        CallEntry::Held(Box::new(CallWrites {
-                            callee: Callee::Implicit {
-                                on: Some(Arc::from(vec![origin])),
-                                operation: Operation::Destroy,
-                            },
-                            arguments: Box::new([]),
-                            places: Box::new([]),
-                            objectless: Box::new([]),
-                            callables: Box::new([]),
-                            fills: Box::new([]),
-                            dies: 0,
-                        }))
-                    }),
-            )
-        });
-    let locals = facts.dying_locals.iter().map(|name| {
+/// call, then the destroys its result and its contents hold, then the dying
+/// variables.
+fn body_calls(facts: &WriteFacts) -> Vec<CallEntry<'_>> {
+    let mut entries = Vec::with_capacity(facts.calls.len() + facts.dying_locals.len());
+    for call in facts.calls.iter() {
+        if call.dies & DIES_SHADOW != 0 {
+            continue;
+        }
+        entries.push(CallEntry::Recorded(call));
+        if call.dies & DIES_TEMPORARY != 0 {
+            entries.push(CallEntry::Held(Held::Returned(&call.callee)));
+        }
+        if call.dies & DIES_CONTENTS != 0 {
+            entries.push(CallEntry::Held(Held::Elements(&call.callee)));
+        }
+    }
+    for name in facts.dying_locals.iter() {
         let (_, origins) = facts
             .origins
             .iter()
             .find(|(held, _)| held == name)
             .expect("a dying local's origins are kept");
-        CallEntry::Held(Box::new(CallWrites {
-            callee: Callee::Implicit {
-                on: Some(Arc::from(origins.to_vec())),
-                operation: Operation::Destroy,
-            },
-            arguments: Box::new([]),
-            places: Box::new([]),
-            objectless: Box::new([]),
-            callables: Box::new([]),
-            fills: Box::new([]),
-            dies: 0,
-        }))
-    });
-    calls.chain(locals)
+        entries.push(CallEntry::Held(Held::Origins(origins)));
+    }
+    entries
+}
+
+/// The operation a held destroy stands for, as the body records it, for the
+/// debug check to compare with the records.
+#[cfg(debug_assertions)]
+fn held_callee(held: Held<'_>) -> Callee {
+    let on: Vec<Origin> = match held {
+        Held::Returned(callee) => vec![Origin::Returned(Arc::new(callee.clone()))],
+        Held::Elements(callee) => vec![Origin::Elements(Arc::new(Origin::Returned(Arc::new(
+            callee.clone(),
+        ))))],
+        Held::Origins(origins) => origins.to_vec(),
+    };
+    Callee::Implicit {
+        on: Some(Arc::from(on)),
+        operation: Operation::Destroy,
+    }
 }
 
 /// Checks, in a debug build, that the destroys the body's call results and
@@ -6900,22 +6946,22 @@ fn check_body_calls(facts: &WriteFacts, entries: &[CallEntry<'_>]) {
         .filter(|call| call.dies & DIES_SHADOW != 0)
         .map(|call| &call.callee)
         .collect();
-    let held: Vec<&Callee> = entries
+    let held: Vec<Callee> = entries
         .iter()
         .filter_map(|entry| match entry {
-            CallEntry::Held(call) => Some(&call.callee),
+            CallEntry::Held(held) => Some(held_callee(*held)),
             CallEntry::Recorded(_) => None,
         })
         .collect();
     for callee in &held {
         assert!(
-            shadow.contains(callee),
+            shadow.contains(&callee),
             "a held destroy is not one the body records"
         );
     }
     for callee in &shadow {
         assert!(
-            held.contains(callee),
+            held.iter().any(|held| held == *callee),
             "a destroy the body records is not held"
         );
     }
