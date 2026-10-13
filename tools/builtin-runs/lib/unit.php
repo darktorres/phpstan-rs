@@ -21,48 +21,52 @@ function probe_function(string $function, array &$out): void
     $builtin = strtolower($function);
     $reflection = new ReflectionFunction($function);
     $params = $reflection->getParameters();
-    probe_child($builtin, 'plain', static function () use ($function, $params): void {
-        Seen::$where = 'plain';
-        Seen::add('reached');
-        invoke_arguments($params, -1, null, static fn (array $args): mixed => $function(...$args));
-        Seen::returned();
-    }, $out);
+    foreach (call_modes($params, -1) as $valued) {
+        probe_child($builtin, 'plain', static function () use ($function, $params, $valued): void {
+            Seen::$where = 'plain';
+            Seen::add('reached');
+            invoke_arguments($params, -1, null, static fn (array $args): mixed => $function(...$args), $valued);
+            Seen::returned();
+        }, $out);
+    }
     foreach ($params as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
             $where = where('', $at, $probe);
-            probe_child($builtin, $where, static function () use ($function, $params, $at, $make, $where, $probe): void {
-                $weak = null;
-                // What the call gave back and the other arguments, which a
-                // caller still holds once it returned.
-                $kept = (static function () use ($function, $params, $at, $make, $where, &$weak): array {
-                    $value = $make();
-                    if (is_object($value)) {
-                        $weak = WeakReference::create($value);
-                    }
-                    Seen::$entries = [];
-                    Seen::$where = $where;
-                    $refs = [];
-                    Seen::add('reached');
-                    $result = invoke_arguments($params, $at, $value, static function (array $args) use ($function, &$refs): mixed {
-                        $refs = [];
-                        foreach ($args as $i => $arg) {
-                            $refs[$i] = $arg;
-                            $args[$i] = &$refs[$i];
+            foreach (call_modes($params, $at) as $valued) {
+                probe_child($builtin, $where, static function () use ($function, $params, $at, $make, $where, $probe, $valued): void {
+                    $weak = null;
+                    // What the call gave back and the other arguments, which a
+                    // caller still holds once it returned.
+                    $kept = (static function () use ($function, $params, $at, $make, $where, $valued, &$weak): array {
+                        $value = $make();
+                        if (is_object($value)) {
+                            $weak = WeakReference::create($value);
                         }
-                        return call_user_func_array($function, $args);
-                    });
-                    Seen::returned();
-                    unset($refs[$at]);
-                    return [$result, $refs];
-                })();
-                if ($probe === 'callable' && $weak !== null && names_callable($params[$at]->getType()) && !$params[$at]->isPassedByReference()) {
-                    gc_collect_cycles();
-                    if ($weak->get() === null) {
-                        Seen::released($where);
+                        Seen::$entries = [];
+                        Seen::$where = $where;
+                        $refs = [];
+                        Seen::add('reached');
+                        $result = invoke_arguments($params, $at, $value, static function (array $args) use ($function, &$refs): mixed {
+                            $refs = [];
+                            foreach ($args as $i => $arg) {
+                                $refs[$i] = $arg;
+                                $args[$i] = &$refs[$i];
+                            }
+                            return call_user_func_array($function, $args);
+                        }, $valued);
+                        Seen::returned();
+                        unset($refs[$at]);
+                        return [$result, $refs];
+                    })();
+                    if ($probe === 'callable' && $weak !== null && names_callable($params[$at]->getType()) && !$params[$at]->isPassedByReference()) {
+                        gc_collect_cycles();
+                        if ($weak->get() === null) {
+                            Seen::released($where);
+                        }
                     }
-                }
-                unset($kept);
-            }, $out, $probe);
+                    unset($kept);
+                }, $out, $probe);
+            }
         }
     }
 }
@@ -77,33 +81,37 @@ function probe_method(string $class, string $name, array &$out): void
     $params = $method->getParameters();
     $static = $method->isStatic();
     // The method, plainly, on a plain object.
-    probe_child($builtin, 'plain', static function () use ($makers, $static, $class, $name, $params): void {
-        $object = $static ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
-        if (!$static && $object === null) {
-            return;
-        }
-        Seen::$entries = [];
-        Seen::$where = 'plain';
-        Seen::add('reached');
-        invoke_arguments($params, -1, null, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args));
-        Seen::returned();
-    }, $out);
+    foreach (call_modes($params, -1) as $valued) {
+        probe_child($builtin, 'plain', static function () use ($makers, $static, $class, $name, $params, $valued): void {
+            $object = $static ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
+            if (!$static && $object === null) {
+                return;
+            }
+            Seen::$entries = [];
+            Seen::$where = 'plain';
+            Seen::add('reached');
+            invoke_arguments($params, -1, null, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args), $valued);
+            Seen::returned();
+        }, $out);
+    }
     // A probe at each of the method's parameters, on a plain object.
     foreach ($params as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
             $where = where('', $at, $probe);
-            probe_child($builtin, $where, static function () use ($makers, $static, $class, $name, $params, $at, $make, $where): void {
-                $object = $static ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
-                if (!$static && $object === null) {
-                    return;
-                }
-                $value = $make();
-                Seen::$entries = [];
-                Seen::$where = $where;
-                Seen::add('reached');
-                invoke_arguments($params, $at, $value, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args));
-                Seen::returned();
-            }, $out, $probe);
+            foreach (call_modes($params, $at) as $valued) {
+                probe_child($builtin, $where, static function () use ($makers, $static, $class, $name, $params, $at, $make, $where, $valued): void {
+                    $object = $static ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
+                    if (!$static && $object === null) {
+                        return;
+                    }
+                    $value = $make();
+                    Seen::$entries = [];
+                    Seen::$where = $where;
+                    Seen::add('reached');
+                    invoke_arguments($params, $at, $value, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args), $valued);
+                    Seen::returned();
+                }, $out, $probe);
+            }
         }
     }
     if ($static) {
@@ -111,14 +119,16 @@ function probe_method(string $class, string $name, array &$out): void
     }
     // The method, plainly, on an object made with a probe.
     foreach (array_slice($makers, 1) as [$where, $make]) {
-        probe_child($builtin, $where, static function () use ($make, $where, $name, $params): void {
-            Seen::$where = $where;
-            $object = $make();
-            Seen::$entries = [];
-            Seen::add('reached');
-            invoke_arguments($params, -1, null, static fn (array $args): mixed => $object->$name(...$args));
-            Seen::returned();
-        }, $out);
+        foreach (call_modes($params, -1) as $valued) {
+            probe_child($builtin, $where, static function () use ($make, $where, $name, $params, $valued): void {
+                Seen::$where = $where;
+                $object = $make();
+                Seen::$entries = [];
+                Seen::add('reached');
+                invoke_arguments($params, -1, null, static fn (array $args): mixed => $object->$name(...$args), $valued);
+                Seen::returned();
+            }, $out);
+        }
     }
 }
 
@@ -134,7 +144,7 @@ function probe_method(string $class, string $name, array &$out): void
  * @param list<ReflectionParameter> $firstParams
  * @return array{?object, mixed, list<WeakReference<object>>}
  */
-function held_first(callable $maker, string $firstName, array $firstParams, int $at, callable $make): array
+function held_first(callable $maker, string $firstName, array $firstParams, int $at, callable $make, bool $valued = false): array
 {
     $object = $maker();
     if (!is_object($object)) {
@@ -146,7 +156,7 @@ function held_first(callable $maker, string $firstName, array $firstParams, int 
         array_values(array_filter(is_array($value) ? $value : [$value], 'is_object')),
     );
     try {
-        invoke_arguments($firstParams, $at, $value, static fn (array $args): mixed => $object->$firstName(...$args));
+        invoke_arguments($firstParams, $at, $value, static fn (array $args): mixed => $object->$firstName(...$args), $valued);
     } catch (Throwable) {
     }
     return [$object, $value, $witness];
@@ -218,54 +228,59 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
             $maker = $makers[0][1];
             $surveyBuiltin = strtolower($class . '::' . $firstName);
             $surveyWhere = 'survey:' . $where;
-            $survey = null;
-            if ($skip !== 'off') {
-                $survey = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make, $probe): void {
-                    [$object, $value, $witness] = held_first($maker, $firstName, $firstParams, $at, $make);
-                    if (!is_object($object)) {
-                        return;
+            // Each mode of the first call is a unit of its own: a dead first call in one mode does not end the others.
+            foreach (call_modes($firstParams, $at) as $valued) {
+                $survey = null;
+                if ($skip !== 'off') {
+                    $survey = in_child(static function () use ($maker, $firstName, $firstParams, $at, $make, $probe, $valued): void {
+                        [$object, $value, $witness] = held_first($maker, $firstName, $firstParams, $at, $make, $valued);
+                        if (!is_object($object)) {
+                            return;
+                        }
+                        Seen::$entries["\tsurvey\t"] = true;
+                        unset($value);
+                        gc_collect_cycles();
+                        if (released_probe($probe, $witness)) {
+                            Seen::$entries["\treleased\t"] = true;
+                        }
+                    });
+                    Stats::child($surveyBuiltin, $surveyWhere);
+                    if ($survey === null) {
+                        Stats::failed($surveyBuiltin, $surveyWhere);
                     }
-                    Seen::$entries["\tsurvey\t"] = true;
-                    unset($value);
-                    gc_collect_cycles();
-                    if (released_probe($probe, $witness)) {
-                        Seen::$entries["\treleased\t"] = true;
+                    if ($survey === null || !isset($survey["\tsurvey\t"])) {
+                        Stats::skipped('dead', count($targets));
+                        continue;
                     }
-                });
-                Stats::child($surveyBuiltin, $surveyWhere);
-                if ($survey === null) {
-                    Stats::failed($surveyBuiltin, $surveyWhere);
                 }
-                if ($survey === null || !isset($survey["\tsurvey\t"])) {
-                    Stats::skipped('dead', count($targets));
-                    return;
-                }
-            }
-            // A retry that found the survey failed runs every method of the unit.
-            $surveyRetried = Stats::wants($surveyBuiltin, $surveyWhere);
-            $released = $skip === 'released' && isset($survey["\treleased\t"]);
-            foreach ($targets as $then) {
-                $builtin = strtolower($class . '::' . $then->getName());
-                if ($released && isset($known[$builtin])) {
-                    Stats::skipped('released', 1);
-                    continue;
-                }
-                if (!$surveyRetried && !Stats::wants($builtin, $where)) {
-                    continue;
-                }
-                $thenName = $then->getName();
-                $thenParams = $then->getParameters();
-                probe_child($builtin, $where, static function () use ($maker, $firstName, $firstParams, $at, $make, $where, $thenName, $thenParams): void {
-                    [$object, $value] = held_first($maker, $firstName, $firstParams, $at, $make);
-                    if ($object === null) {
-                        return;
+                // A retry that found the survey failed runs every method of the unit.
+                $surveyRetried = Stats::wants($surveyBuiltin, $surveyWhere);
+                $released = $skip === 'released' && isset($survey["\treleased\t"]);
+                foreach ($targets as $then) {
+                    $builtin = strtolower($class . '::' . $then->getName());
+                    if ($released && isset($known[$builtin])) {
+                        Stats::skipped('released', 1);
+                        continue;
                     }
-                    Seen::$entries = [];
-                    Seen::$where = $where;
-                    Seen::add('reached');
-                    invoke_arguments($thenParams, -1, null, static fn (array $args): mixed => $object->$thenName(...$args));
-                    Seen::returned();
-                }, $out, $probe);
+                    if (!$surveyRetried && !Stats::wants($builtin, $where)) {
+                        continue;
+                    }
+                    $thenName = $then->getName();
+                    $thenParams = $then->getParameters();
+                    foreach (call_modes($thenParams, -1) as $thenValued) {
+                        probe_child($builtin, $where, static function () use ($maker, $firstName, $firstParams, $at, $make, $where, $thenName, $thenParams, $valued, $thenValued): void {
+                            [$object, $value] = held_first($maker, $firstName, $firstParams, $at, $make, $valued);
+                            if ($object === null) {
+                                return;
+                            }
+                            Seen::$entries = [];
+                            Seen::$where = $where;
+                            Seen::add('reached');
+                            invoke_arguments($thenParams, -1, null, static fn (array $args): mixed => $object->$thenName(...$args), $thenValued);
+                            Seen::returned();
+                        }, $out, $probe);
+                    }
+                }
             }
         }
     }

@@ -1070,12 +1070,14 @@ function plain_value(ReflectionParameter $param, int $probe = -1): mixed
 
 /**
  * The arguments for a call with the probe value at `$at`: the parameters
- * before it plain, the ones after it left out when they may be.
+ * before it plain, the ones after it left out when they may be. In the valued
+ * mode the optional parameters that have a valid value of their own are passed
+ * with it (see `call_modes`).
  *
  * @param list<ReflectionParameter> $params
  * @return list<mixed>
  */
-function arguments(array $params, int $at, mixed $probe, bool $optional = false): array
+function arguments(array $params, int $at, mixed $probe, bool $optional = false, bool $valued = false): array
 {
     $args = [];
     // The context probe's call reads the listener: its first string argument is the URL.
@@ -1094,11 +1096,10 @@ function arguments(array $params, int $at, mixed $probe, bool $optional = false)
                 }
             }
         } elseif ($i > $at && $param->isOptional()) {
-            // A parameter with a valid value of its own is passed with it. Otherwise it is left out unless the call
-            // was refused for too few arguments (see invoke_arguments).
-            $own = own_value($param);
-            if ($own !== null) {
-                $args[$i] = $own($at);
+            // In the valued mode a parameter with its own valid value is passed with it, and the list stops at one
+            // without. Otherwise the parameter is left out unless the call was refused for too few arguments.
+            if ($valued && own_valued($param)) {
+                $args[$i] = own_value($param)($at);
             } elseif (!$optional) {
                 break;
             } else {
@@ -1115,6 +1116,34 @@ function arguments(array $params, int $at, mixed $probe, bool $optional = false)
 function own_value(ReflectionParameter $param): ?Closure
 {
     return valid_site($param) ?? known_parameter_value($param);
+}
+
+/**
+ * Whether the valued mode passes a parameter with its own value: its default is null, or it has none, and it has a
+ * valid value of its own. A default that is not null is the stub's configuration, and it stays.
+ */
+function own_valued(ReflectionParameter $param): bool
+{
+    $nullDefault = !$param->isDefaultValueAvailable() || $param->getDefaultValue() === null;
+    return $nullDefault && own_value($param) !== null;
+}
+
+/**
+ * The modes a call is made in: the optional parameters after the probe left out, and, when the first of them is passed
+ * with its own value in the valued mode, the valued mode as well. Each mode is a child of its own, and the rows are the
+ * union over them: a call that omits an argument may run code that the call with the value does not, and the other way.
+ *
+ * @param list<ReflectionParameter> $params
+ * @return list<bool> the `$valued` flag of each mode
+ */
+function call_modes(array $params, int $at): array
+{
+    foreach ($params as $i => $param) {
+        if ($i > $at && $param->isOptional() && !$param->isVariadic()) {
+            return own_valued($param) ? [false, true] : [false];
+        }
+    }
+    return [false];
 }
 
 /** Whether a parameter is declared as a string: `string`, or a union with it (an untyped parameter is not). */
@@ -1139,12 +1168,12 @@ function declares_string(ReflectionParameter $param): bool
  * the optional parameters after the probe as well. PHP raises that error before any body runs, so
  * the refused call records nothing the second one would not.
  */
-function invoke_arguments(array $params, int $at, mixed $probe, Closure $call): mixed
+function invoke_arguments(array $params, int $at, mixed $probe, Closure $call, bool $valued = false): mixed
 {
     try {
-        return $call(arguments($params, $at, $probe));
+        return $call(arguments($params, $at, $probe, false, $valued));
     } catch (ArgumentCountError) {
-        return $call(arguments($params, $at, $probe, true));
+        return $call(arguments($params, $at, $probe, true, $valued));
     }
 }
 
