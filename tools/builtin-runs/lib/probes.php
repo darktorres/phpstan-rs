@@ -170,7 +170,8 @@ function valid_value(?ReflectionType $type): ?Closure
             return $parser;
         },
         // Not connected: a call on it fails for want of a connection, which the table records as a gap.
-        'mysqli' => static fn (): mysqli => new mysqli(),
+        // Connected to the MySQL server the scan starts inside its sandbox, on a Unix socket.
+        'mysqli' => static fn (): mysqli => new mysqli(null, 'root', '', '', 0, '/tmp/mysql.sock'),
         'socket' => static fn (): Socket => socket_create(AF_UNIX, SOCK_STREAM, 0),
         // Made in the worker's own IPC namespace, which the sandbox gives it; without one the queue is the host's.
         // One message is queued, so a receive returns instead of waiting on the empty queue.
