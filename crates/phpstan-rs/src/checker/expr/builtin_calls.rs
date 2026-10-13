@@ -331,6 +331,125 @@ mod catalog_type_host_tests {
         );
     }
 
+    #[test]
+    fn host_predicates_agree_with_php_on_declared_object_classes() {
+        let oracle = php_oracle();
+        let parsed = syntax::parse(
+            "<?php class S { public function __toString(): string { return 'ab'; } } class P {} final class Q {}",
+        )
+        .expect("the declarations parse");
+        let registry = Registry::build(&parsed.arenas, parsed.statements());
+        let host = |weak_scalar_coercions| CatalogTypeHost {
+            weak_scalar_coercions,
+            registry: &registry,
+            invocation_coverage: vec![],
+            definitely_invalid_string_arguments: Default::default(),
+        };
+        let weak = host(true);
+        let strict = host(false);
+        let predicate =
+            |id: &str| php_semantics::Predicate::Host(php_semantics::Bytes(id.as_bytes().to_vec()));
+        // The oracle's object matrix: S has __toString, P is a plain class, Q is final without it.
+        for (name, class) in [
+            ("stringable", "S"),
+            ("plain_object", "P"),
+            ("final_object", "Q"),
+        ] {
+            let ty = Type::object(class.into(), Vec::new());
+            for (mode, host) in [("weak", &weak), ("strict", &strict)] {
+                let case = oracle_case(&oracle, &format!("parser-{mode}-{name}"));
+                let accepted = case["result"]["outcome"] == "return";
+                let arguments = std::slice::from_ref(&ty);
+                let state = CatalogTypeState::default();
+                let parser = host.test(
+                    &predicate("strlen-string-parser-accepts-under-call-strictness"),
+                    arguments,
+                    &Type::mixed(),
+                    &[],
+                    &state,
+                );
+                match parser {
+                    php_semantics::Truth::Yes => {
+                        assert!(accepted, "{mode} {class}: the host accepts, PHP rejects")
+                    }
+                    php_semantics::Truth::No => {
+                        assert!(!accepted, "{mode} {class}: the host rejects, PHP accepts")
+                    }
+                    php_semantics::Truth::Maybe => {}
+                }
+            }
+            let cast = weak.test(
+                &predicate("strlen-weak-stringable-cast"),
+                std::slice::from_ref(&ty),
+                &Type::mixed(),
+                &[],
+                &CatalogTypeState::default(),
+            );
+            let expected = match name {
+                "stringable" => php_semantics::Truth::Yes,
+                "final_object" => php_semantics::Truth::No,
+                _ => php_semantics::Truth::Maybe,
+            };
+            assert_eq!(cast, expected, "weak {class}: the cast predicate");
+        }
+        // A final class without __toString can never be cast, so the host must say so.
+        let final_class = Type::object("Q".into(), Vec::new());
+        assert_eq!(
+            weak.test(
+                &predicate("strlen-string-parser-accepts-under-call-strictness"),
+                std::slice::from_ref(&final_class),
+                &Type::mixed(),
+                &[],
+                &CatalogTypeState::default(),
+            ),
+            php_semantics::Truth::No,
+        );
+    }
+
+    #[test]
+    fn an_unmodeled_event_keeps_every_abnormal_exit_and_claims_no_coverage() {
+        let registry = Registry::default();
+        let host = CatalogTypeHost {
+            weak_scalar_coercions: true,
+            registry: &registry,
+            invocation_coverage: vec![],
+            definitely_invalid_string_arguments: Default::default(),
+        };
+        let state = CatalogTypeState::default();
+        let exits = host.event(
+            &php_semantics::Event::Read {
+                storage: php_semantics::Operand::Literal(php_semantics::Bytes(b"x".to_vec())),
+            },
+            &[Type::int()],
+            &Type::mixed(),
+            &[],
+            state.clone(),
+        );
+        assert_eq!(
+            exit_kinds(&exits),
+            vec!["normal", "php_throw", "fatal", "native_unwind", "suspended"]
+        );
+        for exit in &exits {
+            match exit {
+                php_semantics::EventExit::Normal {
+                    result,
+                    state: after,
+                    coverage,
+                } => {
+                    assert!(result.is_none());
+                    assert_eq!(after, &state);
+                    assert!(coverage.is_empty());
+                }
+                php_semantics::EventExit::PhpThrow { coverage, .. }
+                | php_semantics::EventExit::Fatal { coverage, .. }
+                | php_semantics::EventExit::NativeUnwind { coverage, .. }
+                | php_semantics::EventExit::Suspended { coverage, .. } => {
+                    assert!(coverage.is_empty());
+                }
+            }
+        }
+    }
+
     fn php_oracle() -> serde_json::Value {
         serde_json::from_str(include_str!(
             "../../../../../tools/php-catalog/experiments/comparison/results/evaluation/strlen-host-oracle-8.5.4.json"
@@ -515,10 +634,33 @@ mod catalog_type_host_tests {
         let handler = oracle_case(&oracle, "diagnostic_handler_throws");
         assert_eq!(handler["result"]["outcome"], "throw");
         assert!(exits(&diagnostic, Type::null()).contains(&"php_throw"));
+
+        let handler_exits = oracle_case(&oracle, "handler_exits");
+        assert_eq!(handler_exits["exit_status"], 4);
+        assert!(
+            handler_exits["stdout"]
+                .as_str()
+                .unwrap()
+                .contains("handler")
+        );
+        assert!(exits(&diagnostic, Type::null()).contains(&"native_unwind"));
+
+        let handler_fatal = oracle_case(&oracle, "handler_fatal");
+        assert_eq!(handler_fatal["exit_status"], 255);
+        assert!(exits(&diagnostic, Type::null()).contains(&"fatal"));
+
+        let handler_suspends = oracle_case(&oracle, "handler_suspends");
+        assert!(
+            handler_suspends["stdout"]
+                .as_str()
+                .unwrap()
+                .contains("suspended:s")
+        );
+        assert!(exits(&diagnostic, Type::null()).contains(&"suspended"));
     }
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct CatalogTypeState {
     diagnostics: std::collections::BTreeSet<(php_semantics::DiagnosticKind, u32)>,
     invoked_string_arguments: std::collections::BTreeSet<u32>,
