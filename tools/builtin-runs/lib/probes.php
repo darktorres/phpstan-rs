@@ -95,6 +95,10 @@ function names_callable(?ReflectionType $type): bool
  */
 function probes_for(ReflectionParameter $param): array
 {
+    // A brigade exists only inside a stream filter: the probe stands for one, and the call runs in the filter.
+    if (str_starts_with($param->getDeclaringFunction()->getName(), 'stream_bucket_') && $param->getName() === 'brigade') {
+        return [['brigade', static fn () => new BrigadeProbe()]];
+    }
     $type = $param->getType();
     $probes = [];
     $sized = known_parameter_value($param);
@@ -209,7 +213,12 @@ function valid_value(?ReflectionType $type): ?Closure
             $image->newImage(1, 1, new ImagickPixel('white'));
             return $image;
         },
-        'imagickdraw' => static fn (): ImagickDraw => new ImagickDraw(),
+        // A drawing with one primitive: an empty one draws nothing, and the drawing methods refuse to draw it.
+        'imagickdraw' => static function (): ImagickDraw {
+            $draw = new ImagickDraw();
+            $draw->rectangle(0, 0, 1, 1);
+            return $draw;
+        },
         'imagickpixel' => static fn (): ImagickPixel => new ImagickPixel('white'),
         // Valid for every function that takes the type, so they are type defaults.
         'iterator' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
@@ -231,7 +240,8 @@ function valid_value(?ReflectionType $type): ?Closure
         'uri\\whatwg\\url' => static fn (): Uri\WhatWg\Url => new Uri\WhatWg\Url('https://example.com/'),
         // Logged in to the FTP server the scan starts inside its sandbox, on loopback.
         'ftp\\connection' => static function (): FTP\Connection {
-            $connection = ftp_connect('127.0.0.1', 2121);
+            // A one-second timeout: a login the server does not answer returns instead of holding the child.
+            $connection = ftp_connect('127.0.0.1', 2121, 1);
             ftp_login($connection, 'anonymous', 'probe@example.com');
             return $connection;
         },
@@ -358,6 +368,22 @@ function dom_document(): DOMDocument
     return $document;
 }
 
+/** A stream filter that stays attached to a stream for the child: the filter is refused once its stream is gone. */
+function stream_filter_sample(): mixed
+{
+    static $stream = null;
+    $stream ??= fopen('php://memory', 'r+');
+    return stream_filter_append($stream, 'string.toupper', STREAM_FILTER_WRITE);
+}
+
+/** A progress file in the working directory, which the progress monitor is given a path to. */
+function progress_file_sample(): string
+{
+    $path = getcwd() . '/progress.txt';
+    file_put_contents($path, '');
+    return $path;
+}
+
 /** A connection to the child's MySQL server, over its socket. */
 function mysqli_connection_sample(): mysqli
 {
@@ -370,6 +396,46 @@ function mysqli_connection_sample(): mysqli
         $connection->savepoint('sp1');
     }
     return $connection;
+}
+
+/** A statement with one placeholder, unexecuted, for the functions that bind a parameter. */
+function mysqli_placeholder_statement(): mysqli_stmt
+{
+    return mysqli_connection_sample()->prepare('SELECT ?');
+}
+
+/**
+ * Runs a call that takes a brigade inside a stream filter, which is where the brigade exists: the call receives the
+ * filter's brigade in place of the marker. The stream is read once, which runs the filter.
+ *
+ * @param list<mixed> $args
+ */
+function run_in_brigade(string $function, array $args): bool
+{
+    if (!in_array('rec.brigade', stream_get_filters(), true)) {
+        stream_filter_register('rec.brigade', RecordingBrigadeFilter::class);
+    }
+    Seen::$brigadeCall = static function (mixed $brigade) use ($function, $args): mixed {
+        return call_user_func_array($function, array_map(static fn (mixed $arg): mixed => $arg instanceof BrigadeProbe ? $brigade : $arg, $args));
+    };
+    $stream = fopen('php://memory', 'r+');
+    fwrite($stream, 'x');
+    rewind($stream);
+    stream_filter_append($stream, 'rec.brigade', STREAM_FILTER_READ);
+    try {
+        fread($stream, 1);
+    } finally {
+        Seen::$brigadeCall = null;
+    }
+    return true;
+}
+
+/** An executed statement of the helper's connection, for the functions that read its result. */
+function mysqli_executed_statement(): mysqli_stmt
+{
+    $statement = mysqli_connection_sample()->prepare('SELECT 1');
+    $statement->execute();
+    return $statement;
 }
 
 /** The thread of a connection of its own, which a kill of a process names. */
@@ -500,6 +566,48 @@ function library_value(ReflectionParameter $param): ?Closure
         ['imagick::distortimage', 'arguments'] => static fn (): array => [0.0, 0.0, 0.0, 0.0],
         ['imagick::writeimagesfile', 'format'] => static fn (): string => 'png',
         ['reflectionproperty::setvalue', 'objectOrValue'] => static fn (): object => new RecordingObject(),
+        ['reflectionproperty::setrawvaluewithoutlazyinitialization', 'object'] => static fn (): object => new RecordingObject(),
+        // Barycentric points: x, y and the three channel values, for four points.
+        ['imagick::sparsecolorimage', 'arguments'] => static fn (): array => [0.0, 0.0, 255.0, 0.0, 0.0, 16.0, 0.0, 0.0, 255.0, 0.0, 0.0, 16.0, 0.0, 0.0, 255.0, 16.0, 16.0, 255.0, 255.0, 255.0],
+        ['pg_set_error_verbosity', 'verbosity'] => static fn (): int => PGSQL_ERRORS_DEFAULT,
+        // The mode of a fetch: a column when the probe is the column index that follows it, the associative array otherwise.
+        ['pdostatement::fetchall', 'mode'], ['pdostatement::setfetchmode', 'mode'] => static fn (int $probe = -1): int => $probe >= 1 ? PDO::FETCH_COLUMN : PDO::FETCH_ASSOC,
+        ['stream_filter_remove', 'stream_filter'] => static fn (): mixed => stream_filter_sample(),
+        ['imagick::setimageprogressmonitor', 'filename'] => static fn (): string => progress_file_sample(),
+        // A colour decision list: one correction with a slope, an offset and a power.
+        ['imagick::colordecisionlistimage', 'color_correction_collection'] => static fn (): string => '<ColorCorrectionCollection xmlns="urn:ASC:CDL:v1.2"><ColorCorrection id="c"><SOPNode><Slope>1 1 1</Slope><Offset>0 0 0</Offset><Power>1 1 1</Power></SOPNode></ColorCorrection></ColorCorrectionCollection>',
+        // An artifact and an option the receiver of the deletes holds.
+        ['imagick::deleteimageartifact', 'artifact'] => static fn (): string => 'rec',
+        ['imagick::deleteoption', 'option'] => static fn (): string => 'rec',
+        // The profile the receiver holds, when the system has one to give it.
+        ['imagick::getimageprofile', 'name'], ['imagick::removeimageprofile', 'name'] => static fn (): string => 'icc',
+        // A Memcached connection string that is not null makes the constructor exhaust its memory in this build: null.
+        ['memcached::__construct', 'connection_str'] => static fn (): null => null,
+        // The handler is the first argument of the handler form, which takes no other argument: a plain callback is the
+        // first argument whenever the probe is a later callback.
+        ['session_set_save_handler', 'open'] => static fn (int $probe = -1): object => $probe >= 2 ? static fn (): int => 0 : new RecordingSessionHandler(),
+        ['mysqli_stmt_bind_param', 'statement'] => static fn (): mysqli_stmt => mysqli_placeholder_statement(),
+        ['mysqli_stmt_bind_param', 'types'] => static fn (): string => 'i',
+        ['stream_bucket_append', 'bucket'], ['stream_bucket_prepend', 'bucket'] => static fn (): mixed => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
+        // A PostgreSQL call with a two-argument form falls back to the legacy form: the argument after the probe is given.
+        ['pg_execute', 'params'], ['pg_query_params', 'params'] => static fn (): array => [],
+        ['pg_prepare', 'query'] => static fn (): string => 'SELECT 1',
+        ['pg_set_error_verbosity', 'connection'] => static fn (): PgSql\Connection => pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres'),
+        // The first column of the statement the receiver holds.
+        ['pdostatement::getcolumnmeta', 'column'] => static fn (): int => 0,
+        // The node of a SimpleXML element, which the function takes as a SimpleXMLElement and not as an object.
+        ['dom_import_simplexml', 'node'], ['dom\\import_simplexml', 'node'] => static fn (): SimpleXMLElement => new SimpleXMLElement('<a><b/></a>'),
+        ['imagickdraw::setfontfamily', 'font_family'] => static fn (): string => 'DejaVu-Sans',
+        // A pattern the drawing names: the receiver pushes it (see method_receiver).
+        ['imagickdraw::setfillpatternurl', 'fill_url'], ['imagickdraw::setstrokepatternurl', 'stroke_url'] => static fn (): string => '#p',
+        // The statements that fetch or store a result take an executed statement.
+        ['mysqli_stmt_fetch', 'statement'], ['mysqli_stmt_store_result', 'statement'], ['mysqli_stmt_get_result', 'statement'] => static fn (): mysqli_stmt => mysqli_executed_statement(),
+        ['mysqli::kill', 'process_id'], ['mysqli_kill', 'process_id'] => static fn (): int => mysqli_connection_sample()->thread_id,
+        ['mysqli_kill', 'mysql'] => static fn (): mysqli => mysqli_connection_sample(),
+        // The connection that made the savepoint, which the function is given.
+        ['mysqli_release_savepoint', 'mysql'] => static fn (): mysqli => mysqli_connection_sample(),
+        ['request_parse_body', 'options'] => static fn (): array => [],
+        // A stream filter of the library, attached to a memory stream: the resource the removal takes.
         ['reflectionmethod::invoke', 'object'], ['reflectionmethod::invokeargs', 'object'] => static fn (): object => new RecordingObject(),
         ['reflectionclass::setstaticpropertyvalue', 'name'] => static fn (): string => 'declaredStatic',
         ['reflectionclass::setstaticpropertyvalue', 'value'] => static fn (): int => 1,
@@ -574,6 +682,9 @@ function builtin_call(string $function, array $args): mixed
     // The state a builtin reads is set first: a search that was not initialised is refused.
     if (str_starts_with($function, 'mb_ereg_search')) {
         mb_ereg_search_init('abc', 'b');
+    }
+    if (array_any($args, static fn (mixed $arg): bool => $arg instanceof BrigadeProbe)) {
+        return run_in_brigade($function, $args);
     }
     return match ($function) {
         'compact' => call_user_func_array(static fn (...$a): mixed => compact(...$a), $args),
@@ -776,7 +887,6 @@ function named_value(ReflectionParameter $param): ?Closure
         ['socket_select', 'read'], ['socket_select', 'write'], ['socket_select', 'except'] => static fn (): array => [socket_pair_sample()],
         ['stream_select', 'read'], ['stream_select', 'write'], ['stream_select', 'except'] => static fn (): array => [stream_pair_sample()],
         // The callbacks form takes a callable first: a handler that records nothing.
-        ['session_set_save_handler', 'open'] => static fn (): Closure => static fn (): bool => true,
         ['session_start', 'options'] => static fn (): array => ['cache_limiter' => 'nocache'],
         ['openfile', 'context'] => static fn (): mixed => stream_context_create(),
         ['openfile', 'mode'] => static fn (): string => 'r',
@@ -824,7 +934,7 @@ function named_value(ReflectionParameter $param): ?Closure
             return $palette;
         },
         ['sodium_crypto_generichash_final', 'length'] => static fn (): int => 32,
-        ['setrestrictionlevel', 'level'] => static fn (): int => Spoofchecker::SINGLE_SCRIPT_RESTRICTION,
+        ['setrestrictionlevel', 'level'] => static fn (): int => Spoofchecker::ASCII,
         ['sodium_crypto_generichash', 'length'], ['sodium_crypto_generichash_init', 'length'] => static fn (): int => 32,
         ['str_increment', 'string'] => static fn (): string => 'a',
         ['str_decrement', 'string'] => static fn (): string => 'b',
@@ -892,6 +1002,14 @@ function imagick_value(ReflectionParameter $param): ?Closure
     // A colour: named so, or typed as ImagickPixel or a string.
     if (str_ends_with($name, 'color') || str_ends_with($name, 'colour') || str_contains((string) $param->getType(), 'ImagickPixel')) {
         return static fn (): string => 'white';
+    }
+    // The second image of a stereo anaglyph has the size of the receiver, which the recipe makes sixteen pixels square.
+    if ($class === 'imagick' && strtolower($function->getName()) === 'stereoimage' && admits($param->getType(), 'imagick')) {
+        return static function (): Imagick {
+            $image = new Imagick();
+            $image->newImage(16, 16, new ImagickPixel('white'));
+            return $image;
+        };
     }
     if ($name === 'geometry') {
         return static fn (): string => '1x1';
@@ -1191,6 +1309,13 @@ function valid_site(ReflectionParameter $param): ?Closure
         'deflate_init' => [0 => static fn (): int => ZLIB_ENCODING_RAW],
         'domdocument::registernodeclass' => [0 => 'DOMElement', 1 => static fn (): null => null],
         'domelement::setidattribute' => [0 => 'id', 1 => true],
+        // One variable is bound: the parameter of the statement, and the column of the result.
+        // The variable is the one after the probe unless the probe is the variable.
+        'mysqli_stmt_bind_param' => [2 => static fn (int $probe = -1): array => $probe === 2 ? [] : [1]],
+        'mysqli_stmt_bind_result' => [1 => static fn (int $probe = -1): array => $probe === 1 ? [] : [null]],
+        'stream_bucket_append' => [0 => static fn (): object => new BrigadeProbe(), 1 => static fn (): mixed => stream_bucket_new(fopen('php://memory', 'r+'), 'x')],
+        'stream_bucket_prepend' => [0 => static fn (): object => new BrigadeProbe(), 1 => static fn (): mixed => stream_bucket_new(fopen('php://memory', 'r+'), 'x')],
+        'stream_bucket_make_writeable' => [0 => static fn (): object => new BrigadeProbe()],
         'ftp_set_option' => [2 => true],
         'mysqli_poll' => [0 => static fn (): array => [new mysqli(null, 'root', '', '', 0, server_run_dir() . '/mysql.sock')]],
         'domelement::setidattributens' => [0 => 'urn:p', 1 => 'id', 2 => true],
@@ -1482,6 +1607,12 @@ function where(string $prefix, int $at, string $probe): string
 function record(string $builtin, string $where, ?array $seen, array &$out): void
 {
     Stats::child($builtin, $where);
+    // A call that ran a user sink of the recorder's own writes no rows, so the engine's default applies to the builtin.
+    foreach (array_keys($seen ?? []) as $entry) {
+        if (explode("\t", $entry)[1] === 'user') {
+            return;
+        }
+    }
     // A trace, when the run names one: each child's result is appended as it is known, so a run can be followed.
     $trace = getenv('BUILTIN_RUNS_TRACE');
     if ($trace !== false && $trace !== '') {

@@ -37,9 +37,30 @@ function sandbox_cap(int $jobs): int
  * @param array{mode: string, cap: int} $sandbox
  * @return list<string>
  */
+/**
+ * The PHP settings the workers run with, as name and value: the sidecar records them with the table.
+ *
+ * @return array<string, string>
+ */
+function worker_settings(): array
+{
+    return [
+        'ffi.enable' => '1',
+        'display_errors' => '0',
+        'memory_limit' => '512M',
+        // A progress monitor can only be enabled at start, and the progress methods are probed with it on.
+        'imagick.progress_monitor' => '1',
+    ];
+}
+
 function worker_command(string $php, bool $zendMm, array $sandbox): array
 {
-    $interpreter = [$php, '-d', 'ffi.enable=1', '-d', 'display_errors=0', '-d', 'memory_limit=512M', dirname(__DIR__) . '/worker.php'];
+    $flags = [];
+    foreach (worker_settings() as $name => $value) {
+        $flags[] = '-d';
+        $flags[] = $name . '=' . $value;
+    }
+    $interpreter = [$php, ...$flags, dirname(__DIR__) . '/worker.php'];
     // A `bwrap` worker's home is its scratch space; the other modes keep the caller's.
     $home = $sandbox['mode'] === 'bwrap' ? '/home/worker' : (string) getenv('HOME');
     $variables = ['PATH' => (string) getenv('PATH'), 'HOME' => $home, 'LC_ALL' => 'C', 'TZ' => 'UTC'];

@@ -95,6 +95,66 @@ function method_receiver(ReflectionClass $reflection, string $method, Closure $m
         $fiber->start();
         return $fiber;
     }
+    // A class that takes constructor arguments: a built-in one, since stdClass takes none.
+    if ($class === 'reflectionclass' && in_array(strtolower($method), ['newinstance', 'newinstanceargs'], true)) {
+        return new ReflectionClass(Exception::class);
+    }
+    // An iterator that caches what it yields: the full cache, which its offsetSet needs.
+    if ($class === 'cachingiterator' && strtolower($method) === 'offsetset') {
+        return new CachingIterator(new ArrayIterator([1]), CachingIterator::FULL_CACHE);
+    }
+    // A comparison of an image sequence of two images, and a palette image whose colour map has an entry.
+    if ($class === 'imagick' && strtolower($method) === 'compleximages') {
+        $first = new Imagick();
+        $first->newImage(16, 16, new ImagickPixel('white'));
+        $second = new Imagick();
+        $second->newImage(16, 16, new ImagickPixel('black'));
+        $first->addImage($second);
+        return $first;
+    }
+    if ($class === 'imagick' && in_array(strtolower($method), ['setimagecolormapcolor', 'getimagecolormapcolor'], true)) {
+        $palette = new Imagick();
+        $palette->newImage(16, 16, new ImagickPixel('white'));
+        $palette->setImageType(Imagick::IMGTYPE_PALETTE);
+        return $palette;
+    }
+    // An image with an ICC profile of the system, when the system has one: the profile methods read or remove it.
+    if ($class === 'imagick' && in_array(strtolower($method), ['getimageprofile', 'removeimageprofile'], true)) {
+        $image = new Imagick();
+        $image->newImage(16, 16, new ImagickPixel('white'));
+        $profiles = glob('/usr/share/color/icc/*/*.ic[cm]') ?: [];
+        if ($profiles !== []) {
+            $image->profileImage('icc', file_get_contents($profiles[0]));
+        }
+        return $image;
+    }
+    // An image with an artifact and an option of the name the deletes are given.
+    if ($class === 'imagick' && in_array(strtolower($method), ['deleteimageartifact', 'deleteoption'], true)) {
+        $image = new Imagick();
+        $image->newImage(16, 16, new ImagickPixel('white'));
+        $image->setImageArtifact('rec', 'x');
+        $image->setOption('rec', 'x');
+        return $image;
+    }
+    // A drawing that names a pattern it has pushed: the pattern is the one the URL methods name.
+    if ($class === 'imagickdraw' && in_array(strtolower($method), ['setfillpatternurl', 'setstrokepatternurl'], true)) {
+        $draw = new ImagickDraw();
+        $draw->pushPattern('p', 0, 0, 4, 4);
+        $draw->rectangle(0, 0, 4, 4);
+        $draw->popPattern();
+        return $draw;
+    }
+    // A session handler's methods run on an active session whose handler is the recorder's: its calls are user sinks.
+    if ($class === 'sessionhandler' && !$unconstructed) {
+        ini_set('session.save_path', getcwd());
+        session_set_save_handler(new RecordingSessionHandler(), true);
+        session_start();
+        return new SessionHandler();
+    }
+    // The helper's connection, whose own thread a kill names.
+    if ($class === 'mysqli' && strtolower($method) === 'kill') {
+        return mysqli_connection_sample();
+    }
     return $unconstructed ? $reflection->newInstanceWithoutConstructor() : $maker();
 }
 
@@ -131,12 +191,13 @@ function recipe(string $class): ?Closure
             $processor->importStylesheet($stylesheet);
             return $processor;
         },
-        'pdostatement' => static fn (): object => (new PDO('sqlite::memory:'))->query('SELECT 1'),
+        'pdostatement' => static fn (): object => (new PDO('sqlite::memory:'))->query('SELECT 1 AS one, 2 AS two'),
         // A DOM node of a document, and a text node of one.
         'domnode' => static fn (): object => dom_document()->documentElement,
         'domelement' => static fn (): object => dom_document()->documentElement,
         'domdocument' => static fn (): object => dom_document(),
         'domcharacterdata' => static fn (): object => dom_document()->createTextNode('x'),
+        'domdocumentfragment' => static fn (): object => dom_document()->createDocumentFragment(),
         'spldoublylinkedlist' => static function (): object {
             $list = new SplDoublyLinkedList();
             $list->push(1);

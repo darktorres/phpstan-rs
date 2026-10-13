@@ -18,6 +18,8 @@ final class Seen
     // reads from: the first string argument of that call is the URL.
     public static mixed $probeContext = null;
     public static ?string $probeUrl = null;
+    // The call a brigade function makes inside the stream filter that holds its brigade (see run_in_brigade).
+    public static ?Closure $brigadeCall = null;
 
     public static function add(string $kind, string $detail = ''): void
     {
@@ -170,4 +172,69 @@ function recording_stream()
     $stream = fopen('rec://stream', 'r+');
     Seen::$entries = $saved;
     return $stream;
+}
+
+/**
+ * A session handler of the recorder. Each method is user code, and records it as a user sink: the table keeps no rows
+ * for a call that runs one (see record), so the engine's default applies to it.
+ */
+final class RecordingSessionHandler implements SessionHandlerInterface
+{
+    public function open(string $path, string $name): bool
+    {
+        Seen::add('user', 'open');
+        return true;
+    }
+
+    public function close(): bool
+    {
+        Seen::add('user', 'close');
+        return true;
+    }
+
+    public function read(string $id): string|false
+    {
+        Seen::add('user', 'read');
+        return '';
+    }
+
+    public function write(string $id, string $data): bool
+    {
+        Seen::add('user', 'write');
+        return true;
+    }
+
+    public function destroy(string $id): bool
+    {
+        Seen::add('user', 'destroy');
+        return true;
+    }
+
+    public function gc(int $max_lifetime): int|false
+    {
+        Seen::add('user', 'gc');
+        return 0;
+    }
+}
+
+/** Stands for the brigade of a stream filter: the call that takes one runs inside the filter, where a brigade exists. */
+final class BrigadeProbe
+{
+}
+
+/** The stream filter that runs a brigade call: the brigade is the one the filter is given. */
+final class RecordingBrigadeFilter extends php_user_filter
+{
+    public function filter($in, $out, &$consumed, bool $closing): int
+    {
+        $call = Seen::$brigadeCall;
+        Seen::$brigadeCall = null;
+        if ($call !== null) {
+            $call($out);
+        }
+        while ($bucket = stream_bucket_make_writeable($in)) {
+            stream_bucket_append($out, $bucket);
+        }
+        return PSFS_PASS_ON;
+    }
 }

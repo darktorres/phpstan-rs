@@ -29,6 +29,7 @@ function sidecar_text(array $rows, array $manifest, string $recorder, string $sk
         'php' => [
             'version' => $manifest['php'],
             'ffi' => $manifest['ffi'],
+            'settings' => worker_settings(),
         ],
         'recorder' => $recorder,
         'sandbox' => $sandbox,
