@@ -571,3 +571,16 @@ fn resolving_effects_clears_the_destroyed_holders_it_started_with() {
     registry.resolve_effects(&NoBodies);
     assert!(!registry.reach_memo.destroy_held.is_used());
 }
+
+#[test]
+fn an_element_written_under_an_is_array_guard_keeps_the_objects_it_runs() {
+    let class = "<?php class Foo { public function __toString(): string { return ''; } }";
+    let unguarded = registry(&format!(
+        "{class} function f($x) {{ $x['a'] = new Foo(); $s = \"{{$x['a']}}\"; }}"
+    ));
+    assert!(!unguarded.function_is_pure("f"));
+    let guarded = registry(&format!(
+        "{class} function g($x) {{ if (is_array($x)) {{ $x['a'] = new Foo(); $s = \"{{$x['a']}}\"; }} }}"
+    ));
+    assert!(!guarded.function_is_pure("g"));
+}
