@@ -149,6 +149,118 @@ try {
 }
 echo 'RESULT:', json_encode($out), "\\n";
 '''),
+    'handler_exits': ('weak', '''set_error_handler(static function (int $no, string $msg): bool { echo "handler\\n"; exit(4); });
+echo "before\\n";
+$n = strlen(null);
+echo "after\\n";
+'''),
+    'handler_fatal': ('weak', '''set_error_handler(static function (int $no, string $msg): bool { trigger_error("fatal", E_USER_ERROR); return true; });
+echo "before\\n";
+$n = strlen(null);
+echo "after\\n";
+'''),
+    'handler_suspends': ('weak', '''set_error_handler(static function (int $no, string $msg): bool { Fiber::suspend("s"); return true; });
+$f = new Fiber(function () {
+    $n = strlen(null);
+    echo 'RESULT:', json_encode(['value' => $n]), "\\n";
+});
+$s = $f->start();
+echo "suspended:", $s, "\\n";
+$f->resume();
+'''),
+    'destructor_exits': ('weak', '''class D {
+    public function __toString(): string { return "x"; }
+    public function __destruct() { echo "destruct\\n"; exit(5); }
+}
+echo "before\\n";
+$n = strlen(new D);
+echo "after\\n";
+'''),
+    'destructor_fatal': ('weak', '''class D {
+    public function __toString(): string { return "x"; }
+    public function __destruct() { trigger_error("fatal", E_USER_ERROR); }
+}
+echo "before\\n";
+$n = strlen(new D);
+echo "after\\n";
+'''),
+    'destructor_suspends': ('weak', '''class D {
+    public function __toString(): string { return "x"; }
+    public function __destruct() { Fiber::suspend("s"); }
+}
+$f = new Fiber(function () {
+    $n = strlen(new D);
+    echo 'RESULT:', json_encode(['value' => $n]), "\\n";
+});
+$s = $f->start();
+echo "suspended:", $s, "\\n";
+$f->resume();
+'''),
+    'cleanup_destructor_returns': ('weak', '''class S {
+    public function __toString(): string { throw new RuntimeException("t"); }
+    public function __destruct() { echo "destruct\\n"; }
+}
+try {
+    $out = ['outcome' => 'return', 'value' => strlen(new S)];
+} catch (\\Throwable $e) {
+    $out = ['outcome' => 'caught', 'class' => get_class($e), 'message' => $e->getMessage()];
+}
+echo "after\\n";
+echo 'RESULT:', json_encode($out), "\\n";
+'''),
+    'cleanup_destructor_throws': ('weak', '''class S {
+    public function __toString(): string { throw new RuntimeException("t"); }
+    public function __destruct() { echo "destruct\\n"; throw new LogicException("d"); }
+}
+try {
+    $out = ['outcome' => 'return', 'value' => strlen(new S)];
+} catch (\\Throwable $e) {
+    $out = ['outcome' => 'caught', 'class' => get_class($e), 'message' => $e->getMessage()];
+}
+echo "after\\n";
+echo 'RESULT:', json_encode($out), "\\n";
+'''),
+    'cleanup_destructor_exits': ('weak', '''class S {
+    public function __toString(): string { throw new RuntimeException("t"); }
+    public function __destruct() { echo "destruct\\n"; exit(6); }
+}
+try {
+    $out = ['outcome' => 'return', 'value' => strlen(new S)];
+} catch (\\Throwable $e) {
+    $out = ['outcome' => 'caught', 'class' => get_class($e), 'message' => $e->getMessage()];
+}
+echo "after\\n";
+echo 'RESULT:', json_encode($out), "\\n";
+'''),
+    'cleanup_destructor_fatal': ('weak', '''class S {
+    public function __toString(): string { throw new RuntimeException("t"); }
+    public function __destruct() { trigger_error("fatal", E_USER_ERROR); }
+}
+try {
+    $out = ['outcome' => 'return', 'value' => strlen(new S)];
+} catch (\\Throwable $e) {
+    $out = ['outcome' => 'caught', 'class' => get_class($e), 'message' => $e->getMessage()];
+}
+echo "after\\n";
+echo 'RESULT:', json_encode($out), "\\n";
+'''),
+    'cleanup_destructor_suspends': ('weak', '''class S {
+    public function __toString(): string { throw new RuntimeException("t"); }
+    public function __destruct() { Fiber::suspend("s"); echo "destruct resumed\\n"; }
+}
+$f = new Fiber(function () {
+    try {
+        $n = strlen(new S);
+        $out = ['outcome' => 'return', 'value' => $n];
+    } catch (\\Throwable $e) {
+        $out = ['outcome' => 'caught', 'class' => get_class($e), 'message' => $e->getMessage()];
+    }
+    echo 'RESULT:', json_encode($out), "\\n";
+});
+$s = $f->start();
+echo "suspended:", $s, "\\n";
+$f->resume();
+'''),
     'constant_string_lengths': ('weak', '''echo 'RESULT:', json_encode(['multibyte' => strlen("\\u{e9}"), 'nul' => strlen("a\\0b"), 'empty' => strlen("")]), "\\n";
 '''),
 }

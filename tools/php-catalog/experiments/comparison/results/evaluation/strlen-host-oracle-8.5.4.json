@@ -378,6 +378,121 @@
       }
     },
     {
+      "id": "handler_exits",
+      "mode": "weak",
+      "transfer": "handler_exits",
+      "input": null,
+      "exit_status": 4,
+      "stdout": "before\nhandler\n",
+      "result": null
+    },
+    {
+      "id": "handler_fatal",
+      "mode": "weak",
+      "transfer": "handler_fatal",
+      "input": null,
+      "exit_status": 255,
+      "stdout": "before\n",
+      "result": null
+    },
+    {
+      "id": "handler_suspends",
+      "mode": "weak",
+      "transfer": "handler_suspends",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "suspended:s\nRESULT:{\"value\":0}\n",
+      "result": {
+        "value": 0
+      }
+    },
+    {
+      "id": "destructor_exits",
+      "mode": "weak",
+      "transfer": "destructor_exits",
+      "input": null,
+      "exit_status": 5,
+      "stdout": "before\ndestruct\n",
+      "result": null
+    },
+    {
+      "id": "destructor_fatal",
+      "mode": "weak",
+      "transfer": "destructor_fatal",
+      "input": null,
+      "exit_status": 255,
+      "stdout": "before\n",
+      "result": null
+    },
+    {
+      "id": "destructor_suspends",
+      "mode": "weak",
+      "transfer": "destructor_suspends",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "suspended:s\nRESULT:{\"value\":1}\n",
+      "result": {
+        "value": 1
+      }
+    },
+    {
+      "id": "cleanup_destructor_returns",
+      "mode": "weak",
+      "transfer": "cleanup_destructor_returns",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "destruct\nafter\nRESULT:{\"outcome\":\"caught\",\"class\":\"RuntimeException\",\"message\":\"t\"}\n",
+      "result": {
+        "outcome": "caught",
+        "class": "RuntimeException",
+        "message": "t"
+      }
+    },
+    {
+      "id": "cleanup_destructor_throws",
+      "mode": "weak",
+      "transfer": "cleanup_destructor_throws",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "destruct\nafter\nRESULT:{\"outcome\":\"caught\",\"class\":\"LogicException\",\"message\":\"d\"}\n",
+      "result": {
+        "outcome": "caught",
+        "class": "LogicException",
+        "message": "d"
+      }
+    },
+    {
+      "id": "cleanup_destructor_exits",
+      "mode": "weak",
+      "transfer": "cleanup_destructor_exits",
+      "input": null,
+      "exit_status": 6,
+      "stdout": "destruct\n",
+      "result": null
+    },
+    {
+      "id": "cleanup_destructor_fatal",
+      "mode": "weak",
+      "transfer": "cleanup_destructor_fatal",
+      "input": null,
+      "exit_status": 255,
+      "stdout": "",
+      "result": null
+    },
+    {
+      "id": "cleanup_destructor_suspends",
+      "mode": "weak",
+      "transfer": "cleanup_destructor_suspends",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "suspended:s\ndestruct resumed\nRESULT:{\"outcome\":\"caught\",\"class\":\"RuntimeException\",\"message\":\"t\"}\n",
+      "result": {
+        "outcome": "caught",
+        "class": "RuntimeException",
+        "message": "t"
+      }
+    },
+    {
       "id": "constant_string_lengths",
       "mode": "weak",
       "transfer": "constant_string_lengths",

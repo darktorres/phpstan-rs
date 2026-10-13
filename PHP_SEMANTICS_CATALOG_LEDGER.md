@@ -34,12 +34,10 @@ Acceptance: not accepted
   Acceptance: accepted
   The [evaluation report's R00.4 accounting](PHP_SEMANTICS_CATALOG_EVALUATION.md#r004-cbmc-property-accounting-and-enforcement) maps all 93 valid-run properties, all 94 invalid-run properties, and both low-budget properties by exact ID, category, and contract relation; it marks every result C-model-only and classifies `main.assertion.11` and `main.unwind.0` as expected negative controls. `campaign.py` verifies the pinned CBMC binary, C source and reference digests, complete normalized property records (identity, status, description, source location, and trace), summary, and command exit; ten Python regressions pass. All three locked CBMC 6.6.0 commands passed through `EnforcedRunner` and yielded the expected 93/94/2 properties and exit codes 0/10/10 under resource enforcement. This closes only the accounting/enforcement task; it does not prove PHP or Rust evaluator semantics.
 
-### F00.3 — Complete: Validate host transfer functions against PHP source behavior
-Acceptance: accepted
-Scope: the strlen host transfers, against PHP 8.5.4 source and the locked CLI
-Remainder: R05.2, R02.5
+### F00.3 — Partial: Validate host transfer functions against PHP source behavior
+Acceptance: not accepted
 
-**Reviewed evidence and current disposition:** Every host transfer of the `strlen` graph was checked against the locked PHP 8.5.4 CLI (31 programs in `results/evaluation/strlen-host-oracle-8.5.4.json`, pinned in `results/lock.json`) and against the locked source. Two defects were fixed: the destructor throw was modeled only for `new` temporaries, and unrecognised events returned no exits. The `__toString` exits now include `exit()` as a native unwind. Destructor-body exits and the native-unwind domain stay open under R05.2 and R02.5. The transfers, oracle cases and verdicts are in the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#f00-3-host-transfer-validation-2026-10-12).
+**Reviewed evidence and current disposition:** The `strlen` host transfers were checked against the locked PHP 8.5.4 CLI (37 programs in `results/evaluation/strlen-host-oracle-8.5.4.json`, pinned in `results/lock.json`) and against the locked source for the cited functions. Defects fixed: the destructor throw was modeled only for `new` temporaries, and unrecognised events returned no exits. Open: destructor-body exits (`exit()`, fatal, suspension) are not modeled, because the cleanup rule of block 8 cannot represent them; modeling them made `Stringable` arguments fall back to the legacy checker, which then loses a callback write (R05.2). The Fiber suspension path was not re-read in source. The transfers and verdicts are in the [review record](PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md#f00-3-host-transfer-validation-2026-10-12).
 
 - **R00.3 — Complete (matrix/audit only; semantic validation is tracked by F00.3)** (depends on: R00.1, R00.2)
   Acceptance: accepted

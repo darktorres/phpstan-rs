@@ -41,7 +41,7 @@ class CheckpointTests(unittest.TestCase):
         semantic = CHECKPOINT.semantic_acceptance(self.ledger())
         self.assertEqual(semantic["status"], "OPEN")
         self.assertEqual({e["id"] for e in semantic["open"]}, {
-            "F00.1", "F00.2", "F00.4", "F01.1", "F01.2", "F01.4", "F01.5", "F02.1", "F02.3",
+            "F00.1", "F00.2", "F00.3", "F00.4", "F01.1", "F01.2", "F01.4", "F01.5", "F02.1", "F02.3",
             "F02.4", "F02.5", "F03.2", "F03.3", "F03.4", "F04.2", "F05.1", "F05.3", "F05.4", "F05.6",
             "F05.7", "F06.1", "F06.3", "F06.4", "F06.5",
             "R02.3", "R02.5", "R02.7", "R03.1", "R03.2", "R03.3", "R03.4", "R05.2", "R05.4", "R05.6",
@@ -53,7 +53,7 @@ class CheckpointTests(unittest.TestCase):
         names = {e["id"] for e in CHECKPOINT.ledger_entries(ledger)}
         scoped = CHECKPOINT.semantic_acceptance(ledger)["scoped"]
         self.assertEqual({e["id"] for e in scoped},
-                         {"R00.2", "R00.3", "R04.1", "R05.1", "R05.3", "R05.5", "F05.5", "F00.3"})
+                         {"R00.2", "R00.3", "R04.1", "R05.1", "R05.3", "R05.5", "F05.5"})
         for entry in scoped:
             remainder = [name.strip() for name in entry["remainder"].split(",")]
             self.assertTrue(remainder)

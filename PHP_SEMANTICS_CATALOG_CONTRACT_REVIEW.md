@@ -1407,44 +1407,52 @@ Each is dispositioned here from the current text and code.
 These dispositions are the author's review of the current text. The contract points C-1 and C-2
 were addressed by the amendments recorded above.
 
+
 ## F00.3 host transfer validation (2026-10-12)
 
-Every host transfer of the `strlen` graph was checked against the locked PHP 8.5.4 CLI. The oracle
-is `results/evaluation/strlen-host-oracle-8.5.4.json`: 31 PHP programs run by
-`build_strlen_host_oracle.py`, whose binary is checked against `php_cli_sha256` and whose output
-is pinned as `strlen_host_oracle_sha256`. The source citations are to the locked tree at
-`e5e09d06`. The host tests `host_predicates_agree_with_php_on_every_definite_type` and
-`host_exits_for_user_code_contain_each_outcome_php_produced` read the oracle.
+The `strlen` host transfers were checked against the locked PHP 8.5.4 CLI. The oracle is
+`results/evaluation/strlen-host-oracle-8.5.4.json`: 37 PHP programs run by
+`build_strlen_host_oracle.py`, whose binary is checked against `php_cli_sha256`; the file is
+pinned as `strlen_host_oracle_sha256`. The host tests `host_predicates_agree_with_php_on_every_definite_type`,
+`host_predicates_agree_with_php_on_declared_object_classes`, `host_exits_for_user_code_contain_each_outcome_php_produced`
+and `an_unmodeled_event_keeps_every_abnormal_exit_and_claims_no_coverage` read the oracle or
+check the fallback.
 
-| Transfer | Host (`builtin_calls.rs`) | PHP source | Oracle cases | Verdict |
-| --- | --- | --- | --- | --- |
-| Parser predicate, `strlen-string-parser-accepts-under-call-strictness` | `parser_acceptance_for_strlen` | `Zend/zend_API.c:758–779`; `ZEND_STRLEN` weak and strict branches in `Zend/zend_vm_def.h` | `parser-{weak,strict}-*` (18) | Agrees for every definite type. A non-final class without `__toString` is Maybe. |
-| Null deprecation predicate, `strlen-weak-null-deprecation` | `CatalogTypeHost::test` | `zend_null_arg_deprecated` (`zend_API.c:764`) | `parser-weak-null` (deprecation recorded); `parser-strict-null` (TypeError) | Agrees. |
-| Stringable cast predicate, `strlen-weak-stringable-cast` | `CatalogTypeHost::test` | `cast_object(IS_STRING)`, `zend_API.c:764–772` | `parser-weak-stringable` (returns); scalars and arrays never cast | Agrees. |
-| `EmitDiagnostic` (null deprecation) | `event`, with `user_code_exits` | A user error handler runs at the diagnostic | `diagnostic_handler_throws` (`ErrorException`) | Throw observed and modeled. Handler `exit`, fatal and suspension are modeled conservatively; not oracle-tested. |
-| `Invoke __toString` | `event`, `user_code_exits` | `Zend/zend_object_handlers.c:2468–2495` | `tostring_normal`, `tostring_returns_int` (`"42"` coerces to a 2-byte string), `tostring_throws`, `tostring_fatal` (exit 255), `tostring_suspends`, `tostring_exits` (exit 3) | Every observed outcome is an exit of the host. `exit()` is a native unwind; its coverage stays Open. |
-| `Release` of the argument | `event` | `zend_parse_arg_str_weak` calls `OBJ_RELEASE(zobj)` after the cast (`zend_API.c:764–767`) | `destructor_on_new_temporary`, `destructor_on_call_result`, `destructor_after_array_cleared_in_tostring` (throws); `destructor_on_held_variable` (no throw inside the call) | Fixed. The host modeled the destructor throw only for `new` temporaries; PHP throws for a call result and for a value cleared inside `__toString`. |
-| `Unknown` (block 0) | `event` | Placeholder; the operation's other exits are in blocks 2, 4, 5 and 6/8 | Parser matrix: no scalar throws outside those blocks | Validated for `strlen`. The no-op stays, because adding exits here would make every scalar call throw. |
-| Unrecognised events | `unmodeled_exits` | None in the `strlen` graph | None | Fixed. These returned no exits, which dropped every continuation; they now fail closed. |
-| `StringByteLength` operand | `resolve` | `strlen` returns `ZSTR_LEN` | `constant_string_lengths` (2, 3, 0) | Agrees. A union with a non-constant member gives an integer range. |
-| `Result` operand (`__toString`) | `event` | The return value is coerced to `string` | `tostring_returns_int` | Agrees. |
-| `Unknown` operand (parser rejection) | `resolve` | `TypeError` | `parser-*` rejections | Agrees: a mixed value on the exit. |
+Source re-read in this pass (locked tree, `e5e09d06`): `Zend/zend_API.c:758–779`
+(`zend_parse_arg_str_weak`: the cast, then `OBJ_RELEASE` of the argument), `Zend/zend_object_handlers.c:2466–2497`
+(`zend_std_cast_object_tostring`: an extra reference around `__toString`, and a non-string result that cannot
+be coerced raises `Error`), `Zend/zend_vm_def.h:8756–8806` (`ZEND_STRLEN`: the deprecation,
+`zend_parse_arg_str_weak` on a copy, then `zval_ptr_dtor` of the copy), and `Zend/zend_builtin_functions.c:1273–1295`
+(`trigger_error`: `E_USER_ERROR` goes to `zend_error_zstr_at`). The Fiber suspension path
+(`Zend/zend_fibers.c`) was not re-read in this pass; its behaviour is recorded by the oracle only.
 
-Changes, all in `builtin_calls.rs`: the destructor throw applies to every object release; the
-`temporary_string_arguments` set is removed; the user-code exits (`PhpThrow`, `Fatal`,
-`NativeUnwind`, `Suspended`) are attached to `EmitDiagnostic` and `Invoke __toString`; and
-unrecognised events fail closed. The full checker fixture suite (4,005) and the library suite
-(1,301) pass with these changes.
+| Transfer | Host (`builtin_calls.rs`) | Oracle cases | Verdict |
+| --- | --- | --- | --- |
+| Parser predicate, `strlen-string-parser-accepts-under-call-strictness` | `parser_acceptance_for_strlen` | `parser-{weak,strict}-*` (18) | Agrees for every definite type, including the declared `Stringable`, plain and final classes. A plain non-final class is Maybe. |
+| Null deprecation predicate | `CatalogTypeHost::test` | `parser-weak-null`, `parser-strict-null` | Agrees. |
+| Stringable cast predicate | `CatalogTypeHost::test` | `parser-weak-stringable`, `parser-weak-final_object` | Agrees: Yes for `Stringable`, No for a final class without `__toString`, Maybe for a plain class. |
+| `EmitDiagnostic` (null deprecation) | `event`, `user_code_exits` | `diagnostic_handler_throws` (throw), `handler_exits` (`exit()`, status 4), `handler_fatal` (status 255), `handler_suspends` (suspension) | Agrees: every observed outcome is an exit of the host. |
+| `Invoke __toString` | `event`, `user_code_exits` | `tostring_normal`, `tostring_returns_int`, `tostring_throws`, `tostring_fatal`, `tostring_suspends`, `tostring_exits` | Agrees: every observed outcome is an exit of the host. |
+| `Release` of the argument, destructor throw | `event` | `destructor_on_new_temporary`, `destructor_on_call_result`, `destructor_after_array_cleared_in_tostring` (throw); `destructor_on_held_variable` (no throw) | Fixed: the destructor throw is now modeled for every release. It was modeled only for `new` temporaries. |
+| `Release`, destructor body exits | not modeled | `destructor_exits` (`exit()`, status 5), `destructor_fatal` (status 255), `destructor_suspends` (suspension) | **Open**, see below. |
+| `Unknown` (block 0) | `event` | Parser matrix | Validated for `strlen`: no scalar throws outside blocks 2, 4, 5 and 6/8. The no-op stays. |
+| Unrecognised events | `unmodeled_exits` | None in the `strlen` graph | Fixed: they fail closed. Covered by a unit test. |
+| `StringByteLength` operand | `resolve` | `constant_string_lengths` (2, 3, 0) | Agrees. |
+| `Result` operand (`__toString`) | `event` | `tostring_returns_int` | Agrees. |
+| `Unknown` operand (parser rejection) | `resolve` | `parser-*` rejections | Agrees. |
 
-Still open, owned by other rows:
-- Destructor bodies can fatal, `exit()` or suspend. The release point does not model those exits,
-  because the cleanup rule can replace only a normal return or a PHP throw (R05.2).
-- Native unwind as a graph domain is declared Open; the host emits its `exit()` exit but does not
-  claim the domain (R05.2, R02.5).
+**Open: destructor-body exits.** The oracle shows a destructor can `exit()`, fatal or suspend
+during the argument release. The host does not model these. Modeling them at `Release` was tried:
+the release is in block 8 as well as block 6, and block 8 is reached for every `Stringable`
+argument (the `__toString` throw edge). Block 8 has a pending PHP throw, and the cleanup rule
+accepts only a normal or PHP-throw replacement, so the evaluation fails and the call falls back to the
+legacy checker. Four RV-29 fixtures then failed (`strlen_catalog_stringable_*`). Their
+`assertType('string|null', $box->value)` checks the write that `__toString` makes; under the
+fallback the checker reports `string`, which is unsound. So the fallback loses a callback write
+for `Stringable` arguments, and that is a finding in its own right. Fixing the exits needs the
+cleanup rule to represent destructor exits (R05.2), and the fallback behaviour needs its own
+investigation. The release transfer was reverted to a normal exit and a PHP throw.
 
 Outside the host: the legacy argument checker reports `argument.type` for a declared plain class
-`P`, while PHP accepts a subclass of `P` with `__toString`. The host is Maybe for `P`, so this
-report comes from the older checker, not from the host transfers. It is recorded as a follow-up.
-
-The per-transfer source reading was done against the locked tree for this pass. The source claims
-also rest on the R00.3 matrix, which cites the same files.
+`P`, while PHP accepts a subclass of `P` with `__toString`. This comes from the legacy checker, not
+the host transfers, and is recorded as a follow-up.
