@@ -115,10 +115,12 @@ function probes_for(ReflectionParameter $param): array
         $probes[] = ['sleeper', static fn () => new RecordingSleeper()];
     }
     // The length or int a sodium function checks the parameter against: the valid value of the parameter.
-    // A string probe is refused by the length check of a sized parameter, so it is offered only where no sized value is known.
+    // The sized value is the probe a sized parameter takes, and a string probe is offered beside it: a reader that opens
+    // a file name reaches the recording stream wrapper through the string.
     if ($sized !== null) {
         $probes[] = ['sized', $sized];
-    } elseif (admits($type, 'string')) {
+    }
+    if (admits($type, 'string')) {
         $probes[] = ['url', static fn () => 'rec://probe'];
     }
     // A class the parameter takes has a valid value (a DOM document, a SimpleXML element): that is a probe too.
@@ -332,6 +334,21 @@ function listener_url(): string
     return "http://127.0.0.1:$port/";
 }
 
+/** A 1x1 PNG file in the working directory, for the functions that read an image from a file name. */
+function png_file_sample(): string
+{
+    $path = getcwd() . '/sample.png';
+    imagepng(imagecreatetruecolor(1, 1), $path);
+    return $path;
+}
+
+/** A font file of the system, or an empty name when the system has none: a font the drawing functions load. */
+function font_file_sample(): string
+{
+    $fonts = glob('/usr/share/fonts/{,*/,*/*/}*.ttf', GLOB_BRACE);
+    return $fonts === false || $fonts === [] ? '' : $fonts[0];
+}
+
 /** A stream holding a 1x1 PNG, for the functions that read an image from a file handle. */
 function png_stream_sample(): mixed
 {
@@ -398,6 +415,10 @@ function named_value(ReflectionParameter $param): ?Closure
 {
     $function = strtolower($param->getDeclaringFunction()->getName());
     $name = $param->getName();
+    // The magic database `finfo` reads its rules from: the one the system installs.
+    if ($name === 'magic_database' && in_array($function, ['__construct', 'finfo_open'], true)) {
+        return static fn (): string => '/usr/share/misc/magic.mgc';
+    }
     if (in_array($name, ['separator', 'enclosure', 'escape'], true) && in_array($function, ['str_getcsv', 'fgetcsv', 'fputcsv', 'setcsvcontrol', 'splfileobject::fgetcsv', 'splfileobject::fputcsv', 'splfileobject::setcsvcontrol'], true)) {
         return match ($name) {
             'separator' => static fn (): string => ',',
@@ -672,6 +693,14 @@ function imagick_value(ReflectionParameter $param): ?Closure
             'inner_bevel', 'outer_bevel', 'x_bevel', 'y_bevel' => static fn (): int => 1,
             default => null,
         };
+    }
+    // A file the image is read from: a PNG the readers decode, written to the working directory.
+    if ($class === 'imagick' && $name === 'filename' && in_array(strtolower($function->getName()), ['readimage', 'pingimage'], true)) {
+        return static fn (): string => png_file_sample();
+    }
+    // A font of the system, for the methods that load one.
+    if ($name === 'font' && $function->getName() === 'setFont' && str_starts_with($class, 'imagick')) {
+        return static fn (): string => font_file_sample();
     }
     // A file the image is written to, named with a format the image writers know.
     if ($name === 'filename' || $name === 'file') {
@@ -988,6 +1017,14 @@ function valid_site(ReflectionParameter $param): ?Closure
         // Callables that record nothing: a recording one would be attributed to whichever probe is running.
         'array_udiff_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0, static fn (): int => 0]],
         'array_uintersect_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0, static fn (): int => 0]],
+        'array_udiff' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
+        'array_udiff_assoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
+        'array_uintersect' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
+        'array_uintersect_assoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
+        'array_diff_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
+        'array_diff_ukey' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
+        'array_intersect_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
+        'array_intersect_ukey' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
         'session_set_save_handler' => [1 => static fn (): mixed => static fn (): int => 0],
         'stream_copy_to_stream' => [0 => static fn (): mixed => fopen('php://memory', 'r+'), 1 => static fn (): mixed => fopen('php://memory', 'r+')],
         'sodium_crypto_secretstream_xchacha20poly1305_push' => [0 => static fn (): string => sodium_crypto_secretstream_xchacha20poly1305_init_push(sodium_crypto_secretstream_xchacha20poly1305_keygen())[0]],
