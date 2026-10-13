@@ -327,6 +327,10 @@ foreach ($groups as $group) {
     }
 }
 check('the groups cover each loaded extension once', count($covered) === count(get_loaded_extensions()) && count(array_unique($covered)) === count($covered));
+foreach ($configured as $module) {
+    $loads = (string) shell_exec(implode(' ', array_map('escapeshellarg', [PHP_BINARY, ...lean_arguments(PHP_BINARY, [$module]), '-r', 'echo 1;'])) . ' 2>&1');
+    check("the group of $module loads with its needs", !str_contains($loads, 'Unable to load'), $loads);
+}
 try {
     recording_groups(['Mystery'], [], []);
     check('a loaded extension neither built in nor configured is refused', false);

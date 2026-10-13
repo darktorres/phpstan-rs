@@ -6,12 +6,20 @@
 /** The modules every worker loads: the recorder runs on them. */
 const BASE_MODULES = ['posix', 'ffi', 'tokenizer'];
 
-/** The modules that load only with the modules they need. */
+/**
+ * The modules that load only with the modules they need, or whose behaviour
+ * the default configuration takes from them: a serializer module is loaded
+ * beside the modules that offer it as a session or cache serializer.
+ */
 const MODULE_NEEDS = [
     'pdo_mysql' => ['pdo', 'mysqlnd'],
     'mysqli' => ['mysqlnd'],
     'pdo_sqlite' => ['pdo'],
     'pdo_pgsql' => ['pdo'],
+    'xmlreader' => ['dom'],
+    'xsl' => ['dom'],
+    'redis' => ['igbinary', 'msgpack'],
+    'memcached' => ['igbinary', 'msgpack'],
 ];
 
 /**
