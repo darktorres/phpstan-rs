@@ -23,6 +23,14 @@ const MODULE_NEEDS = [
 ];
 
 /**
+ * The modules whose rows depend on other modules being loaded beside them,
+ * though they load without them: PDO's statements act through a driver.
+ */
+const MODULE_CONTEXT = [
+    'pdo' => ['pdo_sqlite', 'pdo_mysql', 'pdo_pgsql'],
+];
+
+/**
  * What the ini files of a PHP say: the file it loads, the settings of files
  * that load no module (which every worker takes), and for each module the
  * settings of the file that loads it. Each setting is `[name, value]`.
@@ -78,8 +86,10 @@ function lean_arguments(string $php, array $modules): array
     $config = php_configuration($php);
     $loaded = [];
     foreach ([...BASE_MODULES, ...$modules] as $module) {
-        foreach ([...(MODULE_NEEDS[$module] ?? []), $module] as $needed) {
-            $loaded[$needed] = true;
+        foreach ([$module, ...(MODULE_CONTEXT[$module] ?? [])] as $member) {
+            foreach ([...(MODULE_NEEDS[$member] ?? []), $member] as $needed) {
+                $loaded[$needed] = true;
+            }
         }
     }
     $arguments = ['-n'];

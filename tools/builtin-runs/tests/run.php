@@ -315,6 +315,9 @@ if (in_array('pdo_sqlite', $configured, true)) {
     $sqlite = lean_arguments(PHP_BINARY, ['pdo_sqlite']);
     check('a module loads after the module it needs', array_search('extension=pdo', $sqlite, true) < array_search('extension=pdo_sqlite', $sqlite, true));
 }
+if (in_array('pdo', $configured, true) && in_array('pdo_sqlite', $configured, true)) {
+    check('PDO loads with its drivers, whose rows it depends on', in_array('extension=pdo_sqlite', lean_arguments(PHP_BINARY, ['pdo']), true));
+}
 if (in_array('igbinary', $configured, true)) {
     check('a module setting reaches its worker', in_array('igbinary.compact_strings=On', lean_arguments(PHP_BINARY, ['igbinary']), true));
     check('a module setting stays off the workers of other modules', !in_array('igbinary.compact_strings=On', lean_arguments(PHP_BINARY, ['msgpack']), true));
