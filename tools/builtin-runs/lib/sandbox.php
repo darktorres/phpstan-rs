@@ -35,11 +35,13 @@ function sandbox_cap(int $jobs): int
  * `none` is the PHP itself.
  *
  * @param array{mode: string, cap: int} $sandbox
+ * @param list<string>|null $modules the modules the worker loads beyond the base ones, and no others; `null` is the PHP's own configuration
  * @return list<string>
  */
-function worker_command(string $php, bool $zendMm, array $sandbox): array
+function worker_command(string $php, bool $zendMm, array $sandbox, ?array $modules = null): array
 {
-    $interpreter = [$php, '-d', 'ffi.enable=1', '-d', 'display_errors=0', '-d', 'memory_limit=512M', dirname(__DIR__) . '/worker.php'];
+    $lean = $modules === null ? [] : lean_arguments($php, $modules);
+    $interpreter = [$php, ...$lean, '-d', 'ffi.enable=1', '-d', 'display_errors=0', '-d', 'memory_limit=512M', dirname(__DIR__) . '/worker.php'];
     // A `bwrap` worker's home is its scratch space; the other modes keep the caller's.
     $home = $sandbox['mode'] === 'bwrap' ? '/home/worker' : (string) getenv('HOME');
     $variables = ['PATH' => (string) getenv('PATH'), 'HOME' => $home, 'LC_ALL' => 'C', 'TZ' => 'UTC'];

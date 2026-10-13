@@ -100,6 +100,7 @@ require_once __DIR__ . '/lib/table.php';
 require_once __DIR__ . '/lib/cache.php';
 require_once __DIR__ . '/lib/sidecar.php';
 require_once __DIR__ . '/lib/coverage.php';
+require_once __DIR__ . '/lib/groups.php';
 
 $arguments = array_values(array_filter(array_slice($argv, 1), static fn (string $argument): bool => !str_starts_with($argument, '--')));
 $only = isset($arguments[0]) ? (string) $arguments[0] : null;
@@ -116,6 +117,13 @@ if (!in_array($skip, ['off', 'dead', 'released'], true)) {
     exit(2);
 }
 $extensions = option($argv, 'ext') === null ? null : array_values(array_filter(explode(',', (string) option($argv, 'ext'))));
+// The workers load these modules and no others beyond the base ones; `--modules=` alone loads none.
+$modules = option($argv, 'modules') === null ? null : array_values(array_filter(explode(',', (string) option($argv, 'modules'))));
+$unknown = $modules === null ? [] : array_diff($modules, array_keys(php_configuration($php)['modules']));
+if ($unknown !== []) {
+    fwrite(STDERR, '--modules names a module the ini files do not load: ' . implode(', ', $unknown) . "\n");
+    exit(2);
+}
 $out = option($argv, 'out');
 $update = option($argv, 'update');
 $coverage = option($argv, 'coverage');
@@ -143,7 +151,7 @@ if ($sandboxMode === 'bwrap' && $sandbox['cap'] < 256 * 1024 ** 2) {
     fwrite(STDERR, 'only ' . intdiv($sandbox['cap'], 1024 ** 2) . " MiB of scratch space per worker: free memory or use fewer --jobs\n");
     exit(1);
 }
-$plan = plan_run($php, $only, $extensions, $zendMm, $sandbox);
+$plan = plan_run($php, $only, $extensions, $zendMm, $sandbox, $modules);
 if (in_array('--list', $argv, true)) {
     echo plan_summary($plan['units'], $plan['weights']);
     exit(0);
@@ -164,6 +172,7 @@ $run = [
     'php' => $php,
     'only' => $only,
     'extensions' => $extensions,
+    'modules' => $modules,
     'zendMm' => $zendMm,
     'sandbox' => $sandbox,
     'manifest' => $plan['manifest'],
@@ -235,7 +244,7 @@ if ($failed === [] && ($out !== null || $update !== null)) {
         'differing' => count($differing),
     ];
     $runInfo = [
-        'selection' => ['only' => $only, 'extensions' => $extensions],
+        'selection' => ['only' => $only, 'extensions' => $extensions, 'modules' => $modules],
         'flags' => array_values(array_filter($argv, static fn (string $argument): bool => str_starts_with($argument, '--'))),
         'totals' => $counts,
     ];

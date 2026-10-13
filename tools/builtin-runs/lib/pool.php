@@ -50,7 +50,7 @@ function fail(string $message): never
  *
  * @param array{mode: string, cap: int} $sandbox
  */
-function start_worker(string $php, bool $zendMm, array $sandbox): Worker
+function start_worker(string $php, bool $zendMm, array $sandbox, ?array $modules = null): Worker
 {
     $env = null;
     if ($sandbox['mode'] === 'none') {
@@ -59,7 +59,7 @@ function start_worker(string $php, bool $zendMm, array $sandbox): Worker
             $env['USE_ZEND_ALLOC'] = '0';
         }
     }
-    $command = worker_command($php, $zendMm, $sandbox);
+    $command = worker_command($php, $zendMm, $sandbox, $modules);
     $descriptors = [
         0 => ['file', '/dev/null', 'r'],
         1 => ['file', '/dev/null', 'w'],
@@ -94,9 +94,9 @@ function release_worker(Worker $worker): void
  * @param array{mode: string, cap: int} $sandbox
  * @return array{manifest: array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool}, units: list<array{string, string, string, int, int}>, weights: list<int>, nothing: list<string>, signatures: list<string>}
  */
-function plan_run(string $php, ?string $only, ?array $extensions, bool $zendMm, array $sandbox): array
+function plan_run(string $php, ?string $only, ?array $extensions, bool $zendMm, array $sandbox, ?array $modules = null): array
 {
-    $worker = start_worker($php, $zendMm, $sandbox);
+    $worker = start_worker($php, $zendMm, $sandbox, $modules);
     try {
         send($worker->in, ['init', $only, false, 'off', $extensions]);
         $ready = receive($worker->out);
@@ -165,7 +165,7 @@ function probed_by_class(array $unitLines): array
  *
  * @param list<array{string, string, string, int, int}> $units
  * @param list<int> $weights the forks each unit makes, for the progress line
- * @param array{jobs: int, php: string, only: ?string, extensions: ?list<string>, zendMm: bool, manifest: array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool}, skip: string, cache: ?string, recorder: string, binary: string, signatures: list<string>, sandbox: array{mode: string, cap: int}} $run
+ * @param array{jobs: int, php: string, only: ?string, extensions: ?list<string>, modules: ?list<string>, zendMm: bool, manifest: array{php: string, extensions: array<string, array{version: ?string, info: ?string, provides: list<string>}>, ffi: bool}, skip: string, cache: ?string, recorder: string, binary: string, signatures: list<string>, sandbox: array{mode: string, cap: int}} $run
  * @return array{array<int, array<string, true>>, list<array{string, string, string, int, int}>} the lines of each unit by its index, and the units lost twice
  */
 function run_units(array $units, array $weights, array $run): array
@@ -218,7 +218,7 @@ function run_units(array $units, array $weights, array $run): array
         $done += $weights[$index];
     };
     $spawn = static function () use ($run): void {
-        $worker = start_worker($run['php'], $run['zendMm'], $run['sandbox']);
+        $worker = start_worker($run['php'], $run['zendMm'], $run['sandbox'], $run['modules']);
         try {
             send($worker->in, ['init', $run['only'], Stats::$enabled, $run['skip'], $run['extensions']]);
         } catch (RuntimeException) {
