@@ -1450,11 +1450,10 @@ four RV-29 fixtures that had failed while the release was modeled now pass. Fina
 1,303 library tests, 4,005 checker fixtures.
 
 Found outside F00.3, owned elsewhere:
-- **Legacy call effects lose a `__toString` write for builtins.** `sprintf("%s", $w)`, with `$w` a `Stringable`
-  object whose `__toString` sets `$box->value = null`, leaves `$box->value` as `string`, where PHP allows
-  `string|null`. A control without the write is correct. The builtin-runs table records `sprintf` as `probed`
-  with no effects, so the generic path never sees the callback. This is the open builtin-runs soundness item in
-  `WORK_STACK.md` (level 9's item 0, "Builtin-runs gaps"). It is not fixed here.
+- **Legacy call effects lost a `__toString` write for builtins. Fixed.** `sprintf("%s", $w)`, with `$w` a `Stringable`
+  whose `__toString` writes a property, left that property at the type before the call. A probed builtin's runs are now
+  the table's rows plus its parameter types' upper bound, and the call invalidates what it may write. The precision cost
+  for `mixed` and string parameters, and its recovery, are in `WORK_STACK.md` item 1a.
 - **Legacy argument check rejected a `Stringable` for a `string` parameter.** `str_repeat($w, 2)` reported
   `argument.type` for `Writer`, which has `__toString` and which PHP accepts. Fixed: a Stringable object is accepted
   in weak mode for every function (`weak_stringable_converts_to_every_string_parameter`).
