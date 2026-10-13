@@ -43,6 +43,10 @@ foreach (array_keys($names) as $name) {
     }
     [$kind, $fn, $method, $reflection] = $targets[0];
     $label = $kind === 'function' ? $fn : "$fn::$method";
+    // A method a live server would block on or change is not called (plan.php).
+    if ($kind === 'method' && in_array(strtolower($label), METHODS_SKIPPED, true)) {
+        continue;
+    }
     $params = $reflection->getParameters();
     $makers = $kind === 'method' ? makers(new ReflectionClass($fn)) : [];
     foreach ($params as $at => $param) {

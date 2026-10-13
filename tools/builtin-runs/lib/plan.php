@@ -13,6 +13,21 @@ const SKIPPED = [
 // Functions asserted to run no user code (a program, the network, a delay, a
 // mail) where no call of them was measured: a row is added only for a name
 // with no `probed` row.
+/**
+ * Methods a live server would block on or change: subscriptions and blocking pops wait for a message or an
+ * element; the others stop, reconfigure or empty the server, or open and close connections. Never called.
+ */
+const METHODS_SKIPPED = [
+    'redis::subscribe', 'redis::psubscribe', 'redis::ssubscribe', 'redis::monitor', 'redis::blpop', 'redis::brpop',
+    'redis::brpoplpush', 'redis::blmove', 'redis::bzpopmin', 'redis::bzpopmax', 'redis::bzmpop', 'redis::blmpop',
+    'redis::wait', 'redis::waitaof', 'redis::flushall', 'redis::flushdb', 'redis::shutdown', 'redis::slaveof',
+    'redis::replicaof', 'redis::failover', 'redis::bgrewriteaof', 'redis::bgsave', 'redis::save', 'redis::config',
+    'redis::debug', 'redis::migrate', 'redis::sync', 'redis::psync', 'redis::client', 'redis::script',
+    'redis::function', 'redis::auth', 'redis::select', 'redis::swapdb', 'redis::acl', 'redis::module',
+    'redis::cluster', 'redis::reset', 'redis::connect', 'redis::pconnect', 'redis::popen', 'redis::open',
+    'redis::close', 'redis::multi', 'redis::exec', 'redis::discard', 'redis::watch', 'redis::unwatch',
+];
+
 const RUNS_NOTHING = [
     'exec', 'system', 'passthru', 'shell_exec', 'proc_open', 'popen',
     'sleep', 'usleep', 'time_nanosleep', 'time_sleep_until',
@@ -196,6 +211,9 @@ function units(callable $wanted): array
         $own = own_methods($reflection);
         $instance = array_filter($own, static fn (ReflectionMethod $method): bool => !$method->isStatic() && $method->getName() !== '__construct');
         foreach ($own as $method) {
+            if (in_array(strtolower($class . '::' . $method->getName()), METHODS_SKIPPED, true)) {
+                continue;
+            }
             if ($wanted(strtolower($class . '::' . $method->getName()))) {
                 $add(1 + count($method->getParameters()), ['method', $class, $method->getName(), 0, 0]);
             }
