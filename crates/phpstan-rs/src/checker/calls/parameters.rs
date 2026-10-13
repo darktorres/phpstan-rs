@@ -329,29 +329,37 @@ impl<'a> Checker<'a> {
             // Weak mode converts a value to a `string` parameter for every function, and a
             // Stringable object converts through its `__toString`. The scalar and null
             // conversions are modeled by strlen's catalog graph, so they stay strlen-only.
-            let weak_string_value_accepted = weak_scalar_coercion
+            let accepts_string_by_conversion = weak_scalar_coercion
                 && self
                     .relation()
                     .is_super_type_of(&param_ty, &Type::string())
-                    .yes()
-                && arg_ty.union_members().iter().all(|member| {
-                    let relation = self.relation();
-                    let strlen_scalar = weak_strlen_string_coercion
-                        && (member.is_scalar().yes()
-                            || member.is_null().yes()
-                            || member.is_null().maybe());
-                    relation.is_super_type_of(&param_ty, member).yes()
-                        || strlen_scalar
-                        || relation
-                            .is_super_type_of(
-                                &Type::object("Stringable".into(), Vec::new()),
-                                member,
-                            )
-                            .yes()
-                        || member.as_object().is_some_and(|(class, _)| {
-                            self.registry.lookup_method(class, "__toString").is_some()
-                        })
-                });
+                    .yes();
+            let member_converts = |member: &Type| {
+                let relation = self.relation();
+                let strlen_scalar = weak_strlen_string_coercion
+                    && (member.is_scalar().yes()
+                        || member.is_null().yes()
+                        || member.is_null().maybe());
+                relation.is_super_type_of(&param_ty, member).yes()
+                    || strlen_scalar
+                    || relation
+                        .is_super_type_of(&Type::object("Stringable".into(), Vec::new()), member)
+                        .yes()
+                    || member.as_object().is_some_and(|(class, _)| {
+                        self.registry.lookup_method(class, "__toString").is_some()
+                    })
+            };
+            let weak_string_value_accepted =
+                accepts_string_by_conversion && arg_ty.union_members().iter().all(member_converts);
+            // A declared non-final class without `__toString` may be a subclass that has one.
+            // When that is the only way a value could convert, the report is at level 9: an
+            // opt-in strictness, not a certain error. A member that fails outright keeps level 5.
+            let only_subclass_could_convert = accepts_string_by_conversion
+                && arg_ty
+                    .union_members()
+                    .iter()
+                    .all(|member| member_converts(member) || self.class_may_gain_tostring(member));
+            let report_level: u8 = if only_subclass_could_convert { 9 } else { 5 };
             let null_to_string_is_deprecated = weak_strlen_string_coercion
                 && arg_ty
                     .union_members()
@@ -403,7 +411,7 @@ impl<'a> Checker<'a> {
                         callee.of()
                     ),
                     argument.span,
-                    5,
+                    report_level,
                     from,
                     "argument.type",
                 );
@@ -434,6 +442,19 @@ impl<'a> Checker<'a> {
     /// array the type can be has, its string key naming the parameter;
     /// an optional position with no string key is skipped. `None` when
     /// the type is not constant arrays.
+    /// A known, non-final class with no `__toString` of its own, which a subclass may give one.
+    fn class_may_gain_tostring(&self, member: &Type) -> bool {
+        let Some((class, _)) = member.as_object() else {
+            return false;
+        };
+        self.registry.lookup_method(class, "__toString").is_none()
+            && !self.registry.is_subclass_of(class, "Stringable")
+            && self
+                .registry
+                .class_by_name(class)
+                .is_some_and(|class| !class.is_final())
+    }
+
     fn unpacked_constant_array_arguments(
         &self,
         arenas: &NodeArenas,

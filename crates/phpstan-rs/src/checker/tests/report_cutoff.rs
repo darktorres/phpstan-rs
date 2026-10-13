@@ -38,3 +38,24 @@ fn a_checker_given_the_cutoff_makes_what_the_cutoff_keeps() {
         }
     }
 }
+
+/// A declared non-final class without `__toString` may be a subclass that has one, so its
+/// `argument.type` is at level 9 and the default report (level 6) leaves it unmade. A final
+/// class without one is a certain error at the default level.
+#[test]
+fn a_plain_class_argument_is_reported_only_at_level_nine() {
+    let plain = "<?php\nclass WeakPlain {}\nfunction f(WeakPlain $p): int { return strlen($p); }\n";
+    let sealed =
+        "<?php\nfinal class WeakSealed {}\nfunction f(WeakSealed $s): int { return strlen($s); }\n";
+    let argument_types = |source: &str, level: u8| -> Vec<u8> {
+        let cutoff = LevelCutoff::at(level);
+        all_diagnostics_for_with(source, |s| s.report_cutoff = Some(cutoff))
+            .iter()
+            .filter(|d| d.identifier.as_str() == "argument.type")
+            .map(|d| d.level)
+            .collect()
+    };
+    assert!(argument_types(plain, 6).is_empty());
+    assert_eq!(argument_types(plain, 9), vec![9]);
+    assert_eq!(argument_types(sealed, 6), vec![5]);
+}

@@ -1,1 +1,1 @@
-4:19-4:25 argument.type L5 | Parameter #1 $string of function strlen expects string, stdClass given.
+4:19-4:25 argument.type L9 | Parameter #1 $string of function strlen expects string, stdClass given.

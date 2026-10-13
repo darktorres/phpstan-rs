@@ -1,3 +1,4 @@
+level = 9
 php_version = "8.5.4"
 
 [php_target_profile]

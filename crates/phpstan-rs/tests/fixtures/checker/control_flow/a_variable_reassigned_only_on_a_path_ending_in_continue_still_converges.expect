@@ -1,4 +1,4 @@
 4:13-18:14 missingType.iterableValue L6 | Function f() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 8:25-8:30 if.alwaysTrue L4 | If condition is always true.
-10:41-10:46 argument.type L5 | Parameter #1 $x of function needsString expects string, Diff given.
+10:41-10:46 argument.type L9 | Parameter #1 $x of function needsString expects string, Diff given.
