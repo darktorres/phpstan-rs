@@ -171,7 +171,7 @@ function valid_value(?ReflectionType $type): ?Closure
         },
         // Not connected: a call on it fails for want of a connection, which the table records as a gap.
         // Connected to the MySQL server the scan starts inside its sandbox, on a Unix socket.
-        'mysqli' => static fn (): mysqli => new mysqli(null, 'root', '', '', 0, '/tmp/mysql.sock'),
+        'mysqli' => static fn (): mysqli => new mysqli(null, 'root', '', '', 0, server_run_dir() . '/mysql.sock'),
         'socket' => static fn (): Socket => socket_create(AF_UNIX, SOCK_STREAM, 0),
         // Made in the worker's own IPC namespace, which the sandbox gives it; without one the queue is the host's.
         // One message is queued, so a receive returns instead of waiting on the empty queue.
@@ -216,7 +216,7 @@ function valid_value(?ReflectionType $type): ?Closure
         'ds\\map' => static fn (): Ds\Map => new Ds\Map(),
         'sqlite3' => static fn (): SQLite3 => new SQLite3(':memory:'),
         // Connected to the PostgreSQL server the scan starts inside its sandbox, on a Unix socket.
-        'pgsql\\connection' => static fn (): PgSql\Connection => pg_connect('host=/tmp port=5432 user=postgres dbname=postgres'),
+        'pgsql\\connection' => static fn (): PgSql\Connection => pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres'),
         // Logged in to the FTP server the scan starts inside its sandbox, on loopback.
         'ftp\\connection' => static function (): FTP\Connection {
             $connection = ftp_connect('127.0.0.1', 2121);
@@ -225,11 +225,11 @@ function valid_value(?ReflectionType $type): ?Closure
         },
         // A large object, opened inside a transaction on the server the scan starts.
         'pgsql\\lob' => static function (): PgSql\Lob {
-            $connection = pg_connect('host=/tmp port=5432 user=postgres dbname=postgres');
+            $connection = pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres');
             pg_query($connection, 'BEGIN');
             return pg_lo_open($connection, pg_lo_create($connection), 'w+');
         },
-        'pgsql\\result' => static fn (): PgSql\Result => pg_query(pg_connect('host=/tmp port=5432 user=postgres dbname=postgres'), 'SELECT 1'),
+        'pgsql\\result' => static fn (): PgSql\Result => pg_query(pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres'), 'SELECT 1'),
         'imagickkernel' => static fn (): ImagickKernel => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         'traversable' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
         'domelement' => static function (): DOMElement {
@@ -279,6 +279,16 @@ function socket_pair_sample(): Socket
 function stream_pair_sample(): mixed
 {
     return stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP)[0];
+}
+
+/**
+ * The directory the servers' Unix sockets are in: the worker's own run directory when the environment names one,
+ * otherwise the temporary directory of the scan's sandbox.
+ */
+function server_run_dir(): string
+{
+    $dir = getenv('BUILTIN_RUNS_RUN');
+    return $dir === false || $dir === '' ? '/tmp' : $dir;
 }
 
 /** A stream context whose notification callback is a recording callable. */
@@ -428,7 +438,7 @@ function named_value(ReflectionParameter $param): ?Closure
     }
     // A PostgreSQL function takes its connection first, from the server the scan starts.
     if (str_starts_with($function, 'pg_') && $name === 'connection') {
-        return static fn (): PgSql\Connection => pg_connect('host=/tmp port=5432 user=postgres dbname=postgres');
+        return static fn (): PgSql\Connection => pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres');
     }
     // A database file of SQLite3 is in memory; a directory of the directory iterators is the temporary one.
     if ($class === 'sqlite3' && $name === 'filename') {
@@ -444,7 +454,7 @@ function named_value(ReflectionParameter $param): ?Closure
             'hostname' => 'localhost',
             'username' => 'root',
             'password', 'database' => '',
-            'socket' => '/tmp/mysql.sock',
+            'socket' => server_run_dir() . '/mysql.sock',
             'charset' => 'utf8mb4',
             'name' => 'sp1',
             default => null,

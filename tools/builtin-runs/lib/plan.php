@@ -130,11 +130,11 @@ function recipe(string $class): ?Closure
         'finfo' => static fn (): object => new finfo(FILEINFO_MIME_TYPE),
         'fiber' => static fn (): object => new Fiber(static fn (): int => 1),
         // Connected to the MySQL server the scan starts inside its sandbox, on a Unix socket.
-        'mysqli' => static fn (): object => new mysqli(null, 'root', '', '', 0, '/tmp/mysql.sock'),
+        'mysqli' => static fn (): object => new mysqli(null, 'root', '', '', 0, server_run_dir() . '/mysql.sock'),
         // Connected to the Redis server the scan starts inside its sandbox, on a Unix socket.
         'redis' => static function (): object {
             $redis = new Redis();
-            $redis->connect('/tmp/redis.sock');
+            $redis->connect(server_run_dir() . '/redis.sock');
             return $redis;
         },
         'splobjectstorage' => static function (): object {

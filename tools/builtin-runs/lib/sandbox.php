@@ -47,6 +47,10 @@ function worker_command(string $php, bool $zendMm, array $sandbox): array
         $variables['USE_ZEND_ALLOC'] = '0';
     }
     if ($sandbox['mode'] === 'bwrap') {
+        // The servers' sockets are in the worker's home: its /tmp is the host's, read-only.
+        if (isset($sandbox['servers'])) {
+            $variables['BUILTIN_RUNS_RUN'] = $variables['HOME'] . '/run';
+        }
         $command = ['bwrap', '--unshare-net', '--unshare-pid', '--unshare-uts', '--unshare-ipc', '--hostname', 'rec', '--die-with-parent', '--new-session', '--clearenv'];
         foreach ($variables as $name => $value) {
             array_push($command, '--setenv', $name, $value);
