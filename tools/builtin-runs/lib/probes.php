@@ -219,11 +219,16 @@ function valid_value(?ReflectionType $type): ?Closure
         'opensslasymmetrickey' => static fn (): OpenSSLAsymmetricKey => openssl_pkey_new(['private_key_bits' => 1024, 'private_key_type' => OPENSSL_KEYTYPE_RSA]),
         'streambucket' => static fn (): StreamBucket => stream_bucket_new(fopen('php://memory', 'r+'), 'x'),
         'simplexmlelement' => static fn (): SimpleXMLElement => new SimpleXMLElement('<a><b/></a>'),
+        'mysqli_result' => static fn (): mysqli_result => mysqli_connection_sample()->query('SELECT 1'),
+        'mysqli_stmt' => static fn (): mysqli_stmt => mysqli_connection_sample()->prepare('SELECT 1'),
+        'sysvsemaphore' => static fn (): SysvSemaphore => sem_get(0x5152),
         'intlgregoriancalendar' => static fn (): IntlGregorianCalendar => IntlGregorianCalendar::createInstance('UTC', 'en'),
         'ds\\map' => static fn (): Ds\Map => new Ds\Map(),
         'sqlite3' => static fn (): SQLite3 => new SQLite3(':memory:'),
         // Connected to the PostgreSQL server the scan starts inside its sandbox, on a Unix socket.
         'pgsql\\connection' => static fn (): PgSql\Connection => pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres'),
+        'uri\\rfc3986\\uri' => static fn (): Uri\Rfc3986\Uri => new Uri\Rfc3986\Uri('https://example.com/'),
+        'uri\\whatwg\\url' => static fn (): Uri\WhatWg\Url => new Uri\WhatWg\Url('https://example.com/'),
         // Logged in to the FTP server the scan starts inside its sandbox, on loopback.
         'ftp\\connection' => static function (): FTP\Connection {
             $connection = ftp_connect('127.0.0.1', 2121);
@@ -239,21 +244,11 @@ function valid_value(?ReflectionType $type): ?Closure
         'pgsql\\result' => static fn (): PgSql\Result => pg_query(pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres'), 'SELECT 1'),
         'imagickkernel' => static fn (): ImagickKernel => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         'traversable' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
-        'domelement' => static function (): DOMElement {
-            $document = new DOMDocument();
-            $document->loadXML('<a/>');
-            return $document->documentElement;
-        },
-        'domnode' => static function (): DOMNode {
-            $document = new DOMDocument();
-            $document->loadXML('<a/>');
-            return $document->documentElement;
-        },
-        'domdocument' => static function (): DOMDocument {
-            $document = new DOMDocument();
-            $document->loadXML('<a/>');
-            return $document;
-        },
+        // A new element of the shared document: another node of it, as the receivers are.
+        'domelement' => static fn (): DOMElement => dom_document()->createElement('c'),
+        'domnode' => static fn (): DOMNode => dom_document()->createElement('c'),
+        'domdocument' => static fn (): DOMDocument => dom_document(),
+        'domattr' => static fn (): DOMAttr => dom_document()->documentElement->getAttributeNode('id'),
         // In the worker's IPC namespace, as the message queue is.
         'shmop' => static fn (): Shmop => shmop_open(0x5150, 'c', 0644, 64),
         'sysvsharedmemory' => static fn (): SysvSharedMemory => shm_attach(0x5151, 64),
@@ -349,6 +344,43 @@ function font_file_sample(): string
     return $fonts === false || $fonts === [] ? '' : $fonts[0];
 }
 
+/**
+ * The document the DOM values of a child share, with an element that has an id attribute and a child: a node of it is
+ * another node of it, and a receiver and its arguments are in the same document.
+ */
+function dom_document(): DOMDocument
+{
+    static $document = null;
+    if ($document === null) {
+        $document = new DOMDocument();
+        $document->loadXML('<a id="i" xmlns:p="urn:p" p:id="j">x<b/></a>');
+    }
+    return $document;
+}
+
+/** A connection to the child's MySQL server, over its socket. */
+function mysqli_connection_sample(): mysqli
+{
+    // Kept for the child: a statement or a result made on it is refused once its connection is gone.
+    static $connection = null;
+    return $connection ??= new mysqli(null, 'root', '', '', 0, server_run_dir() . '/mysql.sock');
+}
+
+/** The object a WeakMap or SplObjectStorage holds, and that the probe offers as its key: the same one in a child. */
+function recipe_key(): object
+{
+    static $key = null;
+    return $key ??= new stdClass();
+}
+
+/** A text file in the working directory, for the functions that open a file by name. */
+function text_file_sample(): string
+{
+    $path = getcwd() . '/rec-text.txt';
+    file_put_contents($path, "line\n");
+    return $path;
+}
+
 /** A stream holding a 1x1 PNG, for the functions that read an image from a file handle. */
 function png_stream_sample(): mixed
 {
@@ -390,7 +422,169 @@ function zip_entry_sample(): mixed
  */
 function known_parameter_value(ReflectionParameter $param): ?Closure
 {
-    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? pdo_value($param) ?? xml_value($param) ?? named_value($param);
+    // The library's own values come first: each is keyed by a method and a parameter, and a broader rule would match them.
+    return library_value($param) ?? sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? pdo_value($param) ?? xml_value($param) ?? serialised_value($param) ?? named_value($param);
+}
+
+/**
+ * The valid value of a parameter of a library method that takes a name, a format or a structure the library checks: the
+ * XSLT names, the Imagick formats and arrays, and the PDO, converter and process arguments.
+ */
+function library_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction();
+    $key = $function instanceof ReflectionMethod
+        ? strtolower($function->getDeclaringClass()->getName() . '::' . $function->getName())
+        : strtolower($function->getName());
+    return match ([$key, $param->getName()]) {
+        // A child of the document element, which the receivers are: the child a removal names, and an id attribute it has.
+        ['domelement::setidattribute', 'qualifiedName'] => static fn (): string => 'id',
+        ['domelement::setidattributens', 'namespace'] => static fn (): string => 'urn:p',
+        ['domelement::setidattributens', 'qualifiedName'] => static fn (): string => 'id',
+        ['domelement::setidattribute', 'isId'], ['domelement::setidattributens', 'isId'], ['domelement::setidattributenode', 'isId'] => static fn (): bool => true,
+        ['domnode::removechild', 'child'], ['domnode::insertbefore', 'child'], ['domnode::replacechild', 'child'] => static fn (): DOMNode => dom_document()->documentElement->firstChild,
+        ['domdocument::registernodeclass', 'baseClass'] => static fn (): string => 'DOMElement',
+        ['domdocument::registernodeclass', 'extendedClass'] => static fn (): null => null,
+        ['domelement::insertadjacentelement', 'where'], ['domelement::insertadjacenttext', 'where'] => static fn (): string => 'beforeend',
+        ['xsltprocessor::getparameter', 'name'], ['xsltprocessor::removeparameter', 'name'], ['xsltprocessor::setparameter', 'name'] => static fn (): string => 'p',
+        ['xsltprocessor::setparameter', 'value'] => static fn (): string => 'v',
+        ['xsltprocessor::registerphpfunctionns', 'name'] => static fn (): string => 'f',
+        ['imagick::setformat', 'format'], ['imagick::setimageformat', 'format'], ['imagick::newimage', 'format'], ['imagick::writeimagefile', 'format'] => static fn (): string => 'png',
+        ['imagick::orderedditherimage', 'dither_format'] => static fn (): string => 'o8x8',
+        ['imagick::channelfximage', 'expression'] => static fn (): string => '1',
+        ['imagick::fximage', 'expression'] => static fn (): string => 'u',
+        ['imagick::setimageproperty', 'name'] => static fn (): string => 'comment',
+        // A 5x5 colour matrix, flattened: the identity.
+        ['imagick::colormatriximage', 'color_matrix'] => static fn (): array => array_map(static fn (int $i): float => intdiv($i, 5) === $i % 5 ? 1.0 : 0.0, range(0, 24)),
+        // Sixteen-pixel image in RGB: four by four pixels, three channels each.
+        ['imagick::importimagepixels', 'pixels'] => static fn (): array => array_fill(0, 48, 128),
+        ['pdostatement::getattribute', 'name'] => static fn (): int => PDO::ATTR_DRIVER_NAME,
+        ['reflectionmethod::__construct', 'method'] => static fn (): string => 'count',
+        ['mb_ereg_search', 'options'], ['mb_ereg_search_pos', 'options'], ['mb_ereg_search_regs', 'options'] => static fn (): string => 'i',
+        // A poll reads a connection's socket: one connection in the read array is enough for the call to run.
+        ['mysqli_poll', 'read'] => static fn (): array => [mysqli_connection_sample()],
+        ['mysqli_select_db', 'database'], ['mysqli::select_db', 'database'] => static fn (): string => 'mysql',
+        ['mysqli::execute_query', 'params'], ['mysqli_execute_query', 'params'], ['mysqli_stmt_execute', 'params'] => static fn (): array => [],
+        // A column or an index of the result the valid statement gives: the first.
+        ['mysqli_fetch_column', 'column'], ['mysqli_field_seek', 'index'], ['mysqli_fetch_field_direct', 'index'] => static fn (): int => 0,
+        ['ftp_set_option', 'value'] => static fn (): bool => true,
+        ['imagick::distortimage', 'arguments'] => static fn (): array => [0.0, 0.0, 0.0, 0.0],
+        ['imagick::writeimagesfile', 'format'] => static fn (): string => 'png',
+        ['reflectionproperty::setvalue', 'objectOrValue'] => static fn (): object => new RecordingObject(),
+        ['reflectionmethod::invoke', 'object'], ['reflectionmethod::invokeargs', 'object'] => static fn (): object => new RecordingObject(),
+        ['reflectionclass::setstaticpropertyvalue', 'name'] => static fn (): string => 'declaredStatic',
+        ['reflectionclass::setstaticpropertyvalue', 'value'] => static fn (): int => 1,
+        // The key a WeakMap or SplObjectStorage holds, which its receiver is given (see method_receiver).
+        ['weakmap::offsetget', 'object'], ['splobjectstorage::offsetget', 'object'] => static fn (): object => recipe_key(),
+        ['mysqli_poll', 'error'], ['mysqli_poll', 'reject'] => static fn (): array => [],
+        ['reflectionclass::getmethod', 'name'] => static fn (): string => 'count',
+        ['reflectionclass::getproperty', 'name'] => static fn (): string => 'declared',
+        ['reflectionclass::getstaticpropertyvalue', 'name'] => static fn (): string => 'declaredStatic',
+        ['reflectionclassconstant::__construct', 'class'] => static fn (): string => Attribute::class,
+        ['reflectionclassconstant::__construct', 'constant'] => static fn (): string => 'TARGET_CLASS',
+        ['reflectionextension::__construct', 'name'] => static fn (): string => 'standard',
+        ['reflectionproperty::__construct', 'class'] => static fn (): string => RecordingObject::class,
+        ['reflectionproperty::__construct', 'property'] => static fn (): string => 'declared',
+        ['reflectionmethod::__construct', 'objectOrMethod'] => static fn (): string => RecordingObject::class,
+        ['splfileobject::__construct', 'mode'] => static fn (): string => 'r',
+        ['splfileobject::__construct', 'context'] => static fn (): mixed => stream_context_create(),
+        ['splfileobject::__construct', 'filename'] => static fn (): string => text_file_sample(),
+        ['uconverter::__construct', 'destination_encoding'], ['uconverter::__construct', 'source_encoding'] => static fn (): string => 'UTF-8',
+        ['uri\\whatwg\\invalidurlexception::__construct', 'errors'] => static fn (): array => [new Uri\WhatWg\UrlValidationError('', Uri\WhatWg\UrlValidationErrorType::cases()[0], false)],
+        ['proc_open', 'descriptor_spec'] => static fn (): array => [],
+        default => null,
+    };
+}
+
+/**
+ * The valid payload of an `__unserialize` or `unserialize` parameter: the data that a real object of the class gives
+ * from its own serialisation. The string form exists only for the classes that serialise to one.
+ */
+function serialised_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction();
+    if (!$function instanceof ReflectionMethod || $param->getPosition() !== 0) {
+        return null;
+    }
+    $factory = match (strtolower($function->getDeclaringClass()->getName())) {
+        'datetime' => static fn (): object => new DateTime('2000-01-01 00:00:00', new DateTimeZone('UTC')),
+        'datetimeimmutable' => static fn (): object => new DateTimeImmutable('2000-01-01 00:00:00', new DateTimeZone('UTC')),
+        'datetimezone' => static fn (): object => new DateTimeZone('UTC'),
+        'arrayobject' => static fn (): object => new ArrayObject([]),
+        'arrayiterator' => static fn (): object => new ArrayIterator([]),
+        'spldoublylinkedlist' => static fn (): object => new SplDoublyLinkedList(),
+        'splobjectstorage' => static fn (): object => new SplObjectStorage(),
+        'splpriorityqueue' => static fn (): object => new SplPriorityQueue(),
+        'bcmath\\number' => static fn (): object => new BcMath\Number('1'),
+        'random\\engine\\mt19937' => static fn (): object => new Random\Engine\Mt19937(1),
+        'random\\engine\\pcgoneseq128xslrr64' => static fn (): object => new Random\Engine\PcgOneseq128XslRr64(1),
+        'random\\engine\\xoshiro256starstar' => static fn (): object => new Random\Engine\Xoshiro256StarStar(1),
+        'random\\randomizer' => static fn (): object => new Random\Randomizer(),
+        'uri\\rfc3986\\uri' => static fn (): object => new Uri\Rfc3986\Uri('https://example.com/'),
+        'uri\\whatwg\\url' => static fn (): object => new Uri\WhatWg\Url('https://example.com/'),
+        default => null,
+    };
+    if ($factory === null) {
+        return null;
+    }
+    return match (strtolower($function->getName())) {
+        '__unserialize' => static fn (): array => $factory()->__serialize(),
+        'unserialize' => method_exists($factory(), 'serialize') ? static fn (): string => $factory()->serialize() : null,
+        default => null,
+    };
+}
+
+/**
+ * Calls a builtin with its arguments. The three that read the scope of their caller are called from a closure of
+ * their own, since a call through a name is refused for them.
+ *
+ * @param list<mixed> $args
+ */
+function builtin_call(string $function, array $args): mixed
+{
+    // The state a builtin reads is set first: a search that was not initialised is refused.
+    if (str_starts_with($function, 'mb_ereg_search')) {
+        mb_ereg_search_init('abc', 'b');
+    }
+    return match ($function) {
+        'compact' => call_user_func_array(static fn (...$a): mixed => compact(...$a), $args),
+        'extract' => call_user_func_array(static fn (...$a): mixed => extract(...$a), $args),
+        // The closure's own arguments are what func_get_arg reads: a position the probe gives is read from padded ones.
+        'func_get_arg' => call_user_func_array(static fn (...$a): mixed => func_get_arg($a[0]), [...$args, 0, 0, 0, 0]),
+        // forward_static_call needs a class scope to forward: the recorder's own method is one.
+        'forward_static_call' => call_user_func_array([RecordingScope::class, 'forward'], $args),
+        default => call_user_func_array($function, $args),
+    };
+}
+
+/** A class scope for the functions that need one: a call to `forward_static_call` is made from its method. */
+final class RecordingScope
+{
+    public static function forward(mixed ...$args): mixed
+    {
+        return forward_static_call(...$args);
+    }
+}
+
+/**
+ * The values a variadic parameter takes when the probe is at it: the site's values, with the probe in the place of the
+ * first closure among them, since the probe is a callback there, or ahead of them when it is not.
+ *
+ * @param list<mixed> $values
+ * @return list<mixed>
+ */
+function variadic_with_probe(array $values, mixed $probe): array
+{
+    if (!$probe instanceof Closure) {
+        return [$probe, ...$values];
+    }
+    foreach ($values as $i => $value) {
+        if ($value instanceof Closure) {
+            $values[$i] = $probe;
+            return $values;
+        }
+    }
+    return [...$values, $probe];
 }
 
 /** The valid value of a bcmath parameter: a number string, a modulus that is not zero, or a scale. */
@@ -417,9 +611,13 @@ function named_value(ReflectionParameter $param): ?Closure
     $name = $param->getName();
     // The magic database `finfo` reads its rules from: the one the system installs.
     if ($name === 'magic_database' && in_array($function, ['__construct', 'finfo_open'], true)) {
-        return static fn (): string => '/usr/share/misc/magic.mgc';
+        return static fn (): null => null;
     }
-    if (in_array($name, ['separator', 'enclosure', 'escape'], true) && in_array($function, ['str_getcsv', 'fgetcsv', 'fputcsv', 'setcsvcontrol', 'splfileobject::fgetcsv', 'splfileobject::fputcsv', 'splfileobject::setcsvcontrol'], true)) {
+    // The class an ArrayObject iterates with: an ArrayIterator, which the constructor and the setter accept.
+    if ($name === 'iteratorClass' && in_array($function, ['setiteratorclass', '__construct'], true)) {
+        return static fn (): string => 'ArrayIterator';
+    }
+    if (in_array($name, ['separator', 'enclosure', 'escape'], true) && in_array($function, ['str_getcsv', 'fgetcsv', 'fputcsv', 'setcsvcontrol', 'splfileobject::fgetcsv', 'splfileobject::fputcsv', 'splfileobject::setcsvcontrol', 'pg_copy_from', 'pg_copy_to'], true)) {
         return match ($name) {
             'separator' => static fn (): string => ',',
             'enclosure' => static fn (): string => '"',
@@ -699,7 +897,7 @@ function imagick_value(ReflectionParameter $param): ?Closure
         return static fn (): string => png_file_sample();
     }
     // A font of the system, for the methods that load one.
-    if ($name === 'font' && $function->getName() === 'setFont' && str_starts_with($class, 'imagick')) {
+    if (($name === 'font' || $name === 'font_name') && $function->getName() === 'setFont' && str_starts_with($class, 'imagick')) {
         return static fn (): string => font_file_sample();
     }
     // A file the image is written to, named with a format the image writers know.
@@ -963,6 +1161,12 @@ function valid_site(ReflectionParameter $param): ?Closure
         'datefmt_format_object' => [0 => static fn (): DateTime => new DateTime('2000-01-01 00:00:00', new DateTimeZone('UTC'))],
         'deflate_init' => [0 => static fn (): int => ZLIB_ENCODING_RAW],
         'domdocument::registernodeclass' => [0 => 'DOMElement', 1 => static fn (): null => null],
+        'domelement::setidattribute' => [0 => 'id', 1 => true],
+        'ftp_set_option' => [2 => true],
+        'mysqli_poll' => [0 => static fn (): array => [new mysqli(null, 'root', '', '', 0, server_run_dir() . '/mysql.sock')]],
+        'domelement::setidattributens' => [0 => 'urn:p', 1 => 'id', 2 => true],
+        'domnode::insertbefore' => [1 => static fn (): DOMNode => dom_document()->documentElement->firstChild],
+        'domnode::replacechild' => [1 => static fn (): DOMNode => dom_document()->documentElement->firstChild],
         'imageaffinematrixget' => [0 => static fn (): int => IMG_AFFINE_TRANSLATE, 1 => static fn (): array => ['x' => 1, 'y' => 1]],
         'imagecolormatch' => [1 => static function (): GdImage {
             $palette = imagecreate(1, 1);
@@ -1017,6 +1221,12 @@ function valid_site(ReflectionParameter $param): ?Closure
         // Callables that record nothing: a recording one would be attributed to whichever probe is running.
         'array_udiff_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0, static fn (): int => 0]],
         'array_uintersect_uassoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0, static fn (): int => 0]],
+        // The variadic values a push or an add needs beside the key and the score.
+        'redis::lpush' => [1 => static fn (): array => ['v']],
+        'redis::rpush' => [1 => static fn (): array => ['v']],
+        'redis::zadd' => [2 => static fn (): array => [1.0, 'm']],
+        'pg_socket_poll' => [0 => static fn (): mixed => pg_socket(pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres'))],
+        'pg_trace' => [2 => static fn (): PgSql\Connection => pg_connect('host=' . server_run_dir() . ' port=5432 user=postgres dbname=postgres')],
         'array_udiff' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
         'array_udiff_assoc' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
         'array_uintersect' => [1 => static fn (): array => [[1, 2], static fn (): int => 0]],
@@ -1125,7 +1335,11 @@ function arguments(array $params, int $at, mixed $probe, bool $optional = false,
     // The context probe's call reads the listener: its first string argument is the URL.
     $listen = Seen::$probeUrl !== null && $probe === Seen::$probeContext;
     foreach ($params as $i => $param) {
-        if ($i === $at) {
+        if ($i === $at && $param->isVariadic() && valid_site($param) !== null) {
+            foreach (variadic_with_probe(plain_value($param, $at), $probe) as $value) {
+                $args[] = $value;
+            }
+        } elseif ($i === $at) {
             $args[$i] = $probe;
         } elseif ($listen && declares_string($param)) {
             $args[$i] = Seen::$probeUrl;
@@ -1142,6 +1356,9 @@ function arguments(array $params, int $at, mixed $probe, bool $optional = false,
             // without. Otherwise the parameter is left out unless the call was refused for too few arguments.
             if ($valued && own_valued($param)) {
                 $args[$i] = own_value($param)($at);
+            } elseif ($valued && $param->isDefaultValueAvailable() && $param->getDefaultValue() !== null) {
+                // The default is what the call takes without the argument: passing it changes nothing.
+                $args[$i] = $param->getDefaultValue();
             } elseif (!$optional) {
                 break;
             } else {
@@ -1171,9 +1388,9 @@ function own_valued(ReflectionParameter $param): bool
 }
 
 /**
- * The modes a call is made in: the optional parameters after the probe left out, and, when the first of them is passed
- * with its own value in the valued mode, the valued mode as well. Each mode is a child of its own, and the rows are the
- * union over them: a call that omits an argument may run code that the call with the value does not, and the other way.
+ * The modes a call is made in: the optional parameters after the probe left out, and, when one of them has a valid value
+ * of its own before the first that has none, the valued mode as well. Each mode is a child of its own, and the rows are
+ * the union over them: a call that omits an argument may run code that the call with the value does not, and the other way.
  *
  * @param list<ReflectionParameter> $params
  * @return list<bool> the `$valued` flag of each mode
@@ -1181,8 +1398,15 @@ function own_valued(ReflectionParameter $param): bool
 function call_modes(array $params, int $at): array
 {
     foreach ($params as $i => $param) {
-        if ($i > $at && $param->isOptional() && !$param->isVariadic()) {
-            return own_valued($param) ? [false, true] : [false];
+        if ($i <= $at || !$param->isOptional() || $param->isVariadic()) {
+            continue;
+        }
+        if (own_valued($param)) {
+            return [false, true];
+        }
+        // A default that is not null is passed in the valued mode, so the scan goes on past it.
+        if (!$param->isDefaultValueAvailable() || $param->getDefaultValue() === null) {
+            return [false];
         }
     }
     return [false];

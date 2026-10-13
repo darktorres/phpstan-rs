@@ -8,6 +8,7 @@
 require_once __DIR__ . '/../lib/seen.php';
 require_once __DIR__ . '/../lib/probes.php';
 require_once __DIR__ . '/../lib/plan.php';
+require_once __DIR__ . '/../lib/unit.php';
 
 [, $table, $regex, $out] = $argv;
 
@@ -51,6 +52,7 @@ foreach (array_keys($names) as $name) {
     $makers = $kind === 'method' ? makers(new ReflectionClass($fn)) : [];
     foreach ($params as $at => $param) {
         foreach (probes_for($param) as [$probe, $make]) {
+            foreach (call_modes($params, $at) as $valued) {
             $pipe = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             $pid = pcntl_fork();
             if ($pid === 0) {
@@ -63,23 +65,23 @@ foreach (array_keys($names) as $name) {
                 Seen::$entries = [];
                 Seen::$where = 'x';
                 try {
-                    $args = arguments($params, $at, $value);
+                    $args = arguments($params, $at, $value, false, $valued);
                     Seen::add('reached');
                     if ($kind === 'function') {
-                        invoke_arguments($params, $at, $value, static fn (array $a): mixed => $fn(...$a));
+                        invoke_arguments($params, $at, $value, static fn (array $a): mixed => builtin_call($fn, $a), $valued);
                     } else {
                         // The recorder's own makers, so an object is made as the recorder makes it.
-                        $object = method_receiver(new ReflectionClass($fn), $method, $makers[0][1]);
-                        if ($object === null) {
+                        $object = $method === '__construct' ? null : method_receiver(new ReflectionClass($fn), $method, $makers[0][1]);
+                        if ($object === null && $method !== '__construct') {
                             throw new RuntimeException('no object');
                         }
-                        invoke_arguments($params, $at, $value, static fn (array $a): mixed => $object->$method(...$a));
+                        invoke_arguments($params, $at, $value, method_call($fn, $method, false, $object), $valued);
                     }
                     $result = 'ok';
                 } catch (Throwable $e) {
                     $result = 'threw:' . get_class($e) . ':' . strtok($e->getMessage(), "\n");
                 }
-                fwrite($pipe[1], json_encode([$label, $at, $probe, $result, sink_count()]) . "\n");
+                fwrite($pipe[1], json_encode([$label, $at, $probe, $result, sink_count()], JSON_INVALID_UTF8_SUBSTITUTE) . "\n");
                 exit(0);
             }
             fclose($pipe[1]);
@@ -91,6 +93,7 @@ foreach (array_keys($names) as $name) {
                 fwrite($fh, json_encode([$label, $at, $probe, $result, 0]) . "\n");
             } else {
                 fwrite($fh, trim($line) . "\n");
+            }
             }
         }
     }

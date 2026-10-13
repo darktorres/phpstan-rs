@@ -63,6 +63,34 @@ function method_receiver(ReflectionClass $reflection, string $method, Closure $m
 {
     // SQLite3::open opens a database for an object that has none: it is the constructor's other half.
     $unconstructed = $method === '__construct' || ($method === 'open' && strtolower($reflection->getName()) === 'sqlite3');
+    // A final internal class cannot be made without its constructor: its constructor runs again on an object the maker
+    // made, where the class allows that.
+    if ($unconstructed && $reflection->isFinal() && $reflection->isInternal()) {
+        return $maker();
+    }
+    // A method that looks up a member needs a class that has one: the recorder's own, where stdClass has none.
+    if (strtolower($reflection->getName()) === 'reflectionclass' && in_array(strtolower($method), ['getmethod', 'getproperty', 'getstaticpropertyvalue', 'setstaticpropertyvalue'], true)) {
+        return new ReflectionClass(RecordingObject::class);
+    }
+    // A method that reads a key needs the key held, and one that resumes a fiber needs the fiber suspended.
+    $class = strtolower($reflection->getName());
+    if ($class === 'weakmap' && strtolower($method) === 'offsetget') {
+        $map = new WeakMap();
+        $map[recipe_key()] = 1;
+        return $map;
+    }
+    if ($class === 'splobjectstorage' && strtolower($method) === 'offsetget') {
+        $storage = new SplObjectStorage();
+        $storage->attach(recipe_key());
+        return $storage;
+    }
+    if ($class === 'fiber' && in_array(strtolower($method), ['resume', 'throw'], true)) {
+        $fiber = new Fiber(static function (): void {
+            Fiber::suspend();
+        });
+        $fiber->start();
+        return $fiber;
+    }
     return $unconstructed ? $reflection->newInstanceWithoutConstructor() : $maker();
 }
 
@@ -75,6 +103,7 @@ function recipe(string $class): ?Closure
         'reflectionclassconstant' => static fn (): object => new ReflectionClassConstant(Attribute::class, 'TARGET_CLASS'),
         'reflectionextension' => static fn (): object => new ReflectionExtension('standard'),
         'reflectionclass' => static fn (): object => new ReflectionClass(stdClass::class),
+        'reflectionfunction' => static fn (): object => new ReflectionFunction('strlen'),
         'splfileobject' => static fn (): object => new SplFileObject(recipe_file(), 'w+'),
         'splfileinfo' => static fn (): object => new SplFileInfo(recipe_file()),
         // Imagick's methods throw on an empty object: one image is read first.
@@ -100,12 +129,10 @@ function recipe(string $class): ?Closure
         },
         'pdostatement' => static fn (): object => (new PDO('sqlite::memory:'))->query('SELECT 1'),
         // A DOM node of a document, and a text node of one.
-        'domnode' => static function (): object {
-            $document = new DOMDocument();
-            $document->loadXML('<a>x</a>');
-            return $document->documentElement;
-        },
-        'domcharacterdata' => static fn (): object => (new DOMDocument())->createTextNode('x'),
+        'domnode' => static fn (): object => dom_document()->documentElement,
+        'domelement' => static fn (): object => dom_document()->documentElement,
+        'domdocument' => static fn (): object => dom_document(),
+        'domcharacterdata' => static fn (): object => dom_document()->createTextNode('x'),
         'spldoublylinkedlist' => static function (): object {
             $list = new SplDoublyLinkedList();
             $list->push(1);

@@ -25,7 +25,7 @@ function probe_function(string $function, array &$out): void
         probe_child($builtin, 'plain', static function () use ($function, $params, $valued): void {
             Seen::$where = 'plain';
             Seen::add('reached');
-            invoke_arguments($params, -1, null, static fn (array $args): mixed => $function(...$args), $valued);
+            invoke_arguments($params, -1, null, static fn (array $args): mixed => builtin_call($function, $args), $valued);
             Seen::returned();
         }, $out);
     }
@@ -52,7 +52,7 @@ function probe_function(string $function, array &$out): void
                                 $refs[$i] = $arg;
                                 $args[$i] = &$refs[$i];
                             }
-                            return call_user_func_array($function, $args);
+                            return builtin_call($function, $args);
                         }, $valued);
                         Seen::returned();
                         unset($refs[$at]);
@@ -71,6 +71,20 @@ function probe_function(string $function, array &$out): void
     }
 }
 
+/**
+ * The call of a method on its receiver. A constructor is run by `new`, as PHP runs it: an object made without its
+ * constructor is not valid for a subclass of an internal class, and its constructor would refuse to run on it.
+ *
+ * @return Closure(list<mixed>): mixed
+ */
+function method_call(string $class, string $name, bool $static, ?object $object): Closure
+{
+    if ($name === '__construct') {
+        return static fn (array $args): object => new $class(...$args);
+    }
+    return static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args);
+}
+
 /** The lines for a method: plainly, with a probe at each parameter, and on an object made with a probe. */
 function probe_method(string $class, string $name, array &$out): void
 {
@@ -83,14 +97,14 @@ function probe_method(string $class, string $name, array &$out): void
     // The method, plainly, on a plain object.
     foreach (call_modes($params, -1) as $valued) {
         probe_child($builtin, 'plain', static function () use ($makers, $static, $class, $name, $params, $valued): void {
-            $object = $static ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
-            if (!$static && $object === null) {
+            $object = $static || $name === '__construct' ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
+            if (!$static && $name !== '__construct' && $object === null) {
                 return;
             }
             Seen::$entries = [];
             Seen::$where = 'plain';
             Seen::add('reached');
-            invoke_arguments($params, -1, null, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args), $valued);
+            invoke_arguments($params, -1, null, method_call($class, $name, $static, $object), $valued);
             Seen::returned();
         }, $out);
     }
@@ -100,15 +114,15 @@ function probe_method(string $class, string $name, array &$out): void
             $where = where('', $at, $probe);
             foreach (call_modes($params, $at) as $valued) {
                 probe_child($builtin, $where, static function () use ($makers, $static, $class, $name, $params, $at, $make, $where, $valued): void {
-                    $object = $static ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
-                    if (!$static && $object === null) {
+                    $object = $static || $name === '__construct' ? null : method_receiver(new ReflectionClass($class), $name, $makers[0][1]);
+                    if (!$static && $name !== '__construct' && $object === null) {
                         return;
                     }
                     $value = $make();
                     Seen::$entries = [];
                     Seen::$where = $where;
                     Seen::add('reached');
-                    invoke_arguments($params, $at, $value, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args), $valued);
+                    invoke_arguments($params, $at, $value, method_call($class, $name, $static, $object), $valued);
                     Seen::returned();
                 }, $out, $probe);
             }

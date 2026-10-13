@@ -114,6 +114,7 @@ final class RecordingIterator implements Iterator
 final class RecordingObject implements Countable, ArrayAccess, JsonSerializable, IteratorAggregate, Stringable
 {
     public $declared = 1;
+    public static int $declaredStatic = 1;
 
     public function count(): int { Seen::add('method', 'count'); return 1; }
     public function offsetExists(mixed $offset): bool { Seen::add('method', 'offsetexists'); return true; }
