@@ -14,7 +14,6 @@ struct CatalogTypeHost<'a> {
     registry: &'a Registry,
     invocation_coverage: Vec<php_semantics::DomainCoverage>,
     definitely_invalid_string_arguments: std::collections::BTreeSet<u32>,
-    temporary_string_arguments: std::collections::BTreeSet<u32>,
 }
 
 #[cfg(test)]
@@ -30,7 +29,6 @@ mod catalog_type_host_tests {
             registry: &registry,
             invocation_coverage: vec![],
             definitely_invalid_string_arguments: Default::default(),
-            temporary_string_arguments: Default::default(),
         };
         let exits = host.event(
             &php_semantics::Event::Invoke {
@@ -67,22 +65,23 @@ mod catalog_type_host_tests {
                 .iter()
                 .any(|exit| matches!(exit, php_semantics::EventExit::Suspended { .. }))
         );
+        // `exit()` inside `__toString` ends the call without a PHP exception (oracle:
+        // tostring_exits). Its coverage stays Open in the graph.
         assert!(
-            !exits
+            exits
                 .iter()
                 .any(|exit| matches!(exit, php_semantics::EventExit::NativeUnwind { .. }))
         );
     }
 
     #[test]
-    fn temporary_release_has_a_distinct_destructor_php_throw_outcome() {
+    fn release_may_run_a_destructor_that_throws_on_normal_completion() {
         let registry = Registry::default();
         let host = CatalogTypeHost {
             weak_scalar_coercions: true,
             registry: &registry,
             invocation_coverage: vec![],
             definitely_invalid_string_arguments: Default::default(),
-            temporary_string_arguments: [0].into_iter().collect(),
         };
         let exits = host.event(
             &php_semantics::Event::Release {
@@ -113,14 +112,12 @@ mod catalog_type_host_tests {
             registry: &registry,
             invocation_coverage: vec![],
             definitely_invalid_string_arguments: Default::default(),
-            temporary_string_arguments: Default::default(),
         };
         let strict = CatalogTypeHost {
             weak_scalar_coercions: false,
             registry: &registry,
             invocation_coverage: vec![],
             definitely_invalid_string_arguments: Default::default(),
-            temporary_string_arguments: Default::default(),
         };
         let parser = php_semantics::Predicate::Host(php_semantics::Bytes(
             b"strlen-string-parser-accepts-under-call-strictness".to_vec(),
@@ -217,7 +214,6 @@ mod catalog_type_host_tests {
             registry: &registry,
             invocation_coverage: graph.coverage.clone(),
             definitely_invalid_string_arguments: Default::default(),
-            temporary_string_arguments: Default::default(),
         };
         let weak_int = evaluate(&mut weak, Type::int());
         assert!(
@@ -258,24 +254,23 @@ mod catalog_type_host_tests {
             "the pending callback throw must pass through Release before resume"
         );
 
-        let mut temporary_host = CatalogTypeHost {
+        let mut destructor_host = CatalogTypeHost {
             weak_scalar_coercions: true,
             registry: &registry,
             invocation_coverage: graph.coverage.clone(),
             definitely_invalid_string_arguments: Default::default(),
-            temporary_string_arguments: [0].into_iter().collect(),
         };
-        let temporary = evaluate(
-            &mut temporary_host,
+        let released = evaluate(
+            &mut destructor_host,
             Type::object("Stringable".into(), Vec::new()),
         );
-        assert!(temporary.exits.iter().any(|exit| matches!(
+        assert!(released.exits.iter().any(|exit| matches!(
             exit,
             php_semantics::Exit::Normal { state, .. }
                 if state.released_string_arguments.contains(&0)
         )));
         assert!(
-            temporary.exits.iter().any(|exit| matches!(
+            released.exits.iter().any(|exit| matches!(
                 exit,
                 php_semantics::Exit::PhpThrow { state, .. }
                     if state.released_string_arguments.contains(&0)
@@ -308,7 +303,6 @@ mod catalog_type_host_tests {
             registry: &registry,
             invocation_coverage: graph.coverage.clone(),
             definitely_invalid_string_arguments: Default::default(),
-            temporary_string_arguments: Default::default(),
         };
         let strict_int = evaluate(&mut strict, Type::int());
         assert!(
@@ -335,6 +329,192 @@ mod catalog_type_host_tests {
                 .iter()
                 .any(|exit| matches!(exit, php_semantics::Exit::Normal { .. }))
         );
+    }
+
+    fn php_oracle() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../../tools/php-catalog/experiments/comparison/results/evaluation/strlen-host-oracle-8.5.4.json"
+        ))
+        .expect("the PHP oracle parses")
+    }
+
+    fn oracle_case<'a>(oracle: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
+        oracle["cases"]
+            .as_array()
+            .and_then(|cases| cases.iter().find(|case| case["id"] == id))
+            .unwrap_or_else(|| panic!("the oracle records {id}"))
+    }
+
+    fn exit_kinds(exits: &[php_semantics::EventExit<Type, CatalogTypeState>]) -> Vec<&'static str> {
+        exits
+            .iter()
+            .map(|exit| match exit {
+                php_semantics::EventExit::Normal { .. } => "normal",
+                php_semantics::EventExit::PhpThrow { .. } => "php_throw",
+                php_semantics::EventExit::NativeUnwind { .. } => "native_unwind",
+                php_semantics::EventExit::Fatal { .. } => "fatal",
+                php_semantics::EventExit::Suspended { .. } => "suspended",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn host_predicates_agree_with_php_on_every_definite_type() {
+        let oracle = php_oracle();
+        let registry = Registry::default();
+        let host = |weak_scalar_coercions| CatalogTypeHost {
+            weak_scalar_coercions,
+            registry: &registry,
+            invocation_coverage: vec![],
+            definitely_invalid_string_arguments: Default::default(),
+        };
+        let weak = host(true);
+        let strict = host(false);
+        let predicate =
+            |id: &str| php_semantics::Predicate::Host(php_semantics::Bytes(id.as_bytes().to_vec()));
+        let types = [
+            ("int", Type::int()),
+            ("float", Type::float()),
+            ("bool", Type::bool()),
+            ("null", Type::null()),
+            ("string", Type::string()),
+            ("array", Type::array(Type::int(), Type::mixed())),
+            ("stringable", Type::object("Stringable".into(), Vec::new())),
+        ];
+        for (name, ty) in &types {
+            for (mode, host) in [("weak", &weak), ("strict", &strict)] {
+                let case = oracle_case(&oracle, &format!("parser-{mode}-{name}"));
+                let accepted = case["result"]["outcome"] == "return";
+                let deprecated = !case["result"]["deprecations"]
+                    .as_array()
+                    .expect("the oracle records deprecations")
+                    .is_empty();
+                let arguments = std::slice::from_ref(ty);
+                let state = CatalogTypeState::default();
+                let parser = host.test(
+                    &predicate("strlen-string-parser-accepts-under-call-strictness"),
+                    arguments,
+                    &Type::mixed(),
+                    &[],
+                    &state,
+                );
+                match parser {
+                    php_semantics::Truth::Yes => {
+                        assert!(accepted, "{mode} {name}: the host accepts, PHP rejects")
+                    }
+                    php_semantics::Truth::No => {
+                        assert!(!accepted, "{mode} {name}: the host rejects, PHP accepts")
+                    }
+                    php_semantics::Truth::Maybe => {}
+                }
+                let deprecation = host.test(
+                    &predicate("strlen-weak-null-deprecation"),
+                    arguments,
+                    &Type::mixed(),
+                    &[],
+                    &state,
+                );
+                match deprecation {
+                    php_semantics::Truth::Yes => {
+                        assert!(
+                            deprecated,
+                            "{mode} {name}: the host deprecates, PHP does not"
+                        )
+                    }
+                    php_semantics::Truth::No => {
+                        assert!(
+                            !deprecated,
+                            "{mode} {name}: the host does not deprecate, PHP does"
+                        )
+                    }
+                    php_semantics::Truth::Maybe => {}
+                }
+            }
+            // Only an object reaches __toString in weak mode. A scalar or an array never does.
+            let cast = weak.test(
+                &predicate("strlen-weak-stringable-cast"),
+                std::slice::from_ref(ty),
+                &Type::mixed(),
+                &[],
+                &CatalogTypeState::default(),
+            );
+            let expected = if *name == "stringable" {
+                php_semantics::Truth::Yes
+            } else {
+                php_semantics::Truth::No
+            };
+            assert_eq!(cast, expected, "weak {name}: the cast predicate");
+        }
+    }
+
+    #[test]
+    fn host_exits_for_user_code_contain_each_outcome_php_produced() {
+        let oracle = php_oracle();
+        let registry = Registry::default();
+        let host = CatalogTypeHost {
+            weak_scalar_coercions: true,
+            registry: &registry,
+            invocation_coverage: vec![],
+            definitely_invalid_string_arguments: Default::default(),
+        };
+        let to_string = php_semantics::Event::Invoke {
+            callable: php_semantics::Operand::Literal(php_semantics::Bytes(b"__toString".to_vec())),
+            arguments: vec![php_semantics::Operand::Argument(0)],
+            result: 0,
+        };
+        let release = php_semantics::Event::Release {
+            value: php_semantics::Operand::Argument(0),
+        };
+        let diagnostic = php_semantics::Event::EmitDiagnostic {
+            kind: php_semantics::DiagnosticKind::NullToInternalScalarParameterDeprecated,
+            argument: 0,
+        };
+        let exits = |event: &php_semantics::Event, argument: Type| {
+            exit_kinds(&host.event(
+                event,
+                &[argument],
+                &Type::mixed(),
+                &[],
+                CatalogTypeState::default(),
+            ))
+        };
+        let stringable = || Type::object("Stringable".into(), Vec::new());
+
+        let normal = oracle_case(&oracle, "tostring_normal");
+        assert_eq!(normal["result"]["value"], 2);
+        assert!(exits(&to_string, stringable()).contains(&"normal"));
+
+        let throws = oracle_case(&oracle, "tostring_throws");
+        assert_eq!(throws["result"]["outcome"], "throw");
+        assert!(exits(&to_string, stringable()).contains(&"php_throw"));
+
+        let fatal = oracle_case(&oracle, "tostring_fatal");
+        assert_eq!(fatal["exit_status"], 255);
+        assert!(fatal["result"].is_null());
+        assert!(exits(&to_string, stringable()).contains(&"fatal"));
+
+        let suspends = oracle_case(&oracle, "tostring_suspends");
+        assert!(suspends["stdout"].as_str().unwrap().contains("suspended:s"));
+        assert!(exits(&to_string, stringable()).contains(&"suspended"));
+
+        let exits_program = oracle_case(&oracle, "tostring_exits");
+        assert_eq!(exits_program["exit_status"], 3);
+        assert!(exits_program["result"].is_null());
+        assert!(exits(&to_string, stringable()).contains(&"native_unwind"));
+
+        for id in [
+            "destructor_on_new_temporary",
+            "destructor_on_call_result",
+            "destructor_after_array_cleared_in_tostring",
+        ] {
+            let case = oracle_case(&oracle, id);
+            assert_eq!(case["result"]["outcome"], "throw", "{id}");
+            assert!(exits(&release, stringable()).contains(&"php_throw"), "{id}");
+        }
+
+        let handler = oracle_case(&oracle, "diagnostic_handler_throws");
+        assert_eq!(handler["result"]["outcome"], "throw");
+        assert!(exits(&diagnostic, Type::null()).contains(&"php_throw"));
     }
 }
 
@@ -369,6 +549,54 @@ fn supports_catalog_strlen_binding(sig: &FunctionReflection, args: &[Arg]) -> bo
         }
     }
     explicit_arguments == 1 || args.iter().any(|argument| argument.spread)
+}
+
+impl CatalogTypeHost<'_> {
+    /// The abnormal exits of an event that can run user code. Each carries the given coverage.
+    fn user_code_exits(
+        &self,
+        state: &CatalogTypeState,
+        coverage: &[php_semantics::DomainCoverage],
+    ) -> Vec<php_semantics::EventExit<Type, CatalogTypeState>> {
+        vec![
+            php_semantics::EventExit::PhpThrow {
+                value: Type::mixed(),
+                state: state.clone(),
+                coverage: coverage.to_vec(),
+            },
+            php_semantics::EventExit::Fatal {
+                value: Type::mixed(),
+                state: state.clone(),
+                coverage: coverage.to_vec(),
+            },
+            php_semantics::EventExit::NativeUnwind {
+                value: Type::mixed(),
+                state: state.clone(),
+                coverage: coverage.to_vec(),
+            },
+            php_semantics::EventExit::Suspended {
+                value: Type::mixed(),
+                state: state.clone(),
+                coverage: coverage.to_vec(),
+            },
+        ]
+    }
+
+    /// An event the host does not model. It may run user code, so it continues normally with
+    /// its state unchanged and every abnormal exit is kept. Its coverage is empty: it claims
+    /// nothing about the domains it might affect.
+    fn unmodeled_exits(
+        &self,
+        state: CatalogTypeState,
+    ) -> Vec<php_semantics::EventExit<Type, CatalogTypeState>> {
+        let mut outcomes = vec![php_semantics::EventExit::Normal {
+            result: None,
+            state: state.clone(),
+            coverage: vec![],
+        }];
+        outcomes.extend(self.user_code_exits(&state, &[]));
+        outcomes
+    }
 }
 
 impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
@@ -520,21 +748,20 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
         match event {
             php_semantics::Event::EmitDiagnostic { kind, argument } => {
                 state.diagnostics.insert((*kind, *argument));
+                // A user error handler runs here: it can throw, exit, fatal or suspend a Fiber.
+                // Its effects remain open, so every abnormal exit is kept.
                 let mut outcomes = vec![php_semantics::EventExit::Normal {
                     result: None,
                     state: state.clone(),
                     coverage: self.invocation_coverage.clone(),
                 }];
-                // PHP error handlers can turn this deprecation into a PHP
-                // exception. Their effects and exact throw value remain open,
-                // so preserve both the normal and exceptional continuation.
-                outcomes.push(php_semantics::EventExit::PhpThrow {
-                    value: Type::mixed(),
-                    state,
-                    coverage: self.invocation_coverage.clone(),
-                });
+                outcomes.extend(self.user_code_exits(&state, &self.invocation_coverage));
                 outcomes
             }
+            // Every PHP throw of this function is modeled by a block of the strlen graph (the
+            // parser rejection, the diagnostic handler, __toString and the destructor), so this
+            // placeholder event adds no exit. The oracle matrix confirms that scalars never
+            // throw outside those blocks.
             php_semantics::Event::Unknown { .. } => vec![php_semantics::EventExit::Normal {
                 result: None,
                 state,
@@ -547,7 +774,7 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
             } if method.0 == b"__toString" => {
                 let Some(php_semantics::Operand::Argument(argument)) = invoked_arguments.first()
                 else {
-                    return Vec::new();
+                    return self.unmodeled_exits(state);
                 };
                 state.invoked_string_arguments.insert(*argument);
                 let mut outcomes = Vec::new();
@@ -558,59 +785,34 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                         coverage: self.invocation_coverage.clone(),
                     });
                 }
-                outcomes.extend([
-                    // The paired runtime witness observes a throwing
-                    // __toString callback. Keep that path explicit while
-                    // leaving its full callback semantics open in coverage.
-                    php_semantics::EventExit::PhpThrow {
-                        value: Type::mixed(),
-                        state: state.clone(),
-                        coverage: self.invocation_coverage.clone(),
-                    },
-                    // User callbacks can raise an uncatchable PHP fatal or
-                    // suspend from an active Fiber. Both outcomes are
-                    // evidence-backed, but their detailed state is open.
-                    php_semantics::EventExit::Fatal {
-                        value: Type::mixed(),
-                        state: state.clone(),
-                        coverage: self.invocation_coverage.clone(),
-                    },
-                    php_semantics::EventExit::Suspended {
-                        value: Type::mixed(),
-                        state,
-                        coverage: self.invocation_coverage.clone(),
-                    },
-                ]);
+                // The paired runtime witness observes a throwing __toString callback. The
+                // callback's other exits are evidence-backed but their state is open.
+                outcomes.extend(self.user_code_exits(&state, &self.invocation_coverage));
                 outcomes
             }
             php_semantics::Event::Release { value } => {
                 if let php_semantics::Operand::Argument(argument) = value {
                     state.released_string_arguments.insert(*argument);
-                    if self.temporary_string_arguments.contains(argument) {
-                        // The temporary's destructor runs at this release
-                        // point. Its PHP throw replaces an already pending
-                        // PHP throw, or becomes the call's PHP-throw exit.
-                        return vec![
-                            php_semantics::EventExit::Normal {
-                                result: None,
-                                state: state.clone(),
-                                coverage: self.invocation_coverage.clone(),
-                            },
-                            php_semantics::EventExit::PhpThrow {
-                                value: Type::mixed(),
-                                state,
-                                coverage: self.invocation_coverage.clone(),
-                            },
-                        ];
-                    }
                 }
-                vec![php_semantics::EventExit::Normal {
-                    result: None,
-                    state,
-                    coverage: self.invocation_coverage.clone(),
-                }]
+                // Releasing the copied argument can drop the last reference, whatever the
+                // caller's expression was: a call result, a variable that __toString cleared,
+                // or a `new` temporary. Its destructor then runs here, and a PHP throw from it
+                // replaces a pending throw or becomes the call's exit. The destructor's other
+                // exits are not modeled at this point (see R05.2).
+                vec![
+                    php_semantics::EventExit::Normal {
+                        result: None,
+                        state: state.clone(),
+                        coverage: self.invocation_coverage.clone(),
+                    },
+                    php_semantics::EventExit::PhpThrow {
+                        value: Type::mixed(),
+                        state,
+                        coverage: self.invocation_coverage.clone(),
+                    },
+                ]
             }
-            _ => Vec::new(),
+            _ => self.unmodeled_exits(state),
         }
     }
 
@@ -2847,20 +3049,6 @@ impl<'a> Checker<'a> {
                     let ty = self.infer_expr(expression, locals);
                     self.catalog_string_callback_definitely_invalid(&ty, locals)
                         .then_some(index as u32)
-                })
-                .collect(),
-            temporary_string_arguments: resolved
-                .iter()
-                .enumerate()
-                .filter_map(|(index, expression)| {
-                    let expression = (*expression)?;
-                    let is_new = self.syntax_arenas().is_some_and(|arenas| {
-                        arenas
-                            .peeled(expression.id)
-                            .and_then(|id| arenas.expr(id))
-                            .is_some_and(|expression| matches!(expression.kind, ExprKind::New(..)))
-                    });
-                    is_new.then_some(index as u32)
                 })
                 .collect(),
         };
