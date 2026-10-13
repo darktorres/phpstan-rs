@@ -75,103 +75,15 @@ extract	1	not-recordable	threw:Error:Cannot call extract() dynamically
 extract	2	not-recordable	threw:Error:Cannot call extract() dynamically
 fiber::__construct	0	state	threw:ReflectionException:Class Fiber is an internal class marked as final that cannot be instantiated without invoking its constructor
 fiber::resume	0	value	threw:FiberError:Cannot resume a fiber that is not suspended
-finfo::__construct	1	file-or-font	threw:Exception:finfo::__construct(/tmp/probe-scan-3408/rec): Failed to open stream: No such file or directory
+finfo::__construct	1	file-or-font	threw:Exception:finfo::__construct(/tmp/probe-scan-3411/rec): Failed to open stream: No such file or directory
 forward_static_call	0	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
 forward_static_call	1	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
-ftp_alloc	0	server	threw:TypeError:ftp_alloc(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_alloc	1	server	threw:TypeError:ftp_alloc(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_alloc	2	server	threw:TypeError:ftp_alloc(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_append	0	server	threw:TypeError:ftp_append(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_append	1	server	threw:TypeError:ftp_append(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_append	2	server	threw:TypeError:ftp_append(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_append	3	server	threw:TypeError:ftp_append(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_cdup	0	server	threw:TypeError:ftp_cdup(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_chdir	0	server	threw:TypeError:ftp_chdir(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_chdir	1	server	threw:TypeError:ftp_chdir(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_chmod	0	server	threw:TypeError:ftp_chmod(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_chmod	1	server	threw:TypeError:ftp_chmod(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_chmod	2	server	threw:TypeError:ftp_chmod(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_close	0	server	threw:TypeError:ftp_close(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_delete	0	server	threw:TypeError:ftp_delete(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_delete	1	server	threw:TypeError:ftp_delete(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_exec	0	server	threw:TypeError:ftp_exec(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_exec	1	server	threw:TypeError:ftp_exec(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_fget	0	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_fget	1	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_fget	2	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_fget	3	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_fget	4	server	threw:TypeError:ftp_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_fput	0	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_fput	1	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_fput	2	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_fput	3	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_fput	4	server	threw:TypeError:ftp_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_get	0	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_get	1	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_get	2	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_get	3	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_get	4	server	threw:TypeError:ftp_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_get_option	0	server	threw:TypeError:ftp_get_option(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_get_option	1	server	threw:TypeError:ftp_get_option(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_login	0	server	threw:TypeError:ftp_login(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_login	1	server	threw:TypeError:ftp_login(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_login	2	server	threw:TypeError:ftp_login(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_mdtm	0	server	threw:TypeError:ftp_mdtm(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_mdtm	1	server	threw:TypeError:ftp_mdtm(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_mkdir	0	server	threw:TypeError:ftp_mkdir(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_mkdir	1	server	threw:TypeError:ftp_mkdir(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_mlsd	0	server	threw:TypeError:ftp_mlsd(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_mlsd	1	server	threw:TypeError:ftp_mlsd(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_continue	0	server	threw:TypeError:ftp_nb_continue(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_nb_fget	0	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_nb_fget	1	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_fget	2	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_fget	3	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_fget	4	server	threw:TypeError:ftp_nb_fget(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_fput	0	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_nb_fput	1	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_fput	2	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_fput	3	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_fput	4	server	threw:TypeError:ftp_nb_fput(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_get	0	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_nb_get	1	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_get	2	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_get	3	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_get	4	server	threw:TypeError:ftp_nb_get(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_put	0	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_nb_put	1	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_put	2	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_put	3	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nb_put	4	server	threw:TypeError:ftp_nb_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_nlist	0	server	threw:TypeError:ftp_nlist(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_nlist	1	server	threw:TypeError:ftp_nlist(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_pasv	0	server	threw:TypeError:ftp_pasv(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_pasv	1	server	threw:TypeError:ftp_pasv(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_put	0	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_put	1	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_put	2	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_put	3	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_put	4	server	threw:TypeError:ftp_put(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_pwd	0	server	threw:TypeError:ftp_pwd(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_quit	0	server	threw:TypeError:ftp_quit(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_raw	0	server	threw:TypeError:ftp_raw(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_raw	1	server	threw:TypeError:ftp_raw(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_rawlist	0	server	threw:TypeError:ftp_rawlist(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_rawlist	1	server	threw:TypeError:ftp_rawlist(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_rawlist	2	server	threw:TypeError:ftp_rawlist(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_rename	0	server	threw:TypeError:ftp_rename(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_rename	1	server	threw:TypeError:ftp_rename(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_rename	2	server	threw:TypeError:ftp_rename(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_rmdir	0	server	threw:TypeError:ftp_rmdir(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_rmdir	1	server	threw:TypeError:ftp_rmdir(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_set_option	0	server	threw:TypeError:ftp_set_option(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_set_option	1	server	threw:TypeError:ftp_set_option(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_set_option	2	server	threw:TypeError:ftp_set_option(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_site	0	server	threw:TypeError:ftp_site(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_site	1	server	threw:TypeError:ftp_site(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_size	0	server	threw:TypeError:ftp_size(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
-ftp_size	1	server	threw:TypeError:ftp_size(): Argument #1 ($ftp) must be of type FTP\Connection, stdClass given
-ftp_systype	0	server	threw:TypeError:ftp_systype(): Argument #1 ($ftp) must be of type FTP\Connection, resource given
+ftp_login	0	crash	killed:14
+ftp_login	1	crash	killed:14
+ftp_login	2	crash	killed:14
+ftp_set_option	0	server	threw:TypeError:ftp_set_option(): Argument #3 ($value) must be of type bool for the FTP_AUTOSEEK option, int given
+ftp_set_option	1	server	threw:TypeError:ftp_set_option(): Argument #3 ($value) must be of type bool for the FTP_AUTOSEEK option, int given
+ftp_set_option	2	server	threw:TypeError:ftp_set_option(): Argument #3 ($value) must be of type bool for the FTP_AUTOSEEK option, Closure given
 func_get_arg	0	not-recordable	threw:Error:Cannot call func_get_arg() dynamically
 get_class_vars	0	class-name	threw:TypeError:get_class_vars(): Argument #1 ($class) must be a valid class name, rec://probe given
 globiterator::__construct	0	value	threw:Error:The parent constructor was not called: the object is in an invalid state
@@ -207,10 +119,10 @@ imagick::importimagepixels	5	value	threw:ImagickException:The map contains incor
 imagick::importimagepixels	6	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
 imagick::newimage	3	value	threw:ImagickException:Unable to set the image format
 imagick::orderedditherimage	0	value	threw:ImagickException:invalid argument for option ordered-dither : 'rec://probe' @ error/threshold.c/OrderedDitherImage/1948
-imagick::pingimage	0	file-or-font	threw:ImagickException:unable to open image '/tmp/rec-5525.png': No such file or directory @ error/blob.c/OpenBlob/3710
-imagick::readimage	0	file-or-font	threw:ImagickException:unable to open image '/tmp/rec-5584.png': No such file or directory @ error/blob.c/OpenBlob/3710
+imagick::pingimage	0	file-or-font	threw:ImagickException:unable to open image '/tmp/rec-5561.png': No such file or directory @ error/blob.c/OpenBlob/3710
+imagick::readimage	0	file-or-font	threw:ImagickException:unable to open image '/tmp/rec-5620.png': No such file or directory @ error/blob.c/OpenBlob/3710
 imagick::removeimageprofile	0	file-or-font	threw:ImagickException:The image profile does not exist
-imagick::setfont	0	file-or-font	threw:ImagickException:The path does not exist: /tmp/probe-scan-5671/rec:/probe
+imagick::setfont	0	file-or-font	threw:ImagickException:The path does not exist: /tmp/probe-scan-5707/rec:/probe
 imagick::setformat	0	value	threw:ImagickException:Unable to set format
 imagick::setimagecolormapcolor	0	value	threw:ImagickException:invalid colormap index `MagickWand-0' @ error/magick-image.c/MagickSetImageColormapColor/10112
 imagick::setimagecolormapcolor	1	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
@@ -224,7 +136,7 @@ imagick::stereoimage	0	value	threw:ImagickException:left and right image sizes d
 imagick::writeimagefile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagick::writeimagesfile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagickdraw::setfillpatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetFillPatternURL/4978
-imagickdraw::setfont	0	file-or-font	threw:ImagickException:The path does not exist: /tmp/probe-scan-6129/rec:/probe
+imagickdraw::setfont	0	file-or-font	threw:ImagickException:The path does not exist: /tmp/probe-scan-6165/rec:/probe
 imagickdraw::setfontfamily	0	file-or-font	threw:ImagickDrawException:Unable to set font family; parameter not found in the list of configured fonts
 imagickdraw::setstrokepatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetStrokePatternURL/5420
 mb_ereg_search	0	state	threw:Error:No string was provided
@@ -234,141 +146,57 @@ mb_ereg_search_pos	1	state	threw:Error:No string was provided
 mb_ereg_search_regs	0	state	threw:Error:No string was provided
 mb_ereg_search_regs	1	state	threw:Error:No string was provided
 memcached::__construct	2	value	no-output
-mysqli::__construct	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
-mysqli::__construct	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::__construct	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::__construct	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::__construct	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::__construct	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::autocommit	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::begin_transaction	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::begin_transaction	1	server	threw:Error:mysqli object is not fully initialized
-mysqli::change_user	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::change_user	1	server	threw:Error:mysqli object is not fully initialized
-mysqli::change_user	2	server	threw:Error:mysqli object is not fully initialized
-mysqli::commit	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::commit	1	server	threw:Error:mysqli object is not fully initialized
-mysqli::connect	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
-mysqli::connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::escape_string	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::execute_query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::execute_query	1	server	threw:Error:mysqli object is not fully initialized
-mysqli::kill	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::multi_query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::prepare	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::query	1	server	threw:Error:mysqli object is not fully initialized
-mysqli::real_connect	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
-mysqli::real_connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::real_connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::real_connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::real_connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::real_connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::real_connect	6	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli::real_escape_string	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::real_query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::release_savepoint	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::rollback	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::rollback	1	server	threw:Error:mysqli object is not fully initialized
-mysqli::savepoint	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::select_db	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::set_charset	0	server	threw:Error:mysqli object is not fully initialized
-mysqli::store_result	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_affected_rows	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_autocommit	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_autocommit	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_begin_transaction	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_begin_transaction	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_begin_transaction	2	server	threw:Error:mysqli object is not fully initialized
-mysqli_change_user	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_change_user	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_change_user	2	server	threw:Error:mysqli object is not fully initialized
-mysqli_change_user	3	server	threw:Error:mysqli object is not fully initialized
-mysqli_character_set_name	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_commit	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_commit	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_commit	2	server	threw:Error:mysqli object is not fully initialized
-mysqli_connect	0	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
-mysqli_connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
+mysqli::__construct	0	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::__construct	1	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::__construct	2	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::__construct	3	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::__construct	4	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::connect	0	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::connect	1	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::connect	2	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::connect	3	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::connect	4	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::execute_query	1	server	threw:ValueError:mysqli::execute_query(): Argument #2 ($params) must consist of exactly 0 elements, 2 present
+mysqli::kill	0	server	threw:mysqli_sql_exception:Unknown command
+mysqli::real_connect	0	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::real_connect	1	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::real_connect	2	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::real_connect	3	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::real_connect	4	server	threw:mysqli_sql_exception:No such file or directory
+mysqli::release_savepoint	0	server	threw:mysqli_sql_exception:SAVEPOINT sp1 does not exist
+mysqli::select_db	0	server	threw:mysqli_sql_exception:No database selected
+mysqli_connect	0	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_connect	1	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_connect	2	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_connect	3	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_connect	4	server	threw:mysqli_sql_exception:No such file or directory
 mysqli_data_seek	1	server	threw:TypeError:mysqli_data_seek(): Argument #1 ($result) must be of type mysqli_result, stdClass given
-mysqli_dump_debug_info	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_errno	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_error	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_error_list	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_escape_string	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_escape_string	1	server	threw:Error:mysqli object is not fully initialized
 mysqli_execute	1	server	threw:TypeError:mysqli_execute(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
-mysqli_execute_query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_execute_query	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_execute_query	2	server	threw:Error:mysqli object is not fully initialized
+mysqli_execute_query	2	server	threw:ValueError:mysqli_execute_query(): Argument #3 ($params) must consist of exactly 0 elements, 2 present
 mysqli_fetch_all	1	server	threw:TypeError:mysqli_fetch_all(): Argument #1 ($result) must be of type mysqli_result, stdClass given
 mysqli_fetch_array	1	server	threw:TypeError:mysqli_fetch_array(): Argument #1 ($result) must be of type mysqli_result, stdClass given
 mysqli_fetch_column	1	server	threw:TypeError:mysqli_fetch_column(): Argument #1 ($result) must be of type mysqli_result, stdClass given
 mysqli_fetch_field_direct	1	server	threw:TypeError:mysqli_fetch_field_direct(): Argument #1 ($result) must be of type mysqli_result, stdClass given
 mysqli_fetch_object	1	server	threw:TypeError:mysqli_fetch_object(): Argument #1 ($result) must be of type mysqli_result, stdClass given
 mysqli_fetch_object	2	server	threw:TypeError:mysqli_fetch_object(): Argument #1 ($result) must be of type mysqli_result, stdClass given
-mysqli_field_count	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_field_seek	1	server	threw:TypeError:mysqli_field_seek(): Argument #1 ($result) must be of type mysqli_result, stdClass given
-mysqli_get_charset	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_get_connection_stats	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_get_host_info	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_get_proto_info	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_get_server_info	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_get_server_version	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_get_warnings	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_info	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_insert_id	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_kill	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_kill	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_more_results	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_multi_query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_multi_query	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_next_result	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_ping	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_kill	0	server	threw:mysqli_sql_exception:Unknown command
+mysqli_kill	1	server	threw:mysqli_sql_exception:Unknown command
 mysqli_poll	0	server	threw:TypeError:mysqli_poll(): Argument #1 ($read) must be an instance of mysqli, RecordingObject given
 mysqli_poll	1	server	threw:TypeError:mysqli_poll(): Argument #1 ($read) must be an instance of mysqli, RecordingObject given
 mysqli_poll	2	state	threw:ValueError:No stream arrays were passed
 mysqli_poll	3	state	threw:ValueError:No stream arrays were passed
 mysqli_poll	4	state	threw:ValueError:No stream arrays were passed
-mysqli_prepare	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_prepare	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_query	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_query	2	server	threw:Error:mysqli object is not fully initialized
 mysqli_real_connect	0	server	threw:mysqli_sql_exception:No such file or directory
-mysqli_real_connect	1	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for rec failed: Temporary failure in name resolution
-mysqli_real_connect	2	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_real_connect	3	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_real_connect	4	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_real_connect	5	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_real_connect	6	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_real_connect	7	server	threw:mysqli_sql_exception:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-mysqli_real_escape_string	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_real_escape_string	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_real_query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_real_query	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_reap_async_query	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_release_savepoint	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_release_savepoint	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_rollback	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_rollback	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_rollback	2	server	threw:Error:mysqli object is not fully initialized
-mysqli_savepoint	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_savepoint	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_select_db	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_select_db	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_set_charset	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_set_charset	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_sqlstate	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_stat	0	server	threw:Error:mysqli object is not fully initialized
+mysqli_real_connect	1	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_real_connect	2	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_real_connect	3	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_real_connect	4	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_real_connect	5	server	threw:mysqli_sql_exception:No such file or directory
+mysqli_release_savepoint	0	server	threw:mysqli_sql_exception:SAVEPOINT sp1 does not exist
+mysqli_release_savepoint	1	server	threw:mysqli_sql_exception:SAVEPOINT sp1 does not exist
+mysqli_select_db	0	server	threw:mysqli_sql_exception:No database selected
+mysqli_select_db	1	server	threw:mysqli_sql_exception:No database selected
 mysqli_stmt_attr_get	1	server	threw:TypeError:mysqli_stmt_attr_get(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_attr_set	1	server	threw:TypeError:mysqli_stmt_attr_set(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_attr_set	2	server	threw:TypeError:mysqli_stmt_attr_set(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
@@ -377,15 +205,9 @@ mysqli_stmt_bind_param	2	server	threw:TypeError:mysqli_stmt_bind_param(): Argume
 mysqli_stmt_bind_result	1	server	threw:TypeError:mysqli_stmt_bind_result(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_data_seek	1	server	threw:TypeError:mysqli_stmt_data_seek(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_execute	1	server	threw:TypeError:mysqli_stmt_execute(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
-mysqli_stmt_init	0	server	threw:Error:mysqli object is not fully initialized
 mysqli_stmt_prepare	1	server	threw:TypeError:mysqli_stmt_prepare(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_send_long_data	1	server	threw:TypeError:mysqli_stmt_send_long_data(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
 mysqli_stmt_send_long_data	2	server	threw:TypeError:mysqli_stmt_send_long_data(): Argument #1 ($statement) must be of type mysqli_stmt, stdClass given
-mysqli_store_result	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_store_result	1	server	threw:Error:mysqli object is not fully initialized
-mysqli_thread_id	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_use_result	0	server	threw:Error:mysqli object is not fully initialized
-mysqli_warning_count	0	server	threw:Error:mysqli object is not fully initialized
 pdostatement::fetchall	1	arity	threw:ArgumentCountError:PDOStatement::fetchAll() expects exactly 1 argument for the fetch mode provided, 2 given
 pdostatement::fetchobject	0	class-name	threw:TypeError:PDOStatement::fetchObject(): Argument #1 ($class) must be a valid class name, rec://probe given
 pdostatement::fetchobject	1	class-name	threw:TypeError:PDOStatement::fetchObject(): Argument #1 ($class) must be a valid class name, x given
@@ -413,44 +235,8 @@ random\engine\pcgoneseq128xslrr64::__unserialize	0	serialised	threw:Exception:In
 random\engine\xoshiro256starstar::__construct	0	state	threw:ReflectionException:Class Random\Engine\Xoshiro256StarStar is an internal class marked as final that cannot be instantiated without invoking its construct
 random\engine\xoshiro256starstar::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\Xoshiro256StarStar object
 random\randomizer::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Randomizer object
-redis::connect	0	server	threw:RedisException:Unable to find the socket transport "rec" - did you forget to enable it when you configured PHP?
-redis::connect	1	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::connect	2	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::connect	3	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::connect	4	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::connect	5	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::connect	6	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
 redis::hset	0	server	threw:ArgumentCountError:Redis::hSet() expects at least 2 arguments, 1 given
 redis::lpush	0	server	threw:ArgumentCountError:Redis::lPush() expects at least 2 arguments, 1 given
-redis::migrate	0	server	threw:RedisException:IOERR error or timeout connecting to the client
-redis::migrate	1	server	threw:RedisException:IOERR error or timeout connecting to the client
-redis::migrate	3	server	threw:RedisException:IOERR error or timeout connecting to the client
-redis::migrate	4	server	threw:RedisException:IOERR error or timeout connecting to the client
-redis::migrate	5	server	threw:RedisException:IOERR error or timeout connecting to the client
-redis::migrate	6	server	threw:RedisException:IOERR error or timeout connecting to the client
-redis::open	0	server	threw:RedisException:Unable to find the socket transport "rec" - did you forget to enable it when you configured PHP?
-redis::open	1	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::open	2	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::open	3	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::open	4	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::open	5	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::open	6	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::pconnect	0	server	threw:RedisException:Unable to find the socket transport "rec" - did you forget to enable it when you configured PHP?
-redis::pconnect	1	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::pconnect	2	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::pconnect	3	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::pconnect	4	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::pconnect	5	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::pconnect	6	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::popen	0	server	threw:RedisException:Unable to find the socket transport "rec" - did you forget to enable it when you configured PHP?
-redis::popen	1	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::popen	2	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::popen	3	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::popen	4	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::popen	5	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::popen	6	server	threw:RedisException:php_network_getaddresses: getaddrinfo for x failed: Temporary failure in name resolution
-redis::psubscribe	0	crash	killed:14
-redis::psubscribe	1	crash	killed:14
 redis::rpush	0	server	threw:ArgumentCountError:Redis::rPush() expects at least 2 arguments, 1 given
 redis::sortasc	3	crash	killed:11
 redis::sortasc	4	crash	killed:11
@@ -464,12 +250,6 @@ redis::sortdesc	5	crash	killed:11
 redis::sortdescalpha	3	crash	killed:11
 redis::sortdescalpha	4	crash	killed:11
 redis::sortdescalpha	5	crash	killed:11
-redis::ssubscribe	0	crash	killed:14
-redis::ssubscribe	1	crash	killed:14
-redis::subscribe	0	crash	killed:14
-redis::subscribe	1	crash	killed:14
-redis::swapdb	0	server	threw:RedisException:READONLY You can't write against a read only replica.
-redis::swapdb	1	server	threw:RedisException:READONLY You can't write against a read only replica.
 redis::zadd	0	server	threw:ArgumentCountError:Redis::zAdd() expects at least 3 arguments, 2 given
 redis::zadd	1	server	threw:ArgumentCountError:Redis::zAdd() expects at least 3 arguments, 2 given
 redissentinel::ckquorum	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
@@ -550,7 +330,7 @@ uri\whatwg\invalidurlexception::__construct	2	value	threw:ValueError:Uri\WhatWg\
 uri\whatwg\url::__construct	0	state	threw:ReflectionException:Class Uri\WhatWg\Url is an internal class marked as final that cannot be instantiated without invoking its constructor
 uri\whatwg\url::__construct	2	state	threw:ReflectionException:Class Uri\WhatWg\Url is an internal class marked as final that cannot be instantiated without invoking its constructor
 uri\whatwg\url::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\WhatWg\Url object
-weakmap::offsetget	0	value	threw:Error:Object Closure#203 not contained in WeakMap
+weakmap::offsetget	0	value	threw:Error:Object Closure#209 not contained in WeakMap
 xsltprocessor::getparameter	1	value	threw:ValueError:XSLTProcessor::getParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
 xsltprocessor::registerphpfunctionns	1	value	threw:ValueError:XSLTProcessor::registerPHPFunctionNS(): Argument #2 ($name) must be a valid callback name
 xsltprocessor::removeparameter	1	value	threw:ValueError:XSLTProcessor::removeParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
