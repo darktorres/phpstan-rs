@@ -405,13 +405,18 @@ fn check_cleanup_replacement<V>(
 ) -> Result<(), GraphError> {
     if let Some(pending) = pending {
         let pending = pending_completion_kind(pending);
-        // Evidence-backed PHP cleanup cases: a destructor return preserves
-        // the pending PHP throw, while a PHP throw from that destructor
-        // replaces it. Other completion-kind combinations remain fail-closed.
+        // Evidence-backed PHP cleanup cases (oracle: cleanup_destructor_*). A destructor
+        // return preserves the pending PHP throw. A PHP throw, `exit()` or a fatal from that
+        // destructor replaces it. A suspension resumes into the pending throw, which
+        // `with_resumed_throws` adds as an outcome. Other pending kinds stay fail-closed.
         if pending == CompletionKind::PhpThrow
             && matches!(
                 replacement,
-                CompletionKind::Normal | CompletionKind::PhpThrow
+                CompletionKind::Normal
+                    | CompletionKind::PhpThrow
+                    | CompletionKind::NativeUnwind
+                    | CompletionKind::Fatal
+                    | CompletionKind::Suspended
             )
         {
             return Ok(());
@@ -422,6 +427,33 @@ fn check_cleanup_replacement<V>(
         });
     }
     Ok(())
+}
+
+/// A suspension during a pending PHP throw resumes into that throw. The throw is therefore
+/// one of the outcomes of that point too, with the same state and coverage as the suspension.
+fn with_resumed_throws<V: Clone, S: Clone>(
+    outcomes: Vec<EventExit<V, S>>,
+    pending: &Option<PendingOutcome<V>>,
+) -> Vec<EventExit<V, S>> {
+    let Some(PendingOutcome::PhpThrow(thrown)) = pending else {
+        return outcomes;
+    };
+    let mut expanded = Vec::with_capacity(outcomes.len());
+    for outcome in outcomes {
+        let resumed = match &outcome {
+            EventExit::Suspended {
+                state, coverage, ..
+            } => Some(EventExit::PhpThrow {
+                value: thrown.clone(),
+                state: state.clone(),
+                coverage: coverage.clone(),
+            }),
+            _ => None,
+        };
+        expanded.push(outcome);
+        expanded.extend(resumed);
+    }
+    expanded
 }
 
 impl BehaviorGraph {
@@ -1801,7 +1833,7 @@ fn replay_certificate_frame<H: SemanticHost>(
             if outcomes.is_empty() {
                 return Err(GraphError::EventWithoutOutcome);
             }
-            for outcome in outcomes {
+            for outcome in with_resumed_throws(outcomes, &pending) {
                 if matches!(event, Event::Invoke { .. }) {
                     let coverage = outcome.coverage();
                     if coverage.is_empty()
@@ -1951,6 +1983,22 @@ fn replay_certificate_frame<H: SemanticHost>(
                 let value = host
                     .resolve(operand, arguments, receiver, &results)
                     .ok_or(GraphError::UnresolvedValue)?;
+                if let Some(PendingOutcome::PhpThrow(thrown)) = &pending {
+                    // The suspension resumes into the pending throw (see `with_resumed_throws`).
+                    if let Some(to) = block.exceptional.php_throw {
+                        successors.push(CertifiedFrame {
+                            block: to,
+                            state: state.clone(),
+                            results: results.clone(),
+                            pending: Some(PendingOutcome::PhpThrow(thrown.clone())),
+                        });
+                    } else {
+                        exits.push(Exit::PhpThrow {
+                            value: thrown.clone(),
+                            state: state.clone(),
+                        });
+                    }
+                }
                 if let Some(to) = block.exceptional.suspended {
                     successors.push(CertifiedFrame {
                         block: to,
@@ -2137,7 +2185,7 @@ fn evaluate_inner<H: SemanticHost>(
                 if outcomes.is_empty() {
                     return Err(GraphError::EventWithoutOutcome);
                 }
-                for outcome in outcomes {
+                for outcome in with_resumed_throws(outcomes, &pending) {
                     if matches!(event, Event::Invoke { .. }) {
                         let coverage = outcome.coverage();
                         if coverage.is_empty()
@@ -2425,6 +2473,34 @@ fn evaluate_inner<H: SemanticHost>(
                     let value = host
                         .resolve(value, arguments, receiver, &results)
                         .ok_or(GraphError::UnresolvedValue)?;
+                    if let Some(PendingOutcome::PhpThrow(thrown)) = &pending {
+                        // The suspension resumes into the pending throw (see `with_resumed_throws`).
+                        if let Some(to) = block.exceptional.php_throw {
+                            enqueue(
+                                host,
+                                Frame {
+                                    block: to,
+                                    state: state.clone(),
+                                    results: results.clone(),
+                                    pending: Some(PendingOutcome::PhpThrow(thrown.clone())),
+                                    growing_updates: 0,
+                                },
+                                &mut records,
+                                &mut by_block,
+                                &mut queue,
+                                &mut evaluation_precision,
+                                &mut transfer_candidates,
+                            )?;
+                        } else {
+                            push_exit(
+                                &mut exits,
+                                Exit::PhpThrow {
+                                    value: thrown.clone(),
+                                    state: state.clone(),
+                                },
+                            );
+                        }
+                    }
                     if let Some(to) = block.exceptional.suspended {
                         enqueue(
                             host,
@@ -2513,6 +2589,7 @@ mod tests {
         incomplete_nested_coverage: bool,
         omit_nested_coverage: bool,
         invocation_not_applicable: bool,
+        release_outcome: Option<CompletionKind>,
     }
     fn count_interval(state: &[String]) -> (u32, Option<u32>) {
         let Some(encoded) = state.first().and_then(|item| item.strip_prefix("count:")) else {
@@ -2600,6 +2677,38 @@ mod tests {
             mut state: Vec<String>,
         ) -> Vec<EventExit<String, Vec<String>>> {
             let mut result = None;
+            if let (Event::Release { .. }, Some(kind)) = (event, self.release_outcome) {
+                state.push("release".into());
+                let value = "destructor".to_owned();
+                let coverage = Vec::new();
+                return vec![match kind {
+                    CompletionKind::Normal => EventExit::Normal {
+                        result: None,
+                        state,
+                        coverage,
+                    },
+                    CompletionKind::PhpThrow => EventExit::PhpThrow {
+                        value,
+                        state,
+                        coverage,
+                    },
+                    CompletionKind::NativeUnwind => EventExit::NativeUnwind {
+                        value,
+                        state,
+                        coverage,
+                    },
+                    CompletionKind::Fatal => EventExit::Fatal {
+                        value,
+                        state,
+                        coverage,
+                    },
+                    CompletionKind::Suspended => EventExit::Suspended {
+                        value,
+                        state,
+                        coverage,
+                    },
+                }];
+            }
             match event {
                 Event::Read { .. } => state.push("read".into()),
                 Event::Write { .. } => {
@@ -4817,6 +4926,93 @@ mod tests {
         );
     }
 
+    /// The exits of a PHP throw whose cleanup releases the argument, with the destructor's
+    /// outcome set by the host (oracle: cleanup_destructor_*).
+    fn exits_of_throw_then_destructor(outcome: CompletionKind) -> Vec<Exit<String, Vec<String>>> {
+        let mut g = graph(
+            vec![Event::Invoke {
+                callable: Operand::Argument(1),
+                arguments: vec![],
+                result: 4,
+            }],
+            Terminator::Return(None),
+        );
+        g.blocks[0].exceptional.php_throw = Some(1);
+        g.blocks.push(Block::new(
+            vec![Event::Release {
+                value: Operand::Argument(0),
+            }],
+            Terminator::Resume,
+        ));
+        close_unmodeled_domains(&mut g);
+        let mut host = Host {
+            throw_invoke: true,
+            release_outcome: Some(outcome),
+            ..Host::default()
+        };
+        evaluate(
+            &g,
+            &["slot".into(), "callback".into()],
+            &receiver(),
+            vec![],
+            &mut host,
+        )
+        .unwrap()
+        .exits
+    }
+
+    fn exit_kind(exit: &Exit<String, Vec<String>>) -> &'static str {
+        match exit {
+            Exit::Normal { .. } => "normal",
+            Exit::PhpThrow { .. } => "php_throw",
+            Exit::NativeUnwind { .. } => "native_unwind",
+            Exit::Fatal { .. } => "fatal",
+            Exit::Suspended { .. } => "suspended",
+        }
+    }
+
+    #[test]
+    fn a_destructor_return_keeps_the_pending_throw() {
+        let exits = exits_of_throw_then_destructor(CompletionKind::Normal);
+        assert_eq!(
+            exits.iter().map(exit_kind).collect::<Vec<_>>(),
+            ["php_throw"]
+        );
+    }
+
+    #[test]
+    fn a_destructor_throw_replaces_the_pending_throw() {
+        let exits = exits_of_throw_then_destructor(CompletionKind::PhpThrow);
+        assert_eq!(
+            exits.iter().map(exit_kind).collect::<Vec<_>>(),
+            ["php_throw"]
+        );
+    }
+
+    #[test]
+    fn a_destructor_exit_replaces_the_pending_throw() {
+        let exits = exits_of_throw_then_destructor(CompletionKind::NativeUnwind);
+        assert_eq!(
+            exits.iter().map(exit_kind).collect::<Vec<_>>(),
+            ["native_unwind"]
+        );
+    }
+
+    #[test]
+    fn a_destructor_fatal_replaces_the_pending_throw() {
+        let exits = exits_of_throw_then_destructor(CompletionKind::Fatal);
+        assert_eq!(exits.iter().map(exit_kind).collect::<Vec<_>>(), ["fatal"]);
+    }
+
+    #[test]
+    fn a_destructor_suspension_resumes_into_the_pending_throw() {
+        let exits = exits_of_throw_then_destructor(CompletionKind::Suspended);
+        assert_eq!(
+            exits.iter().map(exit_kind).collect::<Vec<_>>(),
+            ["suspended", "php_throw"]
+        );
+    }
+
     #[test]
     fn pending_callback_throw_runs_cleanup_then_resumes() {
         let mut g = graph(
@@ -4899,7 +5095,7 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_replacement_matrix_allows_evidenced_php_throw_replacement_only() {
+    fn cleanup_replacement_matrix_allows_evidenced_php_throw_replacements_only() {
         let pending = [
             PendingOutcome::PhpThrow("throw".to_owned()),
             PendingOutcome::NativeUnwind("unwind".to_owned()),
@@ -4916,7 +5112,7 @@ mod tests {
         for (pending_index, pending) in pending.iter().enumerate() {
             for (replacement_index, replacement) in replacements.iter().enumerate() {
                 let result = check_cleanup_replacement(&Some(pending.clone()), *replacement);
-                let supported = pending_index == 0 && matches!(replacement_index, 0 | 1);
+                let supported = pending_index == 0 && replacement_index <= 4;
                 assert_eq!(
                     result.is_ok(),
                     supported,
@@ -5053,7 +5249,11 @@ mod tests {
                 let supported = pending_kind == CompletionKind::PhpThrow
                     && matches!(
                         replacement_kind,
-                        CompletionKind::Normal | CompletionKind::PhpThrow
+                        CompletionKind::Normal
+                            | CompletionKind::PhpThrow
+                            | CompletionKind::NativeUnwind
+                            | CompletionKind::Fatal
+                            | CompletionKind::Suspended
                     );
                 assert_eq!(
                     result.is_ok(),
