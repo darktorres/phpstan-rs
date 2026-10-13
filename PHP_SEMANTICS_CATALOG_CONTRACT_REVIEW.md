@@ -1455,8 +1455,9 @@ Found outside F00.3, owned elsewhere:
   `string|null`. A control without the write is correct. The builtin-runs table records `sprintf` as `probed`
   with no effects, so the generic path never sees the callback. This is the open builtin-runs soundness item in
   `WORK_STACK.md` (level 9's item 0, "Builtin-runs gaps"). It is not fixed here.
-- **Legacy argument check rejects a `Stringable` for a `string` parameter.** `str_repeat($w, 2)` reports
-  `argument.type` for `Writer`, which has `__toString` and which PHP accepts. The call is handled by the legacy argument
-  check, not the catalog, and is recorded as a follow-up.
-- **A plain class `P` declared as a parameter type** is reported by the legacy checker, while PHP accepts a subclass
-  of `P` that has `__toString`. Also a follow-up.
+- **Legacy argument check rejected a `Stringable` for a `string` parameter.** `str_repeat($w, 2)` reported
+  `argument.type` for `Writer`, which has `__toString` and which PHP accepts. Fixed: a Stringable object is accepted
+  in weak mode for every function (`weak_stringable_converts_to_every_string_parameter`).
+- **A declared non-final class without `__toString`** is reported by the legacy checker, while PHP accepts a subclass
+  that has one. Left as the project's convention, pinned by `strlen_non_stringable_remains_rejected_in_weak_mode` and
+  `a_class_without_to_string_still_does_not_satisfy_stringable`. It needs a decision (see `WORK_STACK.md`, item 1a).

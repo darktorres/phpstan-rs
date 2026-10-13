@@ -56,10 +56,16 @@ State as of 2026-10-12, `master` at `e32fd95d`.
    that does not write is correct. Cause: the builtin-runs table records `sprintf` as `probed`
    with no effects, so the generic call path never sees the callback. The fix belongs to the
    builtin-runs table (item 1 above), and the table is generated, so it is regenerated from the
-   recorder, not edited. Two follow-ups from the same probe: `str_repeat($w, 2)` reports
-   `argument.type` for an object with `__toString`, which PHP accepts; and a declared plain class
-   `P` is reported while PHP accepts a subclass of `P` with `__toString`. Recorded in
-   `PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md`, section "F00.3 host transfer validation".
+   recorder, not edited. Recorded in `PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md`, section
+   "F00.3 host transfer validation".
+   Follow-up fixed: a `Stringable` object passed to a `string` parameter in weak mode is accepted
+   by every function, not only strlen (`str_repeat`, user functions). Fixture
+   `weak_stringable_converts_to_every_string_parameter`.
+   Follow-up open, needs a decision: a declared non-final class without `__toString` is still
+   reported. Existing fixtures `strlen_non_stringable_remains_rejected_in_weak_mode` and
+   `a_class_without_to_string_still_does_not_satisfy_stringable` require that. PHP accepts a
+   subclass that has `__toString`, and the host predicate treats the class as Maybe. Keep the
+   report, as the project's convention, or treat it as a possibility and stop reporting it.
 1. **Level 8, the builtin-runs recorder: done** (`BUILTIN_RUNS_RECORDER_PLAN.md`,
    steps 1-12 committed; table regenerated at `bc9ab94f`, 10,725 rows). The
    uncommitted E2.V edits to `registry/effects.rs` are not in any checkout; they
