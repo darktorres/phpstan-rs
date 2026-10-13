@@ -25,6 +25,7 @@ require_once dirname(__DIR__) . '/lib/coverage.php';
 require_once dirname(__DIR__) . '/lib/sandbox.php';
 require_once dirname(__DIR__) . '/lib/limits.php';
 require_once dirname(__DIR__) . '/lib/canary.php';
+require_once dirname(__DIR__) . '/lib/groups.php';
 require_once __DIR__ . '/fixtures.php';
 
 $failures = [];
@@ -301,6 +302,37 @@ $plain = worker_command('/usr/bin/php', false, ['mode' => 'none', 'cap' => 0]);
 check('none is the PHP itself', $plain[0] === '/usr/bin/php' && !in_array('bwrap', $plain, true));
 check('sudo-unshare is chosen by name only', worker_command('/usr/bin/php', false, ['mode' => 'sudo-unshare', 'cap' => 0])[0] === 'sudo');
 check('the scratch space of a worker is at most 256 MiB', sandbox_cap(8) <= 256 * 1024 ** 2 && sandbox_cap(1) <= 256 * 1024 ** 2);
+
+// The worker's modules: a lean worker loads the base modules and the ones it
+// records, its needs first, with the settings the ini files give; and the
+// groups of a PHP cover each loaded extension once.
+$configured = array_keys(php_configuration(PHP_BINARY)['modules']);
+$lean = lean_arguments(PHP_BINARY, []);
+check('a lean worker starts without the ini directory, with the php.ini', $lean[0] === '-n' && $lean[1] === '-c' && $lean[2] === php_configuration(PHP_BINARY)['ini']);
+check('a lean worker loads the base modules and no other', in_array('extension=posix', $lean, true) && in_array('extension=tokenizer', $lean, true) && !in_array('extension=imagick', $lean, true));
+check('the global settings reach every lean worker', in_array('zend.assertions=1', $lean, true));
+if (in_array('pdo_sqlite', $configured, true)) {
+    $sqlite = lean_arguments(PHP_BINARY, ['pdo_sqlite']);
+    check('a module loads after the module it needs', array_search('extension=pdo', $sqlite, true) < array_search('extension=pdo_sqlite', $sqlite, true));
+}
+if (in_array('igbinary', $configured, true)) {
+    check('a module setting reaches its worker', in_array('igbinary.compact_strings=On', lean_arguments(PHP_BINARY, ['igbinary']), true));
+    check('a module setting stays off the workers of other modules', !in_array('igbinary.compact_strings=On', lean_arguments(PHP_BINARY, ['msgpack']), true));
+}
+$groups = recording_groups(get_loaded_extensions(), compiled_extensions(PHP_BINARY), $configured);
+$covered = [];
+foreach ($groups as $group) {
+    foreach ($group['extensions'] as $extension) {
+        $covered[] = $extension;
+    }
+}
+check('the groups cover each loaded extension once', count($covered) === count(get_loaded_extensions()) && count(array_unique($covered)) === count($covered));
+try {
+    recording_groups(['Mystery'], [], []);
+    check('a loaded extension neither built in nor configured is refused', false);
+} catch (RuntimeException) {
+    check('a loaded extension neither built in nor configured is refused', true);
+}
 
 @array_map('unlink', glob("$scratch/*") ?: []);
 @rmdir($scratch);
