@@ -5288,13 +5288,17 @@ impl<'r> Level<'r> {
             .facts
             .calls
             .iter()
-            .map(|call| match &call.callee {
-                Callee::Implicit { on, .. } => on.as_deref().map_or(0, <[Origin]>::len),
-                Callee::Method {
-                    receiver: Receiver::Origins(origins),
-                    ..
-                } => origins.len(),
-                _ => 0,
+            .filter(|call| call.dies & DIES_SHADOW == 0)
+            .map(|call| {
+                let held = (call.dies & (DIES_TEMPORARY | DIES_CONTENTS)).count_ones() as usize;
+                held + match &call.callee {
+                    Callee::Implicit { on, .. } => on.as_deref().map_or(0, <[Origin]>::len),
+                    Callee::Method {
+                        receiver: Receiver::Origins(origins),
+                        ..
+                    } => origins.len(),
+                    _ => 0,
+                }
             })
             .sum();
         calls
@@ -5426,9 +5430,11 @@ impl<'r> Level<'r> {
             registry: self.registry,
             ctx: self,
         };
-        let mut reached = Vec::with_capacity(facts.calls.len());
+        let entries = body_calls(facts);
+        let mut reached = Vec::with_capacity(entries.len());
         let mut written_args: Vec<&'r Place> = Vec::new();
-        for call in facts.calls.iter() {
+        for entry in entries.iter() {
+            let call = entry.call();
             let ran = (self.runs.borrow().len(), self.params_run.borrow().len());
             let targets = match &call.callee {
                 Callee::Implicit { on, operation } => {
@@ -5439,14 +5445,18 @@ impl<'r> Level<'r> {
             // A closure the body wrote or a parameter's argument, called:
             // what it takes by reference is not looked up.
             let unknown_params = (self.runs.borrow().len(), self.params_run.borrow().len()) != ran;
-            for (at, place) in call.places.iter() {
-                let filled = call.fills.contains(at);
-                if unknown_params
-                    || targets
-                        .ixs()
-                        .any(|ix| !(filled && self.is_filler(ix)) && self.by_ref_at(ix, at))
-                {
-                    written_args.push(place);
+            // The destroys a call result holds take no places.
+            if let CallEntry::Recorded(recorded) = entry {
+                let recorded: &'r CallWrites = recorded;
+                for (at, place) in recorded.places.iter() {
+                    let filled = recorded.fills.contains(at);
+                    if unknown_params
+                        || targets
+                            .ixs()
+                            .any(|ix| !(filled && self.is_filler(ix)) && self.by_ref_at(ix, at))
+                    {
+                        written_args.push(place);
+                    }
                 }
             }
             reached.push(targets);
@@ -5484,7 +5494,9 @@ impl<'r> Level<'r> {
         let facts: &'r WriteFacts = self.facts;
         // The shared sets of declarations already taken.
         let mut taken: FxHashSet<usize> = FxHashSet::default();
-        for (call, targets) in facts.calls.iter().zip(reached) {
+        let entries = body_calls(facts);
+        for (entry, targets) in entries.iter().zip(reached) {
+            let call: &CallWrites = entry.call();
             let mut site: Option<u32> = None;
             let entries = match targets {
                 Targets::List(list) => list,
@@ -5522,8 +5534,15 @@ impl<'r> Level<'r> {
                 }
                 let at = passes_arguments(&call.callee, key).then(|| {
                     *site.get_or_insert_with(|| {
-                        let passed = self.passed(holder, &reach, call);
-                        sites.push(Site { call, passed });
+                        let recorded: &'r CallWrites = match entry {
+                            CallEntry::Recorded(recorded) => recorded,
+                            CallEntry::Held(_) => unreachable!("a destroy passes no arguments"),
+                        };
+                        let passed = self.passed(holder, &reach, recorded);
+                        sites.push(Site {
+                            call: recorded,
+                            passed,
+                        });
                         sites.len() as u32 - 1
                     })
                 });
@@ -6793,5 +6812,106 @@ mod effect_id_tests {
             }
         );
         assert_eq!(back.effect_decl_key(&back_id), Some(get_a));
+    }
+}
+
+use crate::registry::summaries::{DIES_CONTENTS, DIES_SHADOW, DIES_TEMPORARY};
+
+/// A call of a body as the classifier reads it: a recorded call, or the
+/// destroy a call result holds, as the operation the body records for it.
+enum CallEntry<'r> {
+    Recorded(&'r CallWrites),
+    Held(Box<CallWrites>),
+}
+
+impl CallEntry<'_> {
+    fn call(&self) -> &CallWrites {
+        match self {
+            CallEntry::Recorded(call) => call,
+            CallEntry::Held(call) => call,
+        }
+    }
+}
+
+/// The calls of `facts` in the order the classifier reads them: each recorded
+/// call, then the destroys its result and its contents hold.
+fn body_calls(facts: &WriteFacts) -> Vec<CallEntry<'_>> {
+    let mut entries = Vec::with_capacity(facts.calls.len());
+    for call in facts.calls.iter() {
+        if call.dies & DIES_SHADOW != 0 {
+            continue;
+        }
+        entries.push(CallEntry::Recorded(call));
+        for (bit, contents) in [(DIES_TEMPORARY, false), (DIES_CONTENTS, true)] {
+            if call.dies & bit == 0 {
+                continue;
+            }
+            let mut origin = Origin::Returned(Arc::new(call.callee.clone()));
+            if contents {
+                origin = Origin::Elements(Arc::new(origin));
+            }
+            entries.push(CallEntry::Held(Box::new(CallWrites {
+                callee: Callee::Implicit {
+                    on: Some(Arc::from(vec![origin])),
+                    operation: Operation::Destroy,
+                },
+                arguments: Box::new([]),
+                places: Box::new([]),
+                objectless: Box::new([]),
+                callables: Box::new([]),
+                fills: Box::new([]),
+                dies: 0,
+            })));
+        }
+    }
+    #[cfg(debug_assertions)]
+    check_body_calls(facts, &entries);
+    entries
+}
+
+/// Checks, in a debug build, that the destroys the body's call results hold
+/// are the ones it records as operations: each held one was recorded, and
+/// each recorded one is held or was recorded as its own operation.
+#[cfg(debug_assertions)]
+fn check_body_calls(facts: &WriteFacts, entries: &[CallEntry<'_>]) {
+    let shadow: Vec<&Callee> = facts
+        .calls
+        .iter()
+        .filter(|call| call.dies & DIES_SHADOW != 0)
+        .map(|call| &call.callee)
+        .collect();
+    let recorded: Vec<&Callee> = facts
+        .calls
+        .iter()
+        .filter(|call| {
+            call.dies & DIES_SHADOW == 0
+                && matches!(
+                    call.callee,
+                    Callee::Implicit {
+                        operation: Operation::Destroy,
+                        ..
+                    }
+                )
+        })
+        .map(|call| &call.callee)
+        .collect();
+    let held: Vec<&Callee> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            CallEntry::Held(call) => Some(&call.callee),
+            CallEntry::Recorded(_) => None,
+        })
+        .collect();
+    for callee in &held {
+        assert!(
+            shadow.contains(callee),
+            "a held destroy is not one the body records"
+        );
+    }
+    for callee in &shadow {
+        assert!(
+            held.contains(callee) || recorded.contains(callee),
+            "a destroy the body records is neither held nor recorded"
+        );
     }
 }

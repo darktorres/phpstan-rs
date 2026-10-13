@@ -900,6 +900,14 @@ impl Summarizer<'_> {
     }
 }
 
+/// The destroy a call result makes at the end of its statement, held on the
+/// call's record in `CallWrites::dies`: the result's own, and its contents'.
+pub(crate) const DIES_TEMPORARY: u8 = 1;
+pub(crate) const DIES_CONTENTS: u8 = 2;
+/// Marks, in a debug build, the operation the summary would have recorded for
+/// a held destroy, for the classifier to check the held one against.
+pub(crate) const DIES_SHADOW: u8 = 4;
+
 /// A call in a body, with its arguments that are places, where a
 /// by-reference parameter writes them, and those that name a callable.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -916,6 +924,10 @@ pub(crate) struct CallWrites {
     /// in a way the summary already applied to the variable (`array_push`,
     /// `sort`, `preg_match`, see `filler`): they are not lost to the call.
     pub(crate) fills: Box<[ArgAt]>,
+    /// The destroys the call's result makes, `DIES_TEMPORARY` and
+    /// `DIES_CONTENTS`, which the classifier reads as operations of the call.
+    #[serde(default)]
+    pub(crate) dies: u8,
 }
 
 /// What a body or a closure in it writes, before any declaration is looked
@@ -1177,6 +1189,7 @@ impl BodySummary {
             walk.write_this_property(&param.name.name);
         }
         arena::walk_stmts(&mut walk, arenas, body);
+        walk.flush_dies();
         walk.merge_references();
         if ends {
             let by_ref = params
@@ -1406,6 +1419,10 @@ struct Scope {
     // The positions in `implicit_keys` of the implicit operations, found by
     // their structure.
     implicit: hashbrown::HashTable<u32>,
+    // The call records of the scope by the expression each records, the index
+    // in `calls`, and the destroys of call results waiting for their record.
+    call_at: FxHashMap<u32, u32>,
+    pending_dies: Vec<PendingDies>,
     #[cfg(debug_assertions)]
     implicit_printed: FxHashSet<String>,
 }
@@ -1442,6 +1459,14 @@ impl Scope {
             calls: self.calls.into_boxed_slice(),
         }
     }
+}
+
+/// A destroy a call result makes, waiting for the record of its call.
+struct PendingDies {
+    id: u32,
+    bit: u8,
+    callee: Callee,
+    list: Vec<Origin>,
 }
 
 /// `origins` without the repeats, in order.
@@ -1485,6 +1510,8 @@ struct Summarizer<'a> {
     // The closure the walk is in, by its index; `None` in the body's own
     // scope.
     current: Option<u32>,
+    // The call the walk is recording, by its expression, for `call` to take.
+    call_id: Option<u32>,
     // Each closure's index, by its file-local expression id.
     ids: FxHashMap<ExprId, u32>,
     written: Vec<ClosureFacts>,
@@ -1511,7 +1538,8 @@ const ISSET: u8 = 4;
 const UNSET: u8 = 8;
 
 impl Summarizer<'_> {
-    fn finish(self) -> BodySummary {
+    fn finish(mut self) -> BodySummary {
+        self.flush_dies();
         BodySummary {
             purity: (!self.impure).then(|| self.purity_calls.into_boxed_slice()),
             writes: self.scope.finish(false),
@@ -1579,6 +1607,7 @@ impl Summarizer<'_> {
             .last()
             .map(|enclosing| enclosing.shared.clone())
             .unwrap_or_default();
+        self.flush_dies();
         self.merge_references();
         self.destroy_locals(&by_ref, &shared);
         self.narrowed = narrowed;
@@ -2242,12 +2271,108 @@ impl Summarizer<'_> {
     /// The value `id` dies where it is written when nothing holds it: a
     /// temporary is destroyed at the end of the statement that made it.
     fn dies(&mut self, arenas: &NodeArenas, id: ExprId) {
-        if is_temporary(arenas, id) {
+        if is_temporary(arenas, id) && !self.hold_result_dies(arenas, id, DIES_TEMPORARY) {
             self.implicit(arenas, id, Operation::Destroy);
         }
-        if holds_elements_made_here(arenas, id) {
+        if holds_elements_made_here(arenas, id) && !self.hold_result_dies(arenas, id, DIES_CONTENTS)
+        {
             let contents = self.contents_of(arenas, id);
             self.implicit_on(contents, Operation::Destroy);
+        }
+    }
+
+    /// The callee a call result's destroy is of, and what the destroy takes,
+    /// when the result's origins (`bit` says which) are that one call alone.
+    fn call_result_of(
+        &self,
+        arenas: &NodeArenas,
+        id: ExprId,
+        bit: u8,
+    ) -> Option<(Callee, Vec<Origin>)> {
+        if !matches!(
+            arenas.expr(id).map(|e| &e.kind),
+            Some(ExprKind::Call(..) | ExprKind::MethodCall(..) | ExprKind::StaticCall(..))
+        ) {
+            return None;
+        }
+        let list = if bit == DIES_TEMPORARY {
+            self.origins(arenas, id)?
+        } else {
+            self.contents_of(arenas, id)?
+        };
+        let callee = match list.as_slice() {
+            [Origin::Returned(callee)] if bit == DIES_TEMPORARY => callee,
+            [Origin::Elements(inner)] if bit == DIES_CONTENTS => match &**inner {
+                Origin::Returned(callee) => callee,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        Some(((**callee).clone(), list))
+    }
+
+    /// Holds the destroy of the call result `id` for its call's record, or
+    /// gives it to that record now; false when `id` is no call result.
+    fn hold_result_dies(&mut self, arenas: &NodeArenas, id: ExprId, bit: u8) -> bool {
+        let Some((callee, list)) = self.call_result_of(arenas, id, bit) else {
+            return false;
+        };
+        let raw = u32::from(id.into_raw());
+        #[cfg(debug_assertions)]
+        {
+            self.scope.calls.push(CallWrites {
+                callee: Callee::Implicit {
+                    on: Some(Arc::from(list.clone())),
+                    operation: Operation::Destroy,
+                },
+                arguments: Box::new([]),
+                places: Box::new([]),
+                objectless: Box::new([]),
+                callables: Box::new([]),
+                fills: Box::new([]),
+                dies: DIES_SHADOW,
+            });
+        }
+        match self.scope.call_at.get(&raw).copied() {
+            Some(at) if self.attach(at, bit, &callee) => {}
+            Some(_) => self.implicit_on(Some(list), Operation::Destroy),
+            None => self.scope.pending_dies.push(PendingDies {
+                id: raw,
+                bit,
+                callee,
+                list,
+            }),
+        }
+        true
+    }
+
+    /// Adds `bit` to the call record at `at`, when that record is the call
+    /// the destroy is of.
+    fn attach(&mut self, at: u32, bit: u8, callee: &Callee) -> bool {
+        let call = &mut self.scope.calls[at as usize];
+        if call.callee != *callee {
+            return false;
+        }
+        call.dies |= bit;
+        true
+    }
+
+    /// Gives the destroys waiting for the call recorded at `at` to that record.
+    fn attach_pending(&mut self, raw: u32, at: u32) {
+        for held in std::mem::take(&mut self.scope.pending_dies) {
+            if held.id != raw {
+                self.scope.pending_dies.push(held);
+            } else if !self.attach(at, held.bit, &held.callee) {
+                self.implicit_on(Some(held.list), Operation::Destroy);
+            }
+        }
+    }
+
+    /// The destroys still waiting for their call's record are recorded as
+    /// operations, as they always were.
+    fn flush_dies(&mut self) {
+        for held in std::mem::take(&mut self.scope.pending_dies) {
+            self.implicit_on(Some(held.list), Operation::Destroy);
         }
     }
 
@@ -2436,6 +2561,7 @@ impl Summarizer<'_> {
             objectless: Box::new([]),
             callables: Box::new([]),
             fills: Box::new([]),
+            dies: 0,
         });
     }
 
@@ -2503,6 +2629,7 @@ impl Summarizer<'_> {
     /// A call, with the arguments that are places and those that name a
     /// callable.
     fn call(&mut self, arenas: &NodeArenas, callee: Callee, args: ArgRange) {
+        let call_id = self.call_id.take();
         let args = arenas.args(args);
         let mut spread = false;
         let mut arguments = Vec::with_capacity(args.len());
@@ -2536,7 +2663,13 @@ impl Summarizer<'_> {
             objectless: objectless.into_iter().collect(),
             callables: callables.into_iter().collect(),
             fills,
+            dies: 0,
         });
+        if let Some(raw) = call_id {
+            let at = self.scope.calls.len() as u32 - 1;
+            self.scope.call_at.insert(raw, at);
+            self.attach_pending(raw, at);
+        }
     }
 
     /// Whether the value `id` is an array literal that holds no object at any
@@ -2756,11 +2889,18 @@ impl Summarizer<'_> {
             objectless: Box::new([]),
             callables: Box::new([]),
             fills: Box::new([]),
+            dies: 0,
         });
     }
 
     /// Records `e` when it is a call.
     fn record_call(&mut self, arenas: &NodeArenas, id: ExprId) {
+        let outer = self.call_id.replace(u32::from(id.into_raw()));
+        self.record_call_inner(arenas, id);
+        self.call_id = outer;
+    }
+
+    fn record_call_inner(&mut self, arenas: &NodeArenas, id: ExprId) {
         let Some(e) = arenas.expr(id) else { return };
         match &e.kind {
             ExprKind::Call(callee, args) => match arenas
@@ -4080,6 +4220,7 @@ syntax::canonical_struct!(CallWrites {
     objectless,
     callables,
     fills,
+    dies,
 });
 
 syntax::canonical_struct!(WriteFacts {
