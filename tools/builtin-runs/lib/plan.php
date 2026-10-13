@@ -260,12 +260,16 @@ function unit_weights(array $units, callable $wanted): array
  */
 function unit_signature(array $unit): string
 {
+    static $classes = [];
     [$kind, $name, $method] = $unit;
     if ($kind === 'function') {
         return sha1((string) new ReflectionFunction($name));
     }
-    $reflection = new ReflectionClass($name);
-    return sha1($kind === 'method' ? (string) $reflection->getMethod($method) : (string) $reflection);
+    if ($kind === 'method') {
+        return sha1((string) (new ReflectionClass($name))->getMethod($method));
+    }
+    // Every held unit of a class shares the class's text, which is long for a large class: it is printed once.
+    return $classes[$name] ??= sha1((string) new ReflectionClass($name));
 }
 
 /**
