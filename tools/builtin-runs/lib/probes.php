@@ -97,21 +97,25 @@ function probes_for(ReflectionParameter $param): array
 {
     $type = $param->getType();
     $probes = [];
-    if (admits($type, 'callable') || admits($type, 'closure')) {
+    $sized = known_parameter_value($param);
+    $untyped = $type === null || (string) $type === 'mixed';
+    $native = $sized === null;
+    // A parameter with a valid value of its own is not given the kinds that a native call of it cannot take: arrays
+    // of them, which phpredis and others crash or hang on, and, for an untyped one, callables and iterators.
+    if ((admits($type, 'callable') || admits($type, 'closure')) && ($native || !$untyped)) {
         $probes[] = ['callable', static fn () => recording_callable()];
     }
     if (accepts_value($type, RecordingObject::class)) {
         $probes[] = ['object', static fn () => new RecordingObject()];
     }
-    if (accepts_value($type, RecordingIterator::class)) {
+    if (accepts_value($type, RecordingIterator::class) && ($native || !$untyped)) {
         $probes[] = ['iterator', static fn () => new RecordingIterator()];
     }
-    if (accepts_value($type, RecordingSleeper::class)) {
+    if (accepts_value($type, RecordingSleeper::class) && ($native || !$untyped)) {
         $probes[] = ['sleeper', static fn () => new RecordingSleeper()];
     }
     // The length or int a sodium function checks the parameter against: the valid value of the parameter.
     // A string probe is refused by the length check of a sized parameter, so it is offered only where no sized value is known.
-    $sized = known_parameter_value($param);
     if ($sized !== null) {
         $probes[] = ['sized', $sized];
     } elseif (admits($type, 'string')) {
@@ -131,7 +135,7 @@ function probes_for(ReflectionParameter $param): array
     if (admits($type, 'int') || admits($type, 'float') || admits($type, 'bool')) {
         $probes[] = ['scalar', static fn () => plain_value($param)];
     }
-    if (admits($type, 'array')) {
+    if (admits($type, 'array') && $native) {
         $probes[] = ['objects', static fn () => [new RecordingObject(), new RecordingObject()]];
         $probes[] = ['callables', static fn () => [recording_callable(), recording_callable()]];
         $probes[] = ['urls', static fn () => ['rec://probe']];
@@ -457,6 +461,22 @@ function named_value(ReflectionParameter $param): ?Closure
             'socket' => server_run_dir() . '/mysql.sock',
             'charset' => 'utf8mb4',
             'name' => 'sp1',
+            default => null,
+        };
+        if ($value !== null) {
+            return static fn (): mixed => $value;
+        }
+    }
+    // Redis SORT's arguments after the key: a pattern to get, an offset and a count, and a key to store into; and
+    // GEOSEARCHSTORE's position and shape.
+    if ($class === 'redis' && (str_starts_with($function, 'sort') || $function === 'geosearchstore')) {
+        $value = match ($name) {
+            'get' => 'x*',
+            'offset' => 0,
+            'count' => -1,
+            'store' => 'dst',
+            'position' => [0.0, 0.0],
+            'shape' => 10.0,
             default => null,
         };
         if ($value !== null) {
