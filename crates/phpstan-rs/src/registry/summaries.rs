@@ -1423,9 +1423,7 @@ struct Scope {
     // The positions in `implicit_keys` of the implicit operations, found by
     // their structure.
     implicit: hashbrown::HashTable<u32>,
-    // The call records of the scope by the expression each records, the index
-    // in `calls`, and the destroys of call results waiting for their record.
-    call_at: FxHashMap<u32, u32>,
+    // The destroys of call results waiting for their call's record.
     pending_dies: Vec<PendingDies>,
     // The variables whose origins die when the scope ends, in the order
     // `destroy_locals` takes them.
@@ -2341,16 +2339,14 @@ impl Summarizer<'_> {
                 dies: DIES_SHADOW,
             });
         }
-        match self.scope.call_at.get(&raw).copied() {
-            Some(at) if self.attach(at, bit, &callee) => {}
-            Some(_) => self.implicit_on(Some(list), Operation::Destroy),
-            None => self.scope.pending_dies.push(PendingDies {
-                id: raw,
-                bit,
-                callee,
-                list,
-            }),
-        }
+        // The walk holds a result's destroy before it records the call, so
+        // the call's record takes it (`attach_pending`).
+        self.scope.pending_dies.push(PendingDies {
+            id: raw,
+            bit,
+            callee,
+            list,
+        });
         true
     }
 
@@ -2700,7 +2696,6 @@ impl Summarizer<'_> {
         });
         if let Some(raw) = call_id {
             let at = self.scope.calls.len() as u32 - 1;
-            self.scope.call_at.insert(raw, at);
             self.attach_pending(raw, at);
         }
     }

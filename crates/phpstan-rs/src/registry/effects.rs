@@ -5430,10 +5430,11 @@ impl<'r> Level<'r> {
             registry: self.registry,
             ctx: self,
         };
-        let entries = body_calls(facts);
-        let mut reached = Vec::with_capacity(entries.len());
+        #[cfg(debug_assertions)]
+        check_body_calls(facts, &body_calls(facts).collect::<Vec<_>>());
+        let mut reached = Vec::with_capacity(facts.calls.len() + facts.dying_locals.len());
         let mut written_args: Vec<&'r Place> = Vec::new();
-        for entry in entries.iter() {
+        for entry in body_calls(facts) {
             let call = entry.call();
             let ran = (self.runs.borrow().len(), self.params_run.borrow().len());
             let targets = match &call.callee {
@@ -5446,8 +5447,8 @@ impl<'r> Level<'r> {
             // what it takes by reference is not looked up.
             let unknown_params = (self.runs.borrow().len(), self.params_run.borrow().len()) != ran;
             // The destroys a call result holds take no places.
-            if let CallEntry::Recorded(recorded) = entry {
-                let recorded: &'r CallWrites = recorded;
+            if let CallEntry::Recorded(recorded) = &entry {
+                let recorded: &'r CallWrites = *recorded;
                 for (at, place) in recorded.places.iter() {
                     let filled = recorded.fills.contains(at);
                     if unknown_params
@@ -5494,8 +5495,7 @@ impl<'r> Level<'r> {
         let facts: &'r WriteFacts = self.facts;
         // The shared sets of declarations already taken.
         let mut taken: FxHashSet<usize> = FxHashSet::default();
-        let entries = body_calls(facts);
-        for (entry, targets) in entries.iter().zip(reached) {
+        for (entry, targets) in body_calls(facts).zip(reached) {
             let call: &CallWrites = entry.call();
             let mut site: Option<u32> = None;
             let entries = match targets {
@@ -5532,12 +5532,14 @@ impl<'r> Level<'r> {
                     }
                     continue;
                 }
+                let recorded: Option<&'r CallWrites> = match &entry {
+                    CallEntry::Recorded(recorded) => Some(*recorded),
+                    CallEntry::Held(_) => None,
+                };
                 let at = passes_arguments(&call.callee, key).then(|| {
                     *site.get_or_insert_with(|| {
-                        let recorded: &'r CallWrites = match entry {
-                            CallEntry::Recorded(recorded) => recorded,
-                            CallEntry::Held(_) => unreachable!("a destroy passes no arguments"),
-                        };
+                        let recorded: &'r CallWrites =
+                            recorded.expect("a destroy passes no arguments");
                         let passed = self.passed(holder, &reach, recorded);
                         sites.push(Site {
                             call: recorded,
@@ -6835,42 +6837,43 @@ impl CallEntry<'_> {
 
 /// The calls of `facts` in the order the classifier reads them: each recorded
 /// call, then the destroys its result and its contents hold.
-fn body_calls(facts: &WriteFacts) -> Vec<CallEntry<'_>> {
-    let mut entries = Vec::with_capacity(facts.calls.len());
-    for call in facts.calls.iter() {
-        if call.dies & DIES_SHADOW != 0 {
-            continue;
-        }
-        entries.push(CallEntry::Recorded(call));
-        for (bit, contents) in [(DIES_TEMPORARY, false), (DIES_CONTENTS, true)] {
-            if call.dies & bit == 0 {
-                continue;
-            }
-            let mut origin = Origin::Returned(Arc::new(call.callee.clone()));
-            if contents {
-                origin = Origin::Elements(Arc::new(origin));
-            }
-            entries.push(CallEntry::Held(Box::new(CallWrites {
-                callee: Callee::Implicit {
-                    on: Some(Arc::from(vec![origin])),
-                    operation: Operation::Destroy,
-                },
-                arguments: Box::new([]),
-                places: Box::new([]),
-                objectless: Box::new([]),
-                callables: Box::new([]),
-                fills: Box::new([]),
-                dies: 0,
-            })));
-        }
-    }
-    for name in facts.dying_locals.iter() {
+fn body_calls(facts: &WriteFacts) -> impl Iterator<Item = CallEntry<'_>> + '_ {
+    let calls = facts
+        .calls
+        .iter()
+        .filter(|call| call.dies & DIES_SHADOW == 0)
+        .flat_map(|call| {
+            std::iter::once(CallEntry::Recorded(call)).chain(
+                [(DIES_TEMPORARY, false), (DIES_CONTENTS, true)]
+                    .into_iter()
+                    .filter(move |(bit, _)| call.dies & bit != 0)
+                    .map(move |(_, contents)| {
+                        let mut origin = Origin::Returned(Arc::new(call.callee.clone()));
+                        if contents {
+                            origin = Origin::Elements(Arc::new(origin));
+                        }
+                        CallEntry::Held(Box::new(CallWrites {
+                            callee: Callee::Implicit {
+                                on: Some(Arc::from(vec![origin])),
+                                operation: Operation::Destroy,
+                            },
+                            arguments: Box::new([]),
+                            places: Box::new([]),
+                            objectless: Box::new([]),
+                            callables: Box::new([]),
+                            fills: Box::new([]),
+                            dies: 0,
+                        }))
+                    }),
+            )
+        });
+    let locals = facts.dying_locals.iter().map(|name| {
         let (_, origins) = facts
             .origins
             .iter()
             .find(|(held, _)| held == name)
             .expect("a dying local's origins are kept");
-        entries.push(CallEntry::Held(Box::new(CallWrites {
+        CallEntry::Held(Box::new(CallWrites {
             callee: Callee::Implicit {
                 on: Some(Arc::from(origins.to_vec())),
                 operation: Operation::Destroy,
@@ -6881,11 +6884,9 @@ fn body_calls(facts: &WriteFacts) -> Vec<CallEntry<'_>> {
             callables: Box::new([]),
             fills: Box::new([]),
             dies: 0,
-        })));
-    }
-    #[cfg(debug_assertions)]
-    check_body_calls(facts, &entries);
-    entries
+        }))
+    });
+    calls.chain(locals)
 }
 
 /// Checks, in a debug build, that the destroys the body's call results and
