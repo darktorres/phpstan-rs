@@ -1033,8 +1033,11 @@ impl Session {
                 stem.display()
             ));
         };
+        // A fixture that sets a `level` is judged at it: its findings above the level are cut,
+        // so a level-specific fixture tests the cutoff. A fixture with none shows every level.
+        let session_settings = config.section::<SessionSettings>()?;
         let overrides = Overrides {
-            paths: if config.section::<SessionSettings>()?.paths.is_none() {
+            paths: if session_settings.paths.is_none() {
                 vec![subject]
             } else {
                 Vec::new()
@@ -1043,7 +1046,7 @@ impl Session {
                 .section::<ReflectionSettings>()?
                 .no_composer
                 .is_none(),
-            report_level: Some(u8::MAX),
+            report_level: Some(session_settings.level.unwrap_or(u8::MAX)),
             ..Overrides::default()
         };
         // Paths stay relative to the fixture's own directory, so where the
