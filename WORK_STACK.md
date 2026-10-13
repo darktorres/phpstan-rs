@@ -40,9 +40,11 @@ State as of 2026-10-11, `master` at `2783a866`.
    user class's constructor can run user code the table's grammar cannot name.
    Plan: `/home/torres/.claude/plans/1-in-this-plan-woolly-dragon.md`, steps 0-10.
    Step 1 is not closed. Coverage gaps, with a reason each, are in
-   `tools/builtin-runs/scan/coverage-gaps.tsv` (1,380 of 6,333 positions: 1,042 server,
-   85 state, 122 value, 39 not-recordable, 22 arity, 21 class-name, 20 file-or-font,
-   19 serialised, 7 session, 2 scope, 1 crash).
+   `tools/builtin-runs/scan/coverage-gaps.tsv` (312 of 6,259 positions: 85 server,
+   54 state, 85 value, 20 not-recordable, 19 serialised, 18 class-name, 15 file-or-font,
+   7 session, 4 arity, 2 scope, 3 crash). The MySQL reconnect, the variadic callback
+   families, the Imagick file and font values and the compareImageLayers metric are
+   fixed; the state, value and serialised gaps are not.
    Next: the server decision, then the state and value gaps. See the plan's closing section.
    Step 0 added the passing controls `redis_get_precise` and
    `memcached_getdelayed_callback`; each failing fixture comes with the step

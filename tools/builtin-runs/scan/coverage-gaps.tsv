@@ -1,13 +1,5 @@
 builtin	position	reason	first_message
-array_diff_uassoc	0	arity	threw:ArgumentCountError:array_diff_uassoc() expects at least 2 arguments, 1 given
-array_diff_ukey	0	arity	threw:ArgumentCountError:array_diff_ukey() expects at least 2 arguments, 1 given
-array_intersect_uassoc	0	arity	threw:ArgumentCountError:array_intersect_uassoc() expects at least 2 arguments, 1 given
-array_intersect_ukey	0	arity	threw:ArgumentCountError:array_intersect_ukey() expects at least 2 arguments, 1 given
-array_udiff	0	arity	threw:ArgumentCountError:array_udiff() expects at least 2 arguments, 1 given
-array_udiff_assoc	0	arity	threw:ArgumentCountError:array_udiff_assoc() expects at least 2 arguments, 1 given
 array_udiff_uassoc	1	arity	threw:ArgumentCountError:array_udiff_uassoc() expects at least 3 arguments, 2 given
-array_uintersect	0	arity	threw:ArgumentCountError:array_uintersect() expects at least 2 arguments, 1 given
-array_uintersect_assoc	0	arity	threw:ArgumentCountError:array_uintersect_assoc() expects at least 2 arguments, 1 given
 array_uintersect_uassoc	1	arity	threw:ArgumentCountError:array_uintersect_uassoc() expects at least 3 arguments, 2 given
 arrayiterator::__unserialize	0	serialised	threw:UnexpectedValueException:Incomplete or ill-typed serialization data
 arrayiterator::unserialize	0	serialised	threw:UnexpectedValueException:Error at offset 0 of 11 bytes
@@ -75,7 +67,7 @@ extract	1	not-recordable	threw:Error:Cannot call extract() dynamically
 extract	2	not-recordable	threw:Error:Cannot call extract() dynamically
 fiber::__construct	0	state	threw:ReflectionException:Class Fiber is an internal class marked as final that cannot be instantiated without invoking its constructor
 fiber::resume	0	value	threw:FiberError:Cannot resume a fiber that is not suspended
-finfo::__construct	1	file-or-font	threw:Exception:finfo::__construct(/tmp/probe-scan-3411/rec): Failed to open stream: No such file or directory
+finfo::__construct	1	file-or-font	threw:Exception:finfo::__construct(/tmp/probe-scan-3484/rec): Failed to open stream: No such file or directory
 forward_static_call	0	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
 forward_static_call	1	scope	threw:Error:Cannot call forward_static_call() when no class scope is active
 ftp_login	0	crash	killed:14
@@ -96,7 +88,6 @@ imagick::clippathimage	0	state	threw:ImagickException:no clip path defined '': N
 imagick::clippathimage	1	state	threw:ImagickException:no clip path defined '': No such file or directory @ error/image.c/ClipImagePath/725
 imagick::colordecisionlistimage	0	value	threw:ImagickException:ParseError root tag missing @ warning/xml-tree.c/NewXMLTree/1915
 imagick::colormatriximage	0	value	threw:ImagickException:Color matrix array must be 5x5 or 6x6
-imagick::compareimagelayers	0	crash	killed:6
 imagick::compleximages	0	value	threw:ImagickException:image sequence is required `' @ error/fourier.c/ComplexImages/187
 imagick::deleteimageartifact	0	value	threw:ImagickException:Unable to delete image artifact
 imagick::deleteoption	0	value	threw:ImagickException:Unable to deleteOption
@@ -119,10 +110,7 @@ imagick::importimagepixels	5	value	threw:ImagickException:The map contains incor
 imagick::importimagepixels	6	value	threw:ImagickException:The map contains incorrect number of elements. Expected 48, array has 2
 imagick::newimage	3	value	threw:ImagickException:Unable to set the image format
 imagick::orderedditherimage	0	value	threw:ImagickException:invalid argument for option ordered-dither : 'rec://probe' @ error/threshold.c/OrderedDitherImage/1948
-imagick::pingimage	0	file-or-font	threw:ImagickException:unable to open image '/tmp/rec-5561.png': No such file or directory @ error/blob.c/OpenBlob/3710
-imagick::readimage	0	file-or-font	threw:ImagickException:unable to open image '/tmp/rec-5620.png': No such file or directory @ error/blob.c/OpenBlob/3710
 imagick::removeimageprofile	0	file-or-font	threw:ImagickException:The image profile does not exist
-imagick::setfont	0	file-or-font	threw:ImagickException:The path does not exist: /tmp/probe-scan-5707/rec:/probe
 imagick::setformat	0	value	threw:ImagickException:Unable to set format
 imagick::setimagecolormapcolor	0	value	threw:ImagickException:invalid colormap index `MagickWand-0' @ error/magick-image.c/MagickSetImageColormapColor/10112
 imagick::setimagecolormapcolor	1	value	threw:ImagickException:The parameter must be an instance of ImagickPixel or a string
@@ -136,7 +124,7 @@ imagick::stereoimage	0	value	threw:ImagickException:left and right image sizes d
 imagick::writeimagefile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagick::writeimagesfile	1	value	threw:ImagickException:no encode delegate for this image format `' @ error/constitute.c/WriteImage/1404
 imagickdraw::setfillpatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetFillPatternURL/4978
-imagickdraw::setfont	0	file-or-font	threw:ImagickException:The path does not exist: /tmp/probe-scan-6165/rec:/probe
+imagickdraw::setfont	0	file-or-font	threw:ImagickException:The path does not exist: /tmp/probe-scan-6089/rec:/probe
 imagickdraw::setfontfamily	0	file-or-font	threw:ImagickDrawException:Unable to set font family; parameter not found in the list of configured fonts
 imagickdraw::setstrokepatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetStrokePatternURL/5420
 mb_ereg_search	0	state	threw:Error:No string was provided
@@ -220,7 +208,7 @@ pg_execute	1	server	threw:TypeError:pg_execute(): Argument #1 ($connection) must
 pg_fetch_object	3	server	threw:ValueError:pg_fetch_object(): Argument #3 ($class) must be empty when the specified class (stdClass) does not have a constructor
 pg_prepare	1	server	threw:TypeError:pg_prepare(): Argument #1 ($connection) must be of type string, PgSql\Connection given
 pg_query_params	1	server	threw:TypeError:pg_query_params(): Argument #1 ($connection) must be of type string, PgSql\Connection given
-pg_set_error_verbosity	0	server	threw:TypeError:pg_set_error_verbosity(): Argument #1 ($connection) must be of type int, Closure given
+pg_set_error_verbosity	0	server	threw:TypeError:pg_set_error_verbosity(): Argument #1 ($connection) must be of type int, RecordingObject given
 pg_socket_poll	1	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
 pg_socket_poll	2	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
 pg_socket_poll	3	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
@@ -235,21 +223,8 @@ random\engine\pcgoneseq128xslrr64::__unserialize	0	serialised	threw:Exception:In
 random\engine\xoshiro256starstar::__construct	0	state	threw:ReflectionException:Class Random\Engine\Xoshiro256StarStar is an internal class marked as final that cannot be instantiated without invoking its construct
 random\engine\xoshiro256starstar::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Engine\Xoshiro256StarStar object
 random\randomizer::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Randomizer object
-redis::hset	0	server	threw:ArgumentCountError:Redis::hSet() expects at least 2 arguments, 1 given
 redis::lpush	0	server	threw:ArgumentCountError:Redis::lPush() expects at least 2 arguments, 1 given
 redis::rpush	0	server	threw:ArgumentCountError:Redis::rPush() expects at least 2 arguments, 1 given
-redis::sortasc	3	crash	killed:11
-redis::sortasc	4	crash	killed:11
-redis::sortasc	5	crash	killed:11
-redis::sortascalpha	3	crash	killed:11
-redis::sortascalpha	4	crash	killed:11
-redis::sortascalpha	5	crash	killed:11
-redis::sortdesc	3	crash	killed:11
-redis::sortdesc	4	crash	killed:11
-redis::sortdesc	5	crash	killed:11
-redis::sortdescalpha	3	crash	killed:11
-redis::sortdescalpha	4	crash	killed:11
-redis::sortdescalpha	5	crash	killed:11
 redis::zadd	0	server	threw:ArgumentCountError:Redis::zAdd() expects at least 3 arguments, 2 given
 redis::zadd	1	server	threw:ArgumentCountError:Redis::zAdd() expects at least 3 arguments, 2 given
 redissentinel::ckquorum	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
@@ -281,7 +256,7 @@ reflectionproperty::setrawvaluewithoutlazyinitialization	1	value	threw:TypeError
 reflectionproperty::setvalue	1	value	threw:TypeError:ReflectionProperty::setValue(): Argument #1 ($objectOrValue) must be of type object, int given
 request_parse_body	0	value	threw:ValueError:Invalid integer key in $options argument
 sem_acquire	1	value	threw:TypeError:sem_acquire(): Argument #1 ($semaphore) must be of type SysvSemaphore, stdClass given
-session_set_save_handler	0	value	threw:TypeError:session_set_save_handler(): Argument #1 ($open) must be of type SessionHandlerInterface, Closure given
+session_set_save_handler	0	value	threw:TypeError:session_set_save_handler(): Argument #1 ($open) must be of type SessionHandlerInterface, RecordingObject given
 session_set_save_handler	1	value	threw:TypeError:session_set_save_handler(): Argument #1 ($open) must be of type SessionHandlerInterface, Closure given
 sessionhandler::destroy	0	session	threw:Error:Session is not active
 sessionhandler::gc	0	session	threw:Error:Session is not active
@@ -330,7 +305,7 @@ uri\whatwg\invalidurlexception::__construct	2	value	threw:ValueError:Uri\WhatWg\
 uri\whatwg\url::__construct	0	state	threw:ReflectionException:Class Uri\WhatWg\Url is an internal class marked as final that cannot be instantiated without invoking its constructor
 uri\whatwg\url::__construct	2	state	threw:ReflectionException:Class Uri\WhatWg\Url is an internal class marked as final that cannot be instantiated without invoking its constructor
 uri\whatwg\url::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\WhatWg\Url object
-weakmap::offsetget	0	value	threw:Error:Object Closure#209 not contained in WeakMap
+weakmap::offsetget	0	value	threw:Error:Object Closure#225 not contained in WeakMap
 xsltprocessor::getparameter	1	value	threw:ValueError:XSLTProcessor::getParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
 xsltprocessor::registerphpfunctionns	1	value	threw:ValueError:XSLTProcessor::registerPHPFunctionNS(): Argument #2 ($name) must be a valid callback name
 xsltprocessor::removeparameter	1	value	threw:ValueError:XSLTProcessor::removeParameter(): Argument #2 ($name) must not be a QName when argument #1 ($namespace) is not empty
