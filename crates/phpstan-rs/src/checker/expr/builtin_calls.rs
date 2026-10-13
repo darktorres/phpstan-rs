@@ -937,22 +937,16 @@ impl php_semantics::SemanticHost for CatalogTypeHost<'_> {
                     state.released_string_arguments.insert(*argument);
                 }
                 // Releasing the copied argument can drop the last reference, whatever the
-                // caller's expression was: a call result, a variable that __toString cleared,
-                // or a `new` temporary. Its destructor then runs here, and a PHP throw from it
-                // replaces a pending throw or becomes the call's exit. The destructor's other
-                // exits are not modeled at this point (see R05.2).
-                vec![
-                    php_semantics::EventExit::Normal {
-                        result: None,
-                        state: state.clone(),
-                        coverage: self.invocation_coverage.clone(),
-                    },
-                    php_semantics::EventExit::PhpThrow {
-                        value: Type::mixed(),
-                        state,
-                        coverage: self.invocation_coverage.clone(),
-                    },
-                ]
+                // caller's expression was. The destructor then runs here and can throw, exit,
+                // fatal or suspend. A pending throw from the cleanup is handled by the evaluator
+                // (oracle: cleanup_destructor_*).
+                let mut outcomes = vec![php_semantics::EventExit::Normal {
+                    result: None,
+                    state: state.clone(),
+                    coverage: self.invocation_coverage.clone(),
+                }];
+                outcomes.extend(self.user_code_exits(&state, &self.invocation_coverage));
+                outcomes
             }
             _ => self.unmodeled_exits(state),
         }
