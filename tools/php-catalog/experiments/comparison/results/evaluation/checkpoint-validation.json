@@ -56,11 +56,6 @@
         "acceptance": "not accepted"
       },
       {
-        "id": "F00.3",
-        "status": "Partial: Validate host transfer functions against PHP source behavior",
-        "acceptance": "not accepted"
-      },
-      {
         "id": "F00.4",
         "status": "Partial: Specify distinct, validated assumption identities",
         "acceptance": "not accepted"
@@ -256,6 +251,11 @@
         "id": "R00.2",
         "scope": "definition only",
         "remainder": "R01.5"
+      },
+      {
+        "id": "F00.3",
+        "scope": "the strlen host transfers, against PHP 8.5.4 source and the locked CLI",
+        "remainder": "R05.2"
       },
       {
         "id": "R00.3",

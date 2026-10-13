@@ -132,5 +132,5 @@
     "cir-imports.json": "a4362119095efa559cb05817b24b7124c2cef5ad9304e80fdc21ee9173ffd10f"
   },
   "strlen_host_oracle_sha256": "5121a76acca26801d160e6459171d78692351ff0e865f27948800d8fe3e3ee4f",
-  "checkpoint_validation_sha256": "781fb141df851be15350e5d5cd523dd42eca022901028f7f9eecceb5fb74e636"
+  "checkpoint_validation_sha256": "81bf326352049ada3df7b8759805b5011a6d8cf85a78f3b42fd78e8b104f9eb2"
 }
