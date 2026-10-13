@@ -131,8 +131,9 @@ function probes_for(ReflectionParameter $param): array
     if ($valid !== null) {
         $probes[] = ['valid', $valid];
     }
-    // A scalar parameter takes a valid scalar, which the plain value of the parameter is.
-    if (admits($type, 'int') || admits($type, 'float') || admits($type, 'bool')) {
+    // A scalar parameter takes a valid scalar, which the plain value of the parameter is. A parameter with a valid value
+    // of its own is probed with that value as its sized probe, not with the plain value, which is not always valid.
+    if ($sized === null && (admits($type, 'int') || admits($type, 'float') || admits($type, 'bool'))) {
         $probes[] = ['scalar', static fn () => plain_value($param)];
     }
     if (admits($type, 'array') && $native) {
@@ -646,6 +647,10 @@ function imagick_value(ReflectionParameter $param): ?Closure
     }
     if ($name === 'geometry') {
         return static fn (): string => '1x1';
+    }
+    // The layer method of a comparison: the library asserts, and aborts the process, on any value but these three.
+    if ($class === 'imagick' && $name === 'metric' && strtolower($function->getName()) === 'compareimagelayers') {
+        return static fn (): int => Imagick::LAYERMETHOD_COMPAREANY;
     }
     // Integers of a method on the sixteen-pixel image the recipes make: offsets at the origin, sizes that fit it.
     if ($class === 'imagick' && $name === 'map') {
