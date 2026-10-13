@@ -437,6 +437,22 @@ function named_value(ReflectionParameter $param): ?Closure
     if (in_array($class, ['directoryiterator', 'filesystemiterator', 'recursivedirectoryiterator'], true) && $name === 'directory') {
         return static fn (): string => sys_get_temp_dir();
     }
+    // MySQL arguments: the connection the scan starts inside its sandbox, a statement, a charset and a savepoint name.
+    if (str_starts_with($class, 'mysqli') || str_starts_with($function, 'mysqli')) {
+        $value = match ($name) {
+            'query', 'sql' => 'SELECT 1',
+            'hostname' => 'localhost',
+            'username' => 'root',
+            'password', 'database' => '',
+            'socket' => '/tmp/mysql.sock',
+            'charset' => 'utf8mb4',
+            'name' => 'sp1',
+            default => null,
+        };
+        if ($value !== null) {
+            return static fn (): mixed => $value;
+        }
+    }
     // Methods of a date or timezone class, by the class and the name.
     if (in_array($class, ['datetime', 'datetimeimmutable'], true) && $name === 'datetime') {
         return static fn (): string => '2000-01-01';
