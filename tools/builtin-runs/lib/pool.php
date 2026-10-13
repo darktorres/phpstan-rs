@@ -8,6 +8,8 @@ final class Worker
     /** The index of the unit it is running. */
     public ?int $unit = null;
     public bool $ready = false;
+    /** The data directory of its servers, removed with it; null when it has none. */
+    public ?string $servers = null;
 
     /**
      * @param resource $process
@@ -31,6 +33,9 @@ final class Pool
         foreach (self::$workers as $worker) {
             proc_terminate($worker->process, SIGKILL);
             wipe_directory(Workdir::of($worker->pid));
+            if ($worker->servers !== null) {
+                wipe_directory($worker->servers);
+            }
         }
         self::$workers = [];
     }
@@ -59,6 +64,12 @@ function start_worker(string $php, bool $zendMm, array $sandbox): Worker
             $env['USE_ZEND_ALLOC'] = '0';
         }
     }
+    // A worker in a bwrap sandbox starts the servers the environment names, with a data directory of its own.
+    $servers = null;
+    if ($sandbox['mode'] === 'bwrap' && ($root = servers_root()) !== null) {
+        $servers = ['root' => $root, 'dir' => servers_prepare($root)];
+        $sandbox['servers'] = $servers;
+    }
     $command = worker_command($php, $zendMm, $sandbox);
     $descriptors = [
         0 => ['file', '/dev/null', 'r'],
@@ -72,6 +83,7 @@ function start_worker(string $php, bool $zendMm, array $sandbox): Worker
         fail("cannot start $php in the {$sandbox['mode']} sandbox");
     }
     $worker = new Worker($process, $pipes[3], $pipes[4]);
+    $worker->servers = $servers['dir'] ?? null;
     Pool::$workers[$worker->pid] = $worker;
     return $worker;
 }
@@ -83,6 +95,9 @@ function release_worker(Worker $worker): void
     @fclose($worker->in);
     @fclose($worker->out);
     proc_close($worker->process);
+    if ($worker->servers !== null) {
+        wipe_directory($worker->servers);
+    }
 }
 
 /**

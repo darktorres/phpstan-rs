@@ -62,6 +62,12 @@ function worker_command(string $php, bool $zendMm, array $sandbox): array
         if (str_starts_with($phpDir, '/home/')) {
             array_push($command, '--ro-bind', $phpDir, $phpDir);
         }
+        // A worker's servers keep their data in a directory the sandbox binds read-write, and start before the worker.
+        if (isset($sandbox['servers'])) {
+            $dir = $sandbox['servers']['dir'];
+            array_push($command, '--bind', $dir, $dir);
+            $interpreter = servers_command($sandbox['servers']['root'], $dir, $interpreter);
+        }
         array_push($command, '--size', (string) $sandbox['cap'], '--tmpfs', '/home/worker', '--chdir', '/home/worker');
         return [...$command, ...$interpreter];
     }

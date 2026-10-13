@@ -92,6 +92,7 @@ require_once __DIR__ . '/lib/plan.php';
 require_once __DIR__ . '/lib/unit.php';
 require_once __DIR__ . '/lib/protocol.php';
 require_once __DIR__ . '/lib/workdir.php';
+require_once __DIR__ . '/lib/servers.php';
 require_once __DIR__ . '/lib/sandbox.php';
 require_once __DIR__ . '/lib/pool.php';
 require_once __DIR__ . '/lib/stats.php';
