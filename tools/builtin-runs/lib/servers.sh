@@ -17,6 +17,11 @@ done
 # Redis, on a Unix socket in the run directory.
 redis-server --port 0 --unixsocket "$RUN/redis.sock" --unixsocketperm 777 --daemonize yes --dir "$RUN" --save '' --appendonly no > /dev/null 2>&1
 
+# A Redis master on loopback, and a Sentinel that watches it: the sandbox's network namespace has its own loopback.
+redis-server --port 6379 --bind 127.0.0.1 --daemonize yes --dir "$RUN" --save '' --appendonly no > /dev/null 2>&1
+printf 'port 26379\nbind 127.0.0.1\ndir %s\nsentinel monitor mymaster 127.0.0.1 6379 1\nsentinel down-after-milliseconds mymaster 1000\n' "$RUN" > "$RUN/sentinel.conf"
+redis-server "$RUN/sentinel.conf" --sentinel --daemonize yes > /dev/null 2>&1
+
 # PostgreSQL, initialised in the worker's data directory and listening on a Unix socket only.
 initdb -D "$DIR/pg" -U postgres --auth=trust > "$DIR/pg-init.log" 2>&1
 pg_ctl -D "$DIR/pg" -o "-k $RUN -c listen_addresses=" -l "$DIR/pg.log" -w start > /dev/null 2>&1

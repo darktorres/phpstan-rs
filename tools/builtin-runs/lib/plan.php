@@ -84,6 +84,10 @@ function method_receiver(ReflectionClass $reflection, string $method, Closure $m
         $storage->attach(recipe_key());
         return $storage;
     }
+    // A savepoint is released on the connection that made it.
+    if ($class === 'mysqli' && strtolower($method) === 'release_savepoint') {
+        return mysqli_connection_sample();
+    }
     if ($class === 'fiber' && in_array(strtolower($method), ['resume', 'throw'], true)) {
         $fiber = new Fiber(static function (): void {
             Fiber::suspend();

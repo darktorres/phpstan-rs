@@ -361,9 +361,22 @@ function dom_document(): DOMDocument
 /** A connection to the child's MySQL server, over its socket. */
 function mysqli_connection_sample(): mysqli
 {
-    // Kept for the child: a statement or a result made on it is refused once its connection is gone.
+    // Kept for the child: a statement or a result made on it is refused once its connection is gone. Its savepoint is
+    // made here, so that releasing it is valid.
     static $connection = null;
-    return $connection ??= new mysqli(null, 'root', '', '', 0, server_run_dir() . '/mysql.sock');
+    if ($connection === null) {
+        $connection = new mysqli(null, 'root', '', '', 0, server_run_dir() . '/mysql.sock');
+        $connection->begin_transaction();
+        $connection->savepoint('sp1');
+    }
+    return $connection;
+}
+
+/** The thread of a connection of its own, which a kill of a process names. */
+function mysqli_victim_thread(): int
+{
+    static $victim = null;
+    return ($victim ??= new mysqli(null, 'root', '', '', 0, server_run_dir() . '/mysql.sock'))->thread_id;
 }
 
 /** The object a WeakMap or SplObjectStorage holds, and that the probe offers as its key: the same one in a child. */
@@ -463,6 +476,22 @@ function library_value(ReflectionParameter $param): ?Closure
         ['mb_ereg_search', 'options'], ['mb_ereg_search_pos', 'options'], ['mb_ereg_search_regs', 'options'] => static fn (): string => 'i',
         // A poll reads a connection's socket: one connection in the read array is enough for the call to run.
         ['mysqli_poll', 'read'] => static fn (): array => [mysqli_connection_sample()],
+        // Built-in classes the methods take: a class of the library, not a user one.
+        ['get_class_vars', 'class'], ['pdostatement::fetchobject', 'class'], ['mysqli_fetch_object', 'class'] => static fn (): string => stdClass::class,
+        ['splfileinfo::getfileinfo', 'class'], ['splfileinfo::getpathinfo', 'class'], ['splfileinfo::setinfoclass', 'class'] => static fn (): string => SplFileInfo::class,
+        ['splfileinfo::setfileclass', 'class'] => static fn (): string => SplFileObject::class,
+        ['xsltprocessor::transformtodoc', 'returnClass'] => static fn (): string => DOMDocument::class,
+        // A stream wrapper class is the recorder's own, which the stream functions register under a scheme of its own.
+        ['stream_register_wrapper', 'class'], ['stream_wrapper_register', 'class'] => static fn (): string => RecordingWrapper::class,
+        ['stream_register_wrapper', 'protocol'], ['stream_wrapper_register', 'protocol'] => static fn (): string => 'recreg',
+        ['mysqli_execute', 'params'] => static fn (): array => [],
+        ['mysqli_fetch_object', 'constructor_args'], ['pdostatement::fetchobject', 'constructorArgs'] => static fn (): array => [],
+        ['pg_fetch_object', 'constructor_args'] => static fn (): array => [],
+        // A process that is not this connection: the victim's, which another connection made.
+        ['mysqli::kill', 'process_id'], ['mysqli_kill', 'process_id'] => static fn (): int => mysqli_victim_thread(),
+        // The Sentinel's master, which the Sentinel started inside the sandbox watches.
+        ['redissentinel::master', 'master'], ['redissentinel::getmasteraddrbyname', 'master'], ['redissentinel::ckquorum', 'master'], ['redissentinel::failover', 'master'], ['redissentinel::sentinels', 'master'], ['redissentinel::slaves', 'master'] => static fn (): string => 'mymaster',
+        ['redissentinel::reset', 'pattern'] => static fn (): string => '*',
         ['mysqli_select_db', 'database'], ['mysqli::select_db', 'database'] => static fn (): string => 'mysql',
         ['mysqli::execute_query', 'params'], ['mysqli_execute_query', 'params'], ['mysqli_stmt_execute', 'params'] => static fn (): array => [],
         // A column or an index of the result the valid statement gives: the first.
