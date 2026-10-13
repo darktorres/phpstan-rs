@@ -49,6 +49,9 @@ function worker_command(string $php, bool $zendMm, array $sandbox): array
     if ($sandbox['mode'] === 'bwrap') {
         // The worker's /tmp is the host's, read-only: temporary files go to its home, which is its own.
         $variables['TMPDIR'] = $variables['HOME'];
+        if (isset($sandbox['trace'])) {
+            $variables['BUILTIN_RUNS_TRACE'] = $sandbox['trace'];
+        }
         // The servers' sockets are in the worker's home too.
         if (isset($sandbox['servers'])) {
             $variables['BUILTIN_RUNS_RUN'] = $variables['HOME'] . '/run';
@@ -67,6 +70,11 @@ function worker_command(string $php, bool $zendMm, array $sandbox): array
         $phpDir = dirname((string) realpath($php));
         if (str_starts_with($phpDir, '/home/')) {
             array_push($command, '--ro-bind', $phpDir, $phpDir);
+        }
+        // A trace file is written by the workers: its directory is bound read-write, and the workers are told its name.
+        if (isset($sandbox['trace'])) {
+            $traceDir = dirname($sandbox['trace']);
+            array_push($command, '--bind', $traceDir, $traceDir);
         }
         // A worker's servers keep their data in a directory the sandbox binds read-write, and start before the worker.
         if (isset($sandbox['servers'])) {

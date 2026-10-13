@@ -140,6 +140,11 @@ $jobs = jobs($argv);
 // A worker's children write at most 64 MiB each, four of them at once in the
 // worst case of the measured limits, so scratch space smaller than 256 MiB is refused.
 $sandbox = ['mode' => $sandboxMode, 'cap' => $sandboxMode === 'bwrap' ? sandbox_cap($jobs) : 0];
+// --trace=FILE: each child's result is appended to FILE as it is known, one JSON line each.
+$trace = option($argv, 'trace');
+if ($trace !== null) {
+    $sandbox['trace'] = $trace;
+}
 if ($sandboxMode === 'bwrap' && $sandbox['cap'] < 256 * 1024 ** 2) {
     fwrite(STDERR, 'only ' . intdiv($sandbox['cap'], 1024 ** 2) . " MiB of scratch space per worker: free memory or use fewer --jobs\n");
     exit(1);
