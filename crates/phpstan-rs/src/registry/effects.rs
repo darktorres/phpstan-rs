@@ -843,7 +843,7 @@ fn sees(registry: &Registry, owner: &str, visibility: Visibility, scope: Option<
 
 /// Where a builtin runs code: at a parameter, or through the elements of an
 /// array passed there.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Position {
     pub(super) at: u32,
     pub(super) elements: bool,
@@ -882,7 +882,7 @@ impl BuiltinRuns {
 pub(crate) type CapturedHolders<'a> = &'a dyn Fn(&str) -> Option<Holder>;
 
 /// What a builtin runs through an argument.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum BuiltinRun {
     /// It invokes the callable.
     Calls,
@@ -3446,8 +3446,20 @@ impl Reach<'_> {
             }
         }
         // A stub no run of PHP has seen runs what its parameters let it run.
+        // A probe reaches a builtin only with the values it is given, so the table is a lower
+        // bound on what the builtin runs. What its parameter types let it run is an upper bound,
+        // and both are kept: a probed `sprintf` may convert an object it is given through its
+        // `__toString`, even when the probe's format never used that value.
         let runs: Arc<[(Position, BuiltinRun)]> = match &entry {
-            Some(name) => builtin_runs::runs(name).into(),
+            Some(name) => {
+                let mut runs = builtin_runs::runs(name).to_vec();
+                for run in derived_runs(sig) {
+                    if !runs.contains(&run) {
+                        runs.push(run);
+                    }
+                }
+                runs.into()
+            }
             None => {
                 let takes_code = sig
                     .params
