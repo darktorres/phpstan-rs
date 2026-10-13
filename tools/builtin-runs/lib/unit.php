@@ -208,7 +208,7 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
             }
             $targets = array_values(array_filter(
                 $instance,
-                static fn (ReflectionMethod $then): bool => $wanted(strtolower($class . '::' . $then->getName())),
+                static fn (ReflectionMethod $then): bool => $wanted(strtolower($class . '::' . $then->getName())) && !in_array(strtolower($class . '::' . $then->getName()), METHODS_SKIPPED, true),
             ));
             if ($targets === []) {
                 return;

@@ -467,9 +467,13 @@ function named_value(ReflectionParameter $param): ?Closure
             return static fn (): mixed => $value;
         }
     }
-    // Redis SORT's arguments after the key: a pattern to get, an offset and a count, and a key to store into; and
-    // GEOSEARCHSTORE's position and shape.
-    if ($class === 'redis' && (str_starts_with($function, 'sort') || $function === 'geosearchstore')) {
+    // A Redis option's value is an int: an object or a callable as the serializer breaks the next call that uses it.
+    if ($class === 'redis' && $function === 'setoption' && $name === 'value') {
+        return static fn (): int => Redis::SERIALIZER_NONE;
+    }
+    // Redis arguments with a valid value: SORT's pattern, offset, count and store; GEOSEARCH's and GEOSEARCHSTORE's
+    // position and shape; and HSET's fields and values. A call with the array probes of these breaks the connection.
+    if ($class === 'redis' && (str_starts_with($function, 'sort') || in_array($function, ['geosearch', 'geosearchstore', 'hset'], true))) {
         $value = match ($name) {
             'get' => 'x*',
             'offset' => 0,
@@ -477,6 +481,7 @@ function named_value(ReflectionParameter $param): ?Closure
             'store' => 'dst',
             'position' => [0.0, 0.0],
             'shape' => 10.0,
+            'fields_and_vals' => ['f' => 'v'],
             default => null,
         };
         if ($value !== null) {
