@@ -392,69 +392,18 @@ pdostatement::fetchobject	1	class-name	threw:TypeError:PDOStatement::fetchObject
 pdostatement::getattribute	0	value	threw:PDOException:SQLSTATE[IM001]: Driver does not support this function: driver doesn't support getting that attribute
 pdostatement::getcolumnmeta	0	value	threw:PDOException:SQLSTATE[HY000]: General error: 100 another row available
 pdostatement::setfetchmode	1	arity	threw:ArgumentCountError:PDOStatement::setFetchMode() expects exactly 1 arguments for the fetch mode provided, 2 given
-pg_convert	3	server	threw:ValueError:pg_convert(): Argument #4 ($flags) must be a valid bit mask of PGSQL_CONV_IGNORE_DEFAULT, PGSQL_CONV_FORCE_NULL, and PGSQL_CONV_IGNORE_NOT_NULL
 pg_copy_from	3	server	threw:ValueError:pg_copy_from(): Argument #4 ($separator) must be one character
 pg_copy_to	2	server	threw:ValueError:pg_copy_to(): Argument #3 ($separator) must be one character
-pg_delete	3	server	threw:ValueError:pg_delete(): Argument #4 ($flags) must be a valid bit mask of PGSQL_CONV_FORCE_NULL, PGSQL_DML_NO_CONV, PGSQL_DML_ESCAPE, PGSQL_DML_EXEC, PGSQL
 pg_execute	1	server	threw:TypeError:pg_execute(): Argument #1 ($connection) must be of type string, PgSql\Connection given
-pg_fetch_all_columns	1	server	threw:ValueError:pg_fetch_all_columns(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_fetch_object	2	server	threw:TypeError:pg_fetch_object(): Argument #3 ($class) must be a valid class name, rec://probe given
-pg_fetch_object	3	server	threw:TypeError:pg_fetch_object(): Argument #3 ($class) must be a valid class name, x given
-pg_fetch_result	0	value	threw:ValueError:Argument #2 must be less than the number of fields for this result set
-pg_field_is_null	0	value	threw:ValueError:Argument #2 must be less than the number of fields for this result set
-pg_field_name	0	server	threw:ValueError:pg_field_name(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_name	1	server	threw:ValueError:pg_field_name(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_prtlen	0	value	threw:ValueError:Argument #2 must be less than the number of fields for this result set
-pg_field_size	0	server	threw:ValueError:pg_field_size(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_size	1	server	threw:ValueError:pg_field_size(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_table	0	server	threw:ValueError:pg_field_table(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_table	1	server	threw:ValueError:pg_field_table(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_table	2	server	threw:ValueError:pg_field_table(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_type	0	server	threw:ValueError:pg_field_type(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_type	1	server	threw:ValueError:pg_field_type(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_type_oid	0	server	threw:ValueError:pg_field_type_oid(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_field_type_oid	1	server	threw:ValueError:pg_field_type_oid(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_fieldisnull	0	value	threw:ValueError:Argument #2 must be less than the number of fields for this result set
-pg_fieldname	0	server	threw:ValueError:pg_fieldname(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_fieldname	1	server	threw:ValueError:pg_fieldname(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_fieldprtlen	0	value	threw:ValueError:Argument #2 must be less than the number of fields for this result set
-pg_fieldsize	0	server	threw:ValueError:pg_fieldsize(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_fieldsize	1	server	threw:ValueError:pg_fieldsize(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_fieldtype	0	server	threw:ValueError:pg_fieldtype(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_fieldtype	1	server	threw:ValueError:pg_fieldtype(): Argument #2 ($field) must be less than the number of fields for this result set
-pg_insert	3	server	threw:ValueError:pg_insert(): Argument #4 ($flags) must be a valid bit mask of PGSQL_CONV_FORCE_NULL, PGSQL_DML_NO_CONV, PGSQL_DML_ESCAPE, PGSQL_DML_EXEC, PGSQL
-pg_lo_close	0	server	threw:TypeError:pg_lo_close(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
-pg_lo_open	0	arity	threw:ArgumentCountError:Requires 1 or 2 arguments, 3 given
-pg_lo_open	2	value	threw:ValueError:Mode must be one of 'r', 'r+', 'w', or 'w+'
-pg_lo_read	0	server	threw:TypeError:pg_lo_read(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
-pg_lo_read	1	server	threw:TypeError:pg_lo_read(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
-pg_lo_read_all	0	server	threw:TypeError:pg_lo_read_all(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
-pg_lo_seek	0	server	threw:TypeError:pg_lo_seek(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
-pg_lo_seek	1	server	threw:TypeError:pg_lo_seek(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
-pg_lo_seek	2	server	threw:TypeError:pg_lo_seek(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
-pg_lo_tell	0	server	threw:TypeError:pg_lo_tell(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
-pg_lo_truncate	0	server	threw:TypeError:pg_lo_truncate(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
-pg_lo_truncate	1	server	threw:TypeError:pg_lo_truncate(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
-pg_lo_write	0	server	threw:TypeError:pg_lo_write(): Argument #1 ($lob) must be of type PgSql\Lob, resource given
-pg_lo_write	1	server	threw:TypeError:pg_lo_write(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
-pg_lo_write	2	server	threw:TypeError:pg_lo_write(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
-pg_loopen	0	arity	threw:ArgumentCountError:Requires 1 or 2 arguments, 3 given
-pg_loopen	2	value	threw:ValueError:Mode must be one of 'r', 'r+', 'w', or 'w+'
-pg_loread	1	server	threw:TypeError:pg_loread(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
-pg_lowrite	1	server	threw:TypeError:pg_lowrite(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
-pg_lowrite	2	server	threw:TypeError:pg_lowrite(): Argument #1 ($lob) must be of type PgSql\Lob, stdClass given
+pg_fetch_object	3	server	threw:ValueError:pg_fetch_object(): Argument #3 ($class) must be empty when the specified class (stdClass) does not have a constructor
 pg_prepare	1	server	threw:TypeError:pg_prepare(): Argument #1 ($connection) must be of type string, PgSql\Connection given
 pg_query_params	1	server	threw:TypeError:pg_query_params(): Argument #1 ($connection) must be of type string, PgSql\Connection given
-pg_result	0	value	threw:ValueError:Argument #2 must be less than the number of fields for this result set
-pg_select	3	server	threw:ValueError:pg_select(): Argument #4 ($flags) must be a valid bit mask of PGSQL_CONV_FORCE_NULL, PGSQL_DML_NO_CONV, PGSQL_DML_ESCAPE, PGSQL_DML_EXEC, PGSQL
-pg_select	4	server	threw:ValueError:pg_select(): Argument #4 ($flags) must be a valid bit mask of PGSQL_CONV_FORCE_NULL, PGSQL_DML_NO_CONV, PGSQL_DML_ESCAPE, PGSQL_DML_EXEC, PGSQL
 pg_set_error_verbosity	0	server	threw:TypeError:pg_set_error_verbosity(): Argument #1 ($connection) must be of type int, Closure given
 pg_socket_poll	1	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
 pg_socket_poll	2	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
 pg_socket_poll	3	server	threw:TypeError:pg_socket_poll(): Argument #1 ($socket) invalid resource socket
 pg_trace	0	server	threw:Error:No PostgreSQL connection opened yet
 pg_trace	1	server	threw:Error:No PostgreSQL connection opened yet
-pg_update	4	server	threw:ValueError:pg_update(): Argument #5 ($flags) must be a valid bit mask of PGSQL_CONV_FORCE_NULL, PGSQL_DML_NO_CONV, PGSQL_DML_ESCAPE, PGSQL_DML_EXEC, PGSQL
 proc_open	1	value	threw:ValueError:proc_open(): Argument #2 ($descriptor_spec) must only contain arrays and streams
 random\engine\mt19937::__construct	0	state	threw:ReflectionException:Class Random\Engine\Mt19937 is an internal class marked as final that cannot be instantiated without invoking its constructor
 random\engine\mt19937::__construct	1	state	threw:ReflectionException:Class Random\Engine\Mt19937 is an internal class marked as final that cannot be instantiated without invoking its constructor
