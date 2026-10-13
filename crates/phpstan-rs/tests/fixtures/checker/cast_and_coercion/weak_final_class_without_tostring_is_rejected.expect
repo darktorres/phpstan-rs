@@ -1,0 +1,2 @@
+12:19-12:25 argument.type L5 | Parameter #1 $string of function strlen expects string, WeakSealed given.
+17:28-17:34 argument.type L5 | Parameter #1 $value of function weakTakesString expects string, WeakSealed given.

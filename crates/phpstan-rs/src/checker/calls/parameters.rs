@@ -196,10 +196,12 @@ impl<'a> Checker<'a> {
         // own weak parser has accepted the value. Weak mode accepts scalar
         // string coercions and Stringable; strict mode exits before either
         // conversion, so keep the ordinary string-only type check there.
-        let weak_strlen_string_coercion = catalog_function == Some("strlen")
-            && self.syntax_tree_owner().and_then(|owner| {
-                syntax::strict_types::strict_types_mode(arenas, owner.statements())
-            }) == Some(false);
+        let weak_scalar_coercion = self
+            .syntax_tree_owner()
+            .and_then(|owner| syntax::strict_types::strict_types_mode(arenas, owner.statements()))
+            == Some(false);
+        let weak_strlen_string_coercion =
+            catalog_function == Some("strlen") && weak_scalar_coercion;
         let named_after_unpack = supports(PhpFeature::NamedArgumentAfterUnpackedArgument);
         let named_supported = supports(PhpFeature::NamedArguments);
 
@@ -324,23 +326,31 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(param.ty(), c),
                 None => param.ty().clone(),
             };
-            let weak_string_value_accepted = weak_strlen_string_coercion
+            // Weak mode converts a value to a `string` parameter for every function, and a
+            // Stringable object converts through its `__toString`. The scalar and null
+            // conversions are modeled by strlen's catalog graph, so they stay strlen-only.
+            let weak_string_value_accepted = weak_scalar_coercion
+                && self
+                    .relation()
+                    .is_super_type_of(&param_ty, &Type::string())
+                    .yes()
                 && arg_ty.union_members().iter().all(|member| {
                     let relation = self.relation();
-                    let implicit_stringable = member.as_object().is_some_and(|(class, _)| {
-                        self.registry.lookup_method(class, "__toString").is_some()
-                    });
+                    let strlen_scalar = weak_strlen_string_coercion
+                        && (member.is_scalar().yes()
+                            || member.is_null().yes()
+                            || member.is_null().maybe());
                     relation.is_super_type_of(&param_ty, member).yes()
-                        || member.is_scalar().yes()
-                        || member.is_null().yes()
-                        || member.is_null().maybe()
+                        || strlen_scalar
                         || relation
                             .is_super_type_of(
                                 &Type::object("Stringable".into(), Vec::new()),
                                 member,
                             )
                             .yes()
-                        || implicit_stringable
+                        || member.as_object().is_some_and(|(class, _)| {
+                            self.registry.lookup_method(class, "__toString").is_some()
+                        })
                 });
             let null_to_string_is_deprecated = weak_strlen_string_coercion
                 && arg_ty
