@@ -1471,8 +1471,34 @@ impl Scope {
 struct PendingDies {
     id: u32,
     bit: u8,
-    callee: Callee,
-    list: Vec<Origin>,
+    source: HeldSource,
+}
+
+/// What a held destroy's operand is: the callee of a call, or the class of a
+/// `new`.
+enum HeldSource {
+    Call(Arc<Callee>),
+    New(Option<syntax::ast::QualifiedName>),
+}
+
+/// The call whose result `id` holds: `id` itself, or the call a grouping, a
+/// suppressed call or a clone of a call holds.
+fn result_call(arenas: &NodeArenas, id: ExprId) -> Option<ExprId> {
+    let mut at = id;
+    loop {
+        match &arenas.expr(at)?.kind {
+            ExprKind::Call(..)
+            | ExprKind::MethodCall(..)
+            | ExprKind::StaticCall(..)
+            | ExprKind::New(..) => return Some(at),
+            ExprKind::Grouping(inner)
+            | ExprKind::ErrorSuppress(inner)
+            | ExprKind::Clone(inner, _) => {
+                at = *inner;
+            }
+            _ => return None,
+        }
+    }
 }
 
 /// `origins` without the repeats, in order.
@@ -2277,58 +2303,142 @@ impl Summarizer<'_> {
     /// The value `id` dies where it is written when nothing holds it: a
     /// temporary is destroyed at the end of the statement that made it.
     fn dies(&mut self, arenas: &NodeArenas, id: ExprId) {
-        if is_temporary(arenas, id) && !self.hold_result_dies(arenas, id, DIES_TEMPORARY) {
+        if is_temporary(arenas, id) && !self.hold_result_dies(arenas, id, DIES_TEMPORARY, None) {
             self.implicit(arenas, id, Operation::Destroy);
         }
-        if holds_elements_made_here(arenas, id) && !self.hold_result_dies(arenas, id, DIES_CONTENTS)
-        {
+        if holds_elements_made_here(arenas, id) {
+            self.hold_contents(arenas, id);
+        }
+    }
+
+    /// The contents of `id` die. An array literal's items are held one by
+    /// one, as their own results, and the rest is recorded.
+    fn hold_contents(&mut self, arenas: &NodeArenas, id: ExprId) {
+        if let Some(items) = self.plain_literal_items(arenas, id) {
+            let parts: Option<Vec<(Vec<Origin>, Vec<Origin>)>> = items
+                .iter()
+                .map(|&item| Some((self.origins(arenas, item)?, self.contents_of(arenas, item)?)))
+                .collect();
+            if let Some(parts) = parts {
+                let mut rest = Vec::new();
+                for (&item, (origins, contents)) in items.iter().zip(parts) {
+                    if !self.hold_result_dies(
+                        arenas,
+                        item,
+                        DIES_TEMPORARY,
+                        Some(origins.as_slice()),
+                    ) {
+                        rest.extend(origins);
+                    }
+                    if !self.hold_result_dies(
+                        arenas,
+                        item,
+                        DIES_CONTENTS,
+                        Some(contents.as_slice()),
+                    ) {
+                        rest.extend(contents);
+                    }
+                }
+                self.implicit_on(Some(rest), Operation::Destroy);
+                return;
+            }
+        }
+        if !self.hold_result_dies(arenas, id, DIES_CONTENTS, None) {
             let contents = self.contents_of(arenas, id);
             self.implicit_on(contents, Operation::Destroy);
         }
     }
 
-    /// The callee a call result's destroy is of, and what the destroy takes,
-    /// when the result's origins (`bit` says which) are that one call alone.
-    fn call_result_of(
+    /// The items of the array literal `id`, through its grouping, when it has
+    /// no spread item.
+    fn plain_literal_items(&self, arenas: &NodeArenas, id: ExprId) -> Option<Vec<ExprId>> {
+        let e = arenas.peeled(id).and_then(|id| arenas.expr(id))?;
+        let ExprKind::ArrayLiteral(items) = &e.kind else {
+            return None;
+        };
+        let mut out = Vec::new();
+        for item in arenas.array_items(items.clone()) {
+            if item.spread {
+                return None;
+            }
+            out.push(item.value);
+        }
+        Some(out)
+    }
+
+    /// The call a result's destroy (`bit`) of `id` belongs to, and its
+    /// operand, when `id`'s value is that one call's result alone.
+    fn held_source(
         &self,
         arenas: &NodeArenas,
         id: ExprId,
         bit: u8,
-    ) -> Option<(Callee, Vec<Origin>)> {
-        if !matches!(
-            arenas.expr(id).map(|e| &e.kind),
-            Some(ExprKind::Call(..) | ExprKind::MethodCall(..) | ExprKind::StaticCall(..))
-        ) {
-            return None;
-        }
-        let list = if bit == DIES_TEMPORARY {
-            self.origins(arenas, id)?
-        } else {
-            self.contents_of(arenas, id)?
-        };
-        let callee = match list.as_slice() {
-            [Origin::Returned(callee)] if bit == DIES_TEMPORARY => callee,
-            [Origin::Elements(inner)] if bit == DIES_CONTENTS => match &**inner {
-                Origin::Returned(callee) => callee,
+        known: Option<&[Origin]>,
+    ) -> Option<(u32, HeldSource)> {
+        let call = result_call(arenas, id)?;
+        let kind = &arenas.expr(call)?.kind;
+        let is_call = matches!(
+            kind,
+            ExprKind::Call(..) | ExprKind::MethodCall(..) | ExprKind::StaticCall(..)
+        );
+        let source = if bit == DIES_TEMPORARY {
+            let owned;
+            let origins = match known {
+                Some(known) => known,
+                None => {
+                    owned = self.origins(arenas, id)?;
+                    &owned
+                }
+            };
+            match origins {
+                [Origin::Returned(callee)] if is_call => HeldSource::Call(callee.clone()),
+                [Origin::New(class)] if matches!(kind, ExprKind::New(..)) => {
+                    HeldSource::New(class.clone())
+                }
                 _ => return None,
-            },
-            _ => return None,
+            }
+        } else {
+            let owned;
+            let contents = match known {
+                Some(known) => known,
+                None => {
+                    owned = self.contents_of(arenas, id)?;
+                    &owned
+                }
+            };
+            match contents {
+                [Origin::Elements(inner)] if is_call => match &**inner {
+                    Origin::Returned(callee) => HeldSource::Call(callee.clone()),
+                    _ => return None,
+                },
+                _ => return None,
+            }
         };
-        Some(((**callee).clone(), list))
+        Some((u32::from(call.into_raw()), source))
     }
 
-    /// Holds the destroy of the call result `id` for its call's record, or
-    /// gives it to that record now; false when `id` is no call result.
-    fn hold_result_dies(&mut self, arenas: &NodeArenas, id: ExprId, bit: u8) -> bool {
-        let Some((callee, list)) = self.call_result_of(arenas, id, bit) else {
+    /// Holds the destroy of `id`'s call result (`bit`) for the call's record;
+    /// false when `id` holds no such result.
+    fn hold_result_dies(
+        &mut self,
+        arenas: &NodeArenas,
+        id: ExprId,
+        bit: u8,
+        known: Option<&[Origin]>,
+    ) -> bool {
+        let Some((call, source)) = self.held_source(arenas, id, bit, known) else {
             return false;
         };
-        let raw = u32::from(id.into_raw());
         #[cfg(debug_assertions)]
         {
+            let list = if bit == DIES_TEMPORARY {
+                self.origins(arenas, id)
+            } else {
+                self.contents_of(arenas, id)
+            };
             self.scope.calls.push(CallWrites {
                 callee: Callee::Implicit {
-                    on: Some(Arc::from(list.clone())),
+                    on: Some(Arc::from(list.unwrap_or_default())),
                     operation: Operation::Destroy,
                 },
                 arguments: Box::new([]),
@@ -2342,32 +2452,52 @@ impl Summarizer<'_> {
         // The walk holds a result's destroy before it records the call, so
         // the call's record takes it (`attach_pending`).
         self.scope.pending_dies.push(PendingDies {
-            id: raw,
+            id: call,
             bit,
-            callee,
-            list,
+            source,
         });
         true
     }
 
     /// Adds `bit` to the call record at `at`, when that record is the call
     /// the destroy is of.
-    fn attach(&mut self, at: u32, bit: u8, callee: &Callee) -> bool {
+    fn attach(&mut self, at: u32, bit: u8, source: &HeldSource) -> bool {
         let call = &mut self.scope.calls[at as usize];
-        if call.callee != *callee {
+        let same = match source {
+            HeldSource::Call(callee) => call.callee == **callee,
+            HeldSource::New(class) => matches!(&call.callee, Callee::New(c) if c == class),
+        };
+        if !same {
             return false;
         }
         call.dies |= bit;
         true
     }
 
+    /// The operation a held destroy stands for, when no record takes it.
+    fn held_operation(bit: u8, source: &HeldSource) -> Vec<Origin> {
+        let origin = match source {
+            HeldSource::Call(callee) => Origin::Returned(callee.clone()),
+            HeldSource::New(class) => Origin::New(class.clone()),
+        };
+        if bit == DIES_CONTENTS {
+            vec![Origin::Elements(Arc::new(origin))]
+        } else {
+            vec![origin]
+        }
+    }
+
     /// Gives the destroys waiting for the call recorded at `at` to that record.
     fn attach_pending(&mut self, raw: u32, at: u32) {
+        if self.scope.pending_dies.is_empty() {
+            return;
+        }
         for held in std::mem::take(&mut self.scope.pending_dies) {
             if held.id != raw {
                 self.scope.pending_dies.push(held);
-            } else if !self.attach(at, held.bit, &held.callee) {
-                self.implicit_on(Some(held.list), Operation::Destroy);
+            } else if !self.attach(at, held.bit, &held.source) {
+                let on = Self::held_operation(held.bit, &held.source);
+                self.implicit_on(Some(on), Operation::Destroy);
             }
         }
     }
@@ -2376,7 +2506,8 @@ impl Summarizer<'_> {
     /// operations, as they always were.
     fn flush_dies(&mut self) {
         for held in std::mem::take(&mut self.scope.pending_dies) {
-            self.implicit_on(Some(held.list), Operation::Destroy);
+            let on = Self::held_operation(held.bit, &held.source);
+            self.implicit_on(Some(on), Operation::Destroy);
         }
     }
 

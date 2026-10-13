@@ -5233,6 +5233,15 @@ impl CallContext for Level<'_> {
         match held {
             Held::Returned(callee) => (self.returned_holder(callee), false),
             Held::Elements(callee) => (self.returned_holder_of(callee, elements_holder_of), false),
+            Held::New(class) => match class {
+                Some(class) => (
+                    self.made_holder(
+                        named_classes(self.registry, self.class_name(), class).unwrap_or_default(),
+                    ),
+                    false,
+                ),
+                None => (self.made_unknown_holder(), false),
+            },
             Held::Origins(origins) => self.operand(Some(origins)),
         }
     }
@@ -6887,6 +6896,7 @@ fn held_call() -> &'static CallWrites {
 pub(crate) enum Held<'a> {
     Returned(&'a Callee),
     Elements(&'a Callee),
+    New(&'a Option<syntax::ast::QualifiedName>),
     Origins(&'a [Origin]),
 }
 
@@ -6895,15 +6905,20 @@ pub(crate) enum Held<'a> {
 /// variables.
 fn body_calls(facts: &WriteFacts) -> Vec<CallEntry<'_>> {
     let mut entries = Vec::with_capacity(facts.calls.len() + facts.dying_locals.len());
+    // A held destroy of the same operation is one destroy, as a record was.
+    let mut seen: FxHashSet<(u8, &Callee)> = FxHashSet::default();
     for call in facts.calls.iter() {
         if call.dies & DIES_SHADOW != 0 {
             continue;
         }
         entries.push(CallEntry::Recorded(call));
-        if call.dies & DIES_TEMPORARY != 0 {
-            entries.push(CallEntry::Held(Held::Returned(&call.callee)));
+        if call.dies & DIES_TEMPORARY != 0 && seen.insert((DIES_TEMPORARY, &call.callee)) {
+            entries.push(CallEntry::Held(match &call.callee {
+                Callee::New(class) => Held::New(class),
+                _ => Held::Returned(&call.callee),
+            }));
         }
-        if call.dies & DIES_CONTENTS != 0 {
+        if call.dies & DIES_CONTENTS != 0 && seen.insert((DIES_CONTENTS, &call.callee)) {
             entries.push(CallEntry::Held(Held::Elements(&call.callee)));
         }
     }
@@ -6927,6 +6942,7 @@ fn held_callee(held: Held<'_>) -> Callee {
         Held::Elements(callee) => vec![Origin::Elements(Arc::new(Origin::Returned(Arc::new(
             callee.clone(),
         ))))],
+        Held::New(class) => vec![Origin::New(class.clone())],
         Held::Origins(origins) => origins.to_vec(),
     };
     Callee::Implicit {
