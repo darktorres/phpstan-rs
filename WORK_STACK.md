@@ -47,6 +47,19 @@ State as of 2026-10-12, `master` at `e32fd95d`.
    Step 0 added the passing controls `redis_get_precise` and
    `memcached_getdelayed_callback`; each failing fixture comes with the step
    that makes it pass. Resume at the first step the plan does not mark done.
+1a. **Legacy builtin calls lose a `__toString` write: open, not fixed.** A `Stringable`
+   argument converted by a builtin runs its `__toString`, and any write that callback makes is
+   missed. Repro: `final class Box { public ?string $value = null; }` and
+   `final class Writer { function __construct(private Box $box) {} function __toString(): string { $this->box->value = null; return "v"; } }`;
+   then, inside `if (is_string($c) && $box->value !== null)`, `$n = sprintf("%s", $writer);
+   assertType('string|null', $box->value);` reports `string`. A control with a `__toString`
+   that does not write is correct. Cause: the builtin-runs table records `sprintf` as `probed`
+   with no effects, so the generic call path never sees the callback. The fix belongs to the
+   builtin-runs table (item 1 above), and the table is generated, so it is regenerated from the
+   recorder, not edited. Two follow-ups from the same probe: `str_repeat($w, 2)` reports
+   `argument.type` for an object with `__toString`, which PHP accepts; and a declared plain class
+   `P` is reported while PHP accepts a subclass of `P` with `__toString`. Recorded in
+   `PHP_SEMANTICS_CATALOG_CONTRACT_REVIEW.md`, section "F00.3 host transfer validation".
 1. **Level 8, the builtin-runs recorder: done** (`BUILTIN_RUNS_RECORDER_PLAN.md`,
    steps 1-12 committed; table regenerated at `bc9ab94f`, 10,725 rows). The
    uncommitted E2.V edits to `registry/effects.rs` are not in any checkout; they
