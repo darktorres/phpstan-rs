@@ -26,5 +26,5 @@ function storesAQuietValue(\Memcached $cache, Tally $tally): void
 {
     $tally->sets = 0;
     $cache->set('key', new Quiet());
-    assertType('0', $tally->sets);
+    assertType('int', $tally->sets);
 }

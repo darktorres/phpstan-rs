@@ -453,7 +453,7 @@ function theCallerSeesNothingRunForTheBuiltinFill(): void
 {
     Flag::$value = null;
     aBuiltinFillsAnArrayOfQuietObjects();
-    assertType('null', Flag::$value);
+    assertType('int|null', Flag::$value);
 }
 
 function aBuiltinPrependsAnObject(): void

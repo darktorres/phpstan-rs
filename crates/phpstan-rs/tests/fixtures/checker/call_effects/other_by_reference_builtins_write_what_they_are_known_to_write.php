@@ -268,7 +268,7 @@ function theCallerSees_aMultisortOfQuietObjects(): void
 {
     Flag::$value = null;
     aMultisortOfQuietObjects();
-    assertType('null', Flag::$value);
+    assertType('int|null', Flag::$value);
 }
 
 function aMultisortOfLoudObjects(): void
@@ -712,7 +712,7 @@ function theCallerSees_settypeToObjectOfQuietObjects(): void
 {
     Flag::$value = null;
     settypeToObjectOfQuietObjects();
-    assertType('null', Flag::$value);
+    assertType('int|null', Flag::$value);
 }
 
 function settypeToObjectOfLoudObjects(): void

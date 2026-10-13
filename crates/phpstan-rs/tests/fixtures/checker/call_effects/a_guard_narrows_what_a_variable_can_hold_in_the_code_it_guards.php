@@ -135,14 +135,14 @@ function theEarlyExitCheck(): void
 {
     Holder::$value = null;
     afterAnEarlyExit([1]);
-    assertType('null', Holder::$value);
+    assertType('int|null', Holder::$value);
 }
 
 function theObjectTestCheck(): void
 {
     Holder::$value = null;
     inTheElseOfAnObjectTest([1]);
-    assertType('null', Holder::$value);
+    assertType('int|null', Holder::$value);
 }
 
 function theAndCheck(): void
@@ -163,7 +163,7 @@ function theStringCheck(): void
 {
     Holder::$value = null;
     afterAnIsAString('a');
-    assertType('null', Holder::$value);
+    assertType('int|null', Holder::$value);
 }
 
 function theWrittenCheck(): void

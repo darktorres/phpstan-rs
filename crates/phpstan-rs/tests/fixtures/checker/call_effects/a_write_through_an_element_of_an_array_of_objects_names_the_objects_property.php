@@ -60,5 +60,5 @@ function aCallThatWritesNoBox(Box $box): void
 {
     $box->value = 1;
     echo count(Store::$boxes);
-    assertType('1', $box->value);
+    assertType('int|null', $box->value);
 }

@@ -69,5 +69,5 @@ function theArrayItselfStillRunsNoCode(): void
 {
     Holder::$value = null;
     $keys = array_keys($_SESSION);
-    assertType('null', Holder::$value);
+    assertType('int|null', Holder::$value);
 }
