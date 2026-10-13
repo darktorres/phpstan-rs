@@ -21,7 +21,6 @@ ds\stack::offsetunset	0	not-recordable	threw:Error:Array access by key is not su
 ftp_login	0	crash	killed:14
 ftp_login	1	crash	killed:14
 ftp_login	2	crash	killed:14
-get_class_vars	0	class-name	threw:TypeError:get_class_vars(): Argument #1 ($class) must be a valid class name, rec://probe given
 imagick::animateimages	0	value	threw:ImagickException:unable to open X server `rec://probe' @ error/animate.c/AnimateImages/308
 imagick::clipimagepath	0	state	threw:ImagickException:no clip path defined '': No such file or directory @ error/image.c/ClipImagePath/725
 imagick::clipimagepath	1	state	threw:ImagickException:no clip path defined '': No such file or directory @ error/image.c/ClipImagePath/725
@@ -49,10 +48,6 @@ imagickdraw::setfontfamily	0	file-or-font	threw:ImagickDrawException:Unable to s
 imagickdraw::setstrokepatternurl	0	value	threw:ImagickException:not a relative URL `rec://probe' @ error/drawing-wand.c/DrawSetStrokePatternURL/5420
 memcached::__construct	2	value	no-output
 mysqli::kill	0	server	threw:mysqli_sql_exception:Unknown command
-mysqli::release_savepoint	0	server	threw:mysqli_sql_exception:SAVEPOINT sp1 does not exist
-mysqli_execute	1	server	threw:ValueError:mysqli_execute(): Argument #2 ($params) must consist of exactly 0 elements, 2 present
-mysqli_fetch_object	1	server	threw:TypeError:mysqli_fetch_object(): Argument #2 ($class) must be a valid class name, rec://probe given
-mysqli_fetch_object	2	server	threw:TypeError:mysqli_fetch_object(): Argument #2 ($class) must be a valid class name, x given
 mysqli_kill	0	server	threw:mysqli_sql_exception:Unknown command
 mysqli_kill	1	server	threw:mysqli_sql_exception:Unknown command
 mysqli_release_savepoint	0	server	threw:mysqli_sql_exception:SAVEPOINT sp1 does not exist
@@ -65,24 +60,14 @@ mysqli_stmt_fetch	0	server	threw:mysqli_sql_exception:Commands out of sync; you 
 mysqli_stmt_get_result	0	server	threw:mysqli_sql_exception:Commands out of sync; you can't run this command now
 mysqli_stmt_store_result	0	server	threw:mysqli_sql_exception:Commands out of sync; you can't run this command now
 pdostatement::fetchall	1	arity	threw:ArgumentCountError:PDOStatement::fetchAll() expects exactly 1 argument for the fetch mode provided, 2 given
-pdostatement::fetchobject	0	class-name	threw:TypeError:PDOStatement::fetchObject(): Argument #1 ($class) must be a valid class name, rec://probe given
-pdostatement::fetchobject	1	class-name	threw:TypeError:PDOStatement::fetchObject(): Argument #1 ($class) must be a valid class name, x given
 pdostatement::getattribute	0	value	threw:PDOException:SQLSTATE[IM001]: Driver does not support this function: driver doesn't support getting that attribute
 pdostatement::getcolumnmeta	0	value	threw:PDOException:SQLSTATE[HY000]: General error: 100 another row available
 pdostatement::setfetchmode	1	arity	threw:ArgumentCountError:PDOStatement::setFetchMode() expects exactly 1 arguments for the fetch mode provided, 2 given
 pg_execute	1	server	threw:TypeError:pg_execute(): Argument #1 ($connection) must be of type string, PgSql\Connection given
-pg_fetch_object	3	server	threw:ValueError:pg_fetch_object(): Argument #3 ($class) must be empty when the specified class (stdClass) does not have a constructor
 pg_prepare	1	server	threw:TypeError:pg_prepare(): Argument #1 ($connection) must be of type string, PgSql\Connection given
 pg_query_params	1	server	threw:TypeError:pg_query_params(): Argument #1 ($connection) must be of type string, PgSql\Connection given
 pg_set_error_verbosity	0	server	threw:TypeError:pg_set_error_verbosity(): Argument #1 ($connection) must be of type int, RecordingObject given
 random\randomizer::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Random\Randomizer object
-redissentinel::ckquorum	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
-redissentinel::failover	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
-redissentinel::getmasteraddrbyname	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
-redissentinel::master	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
-redissentinel::reset	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
-redissentinel::sentinels	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
-redissentinel::slaves	0	server	threw:RedisException:Redis server 127.0.0.1:26379 went away
 reflectionclass::newinstance	0	value	threw:ReflectionException:Class stdClass does not have a constructor, so you cannot pass any constructor arguments
 reflectionclass::newinstanceargs	0	value	threw:ReflectionException:Class stdClass does not have a constructor, so you cannot pass any constructor arguments
 reflectionproperty::setrawvaluewithoutlazyinitialization	1	value	threw:TypeError:ReflectionProperty::setRawValueWithoutLazyInitialization(): Argument #1 ($object) must be of type RecordingObject, stdClass given
@@ -96,10 +81,6 @@ sessionhandler::open	1	session	threw:Error:Session is not active
 sessionhandler::read	0	session	threw:Error:Session is not active
 sessionhandler::write	0	session	threw:Error:Session is not active
 sessionhandler::write	1	session	threw:Error:Session is not active
-splfileinfo::getfileinfo	0	class-name	threw:TypeError:SplFileInfo::getFileInfo(): Argument #1 ($class) must be a class name derived from SplFileInfo or null, rec://probe given
-splfileinfo::getpathinfo	0	class-name	threw:TypeError:SplFileInfo::getPathInfo(): Argument #1 ($class) must be a valid class name or null, rec://probe given
-splfileinfo::setfileclass	0	class-name	threw:TypeError:SplFileInfo::setFileClass(): Argument #1 ($class) must be a class name derived from SplFileObject, rec://probe given
-splfileinfo::setinfoclass	0	class-name	threw:TypeError:SplFileInfo::setInfoClass(): Argument #1 ($class) must be a class name derived from SplFileInfo, rec://probe given
 spoofchecker::setrestrictionlevel	0	value	no-output
 stream_bucket_append	0	state	threw:TypeError:stream_bucket_append(): Argument #1 ($brigade) must be of type resource, Closure given
 stream_bucket_append	1	state	threw:TypeError:stream_bucket_append(): supplied resource is not a valid userfilter.bucket brigade resource
@@ -107,12 +88,5 @@ stream_bucket_make_writeable	0	state	threw:TypeError:stream_bucket_make_writeabl
 stream_bucket_prepend	0	state	threw:TypeError:stream_bucket_prepend(): Argument #1 ($brigade) must be of type resource, Closure given
 stream_bucket_prepend	1	state	threw:TypeError:stream_bucket_prepend(): supplied resource is not a valid userfilter.bucket brigade resource
 stream_filter_remove	0	value	threw:TypeError:stream_filter_remove(): Argument #1 ($stream_filter) must be of type resource, Closure given
-stream_register_wrapper	0	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, x given
-stream_register_wrapper	1	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, rec://probe given
-stream_register_wrapper	2	class-name	threw:TypeError:stream_register_wrapper(): Argument #2 ($class) must be a valid class name, x given
-stream_wrapper_register	0	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
-stream_wrapper_register	1	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, rec://probe given
-stream_wrapper_register	2	class-name	threw:TypeError:stream_wrapper_register(): Argument #2 ($class) must be a valid class name, x given
 uri\rfc3986\uri::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\Rfc3986\Uri object
 uri\whatwg\url::__unserialize	0	serialised	threw:Exception:Invalid serialization data for Uri\WhatWg\Url object
-xsltprocessor::transformtodoc	1	class-name	threw:TypeError:XSLTProcessor::transformToDoc(): Argument #2 ($returnClass) must be a valid class name or null, rec://probe given

@@ -40,18 +40,21 @@ State as of 2026-10-11, `master` at `2783a866`.
    user class's constructor can run user code the table's grammar cannot name.
    Plan: `/home/torres/.claude/plans/1-in-this-plan-woolly-dragon.md`, steps 0-10.
    Step 1 is not closed. Coverage gaps, with a reason each, are in
-   `tools/builtin-runs/scan/coverage-gaps.tsv` (117 of 6,313 positions: 37 value,
-   25 server, 15 not-recordable, 14 class-name, 9 state, 7 session, 3 serialised,
-   3 crash, 2 file-or-font, 2 arity). Closed since the last measurement: the
+   `tools/builtin-runs/scan/coverage-gaps.tsv` (91 of 6,313 positions: 37 value,
+   15 not-recordable, 13 server, 9 state, 7 session, 3 serialised, 3 crash,
+   2 file-or-font, 2 arity). Closed since the previous measurement: the
    constructors of subclasses of internal classes (run by `new`), the valued-mode
    defaults, the variadic callbacks, the library, DOM, Reflection, serialised and
-   MySQL values, and the scan's own call modes (it had not run the valued mode).
-   The rest are decided reasons, not closed: ds offset refusals, user classes
-   named by a string, session handlers, sentinel and X-display servers, and the
-   state a receiver would need (savepoints, placeholders, clip paths, profiles).
-   Next: the server decision (which servers can be recorded), then the remaining
-   value gaps. See the plan's closing section. The committed table predates these
-   recorder changes; step 9 regenerates it.
+   MySQL values, the scan's own call modes (it had not run the valued mode), the
+   Redis master and Sentinel the workers now start, and the built-in and
+   recorder-owned class names. What is left is decided or needs a state the
+   recorder does not build: ds offset refusals (the class refuses array access
+   by key on every call), session handlers (a user `SessionHandlerInterface` is
+   the caller's own object), `stream_bucket_*` brigades (only a stream filter
+   provides one), X and clip-path and colour-profile state, the MySQL statement
+   placeholders and bound results, and `pg_set_error_verbosity` (its first
+   argument is an int). The committed table predates these recorder changes;
+   step 9 regenerates it.
    Step 0 added the passing controls `redis_get_precise` and
    `memcached_getdelayed_callback`; each failing fixture comes with the step
    that makes it pass. Resume at the first step the plan does not mark done.
