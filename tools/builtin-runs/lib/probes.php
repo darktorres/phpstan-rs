@@ -1094,16 +1094,27 @@ function arguments(array $params, int $at, mixed $probe, bool $optional = false)
                 }
             }
         } elseif ($i > $at && $param->isOptional()) {
-            // Left out unless the call was refused for too few arguments (see invoke_arguments).
-            if (!$optional) {
+            // A parameter with a valid value of its own is passed with it. Otherwise it is left out unless the call
+            // was refused for too few arguments (see invoke_arguments).
+            $own = own_value($param);
+            if ($own !== null) {
+                $args[$i] = $own($at);
+            } elseif (!$optional) {
                 break;
+            } else {
+                $args[$i] = $param->isDefaultValueAvailable() ? $param->getDefaultValue() : plain_value($param, $at);
             }
-            $args[$i] = $param->isDefaultValueAvailable() ? $param->getDefaultValue() : plain_value($param, $at);
         } else {
             $args[$i] = plain_value($param, $at);
         }
     }
     return $args;
+}
+
+/** The valid value of a parameter of its own: from its site, else from its named rule. Null when it has neither. */
+function own_value(ReflectionParameter $param): ?Closure
+{
+    return valid_site($param) ?? known_parameter_value($param);
 }
 
 /** Whether a parameter is declared as a string: `string`, or a union with it (an untyped parameter is not). */

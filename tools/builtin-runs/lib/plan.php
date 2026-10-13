@@ -26,8 +26,6 @@ const METHODS_SKIPPED = [
     'redis::function', 'redis::auth', 'redis::select', 'redis::swapdb', 'redis::acl', 'redis::module',
     'redis::cluster', 'redis::reset', 'redis::connect', 'redis::pconnect', 'redis::popen', 'redis::open',
     'redis::close', 'redis::multi', 'redis::exec', 'redis::discard', 'redis::watch', 'redis::unwatch',
-    // A MySQL connection is made with a probe value that leaves the object half-open, and the next call on it crashes.
-    'mysqli::connect', 'mysqli::real_connect', 'mysqli::change_user',
 ];
 
 const RUNS_NOTHING = [
