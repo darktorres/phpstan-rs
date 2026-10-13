@@ -1459,5 +1459,5 @@ Found outside F00.3, owned elsewhere:
   `argument.type` for `Writer`, which has `__toString` and which PHP accepts. Fixed: a Stringable object is accepted
   in weak mode for every function (`weak_stringable_converts_to_every_string_parameter`).
 - **A declared non-final class without `__toString`** is reported by the legacy checker, while PHP accepts a subclass
-  that has one. Left as the project's convention, pinned by `strlen_non_stringable_remains_rejected_in_weak_mode` and
-  `a_class_without_to_string_still_does_not_satisfy_stringable`. It needs a decision (see `WORK_STACK.md`, item 1a).
+  that has one. Decided: reported at level 9, an opt-in strictness, so the default report leaves it unmade. A final
+  class without one stays a level-5 error. Pinned by `a_plain_class_argument_is_reported_only_at_level_nine`.

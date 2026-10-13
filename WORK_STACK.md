@@ -61,11 +61,12 @@ State as of 2026-10-12, `master` at `e32fd95d`.
    Follow-up fixed: a `Stringable` object passed to a `string` parameter in weak mode is accepted
    by every function, not only strlen (`str_repeat`, user functions). Fixture
    `weak_stringable_converts_to_every_string_parameter`.
-   Follow-up open, needs a decision: a declared non-final class without `__toString` is still
-   reported. Existing fixtures `strlen_non_stringable_remains_rejected_in_weak_mode` and
-   `a_class_without_to_string_still_does_not_satisfy_stringable` require that. PHP accepts a
-   subclass that has `__toString`, and the host predicate treats the class as Maybe. Keep the
-   report, as the project's convention, or treat it as a possibility and stop reporting it.
+   Follow-up decided: a declared non-final class without `__toString` is reported at level 9,
+   not 5. PHP accepts a subclass that has `__toString`, so the report is opt-in strictness, and
+   the default report (level 6) leaves it unmade. A final class without one stays a level-5 error.
+   Pinned by `a_plain_class_argument_is_reported_only_at_level_nine` (report_cutoff tests) and the
+   fixture `weak_plain_class_without_tostring_is_reported_at_level_nine`. The fixture harness shows
+   every level and ignores a fixture's `level`, so the cutoff is tested in the unit test only.
 1. **Level 8, the builtin-runs recorder: done** (`BUILTIN_RUNS_RECORDER_PLAN.md`,
    steps 1-12 committed; table regenerated at `bc9ab94f`, 10,725 rows). The
    uncommitted E2.V edits to `registry/effects.rs` are not in any checkout; they
