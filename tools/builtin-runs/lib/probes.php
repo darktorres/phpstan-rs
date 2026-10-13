@@ -216,6 +216,12 @@ function valid_value(?ReflectionType $type): ?Closure
         'sqlite3' => static fn (): SQLite3 => new SQLite3(':memory:'),
         // Connected to the PostgreSQL server the scan starts inside its sandbox, on a Unix socket.
         'pgsql\\connection' => static fn (): PgSql\Connection => pg_connect('host=/tmp port=5432 user=postgres dbname=postgres'),
+        // A large object, opened inside a transaction on the server the scan starts.
+        'pgsql\\lob' => static function (): PgSql\Lob {
+            $connection = pg_connect('host=/tmp port=5432 user=postgres dbname=postgres');
+            pg_query($connection, 'BEGIN');
+            return pg_lo_open($connection, pg_lo_create($connection), 'w+');
+        },
         'pgsql\\result' => static fn (): PgSql\Result => pg_query(pg_connect('host=/tmp port=5432 user=postgres dbname=postgres'), 'SELECT 1'),
         'imagickkernel' => static fn (): ImagickKernel => ImagickKernel::fromBuiltin(Imagick::KERNEL_DIAMOND, '1'),
         'traversable' => static fn (): ArrayIterator => new ArrayIterator([1, 2]),
@@ -397,6 +403,21 @@ function named_value(ReflectionParameter $param): ?Closure
     }
     if (in_array($class, ['splfileobject', 'spltempfileobject'], true) && $name === 'context') {
         return static fn (): mixed => stream_context_create();
+    }
+    // PostgreSQL field and row numbers of a one-field, one-row result, flag masks, large-object modes and fetch classes.
+    if (str_starts_with($function, 'pg_') || str_starts_with($function, 'pg') && str_contains($function, 'field')) {
+        if (in_array($name, ['field', 'row'], true)) {
+            return static fn (): int => 0;
+        }
+        if ($name === 'flags') {
+            return static fn (): int => 0;
+        }
+        if ($name === 'mode' && str_contains($function, 'lo')) {
+            return static fn (): string => 'r';
+        }
+        if ($name === 'class' && str_contains($function, 'fetch_object')) {
+            return static fn (): string => 'stdClass';
+        }
     }
     // A PostgreSQL function takes its connection first, from the server the scan starts.
     if (str_starts_with($function, 'pg_') && $name === 'connection') {
