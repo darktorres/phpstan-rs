@@ -216,6 +216,12 @@ function valid_value(?ReflectionType $type): ?Closure
         'sqlite3' => static fn (): SQLite3 => new SQLite3(':memory:'),
         // Connected to the PostgreSQL server the scan starts inside its sandbox, on a Unix socket.
         'pgsql\\connection' => static fn (): PgSql\Connection => pg_connect('host=/tmp port=5432 user=postgres dbname=postgres'),
+        // Logged in to the FTP server the scan starts inside its sandbox, on loopback.
+        'ftp\\connection' => static function (): FTP\Connection {
+            $connection = ftp_connect('127.0.0.1', 2121);
+            ftp_login($connection, 'anonymous', 'probe@example.com');
+            return $connection;
+        },
         // A large object, opened inside a transaction on the server the scan starts.
         'pgsql\\lob' => static function (): PgSql\Lob {
             $connection = pg_connect('host=/tmp port=5432 user=postgres dbname=postgres');
