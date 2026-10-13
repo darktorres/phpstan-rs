@@ -47,7 +47,9 @@ function worker_command(string $php, bool $zendMm, array $sandbox): array
         $variables['USE_ZEND_ALLOC'] = '0';
     }
     if ($sandbox['mode'] === 'bwrap') {
-        // The servers' sockets are in the worker's home: its /tmp is the host's, read-only.
+        // The worker's /tmp is the host's, read-only: temporary files go to its home, which is its own.
+        $variables['TMPDIR'] = $variables['HOME'];
+        // The servers' sockets are in the worker's home too.
         if (isset($sandbox['servers'])) {
             $variables['BUILTIN_RUNS_RUN'] = $variables['HOME'] . '/run';
         }
