@@ -6357,6 +6357,21 @@ impl<'a> Checker<'a> {
     /// construction `check_expr`'s `ExprKind::Closure`/`ExprKind::ArrowFn`
     /// arms do, but on this separate, read-only inference pass rather
     /// than the diagnostic-producing one.
+    /// The declared return of a callable's signature, its templates bound by the types the
+    /// callable is given as parameters.
+    fn bound_return_type(&self, sig: &FunctionReflection, param_overrides: &[Type]) -> Type {
+        let mut bindings: TemplateBindings = TemplateBindings::default();
+        for (param, ty) in sig.params().iter().zip(param_overrides) {
+            let promoted = param.ty().promote_class_string_literals(ty, &|s| {
+                self.registry.lookup_class(s).map(|(c, _)| c.to_string())
+            });
+            self.relation()
+                .infer_template_bindings(param.ty(), &promoted, &mut bindings);
+        }
+        sig.return_type()
+            .substitute_templates(&bindings, &self.relation())
+    }
+
     pub(crate) fn infer_closure_return_with_param_overrides(
         &self,
         callback: &ExprNode,
@@ -6482,25 +6497,19 @@ impl<'a> Checker<'a> {
                     None => (None, None),
                 };
                 sig.map(|s| {
-                    let mut bindings: TemplateBindings = TemplateBindings::default();
-                    for (param, ty) in s.params().iter().zip(param_overrides) {
-                        let promoted = param.ty().promote_class_string_literals(ty, &|s| {
-                            self.registry.lookup_class(s).map(|(c, _)| c.to_string())
-                        });
-                        self.relation().infer_template_bindings(
-                            param.ty(),
-                            &promoted,
-                            &mut bindings,
-                        );
-                    }
-                    let substituted = s
-                        .return_type()
-                        .substitute_templates(&bindings, &self.relation());
+                    let substituted = self.bound_return_type(&s, param_overrides);
                     match &class {
                         Some(class) => self.resolve_pseudo(&substituted, class),
                         None => substituted,
                     }
                 })
+            }
+            // A named function (`array_map('identity', $xs)`) gives its declared return, with
+            // its templates bound by the element types, as a first-class callable does.
+            ExprKind::Literal(Literal::String(name)) => {
+                let name = self.syntax_string_text(name)?;
+                let sig = self.registry.function_by_name(name)?;
+                Some(self.bound_return_type(sig, param_overrides))
             }
             _ => None,
         }
