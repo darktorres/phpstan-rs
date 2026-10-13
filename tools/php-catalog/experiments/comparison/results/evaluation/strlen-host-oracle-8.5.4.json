@@ -1,0 +1,394 @@
+{
+  "php_cli_sha256": "23250df2186ac1f9c7b5323a3518f9f466cdf5b248cca04448ea73c7dd005386",
+  "php_source_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
+  "cases": [
+    {
+      "id": "parser-weak-int",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "int",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"return\",\"value\":1,\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "return",
+        "value": 1,
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-weak-float",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "float",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"return\",\"value\":3,\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "return",
+        "value": 3,
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-weak-bool",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "bool",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"return\",\"value\":1,\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "return",
+        "value": 1,
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-weak-null",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "null",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"return\",\"value\":0,\"deprecations\":[\"strlen(): Passing null to parameter #1 ($string) of type string is deprecated\"]}\n",
+      "result": {
+        "outcome": "return",
+        "value": 0,
+        "deprecations": [
+          "strlen(): Passing null to parameter #1 ($string) of type string is deprecated"
+        ]
+      }
+    },
+    {
+      "id": "parser-weak-string",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "string",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"return\",\"value\":3,\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "return",
+        "value": 3,
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-weak-array",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "array",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-weak-stringable",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "stringable",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"return\",\"value\":2,\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "return",
+        "value": 2,
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-weak-plain_object",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "plain_object",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-weak-final_object",
+      "mode": "weak",
+      "transfer": "parser-predicate",
+      "input": "final_object",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-int",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "int",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-float",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "float",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-bool",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "bool",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-null",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "null",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-string",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "string",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"return\",\"value\":3,\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "return",
+        "value": 3,
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-array",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "array",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-stringable",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "stringable",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-plain_object",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "plain_object",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "parser-strict-final_object",
+      "mode": "strict",
+      "transfer": "parser-predicate",
+      "input": "final_object",
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"TypeError\",\"deprecations\":[]}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "TypeError",
+        "deprecations": []
+      }
+    },
+    {
+      "id": "tostring_normal",
+      "mode": "weak",
+      "transfer": "tostring_normal",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "RESULT:{\"value\":2}\n",
+      "result": {
+        "value": 2
+      }
+    },
+    {
+      "id": "tostring_throws",
+      "mode": "weak",
+      "transfer": "tostring_throws",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"RuntimeException\"}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "RuntimeException"
+      }
+    },
+    {
+      "id": "tostring_returns_int",
+      "mode": "weak",
+      "transfer": "tostring_returns_int",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"return\",\"value\":2}\n",
+      "result": {
+        "outcome": "return",
+        "value": 2
+      }
+    },
+    {
+      "id": "tostring_fatal",
+      "mode": "weak",
+      "transfer": "tostring_fatal",
+      "input": null,
+      "exit_status": 255,
+      "stdout": "before\n",
+      "result": null
+    },
+    {
+      "id": "tostring_suspends",
+      "mode": "weak",
+      "transfer": "tostring_suspends",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "suspended:s\nRESULT:{\"value\":2}\n",
+      "result": {
+        "value": 2
+      }
+    },
+    {
+      "id": "tostring_exits",
+      "mode": "weak",
+      "transfer": "tostring_exits",
+      "input": null,
+      "exit_status": 3,
+      "stdout": "before\n",
+      "result": null
+    },
+    {
+      "id": "destructor_on_new_temporary",
+      "mode": "weak",
+      "transfer": "destructor_on_new_temporary",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "destruct\nRESULT:{\"outcome\":\"throw\",\"class\":\"RuntimeException\",\"message\":\"d\"}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "RuntimeException",
+        "message": "d"
+      }
+    },
+    {
+      "id": "destructor_on_call_result",
+      "mode": "weak",
+      "transfer": "destructor_on_call_result",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "destruct\nRESULT:{\"outcome\":\"throw\",\"class\":\"RuntimeException\",\"message\":\"d\"}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "RuntimeException",
+        "message": "d"
+      }
+    },
+    {
+      "id": "destructor_on_held_variable",
+      "mode": "weak",
+      "transfer": "destructor_on_held_variable",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "RESULT:{\"value\":1}\ndestruct\n",
+      "result": {
+        "value": 1
+      }
+    },
+    {
+      "id": "destructor_after_unset_in_tostring",
+      "mode": "weak",
+      "transfer": "destructor_after_unset_in_tostring",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "destruct\nRESULT:{\"outcome\":\"throw\",\"class\":\"RuntimeException\",\"message\":\"d\"}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "RuntimeException",
+        "message": "d"
+      }
+    },
+    {
+      "id": "destructor_after_array_cleared_in_tostring",
+      "mode": "weak",
+      "transfer": "destructor_after_array_cleared_in_tostring",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "destruct\nRESULT:{\"outcome\":\"throw\",\"class\":\"RuntimeException\",\"message\":\"d\"}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "RuntimeException",
+        "message": "d"
+      }
+    },
+    {
+      "id": "diagnostic_handler_throws",
+      "mode": "weak",
+      "transfer": "diagnostic_handler_throws",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "RESULT:{\"outcome\":\"throw\",\"class\":\"ErrorException\"}\n",
+      "result": {
+        "outcome": "throw",
+        "class": "ErrorException"
+      }
+    },
+    {
+      "id": "constant_string_lengths",
+      "mode": "weak",
+      "transfer": "constant_string_lengths",
+      "input": null,
+      "exit_status": 0,
+      "stdout": "RESULT:{\"multibyte\":2,\"nul\":3,\"empty\":0}\n",
+      "result": {
+        "multibyte": 2,
+        "nul": 3,
+        "empty": 0
+      }
+    }
+  ]
+}

@@ -32,6 +32,10 @@ class LockStalenessTests(unittest.TestCase):
         stale = [name for name, digest in pins.items() if sha(HERE / "results" / "evaluation" / name) != digest]
         self.assertEqual(stale, [])
 
+    def test_the_host_oracle_matches_its_pin(self):
+        self.assertEqual(sha(HERE / "results" / "evaluation" / "strlen-host-oracle-8.5.4.json"),
+                         LOCK["strlen_host_oracle_sha256"])
+
     def test_the_checked_in_link_manifest_and_checkpoint_are_pinned(self):
         self.assertEqual(sha(HERE / "results" / "evaluation" / "link-manifest.json"), LOCK["link_manifest_sha256"])
         self.assertEqual(sha(HERE / "results" / "evaluation" / "checkpoint-validation.json"),

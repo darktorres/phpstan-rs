@@ -131,5 +131,6 @@
     "finish-completed.json": "a307bd4bd98028e83b32e150a056e6242eccb95053d19fabe5b0e73bb02e3848",
     "cir-imports.json": "a4362119095efa559cb05817b24b7124c2cef5ad9304e80fdc21ee9173ffd10f"
   },
-  "checkpoint_validation_sha256": "2a40fa2d6adbd10ffd22bc80b1caa3829abc1df8fd62493450ebc60306a0e059"
+  "strlen_host_oracle_sha256": "4746328cc2a1ffeaf2f14970e7e1e7ee6a83fce414d2fba17762dcb3ef8e310e",
+  "checkpoint_validation_sha256": "779a4c31a28ff06426a87f2ddb2180a8e7ab00dc1355311bec34cfbb975135b4"
 }
