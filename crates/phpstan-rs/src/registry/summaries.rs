@@ -957,6 +957,10 @@ pub(crate) struct WriteFacts {
     /// the body shows, each with where; one written a value not known is
     /// not listed.
     pub(crate) origins: Box<[(Name, Box<[Origin]>)]>,
+    /// The variables whose origins die when the scope ends: what their
+    /// origins name is destroyed then, the classifier reads it from `origins`.
+    #[serde(default)]
+    pub(crate) dying_locals: Box<[Name]>,
     /// A variable whose name is computed is written (`$$n = …`,
     /// `extract()`): any variable may hold anything.
     pub(crate) computed: bool,
@@ -1423,6 +1427,9 @@ struct Scope {
     // in `calls`, and the destroys of call results waiting for their record.
     call_at: FxHashMap<u32, u32>,
     pending_dies: Vec<PendingDies>,
+    // The variables whose origins die when the scope ends, in the order
+    // `destroy_locals` takes them.
+    dying_locals: Vec<Name>,
     #[cfg(debug_assertions)]
     implicit_printed: FxHashSet<String>,
 }
@@ -1454,6 +1461,7 @@ impl Scope {
             bindings: self.bindings.into_boxed_slice(),
             made: made.into_boxed_slice(),
             origins: origins.into_boxed_slice(),
+            dying_locals: self.dying_locals.into_boxed_slice(),
             computed: self.computed,
             anything: self.anything,
             calls: self.calls.into_boxed_slice(),
@@ -2502,8 +2510,33 @@ impl Summarizer<'_> {
         for held in overwritten {
             self.implicit_on(held, Operation::Destroy);
         }
-        for (_, origins, contents) in locals {
-            self.implicit_on(origins, Operation::Destroy);
+        for (name, origins, contents) in locals {
+            let dies = origins
+                .as_ref()
+                .is_some_and(|origins| !origins.iter().all(Origin::runs_nothing));
+            if dies {
+                // The classifier reads what the variable holds from the
+                // variable's origins in the facts, which are these.
+                self.scope.dying_locals.push(name.clone());
+                #[cfg(debug_assertions)]
+                {
+                    let list = distinct_origins(origins.clone().unwrap_or_default());
+                    self.scope.calls.push(CallWrites {
+                        callee: Callee::Implicit {
+                            on: Some(Arc::from(list)),
+                            operation: Operation::Destroy,
+                        },
+                        arguments: Box::new([]),
+                        places: Box::new([]),
+                        objectless: Box::new([]),
+                        callables: Box::new([]),
+                        fills: Box::new([]),
+                        dies: DIES_SHADOW,
+                    });
+                }
+            } else {
+                self.implicit_on(origins, Operation::Destroy);
+            }
             self.implicit_on(contents, Operation::Destroy);
         }
     }
@@ -4230,6 +4263,7 @@ syntax::canonical_struct!(WriteFacts {
     bindings,
     made,
     origins,
+    dying_locals,
     computed,
     anything,
     calls,

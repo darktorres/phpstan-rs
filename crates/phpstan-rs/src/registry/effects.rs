@@ -6817,8 +6817,8 @@ mod effect_id_tests {
 
 use crate::registry::summaries::{DIES_CONTENTS, DIES_SHADOW, DIES_TEMPORARY};
 
-/// A call of a body as the classifier reads it: a recorded call, or the
-/// destroy a call result holds, as the operation the body records for it.
+/// A call of a body as the classifier reads it: a recorded call, or a destroy
+/// a call result or a dying variable holds, as the operation the body records.
 enum CallEntry<'r> {
     Recorded(&'r CallWrites),
     Held(Box<CallWrites>),
@@ -6863,6 +6863,25 @@ fn body_calls(facts: &WriteFacts) -> Vec<CallEntry<'_>> {
                 dies: 0,
             })));
         }
+    }
+    for name in facts.dying_locals.iter() {
+        let (_, origins) = facts
+            .origins
+            .iter()
+            .find(|(held, _)| held == name)
+            .expect("a dying local's origins are kept");
+        entries.push(CallEntry::Held(Box::new(CallWrites {
+            callee: Callee::Implicit {
+                on: Some(Arc::from(origins.to_vec())),
+                operation: Operation::Destroy,
+            },
+            arguments: Box::new([]),
+            places: Box::new([]),
+            objectless: Box::new([]),
+            callables: Box::new([]),
+            fills: Box::new([]),
+            dies: 0,
+        })));
     }
     #[cfg(debug_assertions)]
     check_body_calls(facts, &entries);
