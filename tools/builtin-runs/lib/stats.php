@@ -4,6 +4,9 @@
 
 final class Stats
 {
+    /** The probe a child runs, for the trace: the kind of value at the parameter. */
+    public static ?string $probe = null;
+
     /** Whether a line is kept for every child (`--stats`). */
     public static bool $enabled = false;
     /** The kind of the unit being run. */

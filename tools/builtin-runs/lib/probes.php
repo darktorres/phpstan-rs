@@ -452,10 +452,15 @@ function named_value(ReflectionParameter $param): ?Closure
         return static fn (): string => sys_get_temp_dir();
     }
     // MySQL arguments: the connection the scan starts inside its sandbox, a statement, a charset and a savepoint name.
+    // A MySQL connection goes through the socket: without a host, and with port 0. A TCP attempt to the server, which
+    // skips networking, fails and leaves the object half-open, and the next call on it crashes.
     if (str_starts_with($class, 'mysqli') || str_starts_with($function, 'mysqli')) {
+        if ($name === 'hostname') {
+            return static fn (): mixed => null;
+        }
         $value = match ($name) {
             'query', 'sql' => 'SELECT 1',
-            'hostname' => 'localhost',
+            'port' => 0,
             'username' => 'root',
             'password', 'database' => '',
             'socket' => server_run_dir() . '/mysql.sock',
@@ -1145,7 +1150,7 @@ function record(string $builtin, string $where, ?array $seen, array &$out): void
     // A trace, when the run names one: each child's result is appended as it is known, so a run can be followed.
     $trace = getenv('BUILTIN_RUNS_TRACE');
     if ($trace !== false && $trace !== '') {
-        file_put_contents($trace, json_encode(['builtin' => $builtin, 'where' => $where, 'result' => $seen === null ? 'no-result' : 'ok'], JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        file_put_contents($trace, json_encode(['builtin' => $builtin, 'where' => $where, 'probe' => Stats::$probe, 'result' => $seen === null ? 'no-result' : 'ok'], JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
     }
     if ($seen === null) {
         Stats::failed($builtin, $where);

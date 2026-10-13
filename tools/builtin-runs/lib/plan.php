@@ -26,9 +26,7 @@ const METHODS_SKIPPED = [
     'redis::function', 'redis::auth', 'redis::select', 'redis::swapdb', 'redis::acl', 'redis::module',
     'redis::cluster', 'redis::reset', 'redis::connect', 'redis::pconnect', 'redis::popen', 'redis::open',
     'redis::close', 'redis::multi', 'redis::exec', 'redis::discard', 'redis::watch', 'redis::unwatch',
-    // The serializer and the other options apply to every later call, which an object or a callable as the value breaks.
-    'redis::setoption',
-    // A MySQL connection made with probe values leaves the object unable to answer the next call.
+    // A MySQL connection is made with a probe value that leaves the object half-open, and the next call on it crashes.
     'mysqli::connect', 'mysqli::real_connect', 'mysqli::change_user',
 ];
 

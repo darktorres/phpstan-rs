@@ -7,9 +7,10 @@
  *
  * @param array<string, true> $out
  */
-function probe_child(string $builtin, string $where, Closure $call, array &$out): void
+function probe_child(string $builtin, string $where, Closure $call, array &$out, ?string $probe = null): void
 {
     if (Stats::wants($builtin, $where)) {
+        Stats::$probe = $probe;
         record($builtin, $where, in_child($call), $out);
     }
 }
@@ -61,7 +62,7 @@ function probe_function(string $function, array &$out): void
                     }
                 }
                 unset($kept);
-            }, $out);
+            }, $out, $probe);
         }
     }
 }
@@ -102,7 +103,7 @@ function probe_method(string $class, string $name, array &$out): void
                 Seen::add('reached');
                 invoke_arguments($params, $at, $value, static fn (array $args): mixed => $static ? $class::$name(...$args) : $object->$name(...$args));
                 Seen::returned();
-            }, $out);
+            }, $out, $probe);
         }
     }
     if ($static) {
@@ -264,7 +265,7 @@ function probe_held(string $class, string $firstName, int $paramAt, int $probeAt
                     Seen::add('reached');
                     invoke_arguments($thenParams, -1, null, static fn (array $args): mixed => $object->$thenName(...$args));
                     Seen::returned();
-                }, $out);
+                }, $out, $probe);
             }
         }
     }
