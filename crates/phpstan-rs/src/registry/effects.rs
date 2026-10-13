@@ -6888,30 +6888,15 @@ fn body_calls(facts: &WriteFacts) -> Vec<CallEntry<'_>> {
     entries
 }
 
-/// Checks, in a debug build, that the destroys the body's call results hold
-/// are the ones it records as operations: each held one was recorded, and
-/// each recorded one is held or was recorded as its own operation.
+/// Checks, in a debug build, that the destroys the body's call results and
+/// dying variables hold are exactly the ones it records as operations: each
+/// held one was recorded, and each recorded one is held.
 #[cfg(debug_assertions)]
 fn check_body_calls(facts: &WriteFacts, entries: &[CallEntry<'_>]) {
     let shadow: Vec<&Callee> = facts
         .calls
         .iter()
         .filter(|call| call.dies & DIES_SHADOW != 0)
-        .map(|call| &call.callee)
-        .collect();
-    let recorded: Vec<&Callee> = facts
-        .calls
-        .iter()
-        .filter(|call| {
-            call.dies & DIES_SHADOW == 0
-                && matches!(
-                    call.callee,
-                    Callee::Implicit {
-                        operation: Operation::Destroy,
-                        ..
-                    }
-                )
-        })
         .map(|call| &call.callee)
         .collect();
     let held: Vec<&Callee> = entries
@@ -6929,8 +6914,8 @@ fn check_body_calls(facts: &WriteFacts, entries: &[CallEntry<'_>]) {
     }
     for callee in &shadow {
         assert!(
-            held.contains(callee) || recorded.contains(callee),
-            "a destroy the body records is neither held nor recorded"
+            held.contains(callee),
+            "a destroy the body records is not held"
         );
     }
 }
