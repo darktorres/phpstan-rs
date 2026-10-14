@@ -234,8 +234,8 @@ Proposals (§10), numbered as in the report:
 With the plan and proposals 6-11, both modes end at ≈10.3-10.6 G; without
 6, the off run ends at ≈13.7-14.1 G.
 
-Open, each needing a build (none run): the callees proposal 9's demand
-reaches, which also gives proposal 8's d; proposal 7's measured saving.
+What is still open, the decisions and the investigations, is tracked in
+`PROFILE_DRILL_PIWIGO_OFF_LEDGER.md`.
 
 Resume at proposal 1, then 2; then proposal 6's carrying step. Proposal 8
 waits on 9 and on the user's decision about syntax errors in skimmed
