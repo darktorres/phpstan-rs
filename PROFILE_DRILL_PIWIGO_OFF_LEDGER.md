@@ -32,6 +32,8 @@ None of these was run for the report.
 | B4 | OPEN | Wall time. Nothing is timed, including the 1.6 G of serial stub work on a cold run's critical path, with the other cores idle (§12). | the wall-time weight of proposals 1-5 |
 | B5 | OPEN | A run with the per-file cache warm. All three runs had it off, so its floor and `from_def`'s cost with it on are unknown (§11, §12). | the floor of the per-file-cache-warm mode |
 | B6 | OPEN | Disk time of the cold run's cache write. Its 58 M is callgrind's count only (§12). | the cold run's full cost |
+| B7 | OPEN | How many of `is_super_type_of`'s 1,341,821 questions ask about one node against itself. The profile counts calls, not their operands (N2). | E6's saving |
+| B8 | OPEN | How many of `Type::object`'s 170,696 calls build a class's plain object type, with no arguments, and how many of `int_literal`'s 71,550 build a small integer (N2). | whether E7 is worth building |
 
 ## Investigations in the code or the data, no build
 
@@ -117,7 +119,53 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 
 | # | status | item | gates |
 |---|---|---|---|
-| E1 | OPEN | The deadlock of C2, present in today's code. One fix would build each process-wide stub value off any rayon thread: when `rayon::current_thread_index()` is `Some`, run the build on a scoped `std::thread` and join it. A thread that belongs to no pool blocks in `install` and in `par_iter` without running other jobs. This needs a decision, and a test that forces a cold build from a pool's worker. | proposal 5 |
+| E1 | OPEN, investigated (E1 below) | The deadlock of C2, present in today's code. The fix (R1 and R2 below) and its test wait on a decision. The reproduction was not run. | proposal 5 |
+
+### E1. Where a stub build can deadlock, and the fix
+
+**The locks.** Five process-wide values hold a lock while their first build runs:
+- `plain_base` and `phpstan_base` (`LazyLock`, `project.rs:537-541`, `:1203-1206`);
+- `built_stub_corpus` (`LazyLock`, `stubs.rs:1420-1429`);
+- `stub_index` and `generated_stub_data` (`OnceLock`, `stubs.rs:1431-1450`).
+
+Two kinds of parallel work run under them: the corpus's `par_iter` (`stubs.rs:1482`), and the bases' finishing passes, through `finish_loading` → `worker_pool().install` (`project.rs:1398`). No other static `LazyLock` or `OnceLock` in the crate runs parallel work.
+
+**Two ways it fails.**
+- **Re-entry.** A rayon worker that waits inside the build (in a join, or in an `install` into another pool) runs other jobs of its own pool. One that needs the same lock waits on its own thread (C2).
+- **Starvation.** Waiters that are workers of pool P block in the OS. If every worker of P waits, and the build needs P, nothing serves the build. The comment at `incremental_updates.rs:1158-1162` describes this case: it is why that test runs its groups on a pool of its own.
+
+**Who forces a stub value, and on which thread:**
+
+| caller | thread | can start a build? | risk |
+|---|---|---|---|
+| `check-project`: `Session::load` → `Project::new`, `expect_files` → `switch_to_phpstan_base` | main | yes (cold or off cache) | none: main belongs to no pool |
+| `check-project`: `finishing_scopes` → `rayon::join` of two `closure_scope`s → `stub_index()` (`project.rs:1290-1296`) | a worker of `worker_pool`. The warm profile shows `stub_index` first forced by `closure_scope` on worker 02, with worker 04 blocked on the same `OnceLock` | only when the bases load from the cache but `stub-index` does not (a damaged, unreadable or deleted file, or a failed write). The corpus then builds on worker 02, inside the finishing passes | **re-entry**, if worker 02 takes back the join's other half (the second `closure_scope`) while it waits in the corpus's `par_iter`. Normally another worker steals that half first, so this is rare |
+| checker: `builtin_function_extension` → `stub_index()` (`checker/expr/builtin_calls.rs:36`) | workers of `worker_pool` | the same partial-cache case, when the index was not forced before the check | the same re-entry |
+| language server: `Server::new` → `Project::new` (`lsp.rs:289`); edits and rebuilds | main, and the debounce thread | yes | none: neither belongs to a pool |
+| `incremental-bench` (`main/incremental_bench.rs:43`) | main | yes | none |
+| `check` (`main/check.rs`) | parses only | no | none |
+| fixtures (`tests/fixtures.rs`): `warm_stubs` on threads of its own; `Session::for_fixture` on libtest-mimic's threads | no pool | yes | none |
+| `edits_across_every_fixture_match_a_fresh_load` (`incremental_updates.rs:1155-1175`) | workers of the test's own pool | yes, when the first `cargo test --lib` after a source change runs cold and this test's worker is the first to force a base | **re-entry**, through both paths of C2. Other groups are queued in that pool's deques, so a steal is likely |
+
+**A deterministic reproduction (not run).** A fresh process (an integration-test binary of its own) with `PHPSTAN_RS_NO_STUB_CACHE=1`, a rayon pool of **one** thread, and `pool.install(|| (0..2).into_par_iter().for_each(|_| { Project::new(); }))`:
+1. The `for_each` splits once. The second item stays on the worker's own deque.
+2. The first item forces `plain_base`. The corpus's `par_iter` runs on that one-thread pool, and each join takes back its own half, so the build itself completes.
+3. `finish_loading` then calls `worker_pool().install` from that worker. While it waits, `wait_until_cold` takes the second item from its own deque first (`registry.rs:791`).
+4. The second item calls `Project::new` → `plain_base`, whose initialization is still running lower on the same stack. The thread waits on itself.
+
+The test needs a watchdog: run the body on a thread and fail if a channel's `recv_timeout` expires (a cold stub build in a debug build takes minutes, so the bound must allow for that). Not run because another instance is building on this machine (load 18.7 on 8 cores, a probe worktree at `2a7befd3`).
+
+**The fix.**
+- **R1. Force every stub value on the thread that makes the project.** `Project::new` and `switch_to_phpstan_base` also force `stub_index()` (`warm_index`) and `generated_stub_data()`, next to the base. Then no job of `worker_pool` starts a stub build in `check-project`, the language server or `incremental-bench`, cache state notwithstanding. It costs nothing on a warm run: the index is loaded once either way (1.5 M, by `closure_scope` today).
+- **R2. Make each lock's build safe on a rayon worker.** The five initializers run their body through one helper. When `rayon::current_thread_index()` is `Some`, the helper runs the body on a scoped `std::thread` with `WORKER_STACK_SIZE` and joins it; otherwise it runs the body inline.
+  - The waiting worker then blocks in the OS without taking jobs, so re-entry is impossible.
+  - The nested initializers (base → data → corpus) run inline on the build thread, which belongs to no pool.
+  - R2 covers the test's pool, and any later caller that makes a project on a pool's worker.
+- **R3 (debug only).** The initializers `debug_assert!` that the caller is not a worker of `worker_pool` (`worker_pool().current_thread_index().is_none()`). A build that `worker_pool` serves must not have that pool's workers waiting for it, or all of them can wait and starve it. R1 makes this hold today, and the assertion keeps a later caller from breaking it.
+- **What proposal 5 needs.** With R1-R3, the corpus can move into `worker_pool().install` (proposal 5). Its waiters are main and plain threads (R1), or blocked workers of other pools (R2), and never workers of `worker_pool` (R3).
+- **Rejected:**
+  - `rayon::ThreadPool::install` from a worker of another pool, as a way to wait: it steals while it waits (`in_worker_cross`).
+  - Taking the build out of the lock (build first, then publish): two threads could both build the 5 G corpus.
 
 ## Costs nothing addresses, not investigated further
 
