@@ -16,18 +16,17 @@
 //! `Project` and a `Registry` hold what was built from it, so a pool job
 //! cannot start or wait for a build.
 
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 
-use super::Registry;
 use super::stubs::Corpus;
+use super::{CacheDir, Registry};
 
 /// Where a `Stubs` finds the stub data it does not build.
 #[derive(Clone, Debug)]
 pub enum StubSource {
     /// The stub cache in `dir`: what it holds for this build is read, and
     /// what is built is stored there.
-    Cached { dir: PathBuf },
+    Cached { dir: Arc<CacheDir> },
     /// Nothing is read or stored: the stubs are built from the embedded
     /// sources.
     Build,
@@ -38,12 +37,14 @@ impl StubSource {
     /// `Build`: `PHPSTAN_RS_NO_STUB_CACHE` turns the cache off.
     pub fn from_environment() -> StubSource {
         match super::cache_dir() {
-            Some(dir) => StubSource::Cached { dir },
+            Some(dir) => StubSource::Cached {
+                dir: Arc::new(CacheDir::new(dir)),
+            },
             None => StubSource::Build,
         }
     }
 
-    pub(crate) fn dir(&self) -> Option<&Path> {
+    pub(crate) fn dir(&self) -> Option<&Arc<CacheDir>> {
         match self {
             StubSource::Cached { dir } => Some(dir),
             StubSource::Build => None,
@@ -215,7 +216,7 @@ impl Stubs {
     }
 
     /// The stub cache's directory, if the stubs have one.
-    pub(crate) fn cache_dir(&self) -> Option<&Path> {
-        self.inner.source.dir()
+    pub(crate) fn cache_dir(&self) -> Option<&CacheDir> {
+        self.inner.source.dir().map(|dir| &**dir)
     }
 }

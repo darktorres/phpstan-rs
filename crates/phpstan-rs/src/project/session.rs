@@ -770,7 +770,9 @@ impl Session {
                             if let Read::Loaded(file) = &mut read {
                                 project.index_use_sites(&mut file.parsed, &file.source);
                                 project.note_owner(&mut file.parsed, p);
-                                if let Some(key) = file.cache_key.take() {
+                                if let Some(key) = file.cache_key.take()
+                                    && file_cache::can_store()
+                                {
                                     file_cache::store(
                                         &key,
                                         &file_cache::CachedFile::of(&file.parsed, file.len),

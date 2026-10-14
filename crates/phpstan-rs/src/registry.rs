@@ -33,7 +33,9 @@ mod resolve;
 pub(crate) mod scope;
 mod shared;
 mod stub_cache;
+pub use stub_cache::CacheDir;
 pub(crate) use stub_cache::cache_dir;
+pub(crate) use stub_cache::probe as probe_writable;
 mod summaries;
 pub(crate) use stub_cache::{
     load as load_cached, load_container, store as store_cached, store_container,
@@ -731,7 +733,7 @@ impl Registry {
     /// The registry stored under `name` for this build, if there is a
     /// readable file of it.
     pub(crate) fn load_cached(
-        dir: Option<&std::path::Path>,
+        dir: Option<&stub_cache::CacheDir>,
         name: &str,
     ) -> Option<Result<Registry, String>> {
         let reader = load_container(dir, name)?;
@@ -741,9 +743,12 @@ impl Registry {
     /// Stores the registry under `name` for this build.
     pub(crate) fn store_cached(
         &self,
-        dir: Option<&std::path::Path>,
+        dir: Option<&stub_cache::CacheDir>,
         name: &str,
     ) -> Result<(), String> {
+        if !dir.is_some_and(stub_cache::CacheDir::can_write) {
+            return Ok(());
+        }
         let mut writer = container::Writer::new();
         self.store(&mut writer)?;
         store_container(dir, name, writer);

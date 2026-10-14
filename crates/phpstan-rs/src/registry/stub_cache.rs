@@ -10,6 +10,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use super::container::{Reader, Unreadable, Writer};
 
@@ -43,14 +44,57 @@ pub(crate) fn cache_dir() -> Option<PathBuf> {
     Some(base.join("phpstan-rs"))
 }
 
-fn path(dir: Option<&Path>, name: &str) -> Option<PathBuf> {
-    Some(dir?.join(format!("{name}-{KEY}.cbor")))
+/// A cache directory, and whether it can be written: found once, at the
+/// first store, so a run that stores nothing never looks, and one that
+/// can't store pays for none of what a store does before the write. The
+/// cache is read either way.
+#[derive(Debug)]
+pub struct CacheDir {
+    path: PathBuf,
+    writable: OnceLock<bool>,
+}
+
+impl CacheDir {
+    pub fn new(path: PathBuf) -> CacheDir {
+        CacheDir {
+            path,
+            writable: OnceLock::new(),
+        }
+    }
+
+    /// Whether a store here can succeed: creates the directory, then
+    /// creates and removes a file in it, as a store does. Says so, once,
+    /// when it can't.
+    pub(crate) fn can_write(&self) -> bool {
+        *self.writable.get_or_init(|| match probe(&self.path) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!(
+                    "phpstan-rs: the stub cache in {} can't be written ({error}); it is read, not stored to",
+                    self.path.display()
+                );
+                false
+            }
+        })
+    }
+}
+
+/// Creates `dir`, then a file in it, and removes the file.
+pub(crate) fn probe(dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let file = dir.join(format!(".write-check.{}.tmp", std::process::id()));
+    fs::File::create(&file)?;
+    fs::remove_file(&file)
+}
+
+fn path(dir: Option<&CacheDir>, name: &str) -> Option<PathBuf> {
+    Some(dir?.path.join(format!("{name}-{KEY}.cbor")))
 }
 
 /// The file stored under `name` for this build, if it can be read: the
 /// bytes of a file whole by its checksum and of this layout, else `None`,
 /// for the caller to build it again.
-pub(crate) fn load_container(dir: Option<&Path>, name: &str) -> Option<Reader> {
+pub(crate) fn load_container(dir: Option<&CacheDir>, name: &str) -> Option<Reader> {
     let bytes = fs::read(path(dir, name)?).ok()?;
     match Reader::new(bytes) {
         Ok(reader) => Some(reader),
@@ -70,19 +114,19 @@ pub(crate) fn load_container(dir: Option<&Path>, name: &str) -> Option<Reader> {
 /// Stores `writer`'s file under `name` for this build, pruning the oldest
 /// of what other builds stored under it. Writes a temporary file first and
 /// renames it, so a concurrent load never reads a partial file.
-pub(crate) fn store_container(dir: Option<&Path>, name: &str, writer: Writer) {
+pub(crate) fn store_container(dir: Option<&CacheDir>, name: &str, writer: Writer) {
     let Some(target) = path(dir, name) else {
         return;
     };
     let Some(dir) = target.parent() else {
         return;
     };
-    if fs::create_dir_all(dir).is_err() {
-        return;
-    }
     let temporary = dir.join(format!("{name}-{KEY}.{}.tmp", std::process::id()));
-    let written = fs::write(&temporary, writer.finish()).is_ok();
-    if !written || fs::rename(&temporary, &target).is_err() {
+    let written = fs::create_dir_all(dir)
+        .and_then(|()| fs::write(&temporary, writer.finish()))
+        .and_then(|()| fs::rename(&temporary, &target));
+    if let Err(error) = written {
+        eprintln!("phpstan-rs: the stored {name} can't be written ({error})");
         let _ = fs::remove_file(&temporary);
         return;
     }
@@ -93,7 +137,10 @@ pub(crate) fn store_container(dir: Option<&Path>, name: &str, writer: Writer) {
 const VALUE: &str = "value";
 
 /// What `store` stored under `name` for this build, if it can be read.
-pub(crate) fn load<T: serde::de::DeserializeOwned>(dir: Option<&Path>, name: &str) -> Option<T> {
+pub(crate) fn load<T: serde::de::DeserializeOwned>(
+    dir: Option<&CacheDir>,
+    name: &str,
+) -> Option<T> {
     let reader = load_container(dir, name)?;
     let decoded = reader
         .section(VALUE)
@@ -114,7 +161,10 @@ pub(crate) fn load<T: serde::de::DeserializeOwned>(dir: Option<&Path>, name: &st
 }
 
 /// Stores `value` under `name` for this build, as a file of one section.
-pub(crate) fn store<T: serde::Serialize>(dir: Option<&Path>, name: &str, value: &T) {
+pub(crate) fn store<T: serde::Serialize>(dir: Option<&CacheDir>, name: &str, value: &T) {
+    if !dir.is_some_and(CacheDir::can_write) {
+        return;
+    }
     let Ok(body) = encode(value) else {
         return;
     };

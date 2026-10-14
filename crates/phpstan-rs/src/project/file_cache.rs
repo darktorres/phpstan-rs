@@ -21,7 +21,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
 use rustc_hash::FxHashSet;
@@ -69,6 +69,34 @@ fn directory() -> Option<&'static Path> {
             Some(crate::registry::cache_dir()?.join("files").join(BUILD))
         })
         .as_deref()
+}
+
+/// Whether entries can be stored: checked once, at the first store, by
+/// doing what a store does first - creating the build's directory and a
+/// file in it - and the 256 shard directories entries go in. A run that
+/// stores nothing never looks, and one that can't store builds none of
+/// the entries. Says so, once, when it can't; the cache is read all the
+/// same.
+pub(super) fn can_store() -> bool {
+    static WRITABLE: OnceLock<bool> = OnceLock::new();
+    *WRITABLE.get_or_init(|| {
+        let Some(directory) = directory() else {
+            return false;
+        };
+        let prepared = crate::registry::probe_writable(directory).and_then(|()| {
+            (0..=255u8).try_for_each(|shard| fs::create_dir_all(directory.join(format!("{shard:02x}"))))
+        });
+        match prepared {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!(
+                    "phpstan-rs: the per-file cache in {} can't be written ({error}); it is read, not stored to",
+                    directory.display()
+                );
+                false
+            }
+        }
+    })
 }
 
 /// What a file of a context parse is stored as.
@@ -219,7 +247,8 @@ fn payload(bytes: &[u8]) -> Option<&[u8]> {
 
 /// Stores `cached` under `key`, through a temporary file renamed into place
 /// so a concurrent run never reads a partial entry. A failure leaves the
-/// file to be parsed again next time.
+/// file to be parsed again next time. The caller has found that entries
+/// can be stored (`can_store`), which made the shard directories.
 pub(super) fn store(key: &Key, cached: &CachedFile) {
     let Ok(payload) = postcard::to_allocvec(cached) else {
         return;
@@ -234,15 +263,10 @@ pub(super) fn store(key: &Key, cached: &CachedFile) {
             "a stored file does not read back as what was stored"
         );
     }
-    let Some(directory) = key.file.parent() else {
-        return;
-    };
-    if fs::create_dir_all(directory).is_err() {
-        return;
-    }
+    static PROCESS: OnceLock<u32> = OnceLock::new();
     let temporary = key.file.with_extension(format!(
         "{}.{:?}.tmp",
-        std::process::id(),
+        PROCESS.get_or_init(std::process::id),
         std::thread::current().id()
     ));
     let mut entry = Vec::with_capacity(HEADER_LEN + payload.len());
@@ -252,8 +276,14 @@ pub(super) fn store(key: &Key, cached: &CachedFile) {
     entry.extend_from_slice(&payload);
     let written = fs::File::create(&temporary)
         .and_then(|mut file| file.write_all(&entry))
-        .is_ok();
-    if !written || fs::rename(&temporary, &key.file).is_err() {
+        .and_then(|()| fs::rename(&temporary, &key.file));
+    if let Err(error) = written {
+        static REPORTED: AtomicBool = AtomicBool::new(false);
+        if !REPORTED.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "phpstan-rs: an entry of the per-file cache can't be written ({error}); the files it fails for are parsed again next run"
+            );
+        }
         let _ = fs::remove_file(&temporary);
         return;
     }

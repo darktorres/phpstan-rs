@@ -1276,7 +1276,7 @@ impl StubIndex {
     }
 
     /// The index stored for this build, if there is a readable file of it.
-    fn load_cached(dir: Option<&std::path::Path>) -> Option<StubIndex> {
+    fn load_cached(dir: Option<&crate::registry::CacheDir>) -> Option<StubIndex> {
         let reader = crate::registry::load_container(dir, "stub-index")?;
         match StubIndex::load(&reader) {
             Ok(index) => Some(index),
@@ -1290,7 +1290,10 @@ impl StubIndex {
         }
     }
 
-    fn store_cached(&self, dir: Option<&std::path::Path>) {
+    fn store_cached(&self, dir: Option<&crate::registry::CacheDir>) {
+        if !dir.is_some_and(crate::registry::CacheDir::can_write) {
+            return;
+        }
         let mut writer = Writer::new();
         if self.store(&mut writer).is_ok() {
             crate::registry::store_container(dir, "stub-index", writer);
@@ -1470,7 +1473,7 @@ pub struct Corpus {
     index: StubIndex,
     data: std::sync::OnceLock<GeneratedStubData>,
     // The stub cache the declarations are read from, if the index was.
-    dir: Option<std::path::PathBuf>,
+    dir: Option<std::sync::Arc<crate::registry::CacheDir>>,
 }
 
 impl std::fmt::Debug for Corpus {
@@ -1482,21 +1485,24 @@ impl std::fmt::Debug for Corpus {
 impl Corpus {
     /// The corpus stored in the stub cache `dir` for this build, else
     /// built from the embedded sources on `pool` and stored there.
-    pub(crate) fn obtain(dir: Option<&std::path::Path>, pool: &rayon::ThreadPool) -> Corpus {
-        if let Some(index) = StubIndex::load_cached(dir) {
+    pub(crate) fn obtain(
+        dir: Option<&std::sync::Arc<crate::registry::CacheDir>>,
+        pool: &rayon::ThreadPool,
+    ) -> Corpus {
+        if let Some(index) = StubIndex::load_cached(dir.map(|d| &**d)) {
             return Corpus {
                 index,
                 data: std::sync::OnceLock::new(),
-                dir: dir.map(std::path::Path::to_path_buf),
+                dir: dir.map(std::sync::Arc::clone),
             };
         }
         let (index, data) = build_generated_stub_data(Some(pool));
-        index.store_cached(dir);
-        crate::registry::store_cached(dir, "stub-data", &data);
+        index.store_cached(dir.map(|d| &**d));
+        crate::registry::store_cached(dir.map(|d| &**d), "stub-data", &data);
         Corpus {
             index,
             data: std::sync::OnceLock::from(data),
-            dir: dir.map(std::path::Path::to_path_buf),
+            dir: dir.map(std::sync::Arc::clone),
         }
     }
 
