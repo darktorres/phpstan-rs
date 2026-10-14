@@ -1084,7 +1084,7 @@ fn assert_edits_match_fresh_loads(
         // As `load_files` loads a batch: a project that is to have PHPStan's
         // source in it starts from the registry that has it, and does not
         // switch to it when it finishes.
-        project.expect_files(files.iter().flatten());
+        project.expect_files(files.iter().flatten(), Stubs::shared());
         for ((path, source), file) in texts.iter().zip(files) {
             if let Some(file) = file {
                 project.insert_parsed_file(PathBuf::from(path), file, source.to_string(), true);
@@ -1156,10 +1156,10 @@ fn edits_across_every_fixture_match_a_fresh_load() {
     use rayon::prelude::*;
     let sources = checker_sources();
     // The groups share nothing, so they run beside each other, on a pool of
-    // this test's own. A group that is first to need a registry built
-    // lazily (`Project::phpstan_base`) makes the others wait for it, and
-    // its build runs on `worker_pool()`: were the groups that pool's
-    // workers, all of them would be waiting and none could serve the build.
+    // this test's own. A group that is first to need a registry makes the
+    // others wait for it, and its build runs on `worker_pool()`: were the
+    // groups that pool's workers, all of them would be waiting and none
+    // could serve the build.
     let pool = rayon::ThreadPoolBuilder::new()
         .stack_size(crate::project::WORKER_STACK_SIZE)
         .build()
@@ -1309,7 +1309,7 @@ fn a_batch_load_equals_a_load_file_by_file() {
             crate::project::parse_file(Path::new(path), source.as_bytes(), false).expect("parses")
         })
         .collect();
-    batch.expect_files(files.iter());
+    batch.expect_files(files.iter(), Stubs::shared());
     for ((path, source), file) in paths.iter().zip(sources).zip(files) {
         batch.insert_parsed_file(PathBuf::from(path), file, source.to_string(), true);
     }

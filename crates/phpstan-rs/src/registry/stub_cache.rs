@@ -9,7 +9,7 @@
 //! turns the cache off.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::container::{Reader, Unreadable, Writer};
 
@@ -43,15 +43,15 @@ pub(crate) fn cache_dir() -> Option<PathBuf> {
     Some(base.join("phpstan-rs"))
 }
 
-fn path(name: &str) -> Option<PathBuf> {
-    Some(cache_dir()?.join(format!("{name}-{KEY}.cbor")))
+fn path(dir: Option<&Path>, name: &str) -> Option<PathBuf> {
+    Some(dir?.join(format!("{name}-{KEY}.cbor")))
 }
 
 /// The file stored under `name` for this build, if it can be read: the
 /// bytes of a file whole by its checksum and of this layout, else `None`,
 /// for the caller to build it again.
-pub(crate) fn load_container(name: &str) -> Option<Reader> {
-    let bytes = fs::read(path(name)?).ok()?;
+pub(crate) fn load_container(dir: Option<&Path>, name: &str) -> Option<Reader> {
+    let bytes = fs::read(path(dir, name)?).ok()?;
     match Reader::new(bytes) {
         Ok(reader) => Some(reader),
         Err(Unreadable::Damaged) => None,
@@ -70,8 +70,8 @@ pub(crate) fn load_container(name: &str) -> Option<Reader> {
 /// Stores `writer`'s file under `name` for this build, pruning the oldest
 /// of what other builds stored under it. Writes a temporary file first and
 /// renames it, so a concurrent load never reads a partial file.
-pub(crate) fn store_container(name: &str, writer: Writer) {
-    let Some(target) = path(name) else {
+pub(crate) fn store_container(dir: Option<&Path>, name: &str, writer: Writer) {
+    let Some(target) = path(dir, name) else {
         return;
     };
     let Some(dir) = target.parent() else {
@@ -93,8 +93,8 @@ pub(crate) fn store_container(name: &str, writer: Writer) {
 const VALUE: &str = "value";
 
 /// What `store` stored under `name` for this build, if it can be read.
-pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
-    let reader = load_container(name)?;
+pub(crate) fn load<T: serde::de::DeserializeOwned>(dir: Option<&Path>, name: &str) -> Option<T> {
+    let reader = load_container(dir, name)?;
     let decoded = reader
         .section(VALUE)
         .map_err(|e| e.to_string())
@@ -114,13 +114,13 @@ pub(crate) fn load<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
 }
 
 /// Stores `value` under `name` for this build, as a file of one section.
-pub(crate) fn store<T: serde::Serialize>(name: &str, value: &T) {
+pub(crate) fn store<T: serde::Serialize>(dir: Option<&Path>, name: &str, value: &T) {
     let Ok(body) = encode(value) else {
         return;
     };
     let mut writer = Writer::new();
     if writer.section(VALUE, &body).is_ok() {
-        store_container(name, writer);
+        store_container(dir, name, writer);
     }
 }
 

@@ -46,6 +46,7 @@ use lsp_types::{
 use crate::checker::Checker;
 use crate::project::use_sites;
 use crate::project::{Project, ProjectSettings};
+use crate::registry::stub_set::{StubSource, Stubs};
 use crate::registry::{FunctionReflection, format_signature, param_label};
 use crate::{baseline, ignore_errors};
 use syntax::ast::ClassKind;
@@ -140,6 +141,8 @@ struct Server {
     // The process's worker pool (`project::worker_pool`), which every
     // workspace check runs on.
     pool: Arc<rayon::ThreadPool>,
+    // The built-in stubs, which the project takes its base from.
+    stubs: Stubs,
     // Every URI the client currently has open or has otherwise seen, so
     // the (now-deferred) workspace scan and `didOpen`/`didChange` share
     // one path->diagnostics story instead of the workspace scan being
@@ -286,7 +289,11 @@ struct Server {
 
 impl Server {
     fn new(version: &str, config_schema: config::Schema) -> Self {
-        let mut project = Project::new();
+        let stubs = Stubs::new(
+            StubSource::from_environment(),
+            crate::project::worker_pool(),
+        );
+        let mut project = Project::from_stubs(&stubs);
         // hover/definition's own text-split technique needs each file's
         // exact source text - see `Project::retain_source`'s own doc
         // comment for why this is opt-in and off elsewhere.
@@ -296,7 +303,8 @@ impl Server {
         });
         Server {
             project,
-            pool: crate::project::worker_pool(),
+            pool: Arc::clone(stubs.pool()),
+            stubs,
             open_uris: FxHashMap::default(),
             last_diagnostics: FxHashMap::default(),
             latest_text: FxHashMap::default(),
@@ -425,7 +433,10 @@ impl Server {
     /// failure is logged (both to stderr and as a `window/logMessage`
     /// notification) and skipped, not fatal to the rest of the scan.
     fn load_files(&mut self, files: &[(PathBuf, bool)], messages: &mut Vec<Message>) {
-        for (path, e) in self.project.load_files(files, Some(&self.pool)) {
+        for (path, e) in self
+            .project
+            .load_files(files, Some(&self.pool), &self.stubs)
+        {
             eprintln!(
                 "phpstan-rs lsp: skipping {} - failed to parse: {e}",
                 path.display()
@@ -566,7 +577,7 @@ impl Server {
             any_new = true;
         }
         if any_new {
-            self.project.finish_loading();
+            self.project.finish_loading_with(&self.stubs);
         }
         messages
     }

@@ -26,6 +26,7 @@ use crate::ext::mockstan::MockstanSettings;
 use crate::ext::sql::SqlSettings;
 use crate::parent_calls::{self, ClassShapeSettings};
 use crate::registry::settings::ReflectionSettings;
+use crate::registry::stub_set::Stubs;
 use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
@@ -88,8 +89,11 @@ pub struct Overrides {
 /// A fully resolved `check-project` run: every path, setting and derived
 /// table, ready to load.
 pub struct Session {
-    /// The process's worker pool (`project::worker_pool`), which every
-    /// parallel parse and check runs on.
+    /// The built-in stubs of the run, which the entry point made before
+    /// the session so that they build beside the listing and the parse.
+    stubs: Stubs,
+    /// The pool `stubs` builds on (`Stubs::pool`), which every parallel
+    /// parse and check runs on.
     pool: Arc<rayon::ThreadPool>,
     root: PathBuf,
     session: SessionSettings,
@@ -303,7 +307,7 @@ impl Session {
         config_dir: Option<PathBuf>,
         root: PathBuf,
         overrides: Overrides,
-        pool: Arc<rayon::ThreadPool>,
+        stubs: Stubs,
     ) -> Result<Session, String> {
         let session = config.section::<SessionSettings>()?;
         let reflection = config.section::<ReflectionSettings>()?;
@@ -495,7 +499,8 @@ impl Session {
         };
 
         Ok(Session {
-            pool,
+            pool: Arc::clone(stubs.pool()),
+            stubs,
             root,
             session,
             settings,
@@ -522,11 +527,11 @@ impl Session {
     /// under `config`, the fixture's `stem.toml` if it has one (its paths
     /// relative to the fixture's directory), with composer discovery off
     /// unless the config turns it on, reporting every level, running on
-    /// `pool`. Returns the session and that directory.
+    /// the pool of `stubs`. Returns the session and that directory.
     pub fn for_fixture(
         stem: &Path,
         config: &ConfigFile,
-        pool: Arc<rayon::ThreadPool>,
+        stubs: Stubs,
     ) -> Result<(Session, PathBuf), String> {
         let file_subject = stem.with_extension("php");
         let (subject, base) = if file_subject.is_file() {
@@ -557,7 +562,7 @@ impl Session {
         // Paths stay relative to the fixture's own directory, so where the
         // fixture suite lives (under `tests/`) never shows in the analysed
         // paths - path-sensitive checks see only the fixture's own layout.
-        let session = Session::resolve(config, None, base.clone(), overrides, pool)?;
+        let session = Session::resolve(config, None, base.clone(), overrides, stubs)?;
         Ok((session, base))
     }
 
@@ -730,7 +735,7 @@ impl Session {
             return Err(format!("no .php files found under {}", dirs.join(", ")));
         }
 
-        let mut project = Project::new();
+        let mut project = Project::loading();
         self.configure(&mut project);
 
         let pool = &self.pool;
@@ -796,6 +801,7 @@ impl Session {
                     Read::Loaded(file) => Some(&file.parsed),
                     _ => None,
                 }),
+            &self.stubs,
         );
 
         // Context files first, so an analysed file's declaration wins a
@@ -868,7 +874,7 @@ impl Session {
             }
         }
         lex_warnings.extend(parse_failure_lines);
-        project.finish_loading();
+        project.finish_loading_with(&self.stubs);
 
         // Largest files first, so the longest checks don't start last; of
         // equal ones, the first listed first.

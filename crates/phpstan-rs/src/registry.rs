@@ -39,6 +39,7 @@ pub(crate) use stub_cache::{
     load as load_cached, load_container, store as store_cached, store_container,
 };
 pub mod settings;
+pub mod stub_set;
 pub mod stubs;
 mod type_node;
 
@@ -224,6 +225,11 @@ struct RawDeclarations {
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registry {
+    /// The built-in stubs' index and declarations this registry was made
+    /// from, shared by the registries made from it. `None` only for a
+    /// registry nothing was resolved into yet.
+    #[serde(skip)]
+    pub(crate) corpus: Option<Arc<stubs::Corpus>>,
     #[serde(skip)]
     pub classes: NameTable<ClassReflection>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
@@ -724,16 +730,23 @@ impl Registry {
 
     /// The registry stored under `name` for this build, if there is a
     /// readable file of it.
-    pub(crate) fn load_cached(name: &str) -> Option<Result<Registry, String>> {
-        let reader = load_container(name)?;
+    pub(crate) fn load_cached(
+        dir: Option<&std::path::Path>,
+        name: &str,
+    ) -> Option<Result<Registry, String>> {
+        let reader = load_container(dir, name)?;
         Some(Registry::load(&reader))
     }
 
     /// Stores the registry under `name` for this build.
-    pub(crate) fn store_cached(&self, name: &str) -> Result<(), String> {
+    pub(crate) fn store_cached(
+        &self,
+        dir: Option<&std::path::Path>,
+        name: &str,
+    ) -> Result<(), String> {
         let mut writer = container::Writer::new();
         self.store(&mut writer)?;
-        store_container(name, writer);
+        store_container(dir, name, writer);
         Ok(())
     }
 
@@ -778,6 +791,27 @@ impl Registry {
             std::mem::take(&mut self.configured_class_argument_returns);
         base.changed = std::mem::take(&mut self.changed);
         *self = base;
+    }
+
+    /// The built-in stubs this registry was made from, to hold across a
+    /// change to the registry.
+    ///
+    /// # Panics
+    /// If the registry holds none: every registry a `Project` checks with
+    /// takes its stubs from a `Stubs`.
+    pub(crate) fn shared_corpus(&self) -> Arc<stubs::Corpus> {
+        Arc::clone(
+            self.corpus
+                .as_ref()
+                .expect("the registry was made without the built-in stubs"),
+        )
+    }
+
+    /// See `shared_corpus`.
+    pub(crate) fn corpus(&self) -> &stubs::Corpus {
+        self.corpus
+            .as_deref()
+            .expect("the registry was made without the built-in stubs")
     }
 
     /// Drops what was computed lazily from the classes, for the next

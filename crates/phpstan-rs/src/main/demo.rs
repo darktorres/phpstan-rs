@@ -3,7 +3,6 @@ use std::path::Path;
 use types::Name;
 
 use checker::Checker;
-use phpstan_rs::registry::stubs;
 use phpstan_rs::{checker, output, registry};
 use registry::{Registry, format_signature};
 
@@ -67,12 +66,17 @@ pub(crate) fn run_demo(file: Option<&Path>) {
         println!("{:#?}", stmt);
     }
 
+    let stubs = phpstan_rs::registry::stub_set::Stubs::new(
+        phpstan_rs::registry::stub_set::StubSource::from_environment(),
+        phpstan_rs::project::worker_pool(),
+    );
+    let corpus = stubs.corpus();
     let mut registry = Registry::build(&program);
     // Generated (real php-src source) takes priority over the hand-curated
     // approximations - merge_stubs only fills in names not already present.
-    registry.merge_stubs(stubs::generated_stubs());
-    registry.merge_stub_classes(stubs::generated_stub_classes());
-    registry.merge_stub_constants(stubs::generated_stub_constants());
+    registry.merge_stubs(corpus.generated_stubs());
+    registry.merge_stub_classes(corpus.generated_stub_classes());
+    registry.merge_stub_constants(corpus.generated_stub_constants());
     // `merge_stub_classes` can add extends/implements edges after
     // `Registry::build`'s own internal precompute already ran - rebuild
     // `ancestor_names`/member-owner maps once more now that the registry

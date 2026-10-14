@@ -27,6 +27,7 @@ use libtest_mimic::{Arguments, Failed, Trial};
 use phpstan_rs::gate::{self, FixtureConfig, TemplateScopes};
 use phpstan_rs::project::session::SessionSettings;
 use phpstan_rs::project::worker_pool;
+use phpstan_rs::registry::stub_set::{StubSource, Stubs};
 use serde_json::Value;
 use types::{PhpString, Shape, ShapeField, ShapeKey, Type};
 
@@ -47,10 +48,10 @@ fn main() {
         return;
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let pool = worker_pool();
+    let stubs = Stubs::new(StubSource::from_environment(), worker_pool());
     let outcomes = Arc::new(Mutex::new(Outcomes::default()));
     let mut trials = Vec::new();
-    collect(&root, &root, &pool, &local, &outcomes, &mut trials);
+    collect(&root, &root, &stubs, &local, &outcomes, &mut trials);
     trials.sort_by(|a, b| a.name().cmp(b.name()));
     let conclusion = libtest_mimic::run(&args, trials);
     let outcomes = outcomes.lock().unwrap();
@@ -72,7 +73,7 @@ fn main() {
 fn collect(
     root: &Path,
     dir: &Path,
-    pool: &Arc<rayon::ThreadPool>,
+    stubs: &Stubs,
     local: &str,
     outcomes: &Arc<Mutex<Outcomes>>,
     trials: &mut Vec<Trial>,
@@ -84,7 +85,7 @@ fn collect(
         let path = entry.path();
         if path.is_dir() {
             if !path.with_extension("expect").is_file() {
-                collect(root, &path, pool, local, outcomes, trials);
+                collect(root, &path, stubs, local, outcomes, trials);
             }
         } else if path.extension().is_some_and(|e| e == "expect") {
             let name = path
@@ -93,11 +94,11 @@ fn collect(
                 .with_extension("")
                 .display()
                 .to_string();
-            let pool = Arc::clone(pool);
+            let stubs = stubs.clone();
             let local = local.to_string();
             let outcomes = Arc::clone(outcomes);
             trials.push(Trial::test(name.clone(), move || {
-                let outcome = run(&name, &path.with_extension(""), pool, &local);
+                let outcome = run(&name, &path.with_extension(""), stubs, &local);
                 let mut outcomes = outcomes.lock().unwrap();
                 match outcome {
                     Ok(Outcome::Executed) => outcomes.executed.push(name),
@@ -126,12 +127,7 @@ enum Runner {
     Docker(String),
 }
 
-fn run(
-    name: &str,
-    stem: &Path,
-    pool: Arc<rayon::ThreadPool>,
-    local: &str,
-) -> Result<Outcome, Failed> {
+fn run(name: &str, stem: &Path, stubs: Stubs, local: &str) -> Result<Outcome, Failed> {
     let config = gate::fixture_config(&stem.with_extension("toml"))?;
     if config
         .requires_feature
@@ -205,7 +201,7 @@ fn run(
         }
         return Err(failures.join("\n").into());
     }
-    let (session, _) = gate::load_fixture(stem, &config, pool)?;
+    let (session, _) = gate::load_fixture(stem, &config, stubs)?;
     let loaded = session.load()?;
     let registry = loaded.project.registry();
     let relation = registry.relation();

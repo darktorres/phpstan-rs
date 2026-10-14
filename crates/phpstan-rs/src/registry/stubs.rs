@@ -376,13 +376,15 @@ fn patch_functionmap_array_shapes(stubs: &mut [(Name, FunctionReflection)]) {
     }
 }
 
-/// All signatures generated from the vendored phpstorm-stubs sources,
-/// merged (first occurrence wins). A few functions are declared more than
-/// once across the corpus (e.g. a version-conditional pair of signatures
-/// for the same function in different files); taking the first is a
-/// simplification, not a precision-critical choice.
-pub fn generated_stubs() -> Vec<(Name, FunctionReflection)> {
-    entries(&generated_stub_data().functions, |_| true)
+impl Corpus {
+    /// All signatures generated from the vendored phpstorm-stubs sources,
+    /// merged (first occurrence wins). A few functions are declared more than
+    /// once across the corpus (e.g. a version-conditional pair of signatures
+    /// for the same function in different files); taking the first is a
+    /// simplification, not a precision-critical choice.
+    pub fn generated_stubs(&self) -> Vec<(Name, FunctionReflection)> {
+        entries(&self.data().functions, |_| true)
+    }
 }
 
 /// Real phpstorm-stubs' own `ReflectionClass::__construct`
@@ -792,10 +794,12 @@ fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
     }
 }
 
-/// All classes generated from the vendored phpstorm-stubs sources, merged
-/// (first occurrence wins - see `generated_stubs`' equivalent note).
-pub fn generated_stub_classes() -> Vec<(Name, ClassReflection)> {
-    entries(&generated_stub_data().classes, |_| true)
+impl Corpus {
+    /// All classes generated from the vendored phpstorm-stubs sources, merged
+    /// (first occurrence wins - see `generated_stubs`' equivalent note).
+    pub fn generated_stub_classes(&self) -> Vec<(Name, ClassReflection)> {
+        entries(&self.data().classes, |_| true)
+    }
 }
 
 /// The entries `wanted` accepts, decoded.
@@ -821,47 +825,58 @@ struct StubEntry<V> {
     value: crate::registry::Lazy<V>,
 }
 
-/// The stub files that reference `key` (a `deps::dependency_key`), by their
-/// number in the index.
-pub fn stub_dependent_files(key: &str) -> impl Iterator<Item = u32> {
-    stub_index()
-        .dependents
-        .get(key)
-        .unwrap_or(&[])
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|file| u32::from_le_bytes(*file))
+impl Corpus {
+    /// The stub files that reference `key` (a `deps::dependency_key`), by their
+    /// number in the index.
+    pub fn stub_dependent_files(&self, key: &str) -> impl Iterator<Item = u32> {
+        self.index
+            .dependents
+            .get(key)
+            .unwrap_or(&[])
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|file| u32::from_le_bytes(*file))
+    }
 }
 
-/// How many stub files there are.
-#[cfg(test)]
-pub fn stub_file_count() -> usize {
-    stub_index().declared_by_file.len()
+impl Corpus {
+    /// How many stub files there are.
+    #[cfg(test)]
+    pub fn stub_file_count(&self) -> usize {
+        self.index.declared_by_file.len()
+    }
 }
 
-/// The stub files `file` leads to, itself included, as a bit set by file
-/// number: the files referencing a name it declares, those referencing a
-/// name one of them declares, and so on. It is a fact of the stubs, made
-/// once for a file.
-pub fn stub_file_closure(file: u32) -> &'static [u64] {
-    stub_index().file_closure(file as usize)
+impl Corpus {
+    /// The stub files `file` leads to, itself included, as a bit set by file
+    /// number: the files referencing a name it declares, those referencing a
+    /// name one of them declares, and so on. It is a fact of the stubs, made
+    /// once for a file.
+    pub fn stub_file_closure(&self, file: u32) -> &[u64] {
+        self.index.file_closure(file as usize)
+    }
 }
 
-/// The classes (`true`) and functions stub file `file` declares, each by
-/// its own dependency key.
-pub fn stub_file_names(file: u32) -> impl Iterator<Item = (bool, &'static str)> {
-    stub_index()
-        .declared_keys_of(file as usize)
-        .iter()
-        .map(|(is_class, key)| (*is_class, &**key))
+impl Corpus {
+    /// The classes (`true`) and functions stub file `file` declares, each by
+    /// its own dependency key.
+    pub fn stub_file_names(&self, file: u32) -> impl Iterator<Item = (bool, &str)> {
+        self.index
+            .declared_keys_of(file as usize)
+            .iter()
+            .map(|(is_class, key)| (*is_class, &**key))
+    }
 }
 
-/// The classes (`true`) and functions declared in the stub files that
-/// reference `key` (a `deps::dependency_key`), each by its own dependency
-/// key.
-pub fn stub_dependents(key: &str) -> impl Iterator<Item = (bool, &'static str)> {
-    stub_dependent_files(key).flat_map(stub_file_names)
+impl Corpus {
+    /// The classes (`true`) and functions declared in the stub files that
+    /// reference `key` (a `deps::dependency_key`), each by its own dependency
+    /// key.
+    pub fn stub_dependents(&self, key: &str) -> impl Iterator<Item = (bool, &str)> {
+        self.stub_dependent_files(key)
+            .flat_map(|file| self.stub_file_names(file))
+    }
 }
 
 /// The names one stub file declares, each as a dependency key, with whether
@@ -869,7 +884,7 @@ pub fn stub_dependents(key: &str) -> impl Iterator<Item = (bool, &'static str)> 
 type DeclaredKeys = Box<[(bool, Box<str>)]>;
 
 impl StubIndex {
-    fn file_closure(&'static self, file: usize) -> &'static [u64] {
+    fn file_closure(&self, file: usize) -> &[u64] {
         self.file_closures[file].get_or_init(|| {
             self.closures
                 .get(file)
@@ -928,40 +943,48 @@ impl StubIndex {
 
     /// The names stub file `file` declares, as dependency keys, read from
     /// the index the first time and kept.
-    fn declared_keys_of(&'static self, file: usize) -> &'static DeclaredKeys {
+    fn declared_keys_of(&self, file: usize) -> &DeclaredKeys {
         self.declared_keys[file].get_or_init(|| self.parse_declared_keys(file))
     }
 }
 
-/// `generated_stubs` without PHPStan's own source: the PHP built-ins.
-pub fn builtin_stubs() -> Vec<(Name, FunctionReflection)> {
-    entries(&generated_stub_data().functions, |entry| !entry.phpstan)
+impl Corpus {
+    /// `generated_stubs` without PHPStan's own source: the PHP built-ins.
+    pub fn builtin_stubs(&self) -> Vec<(Name, FunctionReflection)> {
+        entries(&self.data().functions, |entry| !entry.phpstan)
+    }
 }
 
-/// `generated_stub_classes` without PHPStan's own source.
-pub fn builtin_stub_classes() -> Vec<(Name, ClassReflection)> {
-    entries(&generated_stub_data().classes, |entry| !entry.phpstan)
+impl Corpus {
+    /// `generated_stub_classes` without PHPStan's own source.
+    pub fn builtin_stub_classes(&self) -> Vec<(Name, ClassReflection)> {
+        entries(&self.data().classes, |entry| !entry.phpstan)
+    }
 }
 
-/// `generated_stub_constants` without PHPStan's own source.
-pub fn builtin_stub_constants() -> Vec<(Name, Type)> {
-    generated_stub_data().builtin_constants.clone()
+impl Corpus {
+    /// `generated_stub_constants` without PHPStan's own source.
+    pub fn builtin_stub_constants(&self) -> Vec<(Name, Type)> {
+        self.data().builtin_constants.clone()
+    }
 }
 
-/// The names `generated_stubs`, `generated_stub_classes` and
-/// `generated_stub_constants` hold only because PHPStan's own source
-/// declares them.
-pub fn phpstan_stub_names() -> PhpstanStubNames {
-    let index = stub_index();
-    let names = |records: &Records| -> Vec<String> {
-        (0..records.len())
-            .map(|i| String::from_utf8_lossy(records.get(i)).into_owned())
-            .collect()
-    };
-    PhpstanStubNames {
-        functions: names(&index.phpstan_functions),
-        classes: names(&index.phpstan_classes),
-        constants: names(&index.phpstan_constants),
+impl Corpus {
+    /// The names `generated_stubs`, `generated_stub_classes` and
+    /// `generated_stub_constants` hold only because PHPStan's own source
+    /// declares them.
+    pub fn phpstan_stub_names(&self) -> PhpstanStubNames {
+        let index = &self.index;
+        let names = |records: &Records| -> Vec<String> {
+            (0..records.len())
+                .map(|i| String::from_utf8_lossy(records.get(i)).into_owned())
+                .collect()
+        };
+        PhpstanStubNames {
+            functions: names(&index.phpstan_functions),
+            classes: names(&index.phpstan_classes),
+            constants: names(&index.phpstan_constants),
+        }
     }
 }
 
@@ -977,62 +1000,79 @@ fn is_phpstan_origin(origin: &Origin) -> bool {
     matches!(origin, Origin::Phpstan { .. })
 }
 
-/// The entries of `generated_stubs` named `name` in any case, in its
-/// order; PHPStan's own only `with_phpstan`.
-pub fn generated_stubs_named(name: &str, with_phpstan: bool) -> Vec<(Name, FunctionReflection)> {
-    if !stub_index()
-        .function_names
-        .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
-    {
-        return Vec::new();
+impl Corpus {
+    /// The entries of `generated_stubs` named `name` in any case, in its
+    /// order; PHPStan's own only `with_phpstan`.
+    pub fn generated_stubs_named(
+        &self,
+        name: &str,
+        with_phpstan: bool,
+    ) -> Vec<(Name, FunctionReflection)> {
+        if !self
+            .index
+            .function_names
+            .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
+        {
+            return Vec::new();
+        }
+        let data = self.data();
+        named_positions(&data.function_positions, name)
+            .iter()
+            .map(|&i| &data.functions[i])
+            .filter(|entry| with_phpstan || !entry.phpstan)
+            .map(|entry| (entry.name.clone(), entry.value.get().clone()))
+            .collect()
     }
-    let data = generated_stub_data();
-    named_positions(&data.function_positions, name)
-        .iter()
-        .map(|&i| &data.functions[i])
-        .filter(|entry| with_phpstan || !entry.phpstan)
-        .map(|entry| (entry.name.clone(), entry.value.get().clone()))
-        .collect()
 }
 
-/// The entries of `generated_stub_classes` named `name` in any case, in
-/// its order; PHPStan's own only `with_phpstan`.
-pub fn generated_stub_classes_named(
-    name: &str,
-    with_phpstan: bool,
-) -> Vec<(Name, ClassReflection)> {
-    if !stub_index()
-        .class_names
-        .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
-    {
-        return Vec::new();
+impl Corpus {
+    /// The entries of `generated_stub_classes` named `name` in any case, in
+    /// its order; PHPStan's own only `with_phpstan`.
+    pub fn generated_stub_classes_named(
+        &self,
+        name: &str,
+        with_phpstan: bool,
+    ) -> Vec<(Name, ClassReflection)> {
+        if !self
+            .index
+            .class_names
+            .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
+        {
+            return Vec::new();
+        }
+        let data = self.data();
+        named_positions(&data.class_positions, name)
+            .iter()
+            .map(|&i| &data.classes[i])
+            .filter(|entry| with_phpstan || !entry.phpstan)
+            .map(|entry| (entry.name.clone(), entry.value.get().clone()))
+            .collect()
     }
-    let data = generated_stub_data();
-    named_positions(&data.class_positions, name)
-        .iter()
-        .map(|&i| &data.classes[i])
-        .filter(|entry| with_phpstan || !entry.phpstan)
-        .map(|entry| (entry.name.clone(), entry.value.get().clone()))
-        .collect()
 }
 
-/// The entry of `generated_stub_constants` named exactly `name`, if any;
-/// as the built-ins alone define it unless `with_phpstan`.
-pub fn generated_stub_constants_named(name: &str, with_phpstan: bool) -> Vec<(Name, Type)> {
-    if !stub_index().constant_names.contains(name) {
-        return Vec::new();
+impl Corpus {
+    /// The entry of `generated_stub_constants` named exactly `name`, if any;
+    /// as the built-ins alone define it unless `with_phpstan`.
+    pub fn generated_stub_constants_named(
+        &self,
+        name: &str,
+        with_phpstan: bool,
+    ) -> Vec<(Name, Type)> {
+        if !self.index.constant_names.contains(name) {
+            return Vec::new();
+        }
+        let data = self.data();
+        let ty = if with_phpstan {
+            data.constant_positions
+                .get(name)
+                .map(|&i| &data.constants[i].1)
+        } else {
+            data.builtin_constant(name)
+        };
+        ty.map(|ty| (Name::from(name), ty.clone()))
+            .into_iter()
+            .collect()
     }
-    let data = generated_stub_data();
-    let ty = if with_phpstan {
-        data.constant_positions
-            .get(name)
-            .map(|&i| &data.constants[i].1)
-    } else {
-        data.builtin_constant(name)
-    };
-    ty.map(|ty| (Name::from(name), ty.clone()))
-        .into_iter()
-        .collect()
 }
 
 fn named_positions<'a>(
@@ -1068,26 +1108,28 @@ fn stub_entries<V>(entries: Vec<(Name, V)>, origin: impl Fn(&V) -> &Origin) -> V
         .collect()
 }
 
-/// The constant-side sibling of `generated_stub_classes` just above -
-/// undefined-`use const`/bare-constant detection needs built-in/extension
-/// constants (`JSON_PRETTY_PRINT`, `SORT_*`, `CURLOPT_*`, ...) to actually
-/// be known, the same way undefined-function detection needs
-/// `generated_stubs()`'s functions to be known. Real phpstorm-stubs
-/// declares these via ordinary top-level `define('NAME', value)` calls
-/// (6781 of them across the vendored corpus) - `Registry::index_and_
-/// flatten` already collects those into its own `global_constants` map
-/// via the identical `define_call_constant`/`register_global_constant`
-/// path project source goes through, so there's nothing new to parse,
-/// only a new place to read the result from. Merged via `register_
-/// global_constant`'s own "poison to Mixed on any real disagreement"
-/// policy - unlike `generated_stubs`/`generated_stub_classes`'s
-/// first-occurrence-wins dedup (a stub function/class name conflict is
-/// resolved by this project's own conditional-declaration tiebreaking
-/// instead), a bare global constant has no such tiebreaking mechanism, so
-/// this reuses the exact same conflict policy already used *within* one
-/// file's own `global_constants` map, across the whole corpus at once.
-pub fn generated_stub_constants() -> Vec<(Name, Type)> {
-    generated_stub_data().constants.clone()
+impl Corpus {
+    /// The constant-side sibling of `generated_stub_classes` just above -
+    /// undefined-`use const`/bare-constant detection needs built-in/extension
+    /// constants (`JSON_PRETTY_PRINT`, `SORT_*`, `CURLOPT_*`, ...) to actually
+    /// be known, the same way undefined-function detection needs
+    /// `generated_stubs()`'s functions to be known. Real phpstorm-stubs
+    /// declares these via ordinary top-level `define('NAME', value)` calls
+    /// (6781 of them across the vendored corpus) - `Registry::index_and_
+    /// flatten` already collects those into its own `global_constants` map
+    /// via the identical `define_call_constant`/`register_global_constant`
+    /// path project source goes through, so there's nothing new to parse,
+    /// only a new place to read the result from. Merged via `register_
+    /// global_constant`'s own "poison to Mixed on any real disagreement"
+    /// policy - unlike `generated_stubs`/`generated_stub_classes`'s
+    /// first-occurrence-wins dedup (a stub function/class name conflict is
+    /// resolved by this project's own conditional-declaration tiebreaking
+    /// instead), a bare global constant has no such tiebreaking mechanism, so
+    /// this reuses the exact same conflict policy already used *within* one
+    /// file's own `global_constants` map, across the whole corpus at once.
+    pub fn generated_stub_constants(&self) -> Vec<(Name, Type)> {
+        self.data().constants.clone()
+    }
 }
 
 /// The three projections `generated_stubs`/`generated_stub_classes`/
@@ -1234,8 +1276,8 @@ impl StubIndex {
     }
 
     /// The index stored for this build, if there is a readable file of it.
-    fn load_cached() -> Option<StubIndex> {
-        let reader = crate::registry::load_container("stub-index")?;
+    fn load_cached(dir: Option<&std::path::Path>) -> Option<StubIndex> {
+        let reader = crate::registry::load_container(dir, "stub-index")?;
         match StubIndex::load(&reader) {
             Ok(index) => Some(index),
             Err(error) => {
@@ -1248,10 +1290,10 @@ impl StubIndex {
         }
     }
 
-    fn store_cached(&self) {
+    fn store_cached(&self, dir: Option<&std::path::Path>) {
         let mut writer = Writer::new();
         if self.store(&mut writer).is_ok() {
-            crate::registry::store_container("stub-index", writer);
+            crate::registry::store_container(dir, "stub-index", writer);
         }
     }
 
@@ -1287,23 +1329,27 @@ impl GeneratedStubData {
     }
 }
 
-/// The phpstorm-stubs directory (the extension) declaring built-in
-/// function `name`, when it's a PHP built-in.
-pub fn builtin_function_extension(name: &str) -> Option<&'static str> {
-    let index = stub_index();
-    index.extension(
-        &index.function_extensions,
-        &name.trim_start_matches('\\').to_ascii_lowercase(),
-    )
+impl Corpus {
+    /// The phpstorm-stubs directory (the extension) declaring built-in
+    /// function `name`, when it's a PHP built-in.
+    pub fn builtin_function_extension(&self, name: &str) -> Option<&'static str> {
+        let index = &self.index;
+        index.extension(
+            &index.function_extensions,
+            &name.trim_start_matches('\\').to_ascii_lowercase(),
+        )
+    }
 }
 
-/// The class-like counterpart of `builtin_function_extension`.
-pub fn builtin_class_extension(name: &str) -> Option<&'static str> {
-    let index = stub_index();
-    index.extension(
-        &index.class_extensions,
-        &name.trim_start_matches('\\').to_ascii_lowercase(),
-    )
+impl Corpus {
+    /// The class-like counterpart of `builtin_function_extension`.
+    pub fn builtin_class_extension(&self, name: &str) -> Option<&'static str> {
+        let index = &self.index;
+        index.extension(
+            &index.class_extensions,
+            &name.trim_start_matches('\\').to_ascii_lowercase(),
+        )
+    }
 }
 
 /// Computes `GeneratedStubData` exactly once per process
@@ -1415,42 +1461,70 @@ fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
     }
 }
 
-/// Both halves of the stubs as built from the embedded sources, at most
-/// once per process, stored for the next one.
-fn built_stub_corpus() -> &'static (StubIndex, GeneratedStubData) {
-    static BUILT: std::sync::LazyLock<(StubIndex, GeneratedStubData)> =
-        std::sync::LazyLock::new(|| {
-            let built = build_generated_stub_data();
-            built.0.store_cached();
-            crate::registry::store_cached("stub-data", &built.1);
-            built
-        });
-    &BUILT
+/// The built-in stubs as a run reads them: the index of what the stub
+/// files declare and reference, which is small, and the declarations
+/// themselves, read from the stub cache when first asked for. Made once
+/// per `Stubs` (`Stubs::corpus`), on a thread of its own, and shared by
+/// every registry built on it.
+pub struct Corpus {
+    index: StubIndex,
+    data: std::sync::OnceLock<GeneratedStubData>,
+    // The stub cache the declarations are read from, if the index was.
+    dir: Option<std::path::PathBuf>,
 }
 
-fn stub_index() -> &'static StubIndex {
-    static INDEX: std::sync::OnceLock<&'static StubIndex> = std::sync::OnceLock::new();
-    INDEX.get_or_init(|| match StubIndex::load_cached() {
-        Some(index) => Box::leak(Box::new(StubIndex::resolved(index))),
-        None => &built_stub_corpus().0,
-    })
+impl std::fmt::Debug for Corpus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Corpus").finish_non_exhaustive()
+    }
 }
 
-/// Loads the stubs' index now, for `Project::warm_stubs`.
-pub(crate) fn warm_index() {
-    stub_index();
-}
+impl Corpus {
+    /// The corpus stored in the stub cache `dir` for this build, else
+    /// built from the embedded sources on `pool` and stored there.
+    pub(crate) fn obtain(dir: Option<&std::path::Path>, pool: &rayon::ThreadPool) -> Corpus {
+        if let Some(index) = StubIndex::load_cached(dir) {
+            return Corpus {
+                index,
+                data: std::sync::OnceLock::new(),
+                dir: dir.map(std::path::Path::to_path_buf),
+            };
+        }
+        let (index, data) = build_generated_stub_data(Some(pool));
+        index.store_cached(dir);
+        crate::registry::store_cached(dir, "stub-data", &data);
+        Corpus {
+            index,
+            data: std::sync::OnceLock::from(data),
+            dir: dir.map(std::path::Path::to_path_buf),
+        }
+    }
 
-fn generated_stub_data() -> &'static GeneratedStubData {
-    static DATA: std::sync::OnceLock<&'static GeneratedStubData> = std::sync::OnceLock::new();
-    DATA.get_or_init(|| match crate::registry::load_cached("stub-data") {
-        Some(data) => Box::leak(Box::new(data)),
-        None => &built_stub_corpus().1,
-    })
+    /// The corpus built from the embedded sources, stored nowhere.
+    pub(crate) fn built(pool: Option<&rayon::ThreadPool>) -> Corpus {
+        let (index, data) = build_generated_stub_data(pool);
+        Corpus {
+            index,
+            data: std::sync::OnceLock::from(data),
+            dir: None,
+        }
+    }
+
+    /// The declarations. When the stub cache that held the index no longer
+    /// holds them, they are built again here, serially: this can be asked
+    /// on a thread of any pool, which must not wait for a parallel build.
+    fn data(&self) -> &GeneratedStubData {
+        self.data.get_or_init(|| {
+            match crate::registry::load_cached(self.dir.as_deref(), "stub-data") {
+                Some(data) => data,
+                None => build_generated_stub_data(None).1,
+            }
+        })
+    }
 }
 
 /// Indexes every embedded stub file and merges the results.
-fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
+fn build_generated_stub_data(pool: Option<&rayon::ThreadPool>) -> (StubIndex, GeneratedStubData) {
     let mut seen_functions = rustc_hash::FxHashSet::default();
     let mut functions = Vec::new();
     let mut seen_classes = rustc_hash::FxHashSet::default();
@@ -1478,10 +1552,13 @@ fn build_generated_stub_data() -> (StubIndex, GeneratedStubData) {
         builtins.chain(phpstan).collect();
     // Each file indexes on its own; merging stays sequential, in file
     // order, so which declaration wins doesn't depend on scheduling.
-    let indexed: Vec<StubFileDeclarations> = files
-        .par_iter()
-        .map(|(source, _, origin)| index_stub_file(source, origin))
-        .collect();
+    let index_file = |(source, _, origin): &(&'static str, Option<&'static str>, Origin)| {
+        index_stub_file(source, origin)
+    };
+    let indexed: Vec<StubFileDeclarations> = match pool {
+        Some(pool) => pool.install(|| files.par_iter().map(index_file).collect()),
+        None => files.iter().map(index_file).collect(),
+    };
     let mut dependents: rustc_hash::FxHashMap<String, Vec<u32>> = rustc_hash::FxHashMap::default();
     let mut declared_by_file: Vec<Vec<(bool, String)>> = Vec::new();
     for ((_, extension, _), file) in files.into_iter().zip(indexed) {

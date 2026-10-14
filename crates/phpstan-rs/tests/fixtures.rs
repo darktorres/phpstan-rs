@@ -27,18 +27,19 @@ use diagnostics::Diagnostic;
 use libtest_mimic::{Arguments, Failed, Trial};
 use phpstan_rs::gate::{self, FixtureConfig};
 use phpstan_rs::project::worker_pool;
+use phpstan_rs::registry::stub_set::{StubSource, Stubs};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
 fn main() {
     let args = Arguments::from_args();
-    // The stubs load while the fixtures are listed.
-    phpstan_rs::project::Project::warm_stubs();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     // One pool for the whole suite: the listing, and every fixture's parse
     // and check, run on it, alongside the fixtures libtest-mimic runs in
     // parallel.
-    let pool = worker_pool();
+    // The stubs build while the fixtures are listed.
+    let stubs = Stubs::new(StubSource::from_environment(), worker_pool());
+    let pool = Arc::clone(stubs.pool());
     let trials: Vec<Trial> = pool.install(|| {
         let mut listed = list(&root, "");
         // Names are unique, so the order is the same however it is sorted.
@@ -47,9 +48,9 @@ fn main() {
             .into_par_iter()
             .map(|fixture| {
                 let ignored = fixture.has_config && requires_missing_feature(&fixture.expect);
-                let pool = Arc::clone(&pool);
+                let stubs = stubs.clone();
                 let Fixture { name, expect, .. } = fixture;
-                Trial::test(name.clone(), move || run_fixture(&name, &expect, pool))
+                Trial::test(name.clone(), move || run_fixture(&name, &expect, stubs))
                     .with_ignored_flag(ignored)
             })
             .collect()
@@ -132,10 +133,10 @@ fn requires_missing_feature(expect_file: &Path) -> bool {
     }
 }
 
-fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> Result<(), Failed> {
+fn run_fixture(name: &str, expect_file: &Path, stubs: Stubs) -> Result<(), Failed> {
     let stem = expect_file.with_extension("");
     let config = fixture_config(&stem.with_extension("toml"))?;
-    let (session, base) = gate::load_fixture(&stem, &config, pool)?;
+    let (session, base) = gate::load_fixture(&stem, &config, stubs)?;
     let single_file = stem.with_extension("php").is_file();
     let dump = std::env::var_os("PHPSTAN_RS_DUMP_TYPES")
         .map(|dir| PathBuf::from(dir).join(name.replace('/', "__")));

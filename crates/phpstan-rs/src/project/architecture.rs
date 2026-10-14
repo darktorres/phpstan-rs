@@ -9,7 +9,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
-use crate::registry::stubs;
 use syntax::ast::*;
 use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmts};
@@ -205,10 +204,6 @@ impl<'p> Context<'p> {
     }
 }
 
-fn is_builtin(fqn: &str) -> bool {
-    stubs::builtin_class_extension(fqn).is_some()
-}
-
 impl Project {
     /// Every `rules` violation among the analysed classes, keyed by file.
     pub fn check_architecture(
@@ -294,7 +289,13 @@ impl Project {
                 return;
             };
             let target = canonical.to_string();
-            if target.eq_ignore_ascii_case(fqn) || is_builtin(&target) {
+            if target.eq_ignore_ascii_case(fqn)
+                || self
+                    .registry
+                    .corpus()
+                    .builtin_class_extension(&target)
+                    .is_some()
+            {
                 return;
             }
             match index.get(&target.to_ascii_lowercase()) {

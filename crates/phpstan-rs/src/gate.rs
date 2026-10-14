@@ -13,6 +13,7 @@ use types::Type;
 
 use crate::Registry;
 use crate::project::session::Session;
+use crate::registry::stub_set::Stubs;
 
 mod type_drift;
 pub use type_drift::{Drift, Facet, Verdict, type_drift};
@@ -207,9 +208,9 @@ pub fn declares_required_feature(path: &Path) -> bool {
 pub fn load_fixture(
     stem: &Path,
     config: &FixtureConfig,
-    pool: Arc<rayon::ThreadPool>,
+    stubs: Stubs,
 ) -> Result<(Session, PathBuf), String> {
-    Session::for_fixture(stem, &config.config, pool)
+    Session::for_fixture(stem, &config.config, stubs)
 }
 
 /// The drift from `old` to `new` with no project: classes are related by
@@ -239,7 +240,7 @@ pub fn type_drift_of_fixtures(
     root: &Path,
     old: &str,
     new: &str,
-    pool: Arc<rayon::ThreadPool>,
+    stubs: Stubs,
 ) -> Result<Drift, String> {
     let by_fixture = |text: &str| {
         let mut split: std::collections::BTreeMap<String, String> = Default::default();
@@ -264,7 +265,7 @@ pub fn type_drift_of_fixtures(
         }
         let stem = root.join(&fixture);
         let config = fixture_config(&stem.with_extension("toml"))?;
-        let (session, base) = load_fixture(&stem, &config, pool.clone())?;
+        let (session, base) = load_fixture(&stem, &config, stubs.clone())?;
         let loaded = session.load()?;
         let registry = loaded.project.registry();
         let mut scopes = TemplateScopes::new(registry);

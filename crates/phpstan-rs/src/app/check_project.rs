@@ -2,12 +2,12 @@
 //! and the baseline it's reported against.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use config::ConfigFile;
 
 use crate::baseline::{self, Baseline};
 use crate::project::session::{Finalize, Overrides, Session, SessionSettings};
+use crate::registry::stub_set::Stubs;
 
 /// What a `check-project` run asks for, after its command line is parsed.
 #[derive(Default, Clone)]
@@ -55,12 +55,12 @@ pub struct CheckRun {
     pub baseline_per_identifier: bool,
 }
 
-/// Resolves `request` with `config` (`load_config`) into a run on `pool`,
-/// rooted at the working directory.
+/// Resolves `request` with `config` (`load_config`) into a run on the pool
+/// of `stubs`, rooted at the working directory.
 pub fn prepare(
     request: &CheckRequest,
     config: &ConfigFile,
-    pool: Arc<rayon::ThreadPool>,
+    stubs: Stubs,
 ) -> Result<CheckRun, String> {
     let config_dir = config.dir().map(Path::to_path_buf);
     let session = config.section::<SessionSettings>()?;
@@ -88,7 +88,7 @@ pub fn prepare(
         no_composer: request.no_composer,
         emission_order: request.emission_order,
     };
-    let session = Session::resolve(config, config_dir, PathBuf::from("."), overrides, pool)?;
+    let session = Session::resolve(config, config_dir, PathBuf::from("."), overrides, stubs)?;
     Ok(CheckRun {
         session,
         baseline_path,

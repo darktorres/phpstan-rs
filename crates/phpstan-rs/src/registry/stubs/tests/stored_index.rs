@@ -1,14 +1,18 @@
 //! The stub index the cache stores reads back whole, from the file's own
 //! buffer.
 
-use super::super::{
-    Packed, Reader, Records, StubIndex, Writer, stub_dependent_files, stub_dependents,
-    stub_file_closure, stub_file_count, stub_file_names, stub_index,
-};
+use std::sync::Arc;
+
+use super::super::{Corpus, Packed, Reader, Records, StubIndex, Writer};
+use crate::registry::stub_set::Stubs;
+
+fn corpus() -> Arc<Corpus> {
+    Stubs::shared().corpus()
+}
 
 fn read_back() -> StubIndex {
     let mut writer = Writer::new();
-    stub_index().store(&mut writer).expect("stores");
+    corpus().index.store(&mut writer).expect("stores");
     let reader = match Reader::new(writer.finish()) {
         Ok(reader) => reader,
         Err(_) => panic!("a stored index is a whole file"),
@@ -51,7 +55,8 @@ fn same_records(name: &str, a: &Records, b: &Records) {
 
 #[test]
 fn the_stub_index_survives_a_round_trip() {
-    let before = stub_index();
+    let corpus = corpus();
+    let before = &corpus.index;
     let after = read_back();
     same_records(
         "declared_by_file",
@@ -80,7 +85,8 @@ fn the_stub_index_survives_a_round_trip() {
 
 #[test]
 fn the_stored_name_maps_answer_as_the_built_ones_do() {
-    let before = stub_index();
+    let corpus = corpus();
+    let before = &corpus.index;
     let after = read_back();
     let pairs: [(&str, &Packed, &Packed); 6] = [
         ("dependents", &before.dependents, &after.dependents),
@@ -124,7 +130,8 @@ fn the_stored_name_maps_answer_as_the_built_ones_do() {
 
 #[test]
 fn stub_dependents_come_as_the_keys_dependencies_are_tracked_under() {
-    let index = stub_index();
+    let corpus = corpus();
+    let index = &corpus.index;
     let mut seen = 0;
     for key in [
         "exception",
@@ -133,7 +140,7 @@ fn stub_dependents_come_as_the_keys_dependencies_are_tracked_under() {
         "iterator",
         "strlen",
     ] {
-        for (is_class, name) in stub_dependents(key) {
+        for (is_class, name) in corpus.stub_dependents(key) {
             assert_eq!(name, name.to_ascii_lowercase(), "{name}");
             assert!(!name.starts_with('\\'), "{name}");
             let declared = if is_class {
@@ -150,15 +157,16 @@ fn stub_dependents_come_as_the_keys_dependencies_are_tracked_under() {
 
 #[test]
 fn a_stub_file_closure_is_every_file_reached_through_the_names_it_declares() {
-    let count = stub_file_count() as u32;
+    let corpus = corpus();
+    let count = corpus.stub_file_count() as u32;
     // The files the key-by-key walk reaches from `file`.
     let by_keys = |file: u32| {
         let mut reached = rustc_hash::FxHashSet::default();
         reached.insert(file);
         let mut stack = vec![file];
         while let Some(current) = stack.pop() {
-            for (_, name) in stub_file_names(current) {
-                for dependent in stub_dependent_files(name) {
+            for (_, name) in corpus.stub_file_names(current) {
+                for dependent in corpus.stub_dependent_files(name) {
                     if reached.insert(dependent) {
                         stack.push(dependent);
                     }
@@ -168,7 +176,7 @@ fn a_stub_file_closure_is_every_file_reached_through_the_names_it_declares() {
         reached
     };
     for file in (0..count).step_by(37) {
-        let closure = stub_file_closure(file);
+        let closure = corpus.stub_file_closure(file);
         let bits: rustc_hash::FxHashSet<u32> = (0..count)
             .filter(|f| closure[(*f / 64) as usize] >> (*f % 64) & 1 == 1)
             .collect();

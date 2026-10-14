@@ -25,7 +25,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
-use crate::registry::stubs;
 use composer::PackageOwner;
 use composer::constraint;
 use composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
@@ -312,7 +311,7 @@ impl Project {
                                 .map(|(n, _)| n.to_string())
                                 .unwrap_or_else(|| fqn.clone()),
                             declared.map(|(_, p)| *p),
-                            stubs::builtin_class_extension(fqn),
+                            self.registry.corpus().builtin_class_extension(fqn),
                         )
                     }
                     RefTarget::Function(fqn) => {
@@ -326,7 +325,7 @@ impl Project {
                         let builtin = if namespaced_declaration {
                             None
                         } else {
-                            stubs::builtin_function_extension(&global)
+                            self.registry.corpus().builtin_function_extension(&global)
                         };
                         (
                             "Function",

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use phpstan_rs::registry::stub_set::{StubSource, Stubs};
 use phpstan_rs::{output, project};
 
 /// `phpstan-rs incremental-bench <dir> [<file-to-touch>]` - loads every
@@ -10,6 +11,7 @@ use phpstan_rs::{output, project};
 /// an edit to one file costs O(that file), not O(the project). Picks the
 /// first file in directory-walk order when none is named explicitly.
 pub(crate) fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
+    let stubs = Stubs::new(StubSource::from_environment(), project::worker_pool());
     let mut files = Vec::new();
     project::collect_php_files(dir, &mut files);
     if files.is_empty() {
@@ -40,11 +42,11 @@ pub(crate) fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
         .collect();
 
     let full_load_start = std::time::Instant::now();
-    let mut project = project::Project::new();
+    let mut project = project::Project::from_stubs(&stubs);
     for (path, source) in &sources {
         project.load_file(path.clone(), source).unwrap();
     }
-    project.finish_loading();
+    project.finish_loading_with(&stubs);
     let full_load = full_load_start.elapsed();
 
     let target_source = sources

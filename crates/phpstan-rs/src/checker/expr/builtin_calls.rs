@@ -33,7 +33,13 @@ impl<'a> Checker<'a> {
         // Every special case below is a builtin's. A global function by a
         // builtin's name that isn't its stub is a polyfill, declared only
         // where the builtin is missing, so it behaves as the builtin does.
-        if !sig.is_stub() && crate::registry::stubs::builtin_function_extension(name).is_none() {
+        if !sig.is_stub()
+            && self
+                .registry
+                .corpus()
+                .builtin_function_extension(name)
+                .is_none()
+        {
             let resolved = resolve_call_args(args, sig.params());
             return self.infer_call_return_type(sig, &resolved, locals);
         }

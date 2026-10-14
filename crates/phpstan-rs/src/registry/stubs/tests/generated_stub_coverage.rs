@@ -3,11 +3,19 @@
 //! actually wired in and produces correct, non-miscounted signatures.
 
 use super::super::*;
+use std::sync::Arc;
+
+use crate::registry::stub_set::Stubs;
+
+fn corpus() -> Arc<Corpus> {
+    Stubs::shared().corpus()
+}
 
 /// The first declaration of the function `name`, the one the full list
 /// holds.
 fn function(name: &str) -> FunctionReflection {
-    generated_stubs_named(name, true)
+    corpus()
+        .generated_stubs_named(name, true)
         .into_iter()
         .next()
         .unwrap_or_else(|| panic!("{name} should be generated"))
@@ -16,7 +24,8 @@ fn function(name: &str) -> FunctionReflection {
 
 /// The first declaration of the class `name`, the one the full list holds.
 fn class(name: &str) -> ClassReflection {
-    generated_stub_classes_named(name, true)
+    corpus()
+        .generated_stub_classes_named(name, true)
         .into_iter()
         .next()
         .unwrap_or_else(|| panic!("{name} should be a known generated stub class"))
@@ -25,14 +34,16 @@ fn class(name: &str) -> ClassReflection {
 
 /// Whether the stub index lists the class `name` (any case).
 fn has_class(name: &str) -> bool {
-    stub_index()
+    corpus()
+        .index
         .class_names
         .contains(&name.to_ascii_lowercase())
 }
 
 /// Whether the stub index lists the function `name` (any case).
 fn has_function(name: &str) -> bool {
-    stub_index()
+    corpus()
+        .index
         .function_names
         .contains(&name.to_ascii_lowercase())
 }
@@ -41,8 +52,8 @@ fn has_function(name: &str) -> bool {
 /// found here; the others read what they check by name.
 #[test]
 fn every_generated_stub_entry_decodes() {
-    assert!(generated_stubs().len() > 1000);
-    assert!(generated_stub_classes().len() > 100);
+    assert!(corpus().generated_stubs().len() > 1000);
+    assert!(corpus().generated_stub_classes().len() > 100);
 }
 
 #[test]
@@ -61,7 +72,7 @@ fn generated_stub_classes_cover_real_built_in_classes() {
     assert!(has_class("Exception"));
     assert!(has_class("ArrayObject"));
     assert!(has_class("PDO"));
-    assert!(stub_index().class_names.records_len() > 100);
+    assert!(corpus().index.class_names.records_len() > 100);
 }
 
 #[test]
@@ -103,7 +114,7 @@ fn generated_stubs_cover_hundreds_of_functions_across_the_full_corpus() {
     assert!(has_function("preg_match"));
     assert!(has_function("curl_init"));
     assert!(has_function("mysqli_query"));
-    assert!(stub_index().function_names.records_len() > 1000);
+    assert!(corpus().index.function_names.records_len() > 1000);
 }
 
 #[test]

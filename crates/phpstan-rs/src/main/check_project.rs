@@ -95,6 +95,11 @@ pub(crate) struct CheckProjectArgs {
 }
 
 pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
+    // Made first, so that the stubs build beside the listing and the parse.
+    let stubs = phpstan_rs::registry::stub_set::Stubs::new(
+        phpstan_rs::registry::stub_set::StubSource::from_environment(),
+        phpstan_rs::project::worker_pool(),
+    );
     let request = CheckRequest {
         config_file: args.config.clone(),
         sets: args.sets.clone(),
@@ -116,7 +121,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
             std::process::exit(1);
         }
     };
-    let run = match check_project::prepare(&request, &config, phpstan_rs::project::worker_pool()) {
+    let run = match check_project::prepare(&request, &config, stubs) {
         Ok(run) => run,
         Err(e) => {
             eprintln!("{e}");

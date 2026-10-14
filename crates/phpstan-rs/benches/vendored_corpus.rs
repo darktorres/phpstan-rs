@@ -24,6 +24,7 @@
 //! a real slowdown via CI rather than by chance.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use phpstan_rs::project::{self, Project};
@@ -60,14 +61,18 @@ fn bench_vendored_corpus(c: &mut Criterion) {
          (git submodule update --init)"
     );
 
-    let pool = project::worker_pool();
+    let stubs = phpstan_rs::registry::stub_set::Stubs::new(
+        phpstan_rs::registry::stub_set::StubSource::from_environment(),
+        project::worker_pool(),
+    );
+    let pool = Arc::clone(stubs.pool());
     c.bench_function("load_and_check_vendored_corpus", |b| {
         b.iter(|| {
-            let mut project = Project::new();
+            let mut project = Project::from_stubs(&stubs);
             for (path, source) in &sources {
                 let _ = project.load_file(path.clone(), source);
             }
-            project.finish_loading();
+            project.finish_loading_with(&stubs);
             std::hint::black_box(project.check_all(&pool));
         });
     });

@@ -86,14 +86,24 @@ fn main() -> ExitCode {
     }
 }
 
+/// The built-in stubs of this run, on the process's worker pool. Made
+/// before anything else is read, so that they build beside it.
+fn stubs() -> phpstan_rs::registry::stub_set::Stubs {
+    phpstan_rs::registry::stub_set::Stubs::new(
+        phpstan_rs::registry::stub_set::StubSource::from_environment(),
+        phpstan_rs::project::worker_pool(),
+    )
+}
+
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     std::fs::create_dir_all(&args.out).map_err(|e| e.to_string())?;
     if let Some((old, new)) = &args.type_drift {
         return drift(&args, old, new);
     }
+    let stubs = stubs();
     let config = check_project::load_config(&args.request)?;
-    let run = check_project::prepare(&args.request, &config, phpstan_rs::project::worker_pool())?;
+    let run = check_project::prepare(&args.request, &config, stubs)?;
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let analysis = run.session.run(args.dump_types);
@@ -146,11 +156,11 @@ fn drift(args: &Args, old: &Path, new: &Path) -> Result<(), String> {
     };
     let (old, new) = (read(old)?, read(new)?);
     let drift = if let Some(root) = &args.fixture_root {
-        gate::type_drift_of_fixtures(root, &old, &new, phpstan_rs::project::worker_pool())?
+        gate::type_drift_of_fixtures(root, &old, &new, stubs())?
     } else if args.request.config_file.is_some() || !args.request.paths.is_empty() {
+        let stubs = stubs();
         let config = check_project::load_config(&args.request)?;
-        let run =
-            check_project::prepare(&args.request, &config, phpstan_rs::project::worker_pool())?;
+        let run = check_project::prepare(&args.request, &config, stubs)?;
         let loaded = run.session.load()?;
         gate::type_drift_in_project(&loaded.project, &old, &new)
     } else {

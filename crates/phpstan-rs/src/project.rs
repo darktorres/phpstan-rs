@@ -14,7 +14,8 @@ use crate::file_id::{FileId, FileIdSet};
 use crate::ignore_comments;
 use crate::pest_config::{PestConfig, PestFacts};
 use crate::registry::scope::Scope;
-use crate::registry::stubs;
+use crate::registry::stub_set::Stubs;
+use crate::registry::stubs::Corpus;
 use crate::registry::{
     BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
 };
@@ -69,10 +70,10 @@ struct StubFileSet {
 }
 
 impl StubFileSet {
-    /// Adds every stub file `file` leads to (`stubs::stub_file_closure`),
+    /// Adds every stub file `file` leads to (`Corpus::stub_file_closure`),
     /// calling `visit` with each that was not in the set.
-    fn add_closure(&mut self, file: u32, mut visit: impl FnMut(u32)) {
-        let closure = stubs::stub_file_closure(file);
+    fn add_closure(&mut self, corpus: &Corpus, file: u32, mut visit: impl FnMut(u32)) {
+        let closure = corpus.stub_file_closure(file);
         if self.words.len() < closure.len() {
             self.words.resize(closure.len(), 0);
         }
@@ -527,51 +528,43 @@ pub struct ProjectSettings {
 }
 
 impl Project {
-    /// A project holding the built-in stubs, resolved: a clone of a
-    /// registry resolved once per process, sharing its tables.
+    /// A project holding the built-in stubs of `stubs`, resolved: a clone
+    /// of a registry resolved once per `Stubs`, sharing its tables. Waits
+    /// for that registry, so a caller that has other work to do first
+    /// makes the project with `Project::loading`.
+    pub fn from_stubs(stubs: &Stubs) -> Self {
+        Project::with_registry(stubs.base(false))
+    }
+
+    /// A project that holds no stubs yet, for a caller that parses the
+    /// files before it inserts them: `expect_files` gives it the stubs
+    /// the files call for, else `finish_loading` the plain ones. Until
+    /// then it can't be checked.
+    pub fn loading() -> Self {
+        Project::with_registry(Registry::default())
+    }
+
+    /// A project holding the built-in stubs of the process's shared test
+    /// value (`Stubs::shared`).
+    #[cfg(test)]
     pub fn new() -> Self {
-        Project::with_registry(Project::plain_base().clone())
-    }
-
-    /// The registry of the built-in stubs, resolved once per process.
-    fn plain_base() -> &'static Registry {
-        static BASE: std::sync::LazyLock<Registry> =
-            std::sync::LazyLock::new(|| Project::resolved_stubs(false));
-        &BASE
-    }
-
-    /// Starts loading the built-in stubs' registry and index on threads of
-    /// their own and returns at once, for a caller that has other work to
-    /// do before its first project: the loads are then done, or under
-    /// way, when `Project::new` first asks. The registry with PHPStan's
-    /// source is not loaded: only a project whose files mention PHPStan
-    /// needs it.
-    pub fn warm_stubs() {
-        let spawn = |name: &str, load: fn()| {
-            // A failure to start a thread only loses the head start.
-            let _ = std::thread::Builder::new()
-                .name(name.to_string())
-                .stack_size(WORKER_STACK_SIZE)
-                .spawn(load);
-        };
-        spawn("warm-stub-registry", || {
-            Project::plain_base();
-        });
-        spawn("warm-stub-index", stubs::warm_index);
+        Project::from_stubs(Stubs::shared())
     }
 
     /// The registry of the built-in stubs, with PHPStan's own source when
     /// `with_phpstan`, resolved: loaded from the stub cache when it holds
-    /// it, else built and stored there. Frozen, to share.
-    fn resolved_stubs(with_phpstan: bool) -> Registry {
+    /// it, else built and stored there. Frozen, to share. Run on the
+    /// thread `Stubs` builds it on.
+    pub(crate) fn resolved_stubs(stubs: &Stubs, with_phpstan: bool) -> Registry {
         let cache_name = if with_phpstan {
             "stub-base-phpstan"
         } else {
             "stub-base"
         };
-        if let Some(stored) = Registry::load_cached(cache_name) {
+        if let Some(stored) = Registry::load_cached(stubs.cache_dir(), cache_name) {
             match stored {
                 Ok(mut registry) => {
+                    registry.corpus = Some(stubs.corpus());
                     registry.freeze();
                     return registry;
                 }
@@ -583,22 +576,24 @@ impl Project {
                 }
             }
         }
+        let corpus = stubs.corpus();
         let mut registry = Registry::default();
+        registry.corpus = Some(Arc::clone(&corpus));
         if with_phpstan {
             registry.phpstan_stubs_loaded = true;
-            registry.merge_stubs(stubs::generated_stubs());
-            registry.merge_stub_classes(stubs::generated_stub_classes());
-            registry.merge_stub_constants(stubs::generated_stub_constants());
+            registry.merge_stubs(corpus.generated_stubs());
+            registry.merge_stub_classes(corpus.generated_stub_classes());
+            registry.merge_stub_constants(corpus.generated_stub_constants());
         } else {
-            registry.merge_stubs(stubs::builtin_stubs());
-            registry.merge_stub_classes(stubs::builtin_stub_classes());
-            registry.merge_stub_constants(stubs::builtin_stub_constants());
+            registry.merge_stubs(corpus.builtin_stubs());
+            registry.merge_stub_classes(corpus.builtin_stub_classes());
+            registry.merge_stub_constants(corpus.builtin_stub_constants());
         }
         let mut base = Project::with_registry(registry);
         base.phpstan_pinned = with_phpstan;
-        base.finish_loading();
+        base.finish_declarations(None);
         let mut registry = base.registry;
-        if let Err(error) = registry.store_cached(cache_name) {
+        if let Err(error) = registry.store_cached(stubs.cache_dir(), cache_name) {
             eprintln!("phpstan-rs: the {cache_name} can't be stored ({error})");
         }
         registry.freeze();
@@ -1143,6 +1138,7 @@ impl Project {
         &mut self,
         files: &[(PathBuf, bool)],
         pool: Option<&rayon::ThreadPool>,
+        stubs: &Stubs,
     ) -> Vec<(PathBuf, ParseError)> {
         let this = &*self;
         let parsed = map_on_pool(pool, files, |(path, _)| {
@@ -1154,10 +1150,13 @@ impl Project {
                 (source, parsed)
             }))
         });
-        self.expect_files(parsed.iter().filter_map(|p| match p {
-            Some(Ok((_, parsed))) => Some(parsed),
-            _ => None,
-        }));
+        self.expect_files(
+            parsed.iter().filter_map(|p| match p {
+                Some(Ok((_, parsed))) => Some(parsed),
+                _ => None,
+            }),
+            stubs,
+        );
         let mut failed = Vec::new();
         for ((path, analyzed), parsed) in files.iter().zip(parsed) {
             match parsed {
@@ -1177,17 +1176,21 @@ impl Project {
     /// stub classes. The names it declares are rebuilt, from the stubs
     /// first and then every file declaring them, as `Project::new`'s merge
     /// and the loads after it would have built them.
-    fn sync_phpstan_stubs(&mut self) {
+    fn sync_phpstan_stubs(&mut self, stubs: Option<&Stubs>) {
         let wanted = self.phpstan_pinned || self.files.values().any(|f| f.mentions_phpstan);
+        if self.registry.corpus.is_none() {
+            self.switch_to_base(Self::stubs_of(stubs), wanted);
+            return;
+        }
         if wanted == self.registry.phpstan_stubs_loaded {
             return;
         }
         if wanted && !self.finished {
-            self.switch_to_phpstan_base();
+            self.switch_to_base(Self::stubs_of(stubs), true);
             return;
         }
         self.registry.phpstan_stubs_loaded = wanted;
-        let names = stubs::phpstan_stub_names();
+        let names = self.registry.corpus().phpstan_stub_names();
         self.rebuild_declarations(
             &DeclaredNames {
                 functions: names.functions.into_iter().map(Name::from).collect(),
@@ -1198,38 +1201,48 @@ impl Project {
         );
     }
 
-    /// The registry of the built-in stubs and PHPStan's own source,
-    /// resolved once per process.
-    fn phpstan_base() -> &'static Registry {
-        static BASE: std::sync::LazyLock<Registry> =
-            std::sync::LazyLock::new(|| Project::resolved_stubs(true));
-        &BASE
+    /// The `Stubs` a project that is not finished takes its stubs from, if
+    /// the caller gave none: only a test can be in that case.
+    fn stubs_of(stubs: Option<&Stubs>) -> &Stubs {
+        match stubs {
+            Some(stubs) => stubs,
+            #[cfg(test)]
+            None => Stubs::shared(),
+            #[cfg(not(test))]
+            None => panic!("a project that is not finished needs the stubs to take its base from"),
+        }
     }
 
     /// Before the files `parsed` are inserted into a project that has none
-    /// yet: starts from the registry with PHPStan's source when one of
-    /// them mentions it, so that no declaration is inserted twice.
-    pub(crate) fn expect_files<'a>(&mut self, parsed: impl IntoIterator<Item = &'a ParsedFile>) {
-        if self.finished || !self.files.is_empty() || self.registry.phpstan_stubs_loaded {
+    /// yet: gives it the registry with PHPStan's source when one of them
+    /// mentions it, else the plain one, so that no declaration is
+    /// inserted twice.
+    pub(crate) fn expect_files<'a>(
+        &mut self,
+        parsed: impl IntoIterator<Item = &'a ParsedFile>,
+        stubs: &Stubs,
+    ) {
+        if self.finished || !self.files.is_empty() {
             return;
         }
-        if parsed
-            .into_iter()
-            .any(|p| mentions_phpstan(&p.functions, &p.classes, &p.references))
-        {
-            self.registry.switch_base(Project::phpstan_base().clone());
+        let with_phpstan = self.registry.phpstan_stubs_loaded
+            || parsed
+                .into_iter()
+                .any(|p| mentions_phpstan(&p.functions, &p.classes, &p.references));
+        if self.registry.corpus.is_none() || (with_phpstan && !self.registry.phpstan_stubs_loaded) {
+            self.registry.switch_base(stubs.base(with_phpstan));
         }
     }
 
-    /// Starts again from the registry resolved once per process with
-    /// PHPStan's own source in it, instead of resolving that source for
-    /// this project alone: the loaded files' declarations go into it as
-    /// they went into the registry without it, from the built-in stubs
+    /// Starts again from the registry of `stubs`, with PHPStan's own
+    /// source in it when `with_phpstan`, instead of resolving that source
+    /// for this project alone: the loaded files' declarations go into it
+    /// as they went into the registry without it, from the built-in stubs
     /// first, context files before analyzed ones and each group in load order.
     /// Only for a project that hasn't finished yet, whose resolved
     /// declarations are all the shared base's.
-    fn switch_to_phpstan_base(&mut self) {
-        self.registry.switch_base(Project::phpstan_base().clone());
+    fn switch_to_base(&mut self, stubs: &Stubs, with_phpstan: bool) {
+        self.registry.switch_base(stubs.base(with_phpstan));
         self.begin_declaration_changes();
         let mut sources: Vec<(bool, u64, &Path, &[BuiltDecl])> = self
             .files
@@ -1301,6 +1314,7 @@ impl Project {
         changed: &crate::registry::ChangedNames,
         index: &FxHashMap<deps::RefKey, FxHashSet<FileId>>,
     ) -> Scope {
+        let corpus = self.registry.corpus();
         let mut classes: FxHashSet<String> = changed.classes.clone();
         let mut functions: FxHashSet<String> = changed.functions.clone();
         let mut frontier: Vec<deps::RefKey> = classes
@@ -1353,9 +1367,9 @@ impl Project {
             // a key already, and is walked only if a project file
             // references it.
             if let Some(stub_key) = key.stub_key() {
-                for file in stubs::stub_dependent_files(stub_key) {
-                    stub_files.add_closure(file, |file| {
-                        for (is_class, name) in stubs::stub_file_names(file) {
+                for file in corpus.stub_dependent_files(stub_key) {
+                    stub_files.add_closure(corpus, file, |file| {
+                        for (is_class, name) in corpus.stub_file_names(file) {
                             let set = if is_class {
                                 &mut classes
                             } else {
@@ -1384,18 +1398,29 @@ impl Project {
 
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
     #[hotpath::measure]
+    pub fn finish_loading_with(&mut self, stubs: &Stubs) {
+        self.finish_declarations(Some(stubs));
+    }
+
+    /// `finish_loading_with` the process's shared test stubs.
+    #[cfg(test)]
     pub fn finish_loading(&mut self) {
-        self.finish_declarations();
+        self.finish_loading_with(Stubs::shared());
     }
 
     /// Settles which stubs the project has, then runs the finishing passes
     /// on the worker pool. The stubs are settled on the calling thread: a
-    /// registry resolved once per process may have to be built first, on
-    /// the pool, which a pool thread waiting for it would starve.
-    fn finish_declarations(&mut self) -> FxHashSet<PathBuf> {
+    /// registry may have to be waited for, which a pool thread must not do.
+    /// `stubs` is only needed by a project that is not finished and holds
+    /// none yet or gains a file mentioning PHPStan.
+    fn finish_declarations(&mut self, stubs: Option<&Stubs>) -> FxHashSet<PathBuf> {
         self.begin_declaration_changes();
-        self.sync_phpstan_stubs();
-        worker_pool().install(|| self.run_finishing_passes())
+        self.sync_phpstan_stubs(stubs);
+        let pool = match stubs {
+            Some(stubs) => Arc::clone(stubs.pool()),
+            None => worker_pool(),
+        };
+        pool.install(|| self.run_finishing_passes())
     }
 
     /// Runs the finishing passes, returning the `deps::dependency_key`s of
@@ -1556,20 +1581,21 @@ impl Project {
             .collect();
         let constant_keys: FxHashSet<&str> = names.constants.iter().map(Name::as_str).collect();
         let with_phpstan = self.registry.phpstan_stubs_loaded;
+        let corpus = self.registry.shared_corpus();
         for name in &constant_keys {
             self.registry.remove_global_constant(name);
         }
         for name in &function_keys {
             self.registry
-                .merge_stubs(stubs::generated_stubs_named(name, with_phpstan));
+                .merge_stubs(corpus.generated_stubs_named(name, with_phpstan));
         }
         for name in &class_keys {
             self.registry
-                .merge_stub_classes(stubs::generated_stub_classes_named(name, with_phpstan));
+                .merge_stub_classes(corpus.generated_stub_classes_named(name, with_phpstan));
         }
         for name in &constant_keys {
             self.registry
-                .merge_stub_constants(stubs::generated_stub_constants_named(name, with_phpstan));
+                .merge_stub_constants(corpus.generated_stub_constants_named(name, with_phpstan));
         }
         let declares_one = |state: &FileState| {
             state
@@ -1910,7 +1936,7 @@ impl Project {
                 line_index,
             },
         );
-        let mut affected = self.finish_declarations();
+        let mut affected = self.finish_declarations(None);
 
         let mut results = FxHashMap::default();
         affected.insert(path.to_path_buf());
@@ -1988,7 +2014,7 @@ impl Project {
         let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         if any_removed {
             self.rebuild_declarations(&removed, None);
-            affected.extend(self.finish_declarations());
+            affected.extend(self.finish_declarations(None));
         }
 
         affected
@@ -2025,6 +2051,7 @@ impl Project {
             seen,
             stub_files,
         } = walk;
+        let corpus = self.registry.corpus();
         let mut frontier: Vec<deps::RefKey> = changed.into_iter().collect();
         while let Some(key) = frontier.pop() {
             if seen.contains(&key) {
@@ -2054,9 +2081,9 @@ impl Project {
             // leads further: through the files that reference it, which
             // its stub file's closure holds.
             if let Some(stub_key) = key.stub_key() {
-                for file in stubs::stub_dependent_files(stub_key) {
-                    stub_files.add_closure(file, |file| {
-                        for (is_class, name) in stubs::stub_file_names(file) {
+                for file in corpus.stub_dependent_files(stub_key) {
+                    stub_files.add_closure(corpus, file, |file| {
+                        for (is_class, name) in corpus.stub_file_names(file) {
                             if name == stub_key {
                                 continue;
                             }
@@ -2790,6 +2817,7 @@ impl Project {
     }
 }
 
+#[cfg(test)]
 impl Default for Project {
     fn default() -> Self {
         Self::new()
