@@ -192,6 +192,55 @@ docblock is inherited across case-different names; union member order).
   versions not being indexed, and UTF-16/UTF-8 columns in the language server.
 - Two tests of `syntax::span` were wrong and are fixed; expect a few more.
 
+### 8. The off-run drill — `PROFILE_DRILL_PIWIGO_OFF.md` (drilled and validated, nothing implemented)
+
+On branch `callgrind-20g` (at `d520c9fd`, the code of `5fb858c9`). Three
+callgrind runs of one binary on Piwigo:
+
+- off (stub cache and per-file cache off): 25.63 G;
+- cold (stub cache empty): 25.68 G;
+- warm: 20.57 G, the 20 G plan's run.
+
+The stub build is the whole 5.05 G between off and warm. 3.50 G of it
+parses the stub files on a second rayon pool; 1.60 G runs serially on the
+main thread before the parse, with the other cores idle. Every other phase
+matches the warm run, and the 20 G plan's items reach every block of it.
+
+Proposals (§10), numbered as in the report:
+
+- For the stub build (off and cold runs):
+  - 1: resolve only the stub base the files need, −355 M serial;
+  - 2: serialize only what a store keeps, −1.0 G serial, off only;
+  - 3: a hash index for bases built in memory, ≈ −0.29 G;
+  - 4: `build_closures`' dependents looked up once, ≥ −0.2 G serial.
+
+  1-4 overlap, together ≈ −1.5-1.7 G.
+  - 5: the stub corpus built beside the parse, on the worker pool.
+  - 6: ship the stub cache with the build, −5.05 G. It would be packaged
+    beside the binary (3.4 MB with zstd in the archive).
+- For every run:
+  - 7: a PHPDoc tag's description tokenized only when read, ≈0.1 G warm;
+  - 8: skim context files' function bodies (≈47% of the parse job's
+    tokens) and parse one on demand, ≈2.0-2.3 G × (1 − d) after the plan;
+  - 9: purity and property writes on demand, exact (a least fixed point),
+    ≈0.3-0.4 G beyond item 4, on the finishing thread;
+  - 10: `simdutf8`, ≈50 M;
+  - 11: text made only when read: a reported message at display (55
+    level-7 messages are formatted and then dropped, 22.5 M) and no
+    class-constant key without dynamic constants (6.6 M).
+- Rejected: one rayon pool as a speed-up by itself, a narrower cache key,
+  a dedicated autoload reader.
+
+With the plan and proposals 6-11, both modes end at ≈10.3-10.6 G; without
+6, the off run ends at ≈13.7-14.1 G.
+
+Open, each needing a build (none run): the callees proposal 9's demand
+reaches, which also gives proposal 8's d; proposal 7's measured saving.
+
+Resume at proposal 1, then 2; then proposal 6's carrying step. Proposal 8
+waits on 9 and on the user's decision about syntax errors in skimmed
+bodies. No proposal is implemented.
+
 ## Documents with no place in the stack
 
 Standalone research and plans; none blocks anything:
