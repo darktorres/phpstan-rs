@@ -7,14 +7,14 @@ Profile: `~/.cache/prs-profile/callgrind-20g-modes/off/` (`cg.out-01..17`, 17 th
 
 **Sources.**
 - **The profile.** The drill itself built and ran nothing. Its figures come from the callgrind outputs of three runs of that binary (off, cold and warm, §1) and from the code at `d520c9fd`. The token counts of §5 were taken with PHP's own tokenizer (`token_get_all`) over Piwigo's files, and the cache sizes of §10.6 with `zstd` and `gzip` over the cold run's cache files.
-- **The ledger.** What the drill could not settle went to `PROFILE_DRILL_PIWIGO_OFF_LEDGER.md`, and every item there is now worked out. Its investigations made probe builds (B1-B3, B7, B10), interleaved timings (B4), a fourth callgrind run with both caches warm (B5), strace and perf runs (B6) and builds of the crate graph (B9), and read the code, php-src and the crate split's plan (C1-C8, D6). This report carries their results. The ledger holds each one's method, data paths and reasoning in full.
-- **Checked.** Every ledger item was checked again on 2026-10-14 against the code, the profiles, the data on disk and fresh runs of the scripts (`~/.cache/prs-probe/validate/notes.md`). The figures here are the corrected ones.
+- **The investigations.** What the drill could not settle went to a ledger of items (`PROFILE_DRILL_PIWIGO_OFF_LEDGER.md`, retired; its last version is `git show 72cac936:PROFILE_DRILL_PIWIGO_OFF_LEDGER.md`), and every item there was worked out. Its investigations made probe builds (B1-B3, B7, B10), interleaved timings (B4), a fourth callgrind run with both caches warm (B5), strace and perf runs (B6) and builds of the crate graph (B9), and read the code, php-src and the crate split's plan (C1-C8, D6). This report carries their results, and §13 gives each item's method and data path. The ledger's full reasoning is in git history.
+- **Checked.** Every item was checked again on 2026-10-14 against the code, the profiles, the data on disk and fresh runs of the scripts (`~/.cache/prs-probe/validate/notes.md`). The figures here are the corrected ones.
 
 **Conventions.**
 - "M" is 10^6 Ir and "G" is 10^9 Ir.
 - Percentages are of the off run's 25.63 G unless marked.
 - "Item n" is an item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II), and "proposal n" is one of this report's (§10).
-- Dn, Bn, Cn, En and Nn are the ledger's items.
+- Dn, Bn, Cn, En and Nn are the ids of the retired ledger's items (decisions, measurements that needed a build, code and data investigations, cuts and defects found, costs no item reached); §13 lists them with their methods.
 
 ## Summary
 
@@ -46,7 +46,7 @@ Profile: `~/.cache/prs-profile/callgrind-20g-modes/off/` (`cg.out-01..17`, 17 th
 | 10 | Check UTF-8 with SIMD | ≈ −22 M (estimated) | all | — |
 | 11 | Make text only when it is read: a reported message when it is displayed, a constant key only when a dynamic constant is configured | −29.1 M | all | — |
 
-- **Eleven more cuts** came out of the ledger's investigations (§10.13). The largest apply to a run with the per-file cache warm: E12 (≈ −0.35-0.4 G on the serial insert), E4 (≈ −0.25-0.3 G), E11 (≈ −116 M). For the shared work: E7 (≈ −55 M), E2 (≈ −50 M), E3 and E10 (≈ −35 M each), E5 (≈ −30 M), E6 (≈ −10 M), and E8 on runs that read the stub cache (≈ −65 M).
+- **Eleven more cuts** came out of the investigations (§10.13). The largest apply to a run with the per-file cache warm: E12 (≈ −0.35-0.4 G on the serial insert), E4 (≈ −0.25-0.3 G), E11 (≈ −116 M). For the shared work: E7 (≈ −55 M), E2 (≈ −50 M), E3 and E10 (≈ −35 M each), E5 (≈ −30 M), E6 (≈ −10 M), and E8 on runs that read the stub cache (≈ −65 M).
 - **Three defects in today's code** (§10.14), none fixed:
   - **E1.** A cold stub build can deadlock when a rayon worker forces it: a waiting worker steals a job that needs the lock it holds. The fix makes the stubs a value that the entry point owns and builds on a thread of its own, and it carries proposals 1 and 5.
   - **E14.** The parser refuses `$x instanceof static::$name`, which PHP accepts. Six files in the installed dependencies of three trees lose every declaration as context.
@@ -129,8 +129,8 @@ Profile: `~/.cache/prs-profile/callgrind-20g-modes/off/` (`cg.out-01..17`, 17 th
   - **covered**: the design reaches the block's cost;
   - **partly**: it reaches some of it, and the rest is named;
   - **new**: no item reaches it, and a proposal or a cut does.
-- **Savings.** For plan items, the savings quoted are the plan's own estimates. For the proposals and the cuts, they are computed from the profile, the code and the token counts, or measured by the ledger's probes, and each says which.
-- **The ledger's probes.** Probe builds from a worktree at `2a7befd3`, not for commit. One (`~/.cache/prs-profile/off-ledger-b/probe.patch`) answers every purity and property-write question a second time by a search on demand, records every body read, counts what the tag lexer lexes against what a pulling parser would, and records what the checker's truncations drop (B1-B3). Another counts `is_super_type_of`'s operands and logs `powf`'s calls (B7, B10). They ran in the off mode on Piwigo, whose output stayed byte-identical to the profile's, and B1-B3 also on Laravel (`vendor/laravel`, `check-project src`, with its own `vendor/` as context).
+- **Savings.** For plan items, the savings quoted are the plan's own estimates. For the proposals and the cuts, they are computed from the profile, the code and the token counts, or measured by the investigations' probes, and each says which.
+- **The probe builds.** Probe builds from a worktree at `2a7befd3`, not for commit. One (`~/.cache/prs-profile/off-ledger-b/probe.patch`) answers every purity and property-write question a second time by a search on demand, records every body read, counts what the tag lexer lexes against what a pulling parser would, and records what the checker's truncations drop (B1-B3). Another counts `is_super_type_of`'s operands and logs `powf`'s calls (B7, B10). They ran in the off mode on Piwigo, whose output stayed byte-identical to the profile's, and B1-B3 also on Laravel (`vendor/laravel`, `check-project src`, with its own `vendor/` as context).
 
 ## 3. Where the Ir goes
 
@@ -1032,7 +1032,7 @@ Each step is measured with paired cold runs; B4 gives them their wall-time weigh
   - **False flags are safe.** A trigger word inside a string or a comment only causes a full parse.
   - **The facts stay identical.** `FileFacts` stays file-wide and is computed as now, because the skimmer's raw lexer still sees every identifier for the `mentions` bits. A debug build also parses every skimmed body eagerly and asserts equal summaries, flows, declarations, global facts and references.
   - **Summaries do not depend on the registry** (`BodySummary::of(&body.stmts)`, `bodies.rs:112`), so a summary made late equals one made early.
-- **Two questions the check raises, settled in the ledger.** Both hold whether or not proposal 8 is built.
+- **Two questions the check raises, settled by the investigations (D1, D6).** Both hold whether or not proposal 8 is built.
   - **The parse-failure policy (D6, recommended).** A context file that fails to parse loses every declaration. That is right when the error is real and wrong when it is a gap in our parser, and the analyser cannot tell which.
     - **What PHP does with a refused file** (php 8.5.4, autoloading a file one of whose bodies does not parse): `new`, a static call and `class_exists()` autoload it and throw `ParseError`, again on every later attempt; `instanceof`, `::class`, `class_exists($n, false)`, a parameter type and a `catch` clause behave as if the class were not declared; a function it declares is undefined. A compile-time error ends the process at the autoload instead.
     - **Neither world gives "not found" at a use the analysis continues past.** Where the error is real, a use that needs the declaration throws or ends the process, so no code after it runs. Where it is a gap of ours, the declarations exist. Keeping them is the union of the two worlds.
@@ -1137,7 +1137,7 @@ Each step is measured with paired cold runs; B4 gives them their wall-time weigh
 
 ### 10.13 More cuts the investigations found
 
-None is in the 20 G plan. The ledger's E2-E13 hold each one's code trace in full.
+None is in the 20 G plan. Each is traced in the code below the table.
 
 | # | change | saving | runs | exact | needs |
 |---|---|---|---|---|---|
@@ -1169,7 +1169,7 @@ E9, `format!` per product in the regex scanner (`scan_branch` starts its accumul
 
 ### 10.14 Three defects in today's code
 
-None is fixed. Each is found by the investigations, and each has a design in the ledger.
+None is fixed. Each is found by the investigations, and each has its design below.
 
 **E1. A cold stub build can deadlock on a rayon worker (C2).**
 - **The locks.** Five process-wide values hold a lock while their first build runs: `plain_base` and `phpstan_base` (`LazyLock`, `project.rs:537-541`, `:1203-1206`), `built_stub_corpus` (`LazyLock`, `stubs.rs:1420-1429`), and `stub_index` and `generated_stub_data` (`OnceLock`, `stubs.rs:1431-1450`). Two kinds of parallel work run under them: the corpus's `par_iter` (`stubs.rs:1482`), and the bases' finishing passes, through `finish_loading` → `worker_pool().install` (`project.rs:1398`).
@@ -1207,7 +1207,7 @@ None is fixed. Each is found by the investigations, and each has a design in the
 
 ## 11. What remains
 
-Applied in order, each row on what the rows above it leave. The columns assume proposal 6, so the stub build is gone before the plan's items apply, and the per-file cache cold or off, as in the profile. Measured figures replace the drill's estimates where the ledger measured them.
+Applied in order, each row on what the rows above it leave. The columns assume proposal 6, so the stub build is gone before the plan's items apply, and the per-file cache cold or off, as in the profile. Measured figures replace the drill's estimates where the investigations measured them.
 
 | | warm, G | off, G |
 |---|---:|---:|
@@ -1233,7 +1233,7 @@ Applied in order, each row on what the rows above it leave. The columns assume p
 
 ## 12. What this drill does not establish
 
-The ledger's investigations settled most of what the drill left open: wall time (B4), a run with both caches warm (B5), the cache writes on disk (B6), d and proposal 9's reach (B1), proposal 7's saving (B2), the discarded reports (B3), the relation's operands (B7), proposal 6's compile-time cost (B9) and its equality across targets on the host (B10), and the split of the stub bases' finishing runs (C4, C5). What is still not established:
+The investigations settled most of what the drill left open: wall time (B4), a run with both caches warm (B5), the cache writes on disk (B6), d and proposal 9's reach (B1), proposal 7's saving (B2), the discarded reports (B3), the relation's operands (B7), proposal 6's compile-time cost (B9) and its equality across targets on the host (B10), and the split of the stub bases' finishing runs (C4, C5). What is still not established:
 
 - **Instructions are not time.** The allocator's and the copies' costs are memory-bound, so their weight in wall time is higher than in Ir. B4's wall times are of one machine.
 - **No calling context** (§2). Shared functions are split by edge shares. The split of the stub bases' Ir and the plain base's finishing run (≈35-52 M, scaled from the measured 117.2 M) are estimates for that reason.
@@ -1262,5 +1262,39 @@ All paths are under `~/.cache/prs-profile/callgrind-20g-modes/` unless marked. S
 - **Cache sizes** (§10.6): `analysis/n1/sizes.txt`, from `zstd -19` and `gzip -9` over `stubcache/*.cbor`.
 - **Output identity**: `cmp off/out.json warm/out.json` and `cmp off/out.json cold/out.json`.
 - **Messages dropped by level** (§9.2): `report_missing_offset`'s calls by line, from the warm pickle's `fnline` and `callline`.
-- **The ledger's runs**, in `~/.cache/prs-profile/off-ledger-b/`: the probe patch (`probe.patch`, at `2a7befd3`), `b1/` (Piwigo and Laravel probe runs, B1-B3; `triggers.php`), `b4/` (interleaved timings and perf recordings), `b5/` (the both-warm callgrind run and its cache), `b6/` (strace and `classify.py`), `b7/`, `b9/` (builds, the unit-sharing toy workspace `share/`), `b10/`.
-- **The ledger's code and data probes**, in `~/.cache/prs-probe/`: `syntax-in-body/` (D1), `d6/` (the `php -l` verdicts and PHP's behaviour on a refused file), `c7/` (triggers, `verdicts.tsv`, `verdicts_run.tsv`), `c8/` (names, reach, the cargo cycle), and `validate/` (the item-by-item check of 2026-10-14, `gates.php`, `instanceof_sp.tsv`).
+- **The ledger's items.** The ledger (`PROFILE_DRILL_PIWIGO_OFF_LEDGER.md`, 1,098 lines) is retired: its last version is in git at `72cac936` (`git show 72cac936:PROFILE_DRILL_PIWIGO_OFF_LEDGER.md`), and the ids D, B, C, E and N in this report are its item ids. Each result is carried in the sections that cite the id; the table gives each item's method and where its data is. Paths are under `~/.cache/prs-profile/off-ledger-b/` (`b/`), `~/.cache/prs-probe/` (`p/`) and `callgrind-20g-modes/analysis/` (`a/`). `p/validate/notes.md` holds the item-by-item check of 2026-10-14. Probe builds are of a worktree at `2a7befd3` (`b/probe.patch`), not for commit, and ran in the off mode on Piwigo, with output byte-identical to the profile's.
+
+  | item | method | data |
+  |---|---|---|
+  | D1 | php 8.5.4 run on files with a parse error, a compile-time error and a modifier error, loaded by `include`; the parser's only failing step found by reading `project.rs` and `syntax/src/parse.rs`; the saving of a checking-only pass from the profile's parser block | `p/syntax-in-body/`, `p/validate/d1/` |
+  | D2 | read the load path for the bytes it already holds; the share of body text from B1's probe | `b/b1/` |
+  | D3, D4 | read the crate split's plan and the build scripts; D3's reopening by C8 | `p/c8/`, `p/validate/CRATE_SPLIT_PLAN.master.md` |
+  | D5 | read `file_cache.rs`, `stub_cache.rs`, `session.rs` for the failure paths of a store | none |
+  | D6 | php 8.5.4 autoloading a file with a broken body, per kind of use; `php -l` over every PHP file under `vendor/` (111,836 files, 272 fail), classed by hand; Psalm's `StatementsProvider` read | `p/d6/` (`kinds.php`, `main.php`, `php-l-fatal.tsv`, `php-l-class.tsv`, `upstream/`) |
+  | D7 | read the crate split's progress (`gates/module-graph.txt` on master) and the cold-run paths | none |
+  | B1, B2, B3 | the probe patch answers every purity and property-write question a second time by a search on demand, records every body read, counts what the tag lexer lexes against what a pulling parser would, and records what the truncations drop; on Piwigo and on Laravel (`vendor/laravel`, `check-project src`); `triggers.php` counts the skimmer's full parses with `token_get_all` | `b/probe.patch`, `b/b1/{piwigo,laravel}/` (`level.txt`, `b1-b3.txt`, `stderr.txt`, `context-files.txt`), `b/b1/triggers.php` |
+  | B4 | gate binary of `4db8f996` (source hash `558a2b69…`) in six cache modes, round-robin, 8 rounds, each starting at the next mode; medians; perf recordings | `b/b4/scripts/interleave.py`, `b/b4/perf/` |
+  | B5 | the profile's `fp/dhat` binary under callgrind on Piwigo, with a cache filled by two earlier runs; output compared with the profile's; cache mtimes checked | `b/b5/` |
+  | B6 | strace and perf on a cold per-file-cache run against the stub-warm recording, classed by `classify.py` | `b/b6/`, `b/b4/perf/stubwarm.data`, `p/validate/b6-classify.txt` |
+  | B7 | probe build counting, at the top of `is_super_type_of`, its operands, shortcut hits and identical pairs; one run | `b/b7/piwigo/` |
+  | B8 | counted with PHP's tokenizer; settled in E7 | E7's data |
+  | B9 | a worktree at `3324bacd`, builds under `nice -n 19` with `/proc/loadavg` logged, at opt-levels 0, 1 and 3 and with the build override; a three-crate toy workspace for cargo's unit sharing; `cargo build --timings`. The gate build's 9 min 36 s is from a log that did not record the load | `b/b9/` (`share/`), `~/.cache/prs-b/gate-build.log` |
+  | B10 | B7's probe logging every `powf` of constant folding on a two-file project and on Piwigo; the stub sources searched for `**` with the tokenizer; the crates searched for platform-dependent code; four-file build at `PHPSTAN_RS_THREADS` 1, 2, 3, 8, `RAYON_NUM_THREADS=1`, `taskset -c 0` | `b/b10/` |
+  | C1 | read `syntax/src/lexer.rs` and `parser.rs` for state across a token boundary | none |
+  | C2 | read rayon-core 1.13.0's `registry.rs` and the stub-build lock chain; the scenario traced by hand, not run | none |
+  | C3 | a script over the stub cache container's section directory and each table's 16-byte records (`container.rs`, `name_table.rs`), per table, for both bases | `p/validate/c3/` (`tables.py`, `calls.py`, `calls_by_name.py`), over `callgrind-20g-modes/stubcache/*.cbor` |
+  | C4, C5 | per-thread call counts read from the raw callgrind files; closure counts matched to the two bases' class and function counts | `off/cg.out-NN` under `callgrind-20g-modes/`, `q.py` |
+  | C6 | read `project.rs`, `session.rs`, `lexer.rs`, `syntax`'s manifest | none |
+  | C7 | every compile-error site in php-src 8.5.4 listed, one trigger file per site (299 files), each run with `php -l` and with `echo "RAN\n";` first, against the parser; 13 of `zend_inheritance.c`'s 54 sites triggered, the rest read | `~/.cache/php-src/src-8.5.4`, `p/c7/` (`cases/`, `scripts/run.py`, `verdicts.tsv`, `verdicts_run.tsv`), `p/syntax-in-body/goto.php`, `p/validate/c7-accepted.tsv` |
+  | C8 | no build: the names each project's files reference (PHP's tokenizer), closed over the checked-in index to a lower and an upper bound; the context files as `composer/src/vendor.rs` discovers them; the crate split's plan read; cargo's cyclic-dependency rejection on a two-crate workspace | `p/c8/` (`scripts/names.php`, `reach.py`, `context.php`, `cyc/`), `p/validate/c8/` (`gates.php`, `reach_lib.py`), `crates/stub-sources/index.tsv` on master |
+  | E1 | read every lock that holds a build and every caller that forces it; a deterministic reproduction is designed, not run | none |
+  | E2, E4, E5, E6, E8, E11, E12 | callers, call counts and Ir read from the pickles (`q.py incl|callers|callees|lines`); the code at the cited lines read; E6's counts from B7 | `callgrind-20g-modes/{off,warm}/*.pkl`, `b/b5/`, `b/b7/` |
+  | E3, E7 | as above, with the analysed files' calls and integer literals counted with PHP's tokenizer | `a/ee/asserts.php`, `a/ee/ints.php`, `a/n5/analysed.txt` |
+  | E9 | the regex scanner's calls and `format!` costs from the pickle; the 170 patterns from N4's count | `a/nn/preg.php` |
+  | E10 | the reports the truncations drop, from B3's probe; the flag's scope read in `function_decl.rs` and `checker.rs` | `b/b1/` |
+  | E13 | syscalls counted under strace on a cold per-file-cache run | `b/b6/` |
+  | E14 | B1's Laravel warnings; the parser's `instanceof` rule read against PHP's grammar; a tokenizer scan of every file under `vendor/` | `b/b1/laravel/stderr.txt`, `p/validate/d6/instanceof_sp.php`, `instanceof_sp.tsv` |
+  | E15 | `build.rs` of `phpstan-rs` and of `stub-sources` compared; the same lists read on master | none |
+  | N1 | the statements block's rest classed by owner function from the pickles; per-rule costs | `a/nn/n1split.py` (`n1split-warm.txt`, `n1split-off.txt`), `a/stmtsplit.py` |
+  | N2 | calls, self and inclusive Ir of the relation and the interner from the warm and off pickles | `callgrind-20g-modes/{off,warm}/*.pkl` |
+  | N3, N4 | declarations, docs and body tokens of the analysed files counted with PHP's tokenizer; the `preg_match` sites and their distinct patterns counted | `a/nn/decls.php`, `docs.php`, `preg.php` over Piwigo's file lists |

@@ -425,7 +425,7 @@ The off run's 90 unread functions outside the stub phases are the warm run's, pl
   - In memory, the warm run still loads and keeps the plain base: `Session::load` resolves it before the parse (`session.rs:733`), then `expect_files` switches to the PHPStan base. That keeps 6.6 MB from the peak to exit.
   - Deciding the base after the parse, as P1 does, removes it.
 - **P2's gate** also takes the PHPStan base's 18.3 MB write buffer off the off run's peak.
-- **P6** removes the off run's 5.77 M stub-phase blocks (944 MB; 133 MB at the peak, 112 MB at exit). Every run then pays the warm run's item-6 decoding instead: 475 K blocks, 91 MB, 24 MB at the peak and 69 MB at exit (§6). The off report's §10.6 records that P6 is not built in today's form, and ledger C8 takes the decision again after the crate split's version key. Until then, P1, P2, P7 and H1 are what lower these runs.
+- **P6** removes the off run's 5.77 M stub-phase blocks (944 MB; 133 MB at the peak, 112 MB at exit). Every run then pays the warm run's item-6 decoding instead: 475 K blocks, 91 MB, 24 MB at the peak and 69 MB at exit (§6). The off report's §10.6 records that P6 is not built in today's form, and the off report's C8 (§13) takes the decision again after the crate split's version key. Until then, P1, P2, P7 and H1 are what lower these runs.
 - **P7's estimate.**
   - It applies the off report's description shares, by token, to the tag tokenizer's blocks: 84.4% of the stubs' 1.20 M and 56.5% of the analysed files' 0.65 M.
   - The 0.65 M is the same in the off and warm runs, because the analysed files' tokenizer allocates as much in both.

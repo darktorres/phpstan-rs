@@ -241,12 +241,12 @@ Proposals (§10), numbered as in the report:
 - Rejected: one rayon pool as a speed-up by itself, a narrower cache key,
   a dedicated autoload reader.
 
-With the plan, proposals 6-11 and the ledger's cuts (E2-E13), both modes
+With the plan, proposals 6-11 and the off report's cuts (E2-E13), both modes
 end at ≈9.6-10.0 G with the files' parse verdicts cached, ≈11.0-11.4 G
 without; without 6, the off run ends at ≈12.9-13.3 G. With both caches
 warm today's floor is 14.34 G and 1.60 s (B5, B4).
 
-Decided on 2026-10-13 (ledger D1-D5): the stub data is built at compile
+Decided on 2026-10-13 (the off report's D1-D5): the stub data is built at compile
 time (reopened by C8, below); skimmed bodies are checked and their
 verdicts cached; a skimmed body's text is copied from the bytes the load
 reads; each cache checks once, at its first store, whether it can write.
@@ -258,7 +258,7 @@ Recommended on 2026-10-13, not yet decided:
   configured PHP version, and the batch run and the language server use one
   rule. The parser refuses `$s{0}`, which PHP 7 accepts, and a real file
   has it. It also refuses `$x instanceof static::$name`, valid in PHP 8.5
-  (ledger E14).
+  (the off report's E14).
 - **D7.** Proposals 1-5 are built now, since proposal 6 waits on level 2's
   stage C10. Level 2's C4 and C5 remove the eager stub build they speed, so
   they pay only until then.
@@ -270,12 +270,13 @@ run reaches 6-43% of the stub bytes, so proposal 6 saves ≈0.2-1.5 G per
 cold run instead of 5.05 G. C5's version key should keep the gates as data
 (one parse per file), or the data stops being a function of the source.
 Checked-in binary data is unfit. D3 is decided again once C5 sets its
-version key. These and the investigations are tracked in
-`PROFILE_DRILL_PIWIGO_OFF_LEDGER.md`.
+version key. These and the investigations are in `PROFILE_DRILL_PIWIGO_OFF.md` (§10,
+§13 lists each item's method and data); the ledger that tracked them was
+retired, and is in git at `72cac936`.
 
 The order, from D7:
 
-1. the deadlock fix (ledger E1), which carries proposals 1 and 5;
+1. the deadlock fix (the off report's E1), which carries proposals 1 and 5;
 2. D5's write check, which carries proposal 2;
 3. proposal 3;
 4. proposal 4.
@@ -284,7 +285,7 @@ Each is measured with paired cold runs. Proposal 6 is not built in its
 current form; it is decided again with level 2's C5. Proposal 8 waits on
 9; B1 measured d ≈ 0.005-0.006. No proposal is implemented.
 
-The ledger was checked item by item on 2026-10-14 and corrected in place.
+The ledger's items were checked one by one on 2026-10-14 and the report corrected.
 The check found two bugs in today's code, neither fixed:
 
 - **E14.** The parser refuses `instanceof` with a static property as the
