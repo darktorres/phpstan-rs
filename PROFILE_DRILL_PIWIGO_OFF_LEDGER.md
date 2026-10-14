@@ -189,7 +189,7 @@ None of these was run for the report.
 | B3 | DONE (B3 below) | How many reports the loops' convergence passes format and then discard (`diagnostics.truncate`: `checker.rs:1278`, `:1807`, `function_decl.rs:1209`; §10.11). The loops discard 270 on Piwigo and 304 on Laravel. The `extract()` truncation discards 31,660 on Piwigo, ≈35 M (E10). | how far proposal 11a reaches |
 | B4 | DONE (B4 below) | Wall time. Nothing is timed, including the 1.6 G of serial stub work on a cold run's critical path, with the other cores idle (§12). Medians of 8 interleaved runs on a quiet machine: off 2.68 s, stub cache cold 2.69 s, stub cache warm 2.31 s, both caches warm 1.60 s. The stub build is 0.37 s, 14% of an off run, and ≈0.4 s of its stretches run on one core. The finishing passes are ≈40% of the wall time with both caches warm. | the wall-time weight of proposals 1-5 |
 | B5 | DONE (B5 below) | A run with the per-file cache warm. All three runs had it off, so its floor and `from_def`'s cost with it on are unknown (§11, §12). Its floor is 14.34 G, against 20.57 G with the stub cache warm alone. `from_def` falls to 202.1 M, the analysed files' classes only. The run also shows two costs only the warm per-file cache pays (E11, E12). Its wall time is B4's. | the floor of the per-file-cache-warm mode |
-| B6 | DONE (B6 below) | Disk time of the cold run's cache write. Its 58 M is callgrind's count only (§12). The stub cache's write is ≈10 ms (4 files, 31.4 MB) and does not show in wall time. A cold per-file cache's first write costs ≈0.7 s of CPU, mostly in the kernel, and 0.10 s of wall (E13). | the cold run's full cost |
+| B6 | DONE (B6 below) | Disk time of the cold run's cache write. Its 58 M is callgrind's count only (§12). The stub cache's write is ≈10 ms (4 files, 31.4 MB) and does not show in wall time. A cold per-file cache's first write costs ≈0.7 s of CPU in the interleaved runs (0.82 s by perf), mostly in the kernel, and 0.10 s of wall (E13). | the cold run's full cost |
 | B7 | DONE (B7 below) | How many of `is_super_type_of`'s 1,341,821 questions ask about one node against itself. The profile counts calls, not their operands (N2). A probe run on Piwigo makes 1,479,785 calls. 203,478 (13.8%) are one node against itself, and 164,144 of those pass the shortcuts: 67,631 structural, 96,513 registry-backed. Equal nodes that are not one are 0.6%. E6 nets ≈ −10 M. | E6's saving |
 | B8 | DONE (E7 below) | How many of `Type::object`'s 170,696 calls build a class's plain object type, with no arguments, and how many of `int_literal`'s 71,550 build a small integer (N2). Settled from the code and the tokens: 125,364 (73%) are plain, and 92% of the integer literals are 0-255. | whether E7 is worth building |
 | B9 | DONE (B9 below) | What building the stub data at compile time adds to a build: the reflection crate compiled again for the host, and the stub build in the build script at the `build-override` opt-level, for a clean build and for an incremental one after an edit to the reflection crate (§10.6, §12). Cargo compiles the crate once when no `--target` is passed and the override equals the profile, so only `release.yml`'s legs pay a second compile: ≈160-215 s of units at opt-level 1. The stub build takes 3.67 s at opt-level 0, 0.90 s at 1 and 0.59 s at 3, with byte-identical output, and the embedding ≈0.4 s. An edit to reflection loses up to ≈20 s of pipelining, unless only the binary crate takes the data. | proposal 6's cost to development (D3) |
@@ -212,7 +212,7 @@ None of these was run for the report.
 |---|---:|---:|
 | context files, analysed files | 11,459, 2,792 | 12,404, 1,700 |
 | context bodies | 49,533 (17.7 MB) | 38,146 (13.3 MB) |
-| purity questions (function, method, static, `new`) | 39,880, 5,120 of them on stubs | 5,184, 404 on stubs |
+| purity questions (function, method, static, `new`), after the probe's reorder of `check_declared_purity_tag` (`noop.rs:395`), which asks about the declaration itself before it looks at the doc comment, so that only `@phpstan-impure` / `@impure` declarations ask (none on either tree) | 39,880, 5,120 of them on stubs | 5,184, 404 on stubs |
 | distinct non-stub callees asked about | 1,572 | 1,930 |
 | of them pure | 0 | 0 |
 | nodes the purity search visits | 1,590 | 1,939 |
@@ -227,7 +227,7 @@ None of these was run for the report.
 
 - **The search is exact on both trees.** It gives the eager pass's answer for every callee asked about, cycles included.
 - **No non-stub callee the no-op rules asked about is pure**, on either tree. Each search stops at the first impure node, often at the root's gate before any body is read. On Piwigo, the purity search read 123 context bodies and 258 analysed ones, for roots whose own bodies are 227 and 1,288.
-- **The checker itself read no context body.** The uninitialized-property rules are off by default (`rules.check_uninitialized_properties`). The parent-call rule (`project/class_shape.rs:343`) reads only for the methods it is configured with. With those on, the ancestors' bodies they read add to d. That is not measured.
+- **The checker itself read no context body.** The uninitialized-property rules are off by default (`rules.check_uninitialized_properties`). The parent-call rule (`project/class_shape.rs:343`) reads only for the methods it is configured with, but its built-in PHPUnit and Codeception hook rules (`setUp`, `tearDown`, `setUpBeforeClass`, `_before` ...) are on by default (`parent_calls.rs:36`), so on a tree with test classes it reads those few ancestor hook bodies; the two trees here have none. With the other rules on, the ancestors' bodies they read add to d. That is not measured. The checker also reads context files another way: `Project::ast_of` (`project.rs:890-917`) re-reads a file from disk, parses it in full and caches 32 trees, with no hash check, when `judge_property_types` (`:2185`) runs the checker on a non-analysed file that declares a class involved in a private-property write, or a trait such a class uses. Skimming leaves that reader unchanged.
 - **The skimmer's own full parses.** Proposal 8 also parses in full every body that holds a trigger (§10.8). Counted with `token_get_all` over each run's context files (`b1/triggers.php` over `b1/*/context-files.txt`):
 
   | | bodies flagged | share of body tokens | by trigger |
@@ -259,7 +259,7 @@ None of these was run for the report.
   - off: stub build 175.9 M, parse 90.6 M, check 42.0 M;
   - warm: parse 84.8 M, check 47.9 M.
 
-  At the measured shares, not lexing those bytes saves 138.8 + 33.0 + 3.1 = 174.9 M off, and 30.9 + 3.5 = 34.4 M warm. `remaining_description` goes entirely: 197.9 M off and 47.5 M warm.
+  At the measured shares, not lexing those bytes saves 138.8 + 33.0 + 3.1 = 174.9 M off, and 30.9 + 3.5 = 34.4 M warm. `remaining_description` goes: 197.9 M off and 47.5 M warm, except for the three-token prefix test of `[optional]` on each `@param` description. This count took that test as one token; it needs three (`docblock.rs:909-915`), and `@param` descriptions are 266,494 of the 414,584 description tokens in the stub build. So the totals are ceilings.
 - **The saving.** ≈0.37 G off and ≈0.08 G warm, against §10.7's 0.34 and 0.1 G.
   - Four fifths of the off figure is the stub build, which proposal 6 removes, so after proposal 6 both modes save ≈0.08 G.
   - Item 14's borrowed tokens halve that again: ≈0.04 G, against §11's ≈0.05.
@@ -277,7 +277,7 @@ None of these was run for the report.
 | `check_program`'s (`checker.rs:1806`) | 0 | 0 |
 | reports the check keeps | 651 | 9,800 |
 
-- **The loops** discard 270 reports on Piwigo and 304 on Laravel. Proposal 11a saves well under 1 M on them.
+- **The loops** discard 270 reports on Piwigo and 304 on Laravel. Proposal 11a saves well under 1 M on them, unless the 33 `offsetAccess.mightNotExist` reports that `finalize` does not drop (22 of the 55 formatted, `level.txt`) are among them: `b1-b3.txt` counts those 33 among the discarded reports but not by site, and at ≈409 K each they are ≈13 M. If they are among the `extract()` truncation's, they are inside the ≈11 M and ≈35 M below.
 - **The `extract()` truncation is where the waste is.** 31,481 of the 31,660 reports are `varTag.variableNotFound`, from the compiled Latte templates in Piwigo's `_analysis/phpstan-latte/`, which hold 34,570 `@var` tags. Each template's function calls `extract($ʟ_args)` and then names every variable with a `@var` tag.
   - `check_statement_var_tag_names` (`checker/stmt.rs:433`, `:529`) does not count `extract()` as defining a name, so it formats a report for each tag.
   - `check_function` then drops every report of the body.
@@ -307,13 +307,14 @@ None of these was run for the report.
 
 - **The floor is 14.34 G.**
 - **What the parse phase keeps (3.83 G):**
-  - **The 2,792 analysed files: ≈2.52 G.** Their parse is 1,961.2 M (`parse_with_ignores`). Their products cost 548.0 M:
+  - **The 2,792 analysed files: ≈2.51 G.** Their parse is 1,961.2 M (`parse_with_ignores`). Their products cost 548.0 M:
     - `file_declarations::collect`, 262.4 M, of which `from_def` is 200.4 M;
     - `FileBodies::collect`'s walk, 141.3 M;
     - `recorded_references`, 79.5 M;
     - `GlobalFacts::of`, 64.8 M.
   - **The 11,459 cache hits: ≈1.12 G**, ≈98 K per entry, ≈23 per stored byte:
-    - decoding, 985.6 M: `BuiltDecl` 452.7 M, `FileBodies` 338.4 M, the references 86.3 M plus 30.0 M to make their sets, `LineIndex` 51.0 M, `DeclaredClass` 29.8 M, the rest 27.4 M;
+    - decoding, 985.6 M: `BuiltDecl` 452.7 M, `FileBodies` 338.4 M, the references 86.3 M, `LineIndex` 51.0 M, `DeclaredClass` 29.8 M, the rest 27.4 M;
+    - making the references' sets, 30.0 M;
     - the checksum, 23.7 M;
     - the key's content hash, 19.7 M;
     - the reads, 29.1 M;
@@ -354,7 +355,7 @@ None of these was run for the report.
   | check | 2.50-2.90 | ≈5 |
 
   - **The stub stretches** take ≈0.6 s under perf, ≈0.4 s of it on one core.
-  - **Proposals 1-5** cut into these stretches, so their wall-time ceiling is the 0.37 s the warm stub cache saves today. Proposal 5 (the corpus beside the parse) would hide the first serial stretch, ≈0.25 s, behind the parse. The second, PHPStan's base at ≈0.17 s, stays on the critical path.
+  - **Proposals 1-5** cut into these stretches, so their wall-time ceiling is the 0.37 s the warm stub cache saves today. Proposal 5 (the corpus beside the parse) would hide the corpus's share of the first serial stretch (≈0.62 of the stretch's 0.98 G) behind the parse, and proposal 1 removes the plain base's share, so the two together hide the stretch of ≈0.25 s. The second, PHPStan's base at ≈0.17 s, stays on the critical path.
   - **Proposal 6** takes all 0.37 s.
 - **The other modes.**
   - Stub-warm (2.65 s under perf): parse 0.1-1.0 s, insert 1.0-1.2 s, finishing 1.2-2.1 s, check 2.1-2.6 s.
@@ -581,7 +582,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
   - Its classes and functions are a subset of PHPStan's base (`builtin_stubs` filters out `entry.phpstan`, `stubs.rs:937-944`), so it costs at most about 117.2 M.
   - The passes' work is mostly per class. Scaled by class count (1,542 against 3,495), it is ≈52 M. Scaled by the class tables' bytes (4.40 against 14.69 MB), it is ≈35 M.
 - **Together, ≈150-170 M** against §4.4's ≈211 M. The ≈40-60 M left over in §4.4's block differences is cost that stolen jobs moved between blocks, not stub-base work.
-- **Proposal 1's saving on the pool** is the plain base's run: **≈35-50 M**, not the 117.2 M that §10.1 names.
+- **Proposal 1's saving on the pool** is the plain base's run: **≈35-52 M**, not the 117.2 M that §10.1 names.
 - **Proposal 3** is unaffected. Its bisection (193.6 M in the finishing passes) was carved out of the blocks before the ≈211 M was summed.
 
 ### C6. A file's parse verdict depends only on its bytes and the `syntax` crate
@@ -596,7 +597,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 ### C7. The parser rejects 30 of the 268 compile-time errors PHP raises; the other 238 files load
 
 - **Method.**
-  - **PHP's side.** Every site in php-src 8.5.4 (`~/.cache/php-src/src-8.5.4`, the installed php's version) that raises a compile error:
+  - **PHP's side.** Every site in php-src 8.5.4 (`~/.cache/php-src/src-8.5.4`, the installed php's version) that raises a compile error, except most of `zend_inheritance.c`'s (13 of its 54 were triggered; the other 41 are linking checks of the same kind, not triggered one by one):
     - `E_COMPILE_ERROR`;
     - the `CompileError` and `ParseError` exceptions;
     - the `E_ERROR` that attributes raise while compiling.
@@ -865,7 +866,7 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
     - It predated D3. Its options named only a cache directory, and its build used `worker_pool()` itself, where the build script and the fixtures need another pool.
   - **Waiting with `rayon::ThreadPool::install` from a worker of another pool**: it steals while it waits (`in_worker_cross`).
   - **Waiting with `rayon::yield_now` in a loop**: the jobs it runs sit above the build's frame on the same stack, so the build cannot resume until they return.
-  - **Building outside the lock and then publishing**: two threads could both build the 5 G corpus.
+  - **Building outside the lock and then publishing**: two threads could both build the ≈4.1 G corpus.
   - **A once-cell that panics on re-entry**: it turns the hang into a crash, but it doesn't fix the cause.
 - **After the crate split.** C4's memo levels are per-class `OnceLock`s whose re-entry panics and leaves the cell retryable (`CRATE_SPLIT_PLAN.md`, C4), and C5's per-file parse memo is forced from pool jobs. E1's rule applies to both: nothing parallel runs under a lock a pool job can wait on. A per-file parse is serial; whether the index build uses `rayon` is still to be decided (C5).
 
@@ -884,7 +885,7 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
   - Static calls: the target class is resolved (8,324 calls, 11.1 M, ≈1,330 each), then the method is looked up (1.9 M).
   - Function calls: `resolve_function`, 12,674 calls, 3.6 M.
   - Then the owner is compared with `PHPUnit\Framework\Assert`.
-- **Why the name is enough.** The name `assertion_check` reads is the written one (`method.to_ascii_lowercase()`), and every name it matches starts with `assert`: the 55 names of its arms, and the `assertis`/`assertisnot` prefixes (`:127-258`). For any other written name it returns `None`. Gating the two arms on `method`'s first six bytes (`eq_ignore_ascii_case("assert")`) cannot change the result. A dynamic name is `DynamicMethodCall` or `DynamicStaticCall`, never probed today.
+- **Why the name is enough.** The name `assertion_check` reads is the written one (`method.to_ascii_lowercase()`), and every name it matches starts with `assert`: the 52 names of its arms, and the `assertis`, `assertisnot` and `assertnot` prefixes (55 literals in all, `:127-258`). For any other written name it returns `None`. The gate goes at the entry: `apply_phpunit_assertion_narrowing` tests the written name of the statement's method or static call and returns early when its first six bytes are not `assert` (`eq_ignore_ascii_case`), which cannot change the result. `phpunit_method`'s arms stay ungated, because `constraint()` also calls it, with the `assertThat` factory names (`istrue`, `greaterthan`, `logicalnot`, ...), which never start with `assert`. A dynamic name is `DynamicMethodCall` or `DynamicStaticCall`, never probed today.
 - **What stays.** The function-call arm, since `use function … as` can rename an assertion. And the real assertions: Piwigo's tests make 4,553 `self::assert*` calls and 890 method calls named `assert*`, out of 33,777 static and 49,421 method calls in the analysed files (`analysis/ee/asserts.php`). Most of the static calls that statements make are therefore real assertions, and they keep their 11.1 M.
 - **The saving.** ≈28 M of the method arm, ≈5 M of the static arm, and their allocations: ≈ −35 M.
 - **Item 18.1 shrinks it.** The receiver's inference repeats the statement's own (`check_expr` ran it just before). Once one inference per node is built, those 23.6 M become a lookup, and E3 saves ≈12 M. It is still one condition.
@@ -938,7 +939,7 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 ### E8. Types once per cache file: ≈ −65 M today, ≈ −25 M after item 6
 
 - **Today.** `Type`'s `Deserialize` is `Repr::deserialize(..).map(Type::new)` (`types/src/lib.rs:348-351`), so decoding a record interns every node of every type in it. In the warm run that is 416,975 calls of `Type::new`, 93.5 M, ≈224 each. The decoders: `FunctionReflection`'s 213,295 calls (49.2 M), `Vec<Type>`'s 111,634 (18.4 M), and the nested types', ≈92 K.
-- **At most 30% of those nodes are distinct.** The whole warm run made 126,748 new nodes, and every distinct node a decode returns was made once in the process. So at least 70% of the decode's interning finds a node that already exists.
+- **At most 30.4% of those nodes are distinct.** The whole warm run made 126,748 new nodes, and every distinct node a decode returns was made once in the process. So at least 69.6% (about 70%) of the decode's interning finds a node that already exists.
 - **The design.** A cache file holds a table of its distinct type nodes, children before parents, each entry its form with child types as table indices. A record holds an index where it holds a type today. Decoding runs under item 6 step 5's decode context, which holds the table as it holds the name table, with a `OnceLock<Type>` per entry. A type is then interned once per file, and every other occurrence is an `Arc` clone.
 - **The saving.** ≥70% of the 93.5 M today, ≈ −65 M. Item 6 step 1 stops decoding 22,746 stub methods, which leaves ≈35-40 M of this decoding, so ≈ −25 M on top of item 6.
 - **The per-file cache** can share the format, and that cuts E4's decoding too.
@@ -946,7 +947,7 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 ### E9. The regex scanner's concatenation: folded into F6f
 
 - `scan_branch` starts its accumulator at `[""]` and calls `concat_literals` once per atom (`regex_groups.rs:778`). That makes a new `Vec` and one `format!` per product (`:390-401`): 6,988 calls, 3.7 M, within `parse_capture_groups`' 11.7 M over 714 scans.
-- F6f's memo scans each of the 170 distinct patterns once instead of ≈3.5 times, which leaves ≈1 M. F6f's rewrite of the scanner ("scanning bytes and keeping slices", 20 G plan, `PROFILE_DRILL_PIWIGO_20G.md:1705`) replaces these `String`s anyway. Extending the left string in place when the right side is one literal belongs in that rewrite, not in a change of its own.
+- F6f's memo scans each of the 170 distinct patterns once instead of ≈4.2 times, which leaves ≈1 M. F6f's rewrite of the scanner ("scanning bytes and keeping slices", 20 G plan, `PROFILE_DRILL_PIWIGO_20G.md:1705`) replaces these `String`s anyway. (Each of the 170 distinct patterns is scanned ≈4.2 times: 714 scans; each of the 203 sites ≈3.5 times.) Extending the left string in place when the right side is one literal belongs in that rewrite, not in a change of its own.
 
 ### E10. Reports made inside an `extract()` or `eval()` body: ≈ −35 M, exact
 
@@ -1024,7 +1025,7 @@ The report lists these as costs no proposal and no item of the 20 G plan removes
 | N3 | DONE (N3 below) | Building the analysed files' declarations. | §11 |
 | N4 | DONE (N4 below) | The regex scanner's formatting, 3.7 M. | §9.2 |
 
-### N1. Two thirds of the statements block's rest is items of the 20 G plan; two new wastes, ≈100 M
+### N1. About three fifths of the statements block's rest is items of the 20 G plan; two new wastes, ≈100 M
 
 The statements block's rest (what is left after the blocks of §6) is 1,224.9 M (off: 1,211.9 M). Classed by function, self cost unless marked:
 
@@ -1049,7 +1050,7 @@ The plan's items reach ≈746 M of it. What no item reaches is 456.3 M over 1,18
 
 **E2. `@var` targets computed for every statement.** `check_stmt_impl` walks each statement's assigned names (`statement_assigned_variable_names`, `checker/stmt.rs:628`; 43,445 calls, 12.0 M) and its defined names twice (`statement_defined_variable_names`, from `inline_var_annotations` at `:1562` and at `:1260`; 290,162 calls over 145,081 statements, 36.3 M inclusive). Only the `@var` targets read them, and `statement_var_tags_of` (`:1542`) returns nothing unless the statement's doc holds `var`: `var_tag_nodes` ran for 1,645 statements. Computing them only then saves ≈48 M, exactly.
 
-**E3. A PHPUnit probe on every expression statement.** `apply_phpunit_assertion_narrowing` (`stmt.rs:704`) runs for each expression statement. `phpunit_method` (86,463 calls, 55.4 M inclusive; off: 57.2 M) infers the receiver (23.6 M), resolves a static target (11.1 M) and finds the method's owner (6.1 M) before it compares the owner with `PHPUnit\Framework\Assert`. Every name `assertion_check` reads starts with `assert`, so a method or static call whose written name doesn't is never an assertion it uses. Gating those two arms on the name saves ≈35 M (E3 below). The function-call arm stays: `resolve_function` is 3.6 M, and `use function … as` can give an assertion any name.
+**E3. A PHPUnit probe on every expression statement.** `apply_phpunit_assertion_narrowing` (`stmt.rs:704`) runs for each expression statement. `phpunit_method` (86,463 calls, 55.4 M inclusive; off: 57.2 M) infers the receiver (23.6 M), resolves a static target (11.1 M) and finds the method's owner (6.1 M) before it compares the owner with `PHPUnit\Framework\Assert`. Every name `assertion_check` reads starts with `assert`, so a method or static call whose written name doesn't is never an assertion it uses. Gating the probe at its entry on the name saves ≈35 M (E3 below). The function-call arm stays: `resolve_function` is 3.6 M, and `use function … as` can give an assertion any name.
 
 ### N2. Already lean per call; the costs are counts, and four new cuts
 
@@ -1061,7 +1062,7 @@ The plan's items reach ≈746 M of it. What no item reaches is 456.3 M over 1,18
 - The check's relation block is 504.7 M.
 
 **The interner.** 1,676,428 inserts, 521.2 M inclusive (owned 1,335,586, borrowed 340,842); 126,748 new nodes (7.6%).
-- Per insert ≈311: hashing ≈55 (`exact_hash` 92.9 M), comparing ≈83 (the front table 1,477,351 compares, 123.1 M; the shards 72,501, 6.3 M), the insert's own ≈105 (176.8 M).
+- Per insert ≈311: hashing ≈55 (`exact_hash` 92.9 M), comparing ≈77 (the front table 1,477,351 compares, 123.1 M, ≈83 per compare; the shards 72,501, 6.3 M), the insert's own ≈105 (176.8 M), dropping the owned values that hit ≈41 (68.7 M) and ≈33 of other callees (grow, `semantic_hash`, allocation).
 - Dropping the owned values that hit: 1,255,518, 68.7 M.
 - The hash is already shallow (each child's hash is read, not walked). The check's intern block is 369.9 M (insert 113.7, `exact_hash` 59.3, `exact_eq` 49.0, dropping `Repr` 34.8, `intern` 32.1, `is_form_of` 25.6).
 - `Type::new`'s callers: decoding the stub cache 416,975 calls, 93.5 M (the warm run only; the off run decodes nothing); `Type::object` 170,696 (57.6 M); `int_literal` 71,550 (23.8 M); `bind_self` 64,671. Decoding as a whole: classes 137.7 M over 3,949, functions 301.3 M over 39,914.
@@ -1092,6 +1093,6 @@ So a run with the per-file cache warm still pays ≈0.5-0.6 G for analysed files
 
 ### N4. The regex scanner: 714 scans of 170 patterns
 
-`scan_branch`'s 6,988 `format!` calls (3.7 M) run inside 714 `parse_capture_groups` calls, 11.7 M inclusive: 467 from `preg_matches_type`, 247 from `narrow_preg_outcome`. The analysed files hold 203 literal `preg_match` and `preg_match_all` sites, 170 distinct patterns (`analysis/nn/preg.php`), so each pattern is scanned ≈3.5 times (the type and each narrowing). F6f's memo (one analysis per distinct text) removes ≈75% of the 11.7 M. `concat_literals` (`regex_groups.rs:390-401`) builds each product with `format!("{x}{y}")`; E9, which would remove that, is folded into F6f's rewrite of the scanner.
+`scan_branch`'s 6,988 `format!` calls (3.7 M) run inside 714 `parse_capture_groups` calls, 11.7 M inclusive: 467 from `preg_matches_type`, 247 from `narrow_preg_outcome`. The analysed files hold 203 literal `preg_match` and `preg_match_all` sites, 170 distinct patterns (`analysis/nn/preg.php`), so each site is scanned ≈3.5 times and each distinct pattern ≈4.2 times (714 scans: the type and each narrowing). F6f's memo (one analysis per distinct text) removes ≈76% of the 11.7 M. `concat_literals` (`regex_groups.rs:390-401`) builds each product with `format!("{x}{y}")`; E9, which would remove that, is folded into F6f's rewrite of the scanner.
 
 **Reproduction.** The profiles are in `~/.cache/prs-profile/callgrind-20g-modes/` (`warm/warm.pkl`, `off/off.pkl`); `~/.cache/prs-profile/drill-scripts/q.py <pkl> self|incl|find|callers|callees|lines|tree|thread <pattern>` reads them. N1's split is `analysis/nn/n1split.py` (output `n1split-warm.txt`, `n1split-off.txt`); the counts of N3 and N4 come from the PHP scripts beside it, run over Piwigo's file lists. E3's and E7's counts come from `analysis/ee/asserts.php` and `ints.php`, run over `analysis/n5/analysed.txt`.

@@ -242,8 +242,8 @@ Proposals (§10), numbered as in the report:
   a dedicated autoload reader.
 
 With the plan, proposals 6-11 and the ledger's cuts (E2-E13), both modes
-end at ≈9.7-10.0 G with the files' parse verdicts cached, ≈11.1-11.4 G
-without; without 6, the off run ends at ≈12.9-13.2 G. With both caches
+end at ≈9.6-10.0 G with the files' parse verdicts cached, ≈11.0-11.4 G
+without; without 6, the off run ends at ≈12.9-13.3 G. With both caches
 warm today's floor is 14.34 G and 1.60 s (B5, B4).
 
 Decided on 2026-10-13 (ledger D1-D5): the stub data is built at compile
