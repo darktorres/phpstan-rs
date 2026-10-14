@@ -201,7 +201,7 @@ None of these was run for the report.
 | C4 | DONE (C4 below) | Which stub base each finishing run served (§10.1). One run cost 117.2 M on its calling thread; the profile can't say which base it was. | proposal 1's saving on the pool |
 | C5 | DONE (C5 below) | The ≈211 M for the two stub bases' finishing runs (§4.4) is an estimate, because stolen jobs move cost between blocks and the profile has no calling context (§12). | proposals 1 and 3's share of the finishing passes |
 | C6 | DONE (C6 below) | Whether a file's parse verdict depends on anything besides its bytes and the `syntax` crate (§10.8, D1). If it does, a verdict cache keyed by those two can go stale. | whether D1's verdict cache is exact |
-| C7 | OPEN | Which of PHP's compile-time errors the parser does not report. A `goto` to a label that does not exist is one: PHP refuses the file (`~/.cache/prs-probe/syntax-in-body/goto.php`), but the parser only records labels (`GotoScope`, `syntax/src/parser.rs:103`), so the file loads. The list of PHP's compile-time errors (`zend_compile.c`) against the parser's errors gives the rest. | how far a failed parse matches PHP's, with or without proposal 8 (D6) |
+| C7 | DONE (C7 below) | Which of PHP's compile-time errors the parser does not report. A `goto` to a label that does not exist is one: PHP refuses the file (`~/.cache/prs-probe/syntax-in-body/goto.php`), but the parser only records labels (`GotoScope`, `syntax/src/parser.rs:103`), so the file loads. The list of PHP's compile-time errors (`zend_compile.c`) against the parser's errors gives the rest. | how far a failed parse matches PHP's, with or without proposal 8 (D6) |
 
 ### C1. The tag lexer carries no state across a token boundary
 
@@ -281,6 +281,76 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 - **No feature changes the parse.** `syntax`'s only feature, `fuzzing`, derives `Arbitrary` (`php_string.rs:13`, `name.rs:263`).
 - **So the key** is the file's content hash and a hash of `crates/syntax` (its sources and manifest), the workspace manifest (the profiles), `Cargo.lock` (its dependencies) and the target, computed as `build.rs` computes the build's source hash.
 - **A panic is not a verdict.** A parse that panics leaves the file unread (`session.rs:661-666`), and nothing caches it.
+
+### C7. The parser rejects 29 of the 268 compile-time errors PHP raises; the other 239 files load
+
+- **Method.**
+  - **PHP's side.** Every site in php-src 8.5.4 (`~/.cache/php-src/src-8.5.4`, the installed php's version) that raises a compile error:
+    - `E_COMPILE_ERROR`;
+    - the `CompileError` and `ParseError` exceptions;
+    - the `E_ERROR` that attributes raise while compiling.
+
+    That is 229 sites in `zend_compile.c`, 54 in `zend_inheritance.c`, and the rest in `zend_enum.c`, `zend_API.c`, `zend_opcode.c`, `zend_attributes.c` and the scanner.
+  - **One trigger file per site,** 299 files in `~/.cache/prs-probe/c7/cases/`. Each file is run twice:
+    - with `php -l`;
+    - with `echo "RAN\n";` as its first statement. An error that comes before `RAN` is a compile-time refusal: nothing in the file runs, and nothing it declares exists.
+
+    `scripts/run.py` makes both runs. `verdicts.tsv` holds each file's result.
+  - **Our side: read, not run.** Another instance was coding, so no binary was run. The parser's verdicts come from reading `crates/syntax` at HEAD:
+    - every place it builds a `ParseError` or a lexer error;
+    - the grammar paths the triggers take.
+- **Result.** 268 sites refuse the file at compile time from a trigger that hits their exact message.
+  - **The parser rejects 29 of them.**
+    - **20 by checks of its own, with PHP's message:**
+      - destructuring (7);
+      - the `foreach` key (2);
+      - empty array elements (2);
+      - `match` with two defaults;
+      - nested ternaries (3; all three forms get the message of `a ? b : c ? d : e`);
+      - `final` or `abstract` on an anonymous class (2);
+      - an invalid numeric literal, and the `\u{}` escapes (3).
+    - **9 by its grammar, with another message:**
+      - `list()` outside a destructuring;
+      - `__halt_compiler()` inside a block;
+      - a braced namespace inside another one;
+      - `namespace namespace;`;
+      - an unmatched `)`;
+      - four hook forms: `get()`, `set` with two parameters, a variadic one, and one with a default.
+  - **It accepts the other 239.** PHP refuses those files, while we load their declarations. By the function that raises the error:
+
+| group | sites | examples |
+|---|---|---|
+| class members | 55 | an abstract method in a class that is not abstract, a property hook with no body, `readonly` without a type, a promoted property outside the constructor, an enum case with no value, `case` outside an enum |
+| variables | 26 | `$this` as a parameter or a `global`, a parameter declared twice, `use ($a, $a)`, `foreach ($a as $this)` |
+| constant expressions | 24 | `const X = $a;`, `static::` in a class constant, `new` in a class constant, `[...1]` |
+| writes | 21 | `f() = 1;`, `$a?->b = 1;`, `$x = $a[];`, `$GLOBALS = [];`, `[$a + 1] = $b;` |
+| types | 18 | `int\|int`, `?mixed`, `void\|int`, `int&A`, `\int`, `function f(void $a)`, a bad default for a typed parameter |
+| control flow | 18 | `break 2;` with one loop, `break;` outside any loop, `goto` to a missing label or into a loop, `return 1;` in a `void` function, `yield` outside a function |
+| calls and arguments | 17 | a positional argument after a named one, `new A(...)`, `self::` in a function, `parent::` with no parent |
+| names, imports, namespaces | 15 | two functions with one name, `use X\B; use Y\B;`, code after a braced namespace, `namespace` after a statement |
+| modifiers | 11 | `public private`, `static static`, `final abstract class` |
+| attributes | 10 | `#[A(...$a)]`, `#[Attribute]` on a trait, `#[\NoDiscard]` on a `void` function |
+| magic methods | 8 | `__get()` with no parameter, `static function __get`, a return type on `__construct` |
+| declare | 5 | `strict_types` not first, `declare(strict_types=1) { }` |
+| inheritance in one file | 5 | a final method overridden by a class declared later in the same file |
+| lexer | 4 | `(real)`, an unterminated `/*`, a heredoc whose indentation mixes tabs with spaces or is too shallow |
+
+- **When the parser fails, PHP refuses too:** that held for all 29. The gap runs the other way: PHP refuses many files that we load.
+- **Almost all 239 are local to the file.** A pass over the tree after the parse can decide them. The checker already reports some of them as diagnostics, for instance `case` outside an enum and `goto` to a missing label (`checker/keywords.rs:180`). It reports them only in analysed files, so a context file with one of these errors keeps its declarations. Which of the 239 the checker reports was not counted.
+- **What is not a compile-time refusal.** 19 triggers fail only when the declaration runs, after the statements before it have run:
+  - a class declared twice;
+  - the enum checks: magic methods, properties from a trait, `cases()`, `Serializable`;
+  - a trait that does not exist;
+  - an interface implemented twice.
+
+  `zend_inheritance.c`'s checks refuse the file at compile time only when the parent and the interfaces are declared earlier in the same file (early binding). Otherwise they fail at declaration time. 13 of its 54 sites were triggered: the 9 compile-time ones counted above, which include the hooked-property checks and `#[\Override]` that need no other class, and the 2 declaration-time ones. The other 41 are linking checks of the same kind, and were not triggered one by one.
+- **Not reached from source:**
+  - PHP itself raises an earlier error first: `namespace\self` at `:1153`, `readonly` on a method at `:8253` (the modifier check), `__halt_compiler()` in a braced namespace at `:9810` (an unclosed brace).
+  - The value is folded to a string first: `:11120`.
+  - No input reaches them: `:11523`, `:11542`.
+  - The environment raises them: the stack limit, and the scanner's encoding errors.
+- **For D6.** Today's policy, where a context file that fails to parse loses its declarations, matches PHP on 29 of the 268 errors. On the other 239, the analyser declares what PHP never would. Proposal 8 does not change this split, since its pass runs the same parser.
+- **Settling the parser's side by running it.** Run the parser over `~/.cache/prs-probe/c7/cases/`, and compare its verdicts with `verdicts.tsv`. That needs a binary, which was not run.
 
 ## Found by the investigations
 
