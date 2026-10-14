@@ -59,7 +59,7 @@ and E15 are independent of this order unless a row's "needs" says otherwise.
 | # | status | task | estimated saving | needs | verify |
 |---|---|---|---|---|---|
 | P1 | OPEN | Resolve only the stub base the files need: the project starts with no base and takes one at `expect_files` (E1's S4). | −355.1 M serial; the plain base's finishing run ≈35-52 M (estimated) | E1 | Output identical on a project that mentions PHPStan and on one that does not; a file that mentions PHPStan only inside a body (P8) still picks PHPStan's base. |
-| P2 | OPEN | Serialize only what a store keeps: gate `stub_cache::store`, `StubIndex::store_cached`, `Registry::store_cached` and the stub-data store on D5's write check. | −1,005.3 M serial; ≈ −0.71 to −0.74 G after P1 | D5's check | A cold run still checks `store_entries`' duplicate-name test; an unwritable cache directory pays no encoding. |
+| P2 | DONE (c2cd1586; measured: off run 24,498,907,030 Ir against 25,029,730,463 at E1's commit, −530.8 M, output byte-identical; less than the estimated −0.71 to −0.74 G; a read-only cache directory run prints one line per cache and gives the same output) | Serialize only what a store keeps: gate `stub_cache::store`, `StubIndex::store_cached`, `Registry::store_cached` and the stub-data store on D5's write check. | −1,005.3 M serial; ≈ −0.71 to −0.74 G after P1 | D5's check | A cold run still checks `store_entries`' duplicate-name test; an unwritable cache directory pays no encoding. |
 | P3 | OPEN | A hash index for stub bases built in memory: `freeze` builds the index `store_entries` already builds. | ≈ −0.29 G | — | A built-then-frozen base answers every lookup as the bisection did (to be checked by a test). |
 | P4 | OPEN | Look each stub file's dependents up once in `build_closures`: per-file dependent lists, closures in strongly-connected-component order. | ≥ −0.2 G serial | — | The closures equal today's, file by file (to be checked by a test). |
 | P5 | OPEN | Build the stub corpus beside the parse: E1's S2 and S3; the corpus's `par_iter` moves into `worker_pool().install`; `check-project` makes the stubs before listing files. | wall time: ≈0.14 s alone, the whole ≈0.25 s stretch with P1 (a model); no Ir change | E1 | Paired wall-time runs; `PHPSTAN_RS_THREADS` and the 64 MB stack apply to the corpus. |
@@ -85,7 +85,7 @@ and E15 are independent of this order unless a row's "needs" says otherwise.
 | E10 | OPEN | Nothing reported while an enclosing body has called `extract()` or `eval()`. | ≈ −35 M on Piwigo | — (debug assertion that the truncation drops exactly what the count skipped) |
 | E11 | OPEN | A cached file's origins decoded as the one `Arc<Path>` its file binds. | ≈ −116 M, per-file cache warm | E8's decode context |
 | E12 | OPEN | Each class's assert-tagged method names carried in its `BuiltDecl`. | ≈ −0.35-0.4 G serial, per-file cache warm | — |
-| E13 | OPEN | The per-file cache's shard directories made once, by D5's check; the process id read once. | ≈ −80 ms kernel CPU, ≈ −10 ms wall | D5's check |
+| E13 | DONE (c2cd1586; measured: cold run with the per-file cache on, 26,149,980,863 Ir against 26,174,556,141, −24.6 M, same 11,459 entries in 256 shards, output identical; the mkdir and getpid syscalls are not counted by Ir and were not measured) | The per-file cache's shard directories made once, by D5's check; the process id read once. | ≈ −80 ms kernel CPU, ≈ −10 ms wall | D5's check |
 
 ## Left unmeasured or untraced (§12, §10.8, §10.11)
 

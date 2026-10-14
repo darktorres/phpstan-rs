@@ -277,7 +277,7 @@ retired, and is in git at `72cac936`.
 The order, from D7 (rows and state: `PROFILE_DRILL_PIWIGO_OFF_BUILD_LEDGER.md`):
 
 1. ~~the deadlock fix (the off report's E1)~~ done at `3d5434b3` (callgrind-validated only: tests, clippy and fixtures not run); its proposals 1 and 5 ride on it and are measured in the ledger;
-2. D5's write check, which carries proposal 2;
+2. ~~D5's write check, which carries proposal 2~~ done at `c2cd1586` (callgrind-validated only);
 3. proposal 3;
 4. proposal 4.
 
