@@ -5,6 +5,8 @@ use syntax::ast::*;
 use types::{AccessoryKind, OrderingOp, Type};
 
 const ASSERT: &str = "PHPUnit\\Framework\\Assert";
+/// What every assertion method's name starts with, in any case.
+const ASSERT_PREFIX: &str = "assert";
 const FUNCTIONS: &str = "phpunit\\framework\\";
 
 /// What a PHPUnit assertion or constraint checks of a value.
@@ -63,6 +65,18 @@ impl<'a> Checker<'a> {
     /// `Assert::assertX()`) or one of its global `assertX()` functions.
     /// Past the statement the assertion held, since a failing one throws.
     pub(crate) fn apply_phpunit_assertion_narrowing(&self, e: &Expr, locals: &mut Locals) {
+        // Every assertion method's name starts with `assert`; a call written
+        // with another name is not probed for its owner. A function call is
+        // always probed, since `use function ... as` can rename an assertion.
+        if let ExprKind::MethodCall(_, method, ..) | ExprKind::StaticCall(_, method, _) =
+            &e.peeled().kind
+            && !method
+                .as_bytes()
+                .get(..ASSERT_PREFIX.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(ASSERT_PREFIX.as_bytes()))
+        {
+            return;
+        }
         let Some((name, sig, args)) = self.phpunit_method(e, locals) else {
             return;
         };
