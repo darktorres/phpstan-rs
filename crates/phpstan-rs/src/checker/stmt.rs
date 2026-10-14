@@ -625,13 +625,15 @@ impl<'a> Checker<'a> {
         // A tag naming a variable this statement assigns describes the
         // assigned value, so it applies after the assignment (below) -
         // the right-hand side still reads the variable's prior type.
-        let assigned = statement_assigned_variable_names(&stmt.kind);
-        for (name, ty) in &inline_var {
-            if assigned.contains(name) {
-                continue;
+        if !inline_var.is_empty() {
+            let assigned = statement_assigned_variable_names(&stmt.kind);
+            for (name, ty) in &inline_var {
+                if assigned.contains(name) {
+                    continue;
+                }
+                purge_stale_narrowing_for_var(locals, name);
+                locals.insert_var(&name.clone(), ty.clone());
             }
-            purge_stale_narrowing_for_var(locals, name);
-            locals.insert_var(&name.clone(), ty.clone());
         }
         match &stmt.kind {
             StmtKind::Expression(e) => {
@@ -1257,11 +1259,13 @@ impl<'a> Checker<'a> {
         // puts the tag on a statement *inside* the loop body, which the
         // before-dispatch application above already handles correctly
         // and completely on its own.
-        let defined = statement_defined_variable_names(&stmt.kind);
-        for (name, ty) in inline_var {
-            if defined.contains(&name) {
-                purge_stale_narrowing_for_var(locals, &name);
-                locals.insert_var(&name, ty);
+        if !inline_var.is_empty() {
+            let defined = statement_defined_variable_names(&stmt.kind);
+            for (name, ty) in inline_var {
+                if defined.contains(&name) {
+                    purge_stale_narrowing_for_var(locals, &name);
+                    locals.insert_var(&name, ty);
+                }
             }
         }
         match &stmt.kind {
@@ -1559,6 +1563,9 @@ impl<'a> Checker<'a> {
 /// named tag, and a single unnamed one for the one variable the
 /// statement defines (see `statement_defined_variable_names`).
 fn inline_var_annotations(stmt: &Stmt, tags: Vec<(Option<String>, Type)>) -> Vec<(String, Type)> {
+    if tags.is_empty() {
+        return Vec::new();
+    }
     let unnamed_target = match statement_defined_variable_names(&stmt.kind).as_slice() {
         [single] => Some(single.clone()),
         _ => None,
