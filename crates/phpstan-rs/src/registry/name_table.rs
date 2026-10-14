@@ -208,7 +208,10 @@ enum Keys {
         records: Range<usize>,
         index: Range<usize>,
     },
-    Built(Vec<Name>),
+    /// The names of a base made in memory, with a hash index over them of
+    /// the same form as a stored one: each place holds the position of a
+    /// name plus one, or zero when free.
+    Built { names: Vec<Name>, index: Box<[u32]> },
 }
 
 /// The hash a stored table's index files a name under: of its key, which is
@@ -277,7 +280,7 @@ impl Keys {
     fn len(&self) -> usize {
         match self {
             Keys::Stored { records, .. } => records.len() / RECORD_LEN,
-            Keys::Built(names) => names.len(),
+            Keys::Built { names, .. } => names.len(),
         }
     }
 
@@ -316,7 +319,7 @@ impl Keys {
     fn bytes(&self, i: usize) -> &[u8] {
         match self {
             Keys::Stored { buffer, .. } => &buffer[self.name_range(i)],
-            Keys::Built(names) => names[i].as_str().as_bytes(),
+            Keys::Built { names, .. } => names[i].as_str().as_bytes(),
         }
     }
 
@@ -326,7 +329,45 @@ impl Keys {
             Keys::Stored { .. } => {
                 std::str::from_utf8(self.bytes(i)).expect("a stored name is text")
             }
-            Keys::Built(names) => names[i].as_str(),
+            Keys::Built { names, .. } => names[i].as_str(),
+        }
+    }
+
+    /// The number of places in the hash index.
+    fn places(&self) -> usize {
+        match self {
+            Keys::Stored { index, .. } => index.len() / 4,
+            Keys::Built { index, .. } => index.len(),
+        }
+    }
+
+    /// What the index holds at `place`: a record's position plus one, or
+    /// zero.
+    fn index_entry(&self, place: usize) -> usize {
+        match self {
+            Keys::Stored { buffer, index, .. } => {
+                let at = index.start + place * 4;
+                u32::from_le_bytes(buffer[at..at + 4].try_into().unwrap()) as usize
+            }
+            Keys::Built { index, .. } => index[place] as usize,
+        }
+    }
+
+    /// The names, as the index lays them out: the places for `names`, each
+    /// filed under the hash of its lowercased text.
+    fn built(names: Vec<Name>) -> Keys {
+        let mut index = vec![0u32; index_places(names.len())];
+        let mask = index.len() - 1;
+        for (i, name) in names.iter().enumerate() {
+            let mut place = name.folded_hash() as usize & mask;
+            while index[place] != 0 {
+                place = (place + 1) & mask;
+            }
+            index[place] = i as u32 + 1;
+        }
+        Keys::Built {
+            names,
+            index: index.into_boxed_slice(),
         }
     }
 }
@@ -344,7 +385,7 @@ fn cmp_text(fold: bool, text: &[u8], key: &[u8]) -> Ordering {
 impl<V> Base<V> {
     pub(super) fn empty(fold: bool) -> Base<V> {
         Base {
-            keys: Keys::Built(Vec::new()),
+            keys: Keys::built(Vec::new()),
             slots: Box::default(),
             decode: None,
             fold,
@@ -379,7 +420,7 @@ impl<V> Base<V> {
             slots.push(slot);
         }
         Base {
-            keys: Keys::Built(names),
+            keys: Keys::built(names),
             slots: slots.into_boxed_slice(),
             decode: None,
             fold,
@@ -394,61 +435,36 @@ impl<V> Base<V> {
     /// folds) is `key`.
     pub(super) fn find(&self, key: &str) -> Option<usize> {
         let key = key.as_bytes();
-        if let Keys::Stored { buffer, index, .. } = &self.keys {
-            return self.find_indexed(buffer, index, key);
-        }
-        let (mut low, mut high) = (0, self.len());
-        while low < high {
-            let middle = low + (high - low) / 2;
-            match cmp_text(self.fold, self.keys.bytes(middle), key) {
-                Ordering::Less => low = middle + 1,
-                Ordering::Greater => high = middle,
-                Ordering::Equal => return Some(middle),
-            }
-        }
-        None
+        self.probe(hash_key(key), |i| {
+            eq_text(self.fold, self.keys.bytes(i), key)
+        })
     }
 
-    /// `find`, for a key in any case: found through the stored hash index by
-    /// the key's own folded hash, with no lowercase copy of it.
+    /// `find`, for a key in any case: found through the hash index by the
+    /// key's own folded hash, with no lowercase copy of it.
     pub(super) fn find_by<K: TableKey + ?Sized>(&self, key: &K) -> Option<usize> {
-        match &self.keys {
-            Keys::Stored { buffer, index, .. } if self.fold => {
-                let places = index.len() / 4;
-                let mask = places - 1;
-                let len = self.len();
-                let mut place = key.fold_hash() as usize & mask;
-                loop {
-                    let at = index.start + place * 4;
-                    let entry = u32::from_le_bytes(buffer[at..at + 4].try_into().unwrap()) as usize;
-                    if entry == 0 {
-                        return None;
-                    }
-                    let i = entry - 1;
-                    if i < len && key.eq_text_ignoring_case(self.keys.bytes(i)) {
-                        return Some(i);
-                    }
-                    place = (place + 1) & mask;
-                }
-            }
-            _ => key.with_key(|lower| self.find(lower)),
+        if self.fold {
+            self.probe(key.fold_hash() as usize, |i| {
+                key.eq_text_ignoring_case(self.keys.bytes(i))
+            })
+        } else {
+            key.with_key(|lower| self.find(lower))
         }
     }
 
-    /// `find` through a stored table's hash index.
-    fn find_indexed(&self, buffer: &Buffer, index: &Range<usize>, key: &[u8]) -> Option<usize> {
-        let places = index.len() / 4;
-        let mask = places - 1;
+    /// The position of the entry the hash index files under `hash` for
+    /// which `is` holds.
+    fn probe(&self, hash: usize, is: impl Fn(usize) -> bool) -> Option<usize> {
+        let mask = self.keys.places() - 1;
         let len = self.len();
-        let mut place = hash_key(key) & mask;
+        let mut place = hash & mask;
         loop {
-            let at = index.start + place * 4;
-            let entry = u32::from_le_bytes(buffer[at..at + 4].try_into().unwrap()) as usize;
+            let entry = self.keys.index_entry(place);
             if entry == 0 {
                 return None;
             }
             let i = entry - 1;
-            if i < len && eq_text(self.fold, self.keys.bytes(i), key) {
+            if i < len && is(i) {
                 return Some(i);
             }
             place = (place + 1) & mask;
@@ -458,7 +474,7 @@ impl<V> Base<V> {
     /// The declared name of entry `i`.
     pub(super) fn name(&self, i: usize) -> &Name {
         match &self.keys {
-            Keys::Built(names) => &names[i],
+            Keys::Built { names, .. } => &names[i],
             Keys::Stored { .. } => self.slots[i]
                 .name
                 .get_or_init(|| Name::from(self.keys.text(i))),
@@ -1264,6 +1280,62 @@ impl<V: Clone> FromIterator<(Name, V)> for NameTable<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_base_built_in_memory_finds_each_name_where_the_ordering_puts_it() {
+        // Names of several lengths and cases, enough that probes collide.
+        let names: Vec<String> = (0..3000)
+            .map(|i| {
+                let stem = ["Foo", "bAr", "Namespace\\Sub\\Klass", "x", "HTTPRequest"][i % 5];
+                format!("{stem}{i}")
+            })
+            .collect();
+        for fold in [true, false] {
+            let base = Base::built(
+                names
+                    .iter()
+                    .map(|name| (Name::from(name.as_str()), 0u32))
+                    .collect(),
+                fold,
+            );
+            let mut ordered: Vec<String> = names
+                .iter()
+                .map(|name| {
+                    if fold {
+                        name.to_ascii_lowercase()
+                    } else {
+                        name.clone()
+                    }
+                })
+                .collect();
+            ordered.sort();
+            for (position, key) in ordered.iter().enumerate() {
+                assert_eq!(base.find(key), Some(position), "{key}");
+                if fold {
+                    assert_eq!(base.find_by(key.as_str()), Some(position), "{key}");
+                }
+            }
+            for name in &names {
+                let key = if fold {
+                    name.to_ascii_lowercase()
+                } else {
+                    name.clone()
+                };
+                if fold {
+                    assert!(base.find_by(name.as_str()).is_some(), "{name}");
+                }
+                assert_eq!(base.find(&key), ordered.binary_search(&key).ok(), "{name}");
+            }
+            for absent in ["", "nothing", "foo", "foo3000", "x-1"] {
+                assert_eq!(base.find(absent), None, "{absent}");
+                if fold {
+                    assert_eq!(base.find_by(absent), None, "{absent}");
+                }
+            }
+        }
+        let empty: Base<u32> = Base::empty(true);
+        assert_eq!(empty.find("a"), None);
+    }
 
     #[test]
     fn the_folded_comparison_agrees_with_the_ordering_one() {
