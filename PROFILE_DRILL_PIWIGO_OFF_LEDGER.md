@@ -295,7 +295,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 | E7 | DONE (E7 below) | A class's plain object type kept with its declaration, the constant class types as statics, and a table of the integers −1..=255. ≈ −55 M. | item 4 for the declaration's slot; item 16, which makes the same calls cheaper |
 | E8 | DONE (E8 below) | A cache file's types stored once, in a table its records index, as item 6 step 3 stores names. ≈ −65 M of decoding today, ≈ −25 M after item 6 step 1. | item 6, steps 3 and 5 (the decode context and the format bump) |
 | E9 | SKIP (E9 below): F6f's rewrite of the scanner covers it, and ≈1 M is left after F6f's memo | The regex scanner's literal concatenation: `format!` per product (`regex_groups.rs:390-401`). | — |
-| E10 | OPEN, investigated (E10 below) | Report nothing while an enclosing body has called `extract()` or `eval()`: the truncation at its end drops all of it. ≈ −35 M on Piwigo, exact. | — |
+| E10 | DONE (E10 below) | Report nothing while an enclosing body has called `extract()` or `eval()`: the truncation at its end drops all of it. ≈ −35 M on Piwigo, exact. | — |
 
 ### E1. Where a stub build can deadlock, and the fix
 
