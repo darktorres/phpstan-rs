@@ -37,11 +37,87 @@ None of these was run for the report.
 
 | # | status | question | settles |
 |---|---|---|---|
-| C1 | OPEN | The tag lexer (`phpdoc/src/grammar/lexer.rs`): does any lexer state cross the point where the parser would stop at a description? If it does, a fresh lexer started at the offset gives different tokens (§10.7). | whether proposal 7's design holds |
-| C2 | OPEN | Deadlock through `install` (§10.5): can a stolen job wait on the stub corpus's own `LazyLock` when `install` is called from a third pool's thread, such as the one the test at `incremental_updates.rs:1155-1175` makes? | whether proposal 5 is safe as designed |
-| C3 | OPEN | Why encoding costs differ per byte between the two stub bases (§10.2). The file sizes (5.27 MB against 15.33 MB) would put the plain base's stores at about a quarter of 814.9 M, below the 0.26-0.36 G bound the code gives. Unexplained. | the overlap of proposals 1 and 2 |
-| C4 | OPEN | Which stub base each finishing run served (§10.1). One run cost 117.2 M on its calling thread; the profile can't say which base it was. | proposal 1's saving on the pool |
-| C5 | OPEN | The ≈211 M for the two stub bases' finishing runs (§4.4) is an estimate, because stolen jobs move cost between blocks and the profile has no calling context (§12). | proposals 1 and 3's share of the finishing passes |
+| C1 | DONE (C1 below) | The tag lexer (`phpdoc/src/grammar/lexer.rs`): does any lexer state cross the point where the parser would stop at a description? If it does, a fresh lexer started at the offset gives different tokens (§10.7). | whether proposal 7's design holds |
+| C2 | DONE (C2 below) | Deadlock through `install` (§10.5): can a stolen job wait on the stub corpus's own `LazyLock` when `install` is called from a third pool's thread, such as the one the test at `incremental_updates.rs:1155-1175` makes? | whether proposal 5 is safe as designed |
+| C3 | DONE (C3 below) | Why encoding costs differ per byte between the two stub bases (§10.2). The file sizes (5.27 MB against 15.33 MB) would put the plain base's stores at about a quarter of 814.9 M, below the 0.26-0.36 G bound the code gives. Unexplained. | the overlap of proposals 1 and 2 |
+| C4 | DONE (C4 below) | Which stub base each finishing run served (§10.1). One run cost 117.2 M on its calling thread; the profile can't say which base it was. | proposal 1's saving on the pool |
+| C5 | DONE (C5 below) | The ≈211 M for the two stub bases' finishing runs (§4.4) is an estimate, because stolen jobs move cost between blocks and the profile has no calling context (§12). | proposals 1 and 3's share of the finishing passes |
+
+### C1. The tag lexer carries no state across a token boundary
+
+- **The lexer's state** is its text and one byte offset (`Lexer { src, pos }`, `lexer.rs:46-50`). It has no mode, no nesting depth and no look-behind: `peek_at` looks only forward, and every token starts after `skip_whitespace` at `pos` (`:177-187`). A fresh lexer started at a token's start offset therefore gives the same tokens from there on, with spans shifted by that offset. Proposal 7's design holds.
+- **What the pulling parser must still keep:**
+  - **Rewinds.** The parser resets `pos` to a checkpoint in many places (`parser.rs:229`, `:452-456`, `:626`, `:897-910`, `:961-976`, `:1047`, `:1147`). The lexed tokens have to stay in a buffer, and the description's offset is the start of the token at the parser's final position, not the furthest token lexed.
+  - **Lookahead to the end.** `looks_like_html` (`parser.rs:868-890`) scans every remaining token for a closing `</name>` once a type is followed by `<name>`. In that case the parser lexes to the end of the tag, as it does now.
+  - **Spans.** `preceded_by_whitespace` and `is_adjacent_to_previous` (`:636-643`, `:850-852`) compare the spans of neighbouring tokens. They work unchanged on a buffer.
+- **Re-lexing on request, not slicing, is needed for more than `//`.** `token_text` (`parser.rs:1235-1262`) drops a string literal's quotes and its `\` escapes, writes a float in Rust's `{:?}` form (`1.50` becomes `1.5`), writes an integer that overflows `i64` as `0`, and `remaining_description` joins the tokens with single spaces (`:305-312`). A raw slice would differ in each case.
+- **The memo.** `parse_tag_rest_shared` shares a value between equal tag texts. A value that keeps an offset must keep its tag text (or an `Arc<str>` of it) to make the description on request.
+
+### C2. The deadlock exists today, without proposal 5
+
+A thread that waits inside rayon runs other jobs while it waits. If one of those jobs needs a lock that a frame lower on the same stack holds, the thread blocks itself.
+
+- **How rayon waits.**
+  - A `par_iter` on a worker thread runs on that worker's own pool. While it waits in a join, the worker takes jobs from the deques of the other workers of that pool (`rayon-core-1.13.0`, `registry.rs:780-842`: `wait_until_cold`, then `find_work`, then `steal`).
+  - An `install` into another pool from a worker thread (`in_worker_cross`, `registry.rs:543-563`) also waits with `wait_until`, so it also runs the calling pool's jobs while it waits.
+  - Only a thread that belongs to no pool blocks without running anything.
+- **The test's scenario.** At `incremental_updates.rs:1155-1175`, the groups run on the test's own pool T, each through `assert_edits_match_fresh_loads`, which makes projects. Suppose the stub cache is cold or off, and a worker tA of T is the first thread to force a stub value:
+  1. `Project::new` → `plain_base` (a `LazyLock`, `project.rs:537-541`) → `resolved_stubs(false)` → `builtin_stubs` → `generated_stub_data` (a `OnceLock`, `stubs.rs:1444-1450`) → `built_stub_corpus` (a `LazyLock`, `:1420-1429`) → `build_generated_stub_data`.
+  2. Its `files.par_iter()` (`stubs.rs:1482`) runs on T, because tA is a worker of T. While it waits, tA can take another group's job from T.
+  3. That job calls `Project::new` → `plain_base`, whose initialization tA itself is running lower on its stack. tA waits on itself. `OnceLock`'s documentation leaves re-entrant initialization unspecified, and the current implementation deadlocks.
+
+  The other workers of T block on the same locks. They block in the OS, not in rayon, so they cannot help either.
+- **A second path, through `install`.** `resolved_stubs` then calls `finish_loading` → `finish_declarations` → `worker_pool().install(...)` (`project.rs:1395-1399`), still under the base's `LazyLock`. From tA this is `in_worker_cross`, so tA again runs T's jobs while it waits. A stolen group that needs the base being built blocks, either directly (`phpstan_base`, when its files mention PHPStan) or after starting the other base, whose own `install` steals again.
+- **When it can happen.** Only when a base or the corpus is built, not loaded: with the stub cache cold (the first run after a source change) or off. `resolved_stubs` returns before any parallel work when it loads the base from the cache (`project.rs:572-577`). Whether a run deadlocks also depends on timing: tA has to steal a sibling group while its own work is still pending.
+- **Proposal 5 adds a third path of the same kind.** Moving the corpus's `par_iter` into `worker_pool().install` replaces path 2's T-local `par_iter` with an `in_worker_cross` wait, which steals in the same way. It creates no new kind of deadlock and removes none. The hazard needs its own fix (E1 below), and proposal 5 is safe once that fix is in.
+
+### C3. The plain base's stores cost more per byte because the two bases share their function tables
+
+The two files were parsed with a script that walks the container's section directory and each table's 16-byte records (`container.rs:120-136`, `name_table.rs:1028-1066`).
+
+- **Deduplication is not the cause.** `Writer::entry` writes equal entries once (`container.rs:92-109`), so a file is smaller than what was encoded. Counted per record, the plain base encodes 6.62 MB of entries (3.81 MB distinct) and PHPStan's base encodes 18.82 MB (13.45 MB distinct). The plain base's share is 26.0% of what was encoded, the same as its 25.6% share of the file bytes.
+- **The cause is what each base holds:**
+
+  | tables | plain: records, bytes encoded | PHPStan's: records, bytes encoded | store cost in the profile |
+  |---|---|---|---:|
+  | `functions`, `raw.functions` | 10,546, 1.30 MB | 10,564, 1.30 MB | `NameTable<FunctionReflection>::store` 137.8 M |
+  | `classes`, `raw.classes` | 3,084, 4.40 MB | 6,990, 14.69 MB | `NameTable<ClassReflection>::store` 489.6 M |
+  | the other 13 tables and sets | 26,753, 0.92 MB | 36,720, 2.83 MB | 185.2 M |
+
+  - The function tables are the same in both bases (5,273 against 5,282 functions), and they cost ≈53 Ir per byte against ≈26 for the class tables. Half of their 137.8 M belongs to the plain base, although the plain base holds only a quarter of all the bytes.
+  - The 8,259 global constants are also in both bases. The name-only tables cost per record, not per byte.
+- **The plain base's stores** come to 68.9 M (functions) + 112.9-149.9 M (classes, split by bytes or by records) + 45.4-78.0 M (the others) + 0.6 M (`store_container`) = ≈0.23-0.30 G. With the §10.2 bound of at least 0.26 G, that is **≈0.26-0.30 G**.
+- **Proposal 2 after proposal 1** therefore saves 1,005.3 M less that: **≈0.71-0.74 G**, against the report's 0.65-0.74 G.
+
+### C4. Worker 09's 117.2 M run served PHPStan's base
+
+The per-thread call counts were read from the raw callgrind files (`off/cg.out-NN`).
+
+- **Three finishing runs.** The main thread called `finish_declarations` three times: twice from `resolved_stubs` (the two bases) and once from `Session::load` (the project). Worker 02 executed two of the injected jobs (2,069.1 M inclusive on its own thread), and worker 09 executed one (117.2 M).
+- **The counts that identify them:**
+  - **Trait flattening.** The closure that `flatten_traits_one_pass` runs per class (`resolve.rs:161-164`) was called 58,905 times on the worker pool: 1 × 1,542 + 3 × 3,495 + 3 × 15,626.
+    - The plain base has no class that uses a trait (`trait_users` is empty in its file), so its first pass changes nothing and `flatten_traits` stops after one pass over its 1,542 classes (`resolve.rs:127-134`).
+    - PHPStan's base has 30 trait users and takes three passes over its 3,495 classes.
+    - The project takes three passes over its 15,626 classes.
+  - **On worker 09,** that closure ran 10,485 = 3 × 3,495 times. So did the other per-class and per-function closures of that run: `resolve_deferred_value_of` 3,495, `classify_purity` 3,495 (classes) and 5,282 (functions), and `drop_doc_members_excluded_by_native` 5,282 (functions). These are PHPStan's base's 3,495 classes and 5,282 functions.
+  - **On the other workers,** `classify_purity`'s class closure ran 5,448 times on worker 02 and 11,720 times on worker 04: 17,168 = 1,542 + 15,626. That is the plain base and the project.
+- **So** worker 09 ran PHPStan's base's finishing run, and the plain base's run shared worker 02 with the project's run. Proposal 1, which removes the plain base, removes the run that is not the 117.2 M one (C5).
+
+### C5. The two stub bases' finishing runs cost ≈0.15-0.17 G, not ≈0.21 G
+
+- **PHPStan's base: 117.2 M, measured.** Nothing of its run ran on another worker: every closure counted in C4 ran on worker 09 exactly once per class or function of that base. The main thread was blocked in `install` and the pool had no other work, so everything under that frame on worker 09 is that run's.
+- **The plain base: ≈33-52 M, estimated.** Its run shares worker 02 with the project's run, and the counts cannot separate their costs.
+  - Its classes and functions are a subset of PHPStan's base (`builtin_stubs` filters out `entry.phpstan`, `stubs.rs:937-944`), so it costs at most about 117.2 M.
+  - The passes' work is mostly per class. Scaled by class count (1,542 against 3,495), it is ≈52 M. Scaled by the class tables' bytes (4.40 against 14.69 MB), it is ≈35 M.
+- **Together, ≈150-170 M** against §4.4's ≈211 M. The ≈40-60 M left over in §4.4's block differences is cost that stolen jobs moved between blocks, not stub-base work.
+- **Proposal 1's saving on the pool** is the plain base's run: **≈35-50 M**, not the 117.2 M that §10.1 names.
+- **Proposal 3** is unaffected. Its bisection (193.6 M in the finishing passes) was carved out of the blocks before the ≈211 M was summed.
+
+## Found by the investigations
+
+| # | status | item | gates |
+|---|---|---|---|
+| E1 | OPEN | The deadlock of C2, present in today's code. One fix would build each process-wide stub value off any rayon thread: when `rayon::current_thread_index()` is `Some`, run the build on a scoped `std::thread` and join it. A thread that belongs to no pool blocks in `install` and in `par_iter` without running other jobs. This needs a decision, and a test that forces a cold build from a pool's worker. | proposal 5 |
 
 ## Costs nothing addresses, not investigated further
 
