@@ -282,7 +282,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 - **So the key** is the file's content hash and a hash of `crates/syntax` (its sources and manifest), the workspace manifest (the profiles), `Cargo.lock` (its dependencies) and the target, computed as `build.rs` computes the build's source hash.
 - **A panic is not a verdict.** A parse that panics leaves the file unread (`session.rs:661-666`), and nothing caches it.
 
-### C7. The parser rejects 29 of the 268 compile-time errors PHP raises; the other 239 files load
+### C7. The parser rejects 30 of the 268 compile-time errors PHP raises; the other 238 files load
 
 - **Method.**
   - **PHP's side.** Every site in php-src 8.5.4 (`~/.cache/php-src/src-8.5.4`, the installed php's version) that raises a compile error:
@@ -296,11 +296,12 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
     - with `echo "RAN\n";` as its first statement. An error that comes before `RAN` is a compile-time refusal: nothing in the file runs, and nothing it declares exists.
 
     `scripts/run.py` makes both runs. `verdicts.tsv` holds each file's result.
-  - **Our side: read, not run.** Another instance was coding, so no binary was run. The parser's verdicts come from reading `crates/syntax` at HEAD:
-    - every place it builds a `ParseError` or a lexer error;
-    - the grammar paths the triggers take.
+  - **Our side: run.** `phpstan-rs check`, which parses only, ran over the 299 files. The binary was the one saved for `4db8f996` (`.corpus-runs/gate/bin/4db8f996/gate/`), whose `crates/syntax` is HEAD's. Its result for each file is in `verdicts_run.tsv`.
+  - **A reading of `crates/syntax` came first**, and the run settled three cases it got wrong:
+    - the grammar rejects `f as static g` and `f as abstract g` in a trait adaptation;
+    - it accepts `namespace namespace;`.
 - **Result.** 268 sites refuse the file at compile time from a trigger that hits their exact message.
-  - **The parser rejects 29 of them.**
+  - **The parser rejects 30 of them.**
     - **20 by checks of its own, with PHP's message:**
       - destructuring (7);
       - the `foreach` key (2);
@@ -309,25 +310,25 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
       - nested ternaries (3; all three forms get the message of `a ? b : c ? d : e`);
       - `final` or `abstract` on an anonymous class (2);
       - an invalid numeric literal, and the `\u{}` escapes (3).
-    - **9 by its grammar, with another message:**
+    - **10 by its grammar, with another message:**
       - `list()` outside a destructuring;
       - `__halt_compiler()` inside a block;
       - a braced namespace inside another one;
-      - `namespace namespace;`;
       - an unmatched `)`;
-      - four hook forms: `get()`, `set` with two parameters, a variadic one, and one with a default.
-  - **It accepts the other 239.** PHP refuses those files, while we load their declarations. By the function that raises the error:
+      - four hook forms: `get()`, `set` with two parameters, a variadic one, and one with a default;
+      - `static` or `abstract` on a trait alias (2).
+  - **It accepts the other 238.** PHP refuses those files, while we load their declarations. By the function that raises the error:
 
 | group | sites | examples |
 |---|---|---|
-| class members | 55 | an abstract method in a class that is not abstract, a property hook with no body, `readonly` without a type, a promoted property outside the constructor, an enum case with no value, `case` outside an enum |
+| class members | 53 | an abstract method in a class that is not abstract, a property hook with no body, `readonly` without a type, a promoted property outside the constructor, an enum case with no value, `case` outside an enum |
 | variables | 26 | `$this` as a parameter or a `global`, a parameter declared twice, `use ($a, $a)`, `foreach ($a as $this)` |
 | constant expressions | 24 | `const X = $a;`, `static::` in a class constant, `new` in a class constant, `[...1]` |
 | writes | 21 | `f() = 1;`, `$a?->b = 1;`, `$x = $a[];`, `$GLOBALS = [];`, `[$a + 1] = $b;` |
 | types | 18 | `int\|int`, `?mixed`, `void\|int`, `int&A`, `\int`, `function f(void $a)`, a bad default for a typed parameter |
 | control flow | 18 | `break 2;` with one loop, `break;` outside any loop, `goto` to a missing label or into a loop, `return 1;` in a `void` function, `yield` outside a function |
 | calls and arguments | 17 | a positional argument after a named one, `new A(...)`, `self::` in a function, `parent::` with no parent |
-| names, imports, namespaces | 15 | two functions with one name, `use X\B; use Y\B;`, code after a braced namespace, `namespace` after a statement |
+| names, imports, namespaces | 16 | two functions with one name, `use X\B; use Y\B;`, code after a braced namespace, `namespace` after a statement, `namespace namespace;` |
 | modifiers | 11 | `public private`, `static static`, `final abstract class` |
 | attributes | 10 | `#[A(...$a)]`, `#[Attribute]` on a trait, `#[\NoDiscard]` on a `void` function |
 | magic methods | 8 | `__get()` with no parameter, `static function __get`, a return type on `__construct` |
@@ -335,8 +336,8 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 | inheritance in one file | 5 | a final method overridden by a class declared later in the same file |
 | lexer | 4 | `(real)`, an unterminated `/*`, a heredoc whose indentation mixes tabs with spaces or is too shallow |
 
-- **When the parser fails, PHP refuses too:** that held for all 29. The gap runs the other way: PHP refuses many files that we load.
-- **Almost all 239 are local to the file.** A pass over the tree after the parse can decide them. The checker already reports some of them as diagnostics, for instance `case` outside an enum and `goto` to a missing label (`checker/keywords.rs:180`). It reports them only in analysed files, so a context file with one of these errors keeps its declarations. Which of the 239 the checker reports was not counted.
+- **When the parser fails, PHP refuses too:** that held for all 30, and the parser rejected none of the files PHP accepts at compile time. The gap runs the other way: PHP refuses many files that we load.
+- **Almost all 238 are local to the file.** A pass over the tree after the parse can decide them. The checker already reports some of them as diagnostics, for instance `case` outside an enum and `goto` to a missing label (`checker/keywords.rs:180`). It reports them only in analysed files, so a context file with one of these errors keeps its declarations. Which of the 238 the checker reports was not counted.
 - **What is not a compile-time refusal.** 19 triggers fail only when the declaration runs, after the statements before it have run:
   - a class declared twice;
   - the enum checks: magic methods, properties from a trait, `cases()`, `Serializable`;
@@ -349,8 +350,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
   - The value is folded to a string first: `:11120`.
   - No input reaches them: `:11523`, `:11542`.
   - The environment raises them: the stack limit, and the scanner's encoding errors.
-- **For D6.** Today's policy, where a context file that fails to parse loses its declarations, matches PHP on 29 of the 268 errors. On the other 239, the analyser declares what PHP never would. Proposal 8 does not change this split, since its pass runs the same parser.
-- **Settling the parser's side by running it.** Run the parser over `~/.cache/prs-probe/c7/cases/`, and compare its verdicts with `verdicts.tsv`. That needs a binary, which was not run.
+- **For D6.** Today's policy, where a context file that fails to parse loses its declarations, matches PHP on 30 of the 268 errors. On the other 238, the analyser declares what PHP never would. Proposal 8 does not change this split, since its pass runs the same parser.
 
 ## Found by the investigations
 
