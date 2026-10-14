@@ -74,7 +74,7 @@ and E15 are independent of this order unless a row's "needs" says otherwise.
 
 | id | status | task | estimated saving | needs |
 |---|---|---|---|---|
-| E2 | OPEN | A statement's assigned and defined names walked only when it has `@var` tags. | ≈ −50 M | — |
+| E2 | DONE (60b0cd33; measured: off run 23,812,168,909 Ir against 23,866,820,730 at P4's commit, −54.7 M against the estimated ≈ −50 M, Piwigo output byte-identical to the base's; the same binary also carries E14's parser change, which changes nothing on Piwigo; tests, clippy and fixtures not run) | A statement's assigned and defined names walked only when it has `@var` tags. | ≈ −50 M | — |
 | E3 | OPEN | A method or static call probed for a PHPUnit assertion only when its written name starts with `assert`. | ≈ −35 M | — |
 | E4 | OPEN | The analysed files stored in the per-file cache too. | ≈ −0.25-0.3 G net, per-file cache warm | — (debug check that a hit's products encode to the entry's bytes) |
 | E5 | OPEN | A kind code in the type node's free flag bits. | ≈ −30 M | — |
