@@ -1165,3 +1165,33 @@ fn new_takes_a_property_chain_as_its_class_and_the_call_as_its_arguments() {
         (ExprKind::StaticPropertyFetch(StaticTarget::Expr(_), _), 0)
     ));
 }
+
+#[test]
+fn instanceof_with_a_static_property_as_the_class_parses() {
+    let program = parse(
+        r#"<?php
+            $a = $found instanceof static::$interfaceClass;
+            $b = $x instanceof self::$mainEngine;
+            $c = $x instanceof $this->class;
+            $d = $x instanceof ('std' . $class);
+            $e = $x instanceof \Foo\Bar;
+        "#,
+    );
+    let targets: Vec<bool> = program
+        .iter()
+        .map(|stmt| {
+            let StmtKind::Expression(Expr {
+                kind: ExprKind::Assign(_, rhs),
+                ..
+            }) = &stmt.kind
+            else {
+                panic!("expected assignment");
+            };
+            let ExprKind::Instanceof(_, target) = &rhs.kind else {
+                panic!("expected Instanceof");
+            };
+            matches!(target, InstanceofTarget::Expr(_))
+        })
+        .collect();
+    assert_eq!(targets, [true, true, true, true, false]);
+}

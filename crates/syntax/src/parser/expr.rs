@@ -106,13 +106,14 @@ impl Parser<'_> {
                 Infix::Instanceof => {
                     self.skip();
                     // The right-hand side is usually a static class name,
-                    // but PHP also allows an arbitrary expression there
-                    // (`$x instanceof $className`, `$x instanceof ('std' .
-                    // $class)`) for a runtime-determined class.
-                    let target = if matches!(self.peek(), Token::Variable(_) | Token::LParen) {
-                        InstanceofTarget::Expr(Box::new(self.parse_unary()?))
-                    } else {
-                        InstanceofTarget::Name(self.parse_name_reference())
+                    // but PHP also allows what `new` does (`$x instanceof
+                    // $className`, `$x instanceof static::$class`, `$x
+                    // instanceof ('std' . $class)`) for a runtime-determined
+                    // class.
+                    let reference = self.parse_new_class_reference()?;
+                    let target = match &reference.kind {
+                        ExprKind::Name(name) => InstanceofTarget::Name(name.clone()),
+                        _ => InstanceofTarget::Expr(Box::new(reference)),
                     };
                     self.expr(ExprKind::Instanceof(Box::new(lhs), target), start)
                 }
