@@ -92,7 +92,7 @@ None of these was run for the report.
 | B2 | DONE (B2 below) | Proposal 7's real saving. The estimate counts every tag, not every distinct tag, so the memos may lower it (§10.7). Measured per lexer run, memos included: ≈0.37 G off and ≈0.08 G warm, and ≈0.04 G once proposal 6 and item 14 are in. | proposal 7 |
 | B3 | DONE (B3 below) | How many reports the loops' convergence passes format and then discard (`diagnostics.truncate`: `checker.rs:1278`, `:1807`, `function_decl.rs:1209`; §10.11). The loops discard 270 on Piwigo and 304 on Laravel. The `extract()` truncation discards 31,660 on Piwigo, ≈35 M (E10). | how far proposal 11a reaches |
 | B4 | OPEN | Wall time. Nothing is timed, including the 1.6 G of serial stub work on a cold run's critical path, with the other cores idle (§12). | the wall-time weight of proposals 1-5 |
-| B5 | OPEN | A run with the per-file cache warm. All three runs had it off, so its floor and `from_def`'s cost with it on are unknown (§11, §12). | the floor of the per-file-cache-warm mode |
+| B5 | DONE (B5 below) | A run with the per-file cache warm. All three runs had it off, so its floor and `from_def`'s cost with it on are unknown (§11, §12). Its floor is 14.34 G, against 20.57 G with the stub cache warm alone. `from_def` falls to 202.1 M, the analysed files' classes only. The run also shows two costs only the warm per-file cache pays (E11, E12). Its wall time is B4's. | the floor of the per-file-cache-warm mode |
 | B6 | OPEN | Disk time of the cold run's cache write. Its 58 M is callgrind's count only (§12). | the cold run's full cost |
 | B7 | OPEN | How many of `is_super_type_of`'s 1,341,821 questions ask about one node against itself. The profile counts calls, not their operands (N2). | E6's saving |
 | B8 | DONE (E7 below) | How many of `Type::object`'s 170,696 calls build a class's plain object type, with no arguments, and how many of `int_literal`'s 71,550 build a small integer (N2). Settled from the code and the tokens: 125,364 (73%) are plain, and 92% of the integer literals are 0-255. | whether E7 is worth building |
@@ -190,6 +190,43 @@ None of these was run for the report.
   - `report::<&str>` from `check_stmt_impl`: 23.4 M over exactly 31,481 calls. Of that, `DiagnosticBuilder::build` is 16.1 M (14.8 M of it `LineIndex::range`) and the vector's growth 4.6 M.
   - Together ≈35 M.
 - **Proposal 11a** would save only the formatting, ≈11 M, since the report would still be built. E10 saves all of it, and it applies wherever compiled templates call `extract()`.
+
+### B5. With both caches warm: 14.34 G, and two costs only the warm per-file cache pays
+
+- **The run.** The profile's binary (`fp/dhat`, source hash `558a2b69…`) ran under callgrind on Piwigo, with a cache directory that two earlier runs had filled (`~/.cache/prs-profile/off-ledger-b/b5/`).
+  - The stub cache and the per-file cache were both warm: 11,459 entries, one per context file, 48.3 MB.
+  - The output is byte-identical to the profile's `out.json`.
+  - The run wrote nothing: every cache file's mtime and size are unchanged.
+  - Wall time is B4's.
+
+  | phase | stub cache warm, per-file cache off (the profile's warm run) | both warm | change |
+  |---|---:|---:|---:|
+  | parse | 9,983.0 M | 3,833.7 M | −6,149.3 M |
+  | check | 6,774.7 M | 6,704.6 M | −70.1 M |
+  | finishing | 2,475.0 M | 2,617.3 M | +142.3 M |
+  | insert (main thread, serial) | 751.2 M | 582.7 M | −168.5 M |
+  | vendor discovery | 321.3 M | 321.2 M | 0 |
+  | session and main | 264.8 M | 276.4 M | +11.6 M |
+  | **total** | **20,572.2 M** | **14,338.3 M** | **−6,233.9 M** |
+
+- **The floor is 14.34 G.**
+- **What the parse phase keeps (3.83 G):**
+  - **The 2,792 analysed files: ≈2.52 G.** Their parse is 1,961.2 M (`parse_with_ignores`). Their products cost 548.0 M:
+    - `file_declarations::collect`, 262.4 M, of which `from_def` is 200.4 M;
+    - `FileBodies::collect`'s walk, 141.3 M;
+    - `recorded_references`, 79.5 M;
+    - `GlobalFacts::of`, 64.8 M.
+  - **The 11,459 cache hits: ≈1.12 G**, ≈98 K per entry, ≈23 per stored byte:
+    - decoding, 985.6 M: `BuiltDecl` 452.7 M, `FileBodies` 338.4 M, the references 86.3 M plus 30.0 M to make their sets, `LineIndex` 51.0 M, `DeclaredClass` 29.8 M, the rest 27.4 M;
+    - the checksum, 23.7 M;
+    - the key's content hash, 19.7 M;
+    - the reads, 29.1 M;
+    - the entry's path, 30.8 M (`format!` and `Path::join`, twice per hit).
+- **`from_def`** falls from 1,519.7 M (12,546 calls) to 202.1 M (2,005 calls): the analysed files' 1,932 classes and 73 anonymous ones.
+- **E4, now measured.** The analysed files' products cost 548 M, which matches E4's ≈0.6 G gross. Decoding their 2,792 entries at the context entries' rate would cost ≈0.25-0.3 G, so E4 nets ≈0.25-0.3 G. More once E12 leaves the methods lazy.
+- **Two costs the warm per-file cache adds:**
+  - **E11, +116 M in the finishing passes.** The purity and property-write classifiers read 103,921 summaries from cached files, and each read hashes the file's path (`HashMap<PathBuf, FileId>::get`, ≈1.1 K Ir each). The same 121,031 reads cost 11.1 M in all with the cache off.
+  - **E12, ≈0.4 G in the serial insert.** `record_assert_tagged_names` decodes 51,750 lazily stored methods of cached classes, 419.2 M. All of them, to read whether their assert list is empty. Without that, the insert would be ≈0.18 G: what the cache-off insert pays besides the tree drops.
 
 ## Investigations in the code or the data, no build
 
@@ -366,6 +403,8 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 | E8 | DONE (E8 below) | A cache file's types stored once, in a table its records index, as item 6 step 3 stores names. ≈ −65 M of decoding today, ≈ −25 M after item 6 step 1. | item 6, steps 3 and 5 (the decode context and the format bump) |
 | E9 | SKIP (E9 below): F6f's rewrite of the scanner covers it, and ≈1 M is left after F6f's memo | The regex scanner's literal concatenation: `format!` per product (`regex_groups.rs:390-401`). | — |
 | E10 | DONE (E10 below) | Report nothing while an enclosing body has called `extract()` or `eval()`: the truncation at its end drops all of it. ≈ −35 M on Piwigo, exact. | — |
+| E11 | DONE (E11 below) | Decode a cached file's origins as the one `Arc<Path>` the file table binds, so its declarations' summary reads find the file by address. ≈ −116 M with the per-file cache warm, exact. | E8's decode context (item 6, step 3) |
+| E12 | DONE (E12 below) | Carry each class's assert-tagged method names in its `BuiltDecl`, so inserting a cached class decodes none of its lazily stored methods. ≈ −0.35-0.4 G with the per-file cache warm, on the serial insert, exact. | — |
 
 ### E1. Where a stub build can deadlock, and the fix
 
@@ -561,6 +600,31 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 - **Why the output cannot change.** `report` only pushes (`checker.rs:1487-1495`), and everything it would have pushed is truncated. A debug build reports as now and asserts that the truncation drops exactly what the count skipped.
 - **The saving.** ≈35 M on Piwigo (B3). It applies to any tree that analyses templates compiled with `extract()`: Latte, Blade, plain PHP views.
 - **What it leaves.** The rest of such a body's check still runs, because it records facts that outlive the body, such as property assignments and class-level sites. Which of those facts a dropped body needs is not traced.
+
+### E11. A cached file's declarations miss the origin's address: ≈ −116 M with the per-file cache warm
+
+- **The fast path.** `FileTable::get_by_origin` (`project/file_table.rs:108-114`) finds a file by the address of the `Arc<Path>` its declarations name it by. `insert_parsed_file` binds that one `Arc` (`bind_origin`, `project.rs:1055`). A parsed file's declarations all share it (`project.rs:3017-3018`), so a summary read hashes nothing.
+- **A cached file misses it.**
+  - Each decoded `Origin::File` is a new `Arc<Path>`: postcard decodes every occurrence on its own (`registry/provenance.rs:63`, `:129`).
+  - `CachedFile::into_parsed` binds yet another `Arc::from(path)` (`project/file_cache.rs:146`).
+
+  So every read through a cached declaration's provenance falls back to `self.get(path)`. That is `Path`'s component-wise hash and compare: 103,921 reads, 116.2 M (B5). The entries also store and decode the path once per provenance.
+- **The change.** Decode a per-file entry's file origins as the entry's own path:
+  - the entry stores a marker for "this file";
+  - the decode context (E8's, item 6 step 3) hands back the one `Arc` that `into_parsed` binds.
+
+  That covers the lazily stored methods if their decode gets the same context. Otherwise, `FileTable` keyed by the path's bytes would bring the fallback down from ≈1.1 K to ≈0.1 K per lookup.
+- **Exact.** The origin is the same path, and only its sharing changes. A debug build asserts that each decoded origin spells the entry's path.
+
+### E12. Inserting a cached class decodes all its methods: ≈ −0.35-0.4 G with the per-file cache warm, on the serial insert
+
+- **What runs.** `insert_built_decl` calls `record_assert_tagged_names` (`registry/index.rs:153`, `:461-487`). For a class, it walks `info.methods.iter()` and reads `sig.assert`. A cached class's methods are stored lazily (`name_table::Lazy`), and that read forces each one's decode: 51,750 methods, 419.2 M, on the main thread (B5).
+  - With the cache off, the methods are already built, and the walk costs little.
+  - Which of the 51,750 a later step would read is hidden, because the insert decodes them first. The later decodes number 35,391, against 35,397 with the cache off: the stub bases' own.
+  - The check asks about 1,572 purity callees and 2,489 property-write callees (B1), so at ≈8.1 K per method, the methods it reads cost tens of M at most.
+- **The change.** `BuiltDecl::Class` carries the names of its methods that have assert tags, computed when the declaration is built. The cache stores it, and `record_assert_tagged_names` reads it without touching the methods.
+- **The saving.** ≈0.35-0.4 G, less any of those methods a later step decodes, on the main thread's serial insert. E12 is also a wall-time cut (B4).
+- **Exact.** `names_with_assert_tags` gets the same names. A debug build compares them with the walk's.
 
 ## Costs the report says nothing addresses
 
