@@ -903,25 +903,109 @@ impl StubIndex {
     /// the names each file declares, as `parse_declared_keys` reads them.
     fn build_closures(&self, keys: &[DeclaredKeys]) -> Records {
         let files = keys.len();
-        let mut records = RecordsBuilder::default();
-        for file in 0..files {
-            let mut reached = vec![0u64; files.div_ceil(64)];
-            reached[file / 64] |= 1 << (file % 64);
-            let mut stack = vec![file];
-            while let Some(current) = stack.pop() {
-                for (_, key) in keys[current].iter() {
+        let words = files.div_ceil(64);
+        // The files each file leads to directly: those that reference a
+        // name it declares. Each key is looked up once, here.
+        let edges: Vec<Vec<u32>> = keys
+            .iter()
+            .map(|declared| {
+                let mut out: Vec<u32> = Vec::new();
+                for (_, key) in declared.iter() {
                     let dependents = self.dependents.get(key).unwrap_or(&[]);
-                    for dependent in dependents.as_chunks::<4>().0 {
-                        let dependent = u32::from_le_bytes(*dependent) as usize;
-                        let (word, bit) = (dependent / 64, 1u64 << (dependent % 64));
-                        if reached[word] & bit == 0 {
-                            reached[word] |= bit;
-                            stack.push(dependent);
+                    out.extend(
+                        dependents
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .map(|dependent| u32::from_le_bytes(*dependent)),
+                    );
+                }
+                out.sort_unstable();
+                out.dedup();
+                out
+            })
+            .collect();
+        // Tarjan's components, found without recursion. A component comes
+        // out after every component it leads to, so its closure is its own
+        // files and those of the closures of the components it leads to,
+        // each of which is done: no search is repeated.
+        const UNVISITED: u32 = u32::MAX;
+        let mut order = vec![UNVISITED; files];
+        let mut low = vec![0u32; files];
+        let mut on_stack = vec![false; files];
+        let mut component = vec![UNVISITED; files];
+        let mut closures: Vec<Vec<u64>> = Vec::new();
+        let mut stack: Vec<usize> = Vec::new();
+        let mut calls: Vec<(usize, usize)> = Vec::new();
+        let mut counter = 0u32;
+        for root in 0..files {
+            if order[root] != UNVISITED {
+                continue;
+            }
+            order[root] = counter;
+            low[root] = counter;
+            counter += 1;
+            stack.push(root);
+            on_stack[root] = true;
+            calls.push((root, 0));
+            while let Some(&(node, next)) = calls.last() {
+                if let Some(&edge) = edges[node].get(next) {
+                    let to = edge as usize;
+                    calls.last_mut().expect("a call is open").1 += 1;
+                    if order[to] == UNVISITED {
+                        order[to] = counter;
+                        low[to] = counter;
+                        counter += 1;
+                        stack.push(to);
+                        on_stack[to] = true;
+                        calls.push((to, 0));
+                    } else if on_stack[to] {
+                        low[node] = low[node].min(order[to]);
+                    }
+                    continue;
+                }
+                calls.pop();
+                if let Some(&(parent, _)) = calls.last() {
+                    low[parent] = low[parent].min(low[node]);
+                }
+                if low[node] != order[node] {
+                    continue;
+                }
+                let id = closures.len() as u32;
+                let mut members = Vec::new();
+                loop {
+                    let member = stack.pop().expect("the component's files are on the stack");
+                    on_stack[member] = false;
+                    component[member] = id;
+                    members.push(member);
+                    if member == node {
+                        break;
+                    }
+                }
+                let mut bits = vec![0u64; words];
+                for &member in &members {
+                    bits[member / 64] |= 1 << (member % 64);
+                }
+                let mut merged = rustc_hash::FxHashSet::default();
+                for &member in &members {
+                    for &edge in &edges[member] {
+                        let other = component[edge as usize];
+                        if other != id && merged.insert(other) {
+                            for (word, theirs) in bits.iter_mut().zip(&closures[other as usize]) {
+                                *word |= theirs;
+                            }
                         }
                     }
                 }
+                closures.push(bits);
             }
-            let bytes: Vec<u8> = reached.iter().flat_map(|word| word.to_le_bytes()).collect();
+        }
+        let mut records = RecordsBuilder::default();
+        for file in 0..files {
+            let bytes: Vec<u8> = closures[component[file] as usize]
+                .iter()
+                .flat_map(|word| word.to_le_bytes())
+                .collect();
             records.push(&bytes);
         }
         records.finish()
