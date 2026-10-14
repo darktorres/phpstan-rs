@@ -274,7 +274,7 @@ version key. These and the investigations are in `PROFILE_DRILL_PIWIGO_OFF.md` (
 §13 lists each item's method and data); the ledger that tracked them was
 retired, and is in git at `72cac936`.
 
-The order, from D7:
+The order, from D7 (rows and state: `PROFILE_DRILL_PIWIGO_OFF_BUILD_LEDGER.md`):
 
 1. the deadlock fix (the off report's E1), which carries proposals 1 and 5;
 2. D5's write check, which carries proposal 2;
