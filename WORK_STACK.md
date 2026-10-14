@@ -286,15 +286,10 @@ current form; it is decided again with level 2's C5. Proposal 8 waits on
 9; B1 measured d ≈ 0.005-0.006. No proposal is implemented.
 
 The ledger's items were checked one by one on 2026-10-14 and the report corrected.
-The check found two bugs in today's code, neither fixed:
-
-- **E14.** The parser refuses `instanceof` with a static property as the
-  class; six files in installed dependencies lose every declaration as
-  context. Running the parser over all of `vendor/` against `php -l` would
-  find any other such gap; that run has not been made.
-- **E15.** The build's source hash leaves out `vendor/phpstan-src/stubs`,
-  which the stub build reads, so an edit to a `.stub` file alone leaves a
-  stale stub cache in use.
+The check found two bugs, both fixed: E14 (`instanceof` with a static property as the
+class, `6dd06124`) and E15 (the source hash left out `vendor/phpstan-src/stubs`, `efe621ad`).
+Running the parser over all of `vendor/` against `php -l` (U1) would find any other such
+gap; that run has not been made.
 
 The heap drill of the same three runs, with whole stacks, is
 `PROFILE_DRILL_PIWIGO_OFF_HEAP.md` (done). Every allocation maps to a 20 G
