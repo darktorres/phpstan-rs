@@ -214,7 +214,7 @@ Proposals (§10), numbered as in the report:
   - 3: a hash index for bases built in memory, ≈ −0.29 G;
   - 4: `build_closures`' dependents looked up once, ≥ −0.2 G serial.
 
-  1-4 overlap, together ≈ −1.5-1.7 G.
+  1-4 overlap, together ≈ −1.6 G.
   - 5: the stub corpus built beside the parse, on the worker pool.
   - 6: the stub data built at compile time into every binary, −5.05 G. It
     needs level 2's reflection layer, since the build script must run the
@@ -224,13 +224,14 @@ Proposals (§10), numbered as in the report:
     stub file's declarations are left to carry, ≈0.2-1.5 G per cold run
     (C8).
 - For every run:
-  - 7: a PHPDoc tag's description tokenized only when read, ≈0.1 G warm;
+  - 7: a PHPDoc tag's description tokenized only when read, measured
+    ≈0.08 G warm, ≈0.04 G after item 14;
   - 8: skim context files' function bodies (≈47% of the parse job's
     tokens) and parse one on demand. Every skimmed body is still checked,
     by a pass that builds only what its checks read, and each file's
     verdict is cached by its bytes and the `syntax` crate. After the plan
-    it saves ≈2.0-2.3 G × (1 − d) with the verdict cached; without it,
-    nothing from d ≈ 0.26-0.45;
+    it saves ≈2.0-2.3 G with the verdict cached and ≈0.55-0.85 G without
+    it, at the measured d ≈ 0.005-0.006 (≈0.02 by tokens);
   - 9: purity and property writes on demand, exact (a least fixed point),
     ≈0.3-0.4 G beyond item 4, on the finishing thread;
   - 10: `simdutf8`, ≈50 M;
@@ -240,8 +241,10 @@ Proposals (§10), numbered as in the report:
 - Rejected: one rayon pool as a speed-up by itself, a narrower cache key,
   a dedicated autoload reader.
 
-With the plan and proposals 6-11, both modes end at ≈10.3-10.6 G; without
-6, the off run ends at ≈13.7-14.1 G.
+With the plan, proposals 6-11 and the ledger's cuts (E2-E13), both modes
+end at ≈9.7-10.0 G with the files' parse verdicts cached, ≈11.1-11.4 G
+without; without 6, the off run ends at ≈12.9-13.2 G. With both caches
+warm today's floor is 14.34 G and 1.60 s (B5, B4).
 
 Decided on 2026-10-13 (ledger D1-D5): the stub data is built at compile
 time (reopened by C8, below); skimmed bodies are checked and their
