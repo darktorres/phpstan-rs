@@ -95,7 +95,7 @@ place. The checks and what each found are in
 - **The gate comes before `CachedFile::of`**, which builds the entry before it is encoded (`session.rs:765-771`), so a file that will not be stored pays neither.
 - **Reports.**
   - One warning when the cache cannot be written.
-  - One more on a later write failure: entries sit in 256 shard directories (`file_cache.rs:177`), so one write can fail after the check passed.
+  - One more on a later write failure: entries sit in 256 shard directories (`file_cache.rs:177-179`), so one write can fail after the check passed.
   - A load refreshes an entry's mtime after 12 h (`file_cache.rs:190-196`), and a failure there passes silently today.
 - **Which caches:** the per-file cache, the stub cache until proposal 6 or the crate split's C5 removes it, and D1's verdict cache.
 - **E13's shard directories** are made by this check too, so a run that stores nothing touches nothing on disk.
@@ -225,7 +225,7 @@ None of these was run for the report.
 | context bodies read, all readers | 313 (102 KB) | 192 (71 KB) |
 | **d, by count and by bytes** | **0.0063, 0.0058** | **0.0050, 0.0054** |
 
-- **The search is exact on both trees.** It gives the eager pass's answer for every callee asked about, cycles included.
+- **The search agreed with the eager pass on both trees,** for every callee asked about. But every purity answer was impure, no purity cycle was met, and only the property-write search met cycles (14, on Piwigo): the pure answer and the purity cycle rule were not exercised on real data.
 - **No non-stub callee the no-op rules asked about is pure**, on either tree. Each search stops at the first impure node, often at the root's gate before any body is read. On Piwigo, the purity search read 123 context bodies and 258 analysed ones, for roots whose own bodies are 227 and 1,288.
 - **The checker itself read no context body.** The uninitialized-property rules are off by default (`rules.check_uninitialized_properties`). The parent-call rule (`project/class_shape.rs:343`) reads only for the methods it is configured with, but its built-in PHPUnit and Codeception hook rules (`setUp`, `tearDown`, `setUpBeforeClass`, `_before` ...) are on by default (`parent_calls.rs:36`), so on a tree with test classes it reads those few ancestor hook bodies; the two trees here have none. With the other rules on, the ancestors' bodies they read add to d. That is not measured. The checker also reads context files another way: `Project::ast_of` (`project.rs:890-917`) re-reads a file from disk, parses it in full and caches 32 trees, with no hash check, when `judge_property_types` (`:2185`) runs the checker on a non-analysed file that declares a class involved in a private-property write, or a trait such a class uses. Skimming leaves that reader unchanged.
 - **The skimmer's own full parses.** Proposal 8 also parses in full every body that holds a trigger (§10.8). Counted with `token_get_all` over each run's context files (`b1/triggers.php` over `b1/*/context-files.txt`):
@@ -237,7 +237,7 @@ None of these was run for the report.
 
   With the bodies read, ≈1-2% of the context body tokens are parsed in full.
 - **Proposal 9.** "Less what is asked for" (§10.9) is 0.3-4.3% of the declarations per search (Piwigo 2.3% and 4.3%, Laravel 1.7% and 0.3%), so §10.9's saving stands: ≈0.3-0.4 G beyond item 4, and most of the passes' 0.19 s on the finishing thread.
-- **Proposal 8, at d ≈ 0.02 by tokens:**
+- **Proposal 8, at d ≈ 0.02 by tokens** (d here is the share of body tokens parsed in full: the bodies read, d_read ≈ 0.005-0.006, plus the bodies a skimmer trigger flags):
   - **With the verdict cached:** F × (1 − d) ≈ 2.0-2.3 G after the plan, against §11's 1.6-1.85 G at d ≈ 0.2. §11's warm column then leaves ≈9.9-10.2 G, not 10.3-10.6.
   - **Without it:** S − F × d ≈ 0.55-0.85 G after the plan, against ≈0.15-0.5 G at d ≈ 0.2. Proposal 8 pays on every run, far below the break-even d ≈ 0.26-0.45. A run with no cached verdict leaves ≈11.3-11.6 G, not 11.6-12.0.
   - **D1's verdict cache** is worth F − S ≈ 1.1-1.7 G on a run whose files have verdicts. It no longer decides whether proposal 8 pays.
@@ -259,7 +259,7 @@ None of these was run for the report.
   - off: stub build 175.9 M, parse 90.6 M, check 42.0 M;
   - warm: parse 84.8 M, check 47.9 M.
 
-  At the measured shares, not lexing those bytes saves 138.8 + 33.0 + 3.1 = 174.9 M off, and 30.9 + 3.5 = 34.4 M warm. `remaining_description` goes: 197.9 M off and 47.5 M warm, except for the three-token prefix test of `[optional]` on each `@param` description. This count took that test as one token; it needs three (`docblock.rs:909-915`), and `@param` descriptions are 266,494 of the 414,584 description tokens in the stub build. So the totals are ceilings.
+  Assuming Ir is proportional to the bytes lexed, and at the measured shares, not lexing those bytes saves 138.8 + 33.0 + 3.1 = 174.9 M off, and 30.9 + 3.5 = 34.4 M warm. `remaining_description` goes: 197.9 M off and 47.5 M warm, except for the three-token prefix test of `[optional]` on each `@param` description. This count took that test as one token; it needs three (`docblock.rs:909-915`), and `@param` descriptions are 266,494 of the 414,584 description tokens in the stub build. So the totals are ceilings.
 - **The saving.** ≈0.37 G off and ≈0.08 G warm, against §10.7's 0.34 and 0.1 G.
   - Four fifths of the off figure is the stub build, which proposal 6 removes, so after proposal 6 both modes save ≈0.08 G.
   - Item 14's borrowed tokens halve that again: ≈0.04 G, against §11's ≈0.05.
@@ -737,7 +737,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
   - **Not embedded.** The stub files go through the per-file cache, as context files do.
     - A warm run decodes only the files it reaches, and a cold run parses them, the ≈0.2-1.5 G above.
     - The cache's key holds the build's source hash, so in development every rebuild makes the next run cold.
-    - After the split, a key over the crates the declarations depend on (`reflection` and the workspace crates the module graph lets it depend on: `syntax`, `types`, `phpdoc`, `stub-sources`, `composer`, `config`, `diagnostics`, `semantics`; with the manifest, `Cargo.lock` and the target, as C6 keys the verdict) keeps the entries across other edits. §10.12 rejected a narrower key only because today's stub build reads most of the main crate.
+    - After the split, a key over the crates the declarations depend on (`reflection` and the workspace crates the module graph lets it depend on: `syntax`, `types`, `phpdoc`, `stub-sources`, `composer`, `config`, `diagnostics`, `semantics`; with the manifest, `Cargo.lock` and the target, as C6 keys the verdict) keeps the entries across other edits. §10.12 rejected a narrower key because today's stub build reads most of the main crate, so a narrower key is easy to get wrong, and a missed input reads a stale base with no error (E15: today's key already misses one).
 - **For D3.** Its decision, the data built at compile time into every binary, can still stand. Its form and its saving do not:
   - the four files and the eager build go, since C4 and C5 leave per-file declarations, read lazily;
   - the saving falls from 5.05 G to ≈0.2-1.5 G per cold run (≈2 G at the upper bounds);
@@ -925,7 +925,7 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 
 - **Plain object types (B8).** Of `Type::object`'s 170,696 calls, 125,364 (73%) build a class's type with no arguments:
   - `resolve_name_expr`, 95,861 calls, 33.1 M (`checker/resolve.rs:13-28`): `new Foo`, `instanceof Foo`, `Foo::` written in code;
-  - `record_call_throw_point`, 16,133 calls, 5.5 M: the same `Throwable` type each time (`checker/throws.rs:106`);
+  - `record_call_throw_point`, 16,133 calls, 5.5 M: the same `Throwable` type each time (`checker/throws.rs:49`; built in the inlined helper `call_throw_type`, `:106`);
   - `instance_of_any`, 13,370 calls, 4.5 M: one type per name of a fixed list, at each call (`checker/operators.rs:701-705`).
 
   Each call is ≈340, all in `Type::new`: hashing, the front table's compare, dropping the owned form.

@@ -226,7 +226,7 @@ Proposals (§10), numbered as in the report:
 - For every run:
   - 7: a PHPDoc tag's description tokenized only when read, measured
     ≈0.08 G warm, ≈0.04 G after item 14;
-  - 8: skim context files' function bodies (≈47% of the parse job's
+  - 8: skim context files' function bodies (≈48% of the parse job's
     tokens) and parse one on demand. Every skimmed body is still checked,
     by a pass that builds only what its checks read, and each file's
     verdict is cached by its bytes and the `syntax` crate. After the plan
