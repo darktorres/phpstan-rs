@@ -241,39 +241,66 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 **The cause.** The stub state is five hidden statics. Any code can force them, at any depth, including jobs of a pool, and their first use builds while holding a lock. Both failures follow from that: a pool job can start a build, and a thread can wait for a build while its pool hands it other jobs.
 
 **The fix.**
+- **What D3 changes.** Once proposal 6 embeds the stub data, a run reads it with serial code only: `Registry::load` and `StubIndex::load` decode in place, with no parallel work (`registry.rs:741-751`, `stubs.rs:1237-1249`). Serial code cannot steal a job, so a lazy value over embedded data cannot deadlock. Builds remain in three places: the off mode, the reflection crate's own tests, and the build script. The stub cache on disk goes away. The fix below holds before proposal 6 and after it.
 - **S1. The stubs are a value, owned by the program's entry point and handed down. Production code has no static.**
-  - Each entry point makes one `Stubs` value from explicit options (`StubOptions { cache_dir: Option<PathBuf> }`, read from the environment once, there) and hands it to the sessions and projects it makes. The entry points are `check-project`'s command, the language server's `Server`, `incremental-bench` and the fixtures binary's `main`. Today `cache_dir()` reads `PHPSTAN_RS_NO_STUB_CACHE` and `PHPSTAN_RS_CACHE_DIR` on every call, deep in the code (`stub_cache.rs:33-44`).
+  - Each entry point makes one `Stubs` value from a `StubSource`, chosen there from the environment, and hands it to the sessions it makes. The entry points are `check-project`'s command, the language server's `Server`, `incremental-bench` and the fixtures binary's `main`. Today `cache_dir()` reads `PHPSTAN_RS_NO_STUB_CACHE` and `PHPSTAN_RS_CACHE_DIR` on every call, deep in the code (`stub_cache.rs:33-44`).
+  - **`StubSource`:**
+    - `Cached { dir }`: the default until proposal 6.
+    - `Embedded`: the default after it.
+    - `Build`: the off mode, and the reflection crate's tests.
   - **Two layers, so that nothing is circular.**
-    - `Corpus` holds the stub index and data.
-    - A `Base` is built from a `&Corpus` and a kind (plain, or with PHPStan's source).
+    - `Corpus` holds the stub index and data. `Corpus::build(pool)` builds it.
+    - A `Base` is built by `Base::build(&Corpus, kind, pool)`, the kind being plain or with PHPStan's source.
     - A base's own build project (`project.rs:597-599`), whose finishing passes read the stub index, is given the corpus that base is built from. It never asks for the value that is still being built.
-    - A `Project` holds an `Arc<Corpus>` and its base.
-  - **The free functions of `stubs.rs` become methods of `Corpus`:** `stub_index`, `generated_stub_data`, `builtin_function_extension`, `builtin_class_extension`, `stub_file_closure`, `stub_dependent_files`, `stub_file_names`, `phpstan_stub_names` and the `generated_stub*_named` family. The `Registry` keeps the `Arc<Corpus>` (`#[serde(skip)]`).
-  - **Pool jobs cannot start a build.** The code that runs in them reads through the registry: the checker (`builtin_calls.rs:36`, through `Checker::registry`, `checker.rs:277`), `closure_scope`, `composer_hygiene` and `architecture`. It has no call that can start a build. The type system enforces this.
+    - The build script calls the two builds directly, on its own thread. It needs no `Stubs`.
+  - **The free functions of `stubs.rs` become methods of `Corpus`:** `stub_index`, `generated_stub_data`, `builtin_function_extension`, `builtin_class_extension`, `stub_file_closure`, `stub_dependent_files`, `stub_file_names`, `phpstan_stub_names` and the `generated_stub*_named` family. The `Registry` keeps an `Arc<Corpus>` (`#[serde(skip)]`).
+  - **No project or registry stores the `Stubs` value.** They hold only built values: the `Arc<Corpus>` and the base.
+    - The two calls that may need a base take `&Stubs` as an argument: `expect_files` (S4), and `finish_loading` for its late switch (`sync_phpstan_stubs`, `project.rs:1180-1188`). That switch is for a project that is not finished and that gains a file mentioning `PHPStan\` after `expect_files`.
+    - Their production callers are the entry points and the session, which hold the value: `session.rs:791`, `:871`, `lsp.rs:569` and `incremental_bench.rs:47`.
+  - **Pool jobs cannot start or wait for a build.** They are given a `&Project` or a `&Registry`:
+    - the parse (`session.rs:748-781`, `project.rs:1148-1155`);
+    - the checker (`builtin_calls.rs:36`, through `Checker::registry`, `checker.rs:277`);
+    - `closure_scope`, `composer_hygiene` and `architecture`.
+
+    Neither type holds a `Stubs` value, so the type system enforces this.
   - **The partial-cache case goes away:** whatever the cache lacks is built when the entry point makes the value.
-  - **The stub cache becomes testable in one process.** A test makes a fresh `Stubs` with a temporary cache directory. Today a test has to spawn the binary with environment variables (`tests/file_cache.rs:26-35`), because the statics are process-wide and are forced once.
+  - **The stub cache becomes testable in one process**, until proposal 6 removes it. A test makes a fresh `Stubs` with a temporary cache directory. Today a test has to spawn the binary with environment variables (`tests/file_cache.rs:26-35`), because the statics are process-wide and are forced once.
 - **S2. Each layer is built on a thread of its own, and waiting blocks in the OS.**
   - Making the value only starts the corpus's build thread. A base's build thread starts when a session first asks for that kind of base.
   - `wait()` blocks in the OS until the build thread publishes. So every waiter, main or a worker of any pool, blocks without taking jobs, and re-entry is impossible anywhere. No lock is held while anything parallel runs.
   - A panic in a build is carried to every waiter (`resume_unwind`).
-  - The entry point makes the value before it lists the files, so the corpus builds beside the listing and the parse. This is proposal 5, and it replaces `warm_stubs`' threads (`project.rs:549-561`).
-- **S3. The builds' parallel work runs on `worker_pool`.**
-  - The corpus's `par_iter` moves into `worker_pool().install`: one pool, and `PHPSTAN_RS_THREADS` and the stack size apply to it (§10.5, §10.12).
-  - Starvation would need every worker of `worker_pool` to wait for a build. Pool jobs never hold a `Stubs` handle to wait on: projects are made by entry points and sessions, not inside pool jobs. `wait()` `debug_assert!`s that its caller is not a worker of `worker_pool`.
-- **S4. The base is chosen where its files say which one.** That is at `expect_files` (proposal 1), on the session's thread, through `Stubs::base(kind)`.
+  - The entry point makes the value before it lists the files. The corpus then builds beside the listing and the parse. This is proposal 5, and it replaces `warm_stubs`' threads (`project.rs:549-561`).
+  - **This overlap holds only because the project gets its stubs at `expect_files`.** Today the session makes its project (`session.rs:733`) before the parse (`:748`). A project that held a built corpus from its creation would wait there, so the parse would never overlap the build.
+  - The parse needs no stubs, only the settings and the composer packages:
+    - `index_use_sites` → `class_fn_refs_of`;
+    - `note_owner` → `packages.owner` (`project.rs:1125-1136`).
+- **S3. The builds' parallel work runs on the pool the entry point hands in.**
+  - That is the session's pool (`worker_pool()` for `check-project`, the suite's pool for the fixtures), and `PHPSTAN_RS_THREADS` and the stack size apply to it (§10.5, §10.12). The corpus's `par_iter` (`stubs.rs:1482`) runs inside its `install`.
+  - Starvation would need every worker of that pool to wait for a build. In production, only the entry points and the session hold a `Stubs` value (S1), and none of them runs on a worker of the pool.
+  - The test value (below) is the one place left where a pool job can wait. `wait()` `debug_assert!`s that its caller is not a worker of the build's pool.
+- **S4. The base is chosen where its files say which one, and a project cannot exist without one.**
+  - A project being loaded is its own type. It holds the settings, the composer packages and the file numbering, which is all the parse reads. It has no registry.
+  - `expect_files(parsed, &Stubs)` turns it into a `Project`. That step takes the corpus, and the base its files call for through `Stubs::base(kind)`, on the session's thread (proposal 1).
+  - Checking a project with no base cannot compile.
+  - The language server's `Server::new` (`lsp.rs:289`) holds the loading state until its first `load_files`.
 - **Tests share one value.**
   - A shared `Stubs` for the hundreds of tests that make a project lives behind a `test-support` cargo feature. The crate's dev-dependency on itself enables the feature, so production code cannot reach it.
-  - `Project::new()` becomes that feature's shorthand for `Project::with_stubs(test_support::stubs())`.
+  - Its source is `Embedded` once proposal 6 lands, except in the reflection crate's own tests, where it is `Build`.
+  - `Project::new()` becomes that feature's shorthand for a project made from the test value, with the plain base.
 - **The test at `incremental_updates.rs:1155`:** its groups get the shared value, and they block in the OS while a build runs.
-- **The regression test** for the reproduction above makes its own fresh `Stubs` with the cache off, in-process. It needs neither a separate binary nor environment variables.
+- **The regression test** for the reproduction above makes its own fresh `Stubs` with the source `Build`, in-process. It needs neither a separate binary nor environment variables.
 - **Rejected:**
   - **The first proposal**, in three parts:
     1. Force the stub values where the project is made. This is a convention that each new entry point must follow, and S1's types enforce it instead.
     2. Move the build onto a plain thread only when the caller is a rayon worker. This is a conditional hop around the hidden statics, and S2's unconditional build thread removes the need for it.
-    3. Assert in debug builds that no `worker_pool` thread waits. S3 narrows this to the one rule left.
+    3. Assert in debug builds that no `worker_pool` thread waits. S3 narrows this to the test value.
   - **The first revision of S1-S4**, for two reasons:
     - It kept a process-wide `Stubs::shared()` and the environment reads inside `cache_dir()`. Any code could still reach the global, and the stub cache stayed testable only through a child process.
     - It left the base's own build project needing the value under construction.
+  - **The second revision**, for three reasons:
+    - It had a project hold its corpus from its creation. That makes the session wait before the parse, which undoes S2's overlap.
+    - It let a `Project` reach the `Stubs` value. Every pool job is given a `&Project`, so the rule that no pool job waits for a build rested on S3's `debug_assert!`.
+    - It predated D3. Its options named only a cache directory, and its build used `worker_pool()` itself, where the build script and the fixtures need another pool.
   - **Waiting with `rayon::ThreadPool::install` from a worker of another pool**: it steals while it waits (`in_worker_cross`).
   - **Waiting with `rayon::yield_now` in a loop**: the jobs it runs sit above the build's frame on the same stack, so the build cannot resume until they return.
   - **Building outside the lock and then publishing**: two threads could both build the 5 G corpus.
