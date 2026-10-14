@@ -821,8 +821,12 @@ impl<V: PartialEq> PartialEq for NameMap<V> {
 impl<V: serde::Serialize> serde::Serialize for NameMap<V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (name, value) in self.iter() {
+        // In the order of the names, not of the table: a map decoded from
+        // what is written must write the same bytes again.
+        let mut entries: Vec<(&Name, &V)> = self.iter().collect();
+        entries.sort_unstable_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        let mut map = serializer.serialize_map(Some(entries.len()))?;
+        for (name, value) in entries {
             map.serialize_entry(name, value)?;
         }
         map.end()
@@ -947,7 +951,9 @@ impl Extend<Name> for NameSet {
 
 impl serde::Serialize for NameSet {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.iter())
+        let mut names: Vec<&Name> = self.iter().collect();
+        names.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+        serializer.collect_seq(names)
     }
 }
 
@@ -1286,8 +1292,12 @@ impl<V> Extend<(Name, V)> for FoldedMap<V> {
 impl<V: serde::Serialize> serde::Serialize for FoldedMap<V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (name, value) in self.iter() {
+        // In the order of the names, not of the table: a map decoded from
+        // what is written must write the same bytes again.
+        let mut entries: Vec<(&Name, &V)> = self.iter().collect();
+        entries.sort_unstable_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        let mut map = serializer.serialize_map(Some(entries.len()))?;
+        for (name, value) in entries {
             map.serialize_entry(name, value)?;
         }
         map.end()
@@ -1501,6 +1511,38 @@ impl NameCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a map, a set and a folded map write does not depend on the
+    /// order they were filled in, so one decoded from it writes it again.
+    #[test]
+    fn maps_and_sets_write_their_names_in_one_order() {
+        let names: Vec<Name> = (0..300)
+            .map(|i| Name::from(format!("Vendor\\Package\\Class{}", (i * 7919) % 1000).as_str()))
+            .collect();
+        let forward: NameMap<usize> = names.iter().cloned().zip(0..).collect();
+        let backward: NameMap<usize> = names
+            .iter()
+            .cloned()
+            .enumerate()
+            .rev()
+            .map(|(i, name)| (name, i))
+            .collect();
+        assert_eq!(
+            serde_json::to_string(&forward).unwrap(),
+            serde_json::to_string(&backward).unwrap()
+        );
+        let set: NameSet = names.iter().cloned().collect();
+        let reversed: NameSet = names.iter().cloned().rev().collect();
+        assert_eq!(
+            serde_json::to_string(&set).unwrap(),
+            serde_json::to_string(&reversed).unwrap()
+        );
+        let again: NameSet = serde_json::from_str(&serde_json::to_string(&set).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_string(&set).unwrap(),
+            serde_json::to_string(&again).unwrap()
+        );
+    }
 
     /// Texts that differ in case, and in what is not ASCII, from a small
     /// alphabet so that many collide as one name ignoring case.
