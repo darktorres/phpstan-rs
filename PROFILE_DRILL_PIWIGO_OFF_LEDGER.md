@@ -91,9 +91,9 @@ None of these was run for the report.
 | B1 | DONE (B1 below) | What proposal 9's on-demand search reaches, on Piwigo and on a general tree: the distinct callees the no-op rules and the property-write reads ask about, and the nodes the searches visit (§10.9). This also gives d, the share of bodies read. §11 assumes d ≈ 0.2. Measured on Piwigo and Laravel: the searches visit 1.6-3.0 k nodes, against 69-114 k the eager pass classifies, and no answer differs from it; d ≈ 0.005-0.006, and the bodies the skimmer parses in full for a trigger bring the share of body tokens parsed to ≈0.01-0.02. | proposal 9's saving; proposal 8's saving: ≈2.0-2.3 G × (1 − d) after the plan with each file's verdict cached, and without it whether proposal 8 pays at all, since it saves nothing from d ≈ 0.26-0.45 (D1) |
 | B2 | DONE (B2 below) | Proposal 7's real saving. The estimate counts every tag, not every distinct tag, so the memos may lower it (§10.7). Measured per lexer run, memos included: ≈0.37 G off and ≈0.08 G warm, and ≈0.04 G once proposal 6 and item 14 are in. | proposal 7 |
 | B3 | DONE (B3 below) | How many reports the loops' convergence passes format and then discard (`diagnostics.truncate`: `checker.rs:1278`, `:1807`, `function_decl.rs:1209`; §10.11). The loops discard 270 on Piwigo and 304 on Laravel. The `extract()` truncation discards 31,660 on Piwigo, ≈35 M (E10). | how far proposal 11a reaches |
-| B4 | OPEN | Wall time. Nothing is timed, including the 1.6 G of serial stub work on a cold run's critical path, with the other cores idle (§12). | the wall-time weight of proposals 1-5 |
+| B4 | DONE (B4 below) | Wall time. Nothing is timed, including the 1.6 G of serial stub work on a cold run's critical path, with the other cores idle (§12). Medians of 8 interleaved runs on a quiet machine: off 2.68 s, stub cache cold 2.69 s, stub cache warm 2.31 s, both caches warm 1.60 s. The stub build is 0.37 s, 14% of an off run, and ≈0.4 s of its stretches run on one core. The finishing passes are ≈40% of the wall time with both caches warm. | the wall-time weight of proposals 1-5 |
 | B5 | DONE (B5 below) | A run with the per-file cache warm. All three runs had it off, so its floor and `from_def`'s cost with it on are unknown (§11, §12). Its floor is 14.34 G, against 20.57 G with the stub cache warm alone. `from_def` falls to 202.1 M, the analysed files' classes only. The run also shows two costs only the warm per-file cache pays (E11, E12). Its wall time is B4's. | the floor of the per-file-cache-warm mode |
-| B6 | OPEN | Disk time of the cold run's cache write. Its 58 M is callgrind's count only (§12). | the cold run's full cost |
+| B6 | DONE (B6 below) | Disk time of the cold run's cache write. Its 58 M is callgrind's count only (§12). The stub cache's write is ≈10 ms (4 files, 31.4 MB) and does not show in wall time. A cold per-file cache's first write costs ≈0.7 s of CPU, mostly in the kernel, and 0.10 s of wall (E13). | the cold run's full cost |
 | B7 | OPEN | How many of `is_super_type_of`'s 1,341,821 questions ask about one node against itself. The profile counts calls, not their operands (N2). | E6's saving |
 | B8 | DONE (E7 below) | How many of `Type::object`'s 170,696 calls build a class's plain object type, with no arguments, and how many of `int_literal`'s 71,550 build a small integer (N2). Settled from the code and the tokens: 125,364 (73%) are plain, and 92% of the integer literals are 0-255. | whether E7 is worth building |
 | B9 | OPEN | What building the stub data at compile time adds to a build: the reflection crate compiled again for the host, and the stub build in the build script at the `build-override` opt-level, for a clean build and for an incremental one after an edit to the reflection crate (§10.6, §12). | proposal 6's cost to development (D3) |
@@ -227,6 +227,69 @@ None of these was run for the report.
 - **Two costs the warm per-file cache adds:**
   - **E11, +116 M in the finishing passes.** The purity and property-write classifiers read 103,921 summaries from cached files, and each read hashes the file's path (`HashMap<PathBuf, FileId>::get`, ≈1.1 K Ir each). The same 121,031 reads cost 11.1 M in all with the cache off.
   - **E12, ≈0.4 G in the serial insert.** `record_assert_tagged_names` decodes 51,750 lazily stored methods of cached classes, 419.2 M. All of them, to read whether their assert list is empty. Without that, the insert would be ≈0.18 G: what the cache-off insert pays besides the tree drops.
+
+### B4. Wall time: the stub build is 0.37 s of a 2.68 s off run
+
+- **How.** The gate binary of `4db8f996`, whose source hash (`558a2b69…`) is the profile's, ran on Piwigo in six cache modes, round-robin for 8 rounds (`~/.cache/prs-profile/off-ledger-b/b4/scripts/interleave.py`). Each round started at the next mode.
+  - The machine was otherwise idle. The load average, 0.9-6, is the runs' own.
+  - Two earlier hyperfine passes ran at a load of 16-22 and disagreed by a factor of two. They are not used.
+
+  | mode | median wall, s | min-max | user CPU, s | system CPU, s |
+  |---|---:|---:|---:|---:|
+  | off | 2.681 | 2.48-3.52 | 9.54 | 1.92 |
+  | stub cache cold (the profile's cold run) | 2.693 | 2.52-3.54 | 9.41 | 1.97 |
+  | stub cache warm (the profile's warm run) | 2.308 | 2.11-2.50 | 8.28 | 1.94 |
+  | stub cache warm, per-file cache cold | 2.405 | 2.29-2.93 | 8.46 | 2.45 |
+  | both warm | 1.595 | 1.53-1.95 | 5.67 | 1.03 |
+  | both cold | 2.859 | 2.74-3.18 | 10.02 | 2.45 |
+
+- **The stub build costs 0.37 s** (off against stub-warm). That is 14% of the off run's wall time, against 20% of its Ir.
+- **Where the phases sit.** The profile's `fp/dhat` binary was recorded with perf, frame pointers, at 1,999 Hz (`b4/perf/`). Under perf a run takes ≈10% longer. A thread that runs all the time samples as 0.5-0.9 cores, so the core counts read about a quarter low.
+
+  | stretch of the off run (2.95 s under perf) | s | cores busy |
+  |---|---|---:|
+  | start-up and vendor discovery | 0.00-0.15 | ≈1 |
+  | stub sources, on the global pool | 0.15-0.35 | ≈4 |
+  | stub corpus and plain base | 0.35-0.60 | 1 |
+  | parse | 0.60-1.40 | ≈4 |
+  | PHPStan's base, at `expect_files` | 1.43-1.60 | 1 |
+  | insert | 1.60-1.80 | 1 |
+  | finishing passes | 1.80-2.50 | ≈1-3 |
+  | check | 2.50-2.90 | ≈5 |
+
+  - **The stub stretches** take ≈0.6 s under perf, ≈0.4 s of it on one core.
+  - **Proposals 1-5** cut into these stretches, so their wall-time ceiling is the 0.37 s the warm stub cache saves today. Proposal 5 (the corpus beside the parse) would hide the first serial stretch, ≈0.25 s, behind the parse. The second, PHPStan's base at ≈0.17 s, stays on the critical path.
+  - **Proposal 6** takes all 0.37 s.
+- **The other modes.**
+  - Stub-warm (2.65 s under perf): parse 0.1-1.0 s, insert 1.0-1.2 s, finishing 1.2-2.1 s, check 2.1-2.6 s.
+  - Both warm (1.65 s): parse 0.1-0.45 s, insert 0.45-0.55 s (nearly all E12's decoding), finishing 0.55-1.2 s, check 1.2-1.6 s.
+- **What the wall time shows that Ir does not:**
+  - **The finishing passes are the longest stretch after the parse.** They run 0.65-0.9 s at 1-3 cores in every mode. With both caches warm they are ≈40% of the wall time, against 18% of the Ir (2.62 of 14.34 G).
+  - **The insert is serial.** It takes ≈0.2 s with the per-file cache off, mostly the tree drops, and ≈0.1 s with it warm, mostly E12.
+  - **The per-file cache saves 0.71 s** of the stub-warm run's 2.31 s (31%), against 30% of the Ir.
+
+### B6. The cache writes: ≈10 ms for the stub cache, ≈0.1 s of wall for a cold per-file cache
+
+- **The stub cache.** A cold run writes 4 files, 31.4 MB, each through a temporary and a rename (`stub_cache.rs:73-89`). The system calls take ≈10 ms (strace).
+  - The wall cost is below the noise: cold 2.693 s against off 2.681 s, with a spread of ±0.3 s.
+  - With the 58 M of encoding (≈15 ms), the cold run costs what the off run does.
+- **The per-file cache.** The profile's runs had it off. The first run with it on writes 11,459 entries, 48.3 MB.
+  - Per entry, `store` (`file_cache.rs:223-262`) calls `create_dir_all` (a `mkdir`; 11,473 in all), then `getpid` for the temporary's name, then `openat` with `O_CREAT`, `write`, `close` and `rename`.
+  - Then `trim` lists the directory and stats every entry once: 11,430 `statx`, on the main thread (`session.rs:786`).
+- **Its cost.** Perf, one run each, against the stub-warm recording:
+
+  | | CPU, ms |
+  |---|---:|
+  | `openat` | +315 |
+  | `rename` | +111 |
+  | `mkdir` | +80 |
+  | `write` | +76 |
+  | `statx`, `getdents64`, `close` | +47 |
+  | postcard encoding | +123 |
+
+  The interleaved runs give +0.51 s of system CPU, +0.18 s of user CPU and +0.10 s of wall (2.405 s against 2.308 s). The parse workers share the cost.
+- **E13** removes the `mkdir`s.
+- **Strace's per-call times are not usable here.** Under `-f` it serializes the threads, so the 11,459 writes show as 3.1 s. Its call counts are exact.
 
 ## Investigations in the code or the data, no build
 
@@ -405,6 +468,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 | E10 | DONE (E10 below) | Report nothing while an enclosing body has called `extract()` or `eval()`: the truncation at its end drops all of it. ≈ −35 M on Piwigo, exact. | — |
 | E11 | DONE (E11 below) | Decode a cached file's origins as the one `Arc<Path>` the file table binds, so its declarations' summary reads find the file by address. ≈ −116 M with the per-file cache warm, exact. | E8's decode context (item 6, step 3) |
 | E12 | DONE (E12 below) | Carry each class's assert-tagged method names in its `BuiltDecl`, so inserting a cached class decodes none of its lazily stored methods. ≈ −0.35-0.4 G with the per-file cache warm, on the serial insert, exact. | — |
+| E13 | DONE (E13 below) | Make the per-file cache's 256 shard directories once, instead of `create_dir_all` per entry, and read the process id once. ≈ −80 ms of kernel CPU on a run that writes the cache, ≈ −10 ms of wall. Exact. | — |
 
 ### E1. Where a stub build can deadlock, and the fix
 
@@ -625,6 +689,16 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 - **The change.** `BuiltDecl::Class` carries the names of its methods that have assert tags, computed when the declaration is built. The cache stores it, and `record_assert_tagged_names` reads it without touching the methods.
 - **The saving.** ≈0.35-0.4 G, less any of those methods a later step decodes, on the main thread's serial insert. E12 is also a wall-time cut (B4).
 - **Exact.** `names_with_assert_tags` gets the same names. A debug build compares them with the walk's.
+
+### E13. The per-file cache's directories, made once
+
+- **What runs.** `store` calls `fs::create_dir_all` on the entry's shard for every entry (`file_cache.rs:240`). That is 11,473 `mkdir`s on a cold Piwigo run, all but the first in each of the 256 shards failing with `EEXIST`: ≈80 ms of kernel time (B6). Each temporary's name also calls `std::process::id()` (`:245`), one `getpid` per entry.
+- **The change.**
+  - The build's directory and its 256 shards are made once, when `directory()` (`:62`) first finds the cache on.
+  - The process id is read once.
+  - If a shard disappears during the run, the temporary's open fails and `store` skips that entry, as it does for any failed write.
+- **The saving.** ≈80 ms of CPU and ≈10 ms of wall, on runs that write entries.
+- **What stays.** The `openat`, `write` and `rename` per entry, ≈0.5 s of CPU. Packing entries into fewer files would remove them, but that changes the cache's format and its trim.
 
 ## Costs the report says nothing addresses
 
