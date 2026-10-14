@@ -88,9 +88,9 @@ None of these was run for the report.
 
 | # | status | question | settles |
 |---|---|---|---|
-| B1 | OPEN | What proposal 9's on-demand search reaches, on Piwigo and on a general tree: the distinct callees the no-op rules and the property-write reads ask about, and the nodes the searches visit (§10.9). This also gives d, the share of bodies read. §11 assumes d ≈ 0.2. | proposal 9's saving; proposal 8's saving: ≈2.0-2.3 G × (1 − d) after the plan with each file's verdict cached, and without it whether proposal 8 pays at all, since it saves nothing from d ≈ 0.26-0.45 (D1) |
-| B2 | OPEN | Proposal 7's real saving. The estimate counts every tag, not every distinct tag, so the memos may lower it (§10.7). | proposal 7 |
-| B3 | OPEN | How many reports the loops' convergence passes format and then discard (`diagnostics.truncate`: `checker.rs:1278`, `:1807`, `function_decl.rs:1209`; §10.11). | how far proposal 11a reaches |
+| B1 | DONE (B1 below) | What proposal 9's on-demand search reaches, on Piwigo and on a general tree: the distinct callees the no-op rules and the property-write reads ask about, and the nodes the searches visit (§10.9). This also gives d, the share of bodies read. §11 assumes d ≈ 0.2. Measured on Piwigo and Laravel: the searches visit 1.6-3.0 k nodes, against 69-114 k the eager pass classifies, and no answer differs from it; d ≈ 0.005-0.006, and the bodies the skimmer parses in full for a trigger bring the share of body tokens parsed to ≈0.01-0.02. | proposal 9's saving; proposal 8's saving: ≈2.0-2.3 G × (1 − d) after the plan with each file's verdict cached, and without it whether proposal 8 pays at all, since it saves nothing from d ≈ 0.26-0.45 (D1) |
+| B2 | DONE (B2 below) | Proposal 7's real saving. The estimate counts every tag, not every distinct tag, so the memos may lower it (§10.7). Measured per lexer run, memos included: ≈0.37 G off and ≈0.08 G warm, and ≈0.04 G once proposal 6 and item 14 are in. | proposal 7 |
+| B3 | DONE (B3 below) | How many reports the loops' convergence passes format and then discard (`diagnostics.truncate`: `checker.rs:1278`, `:1807`, `function_decl.rs:1209`; §10.11). The loops discard 270 on Piwigo and 304 on Laravel. The `extract()` truncation discards 31,660 on Piwigo, ≈35 M (E10). | how far proposal 11a reaches |
 | B4 | OPEN | Wall time. Nothing is timed, including the 1.6 G of serial stub work on a cold run's critical path, with the other cores idle (§12). | the wall-time weight of proposals 1-5 |
 | B5 | OPEN | A run with the per-file cache warm. All three runs had it off, so its floor and `from_def`'s cost with it on are unknown (§11, §12). | the floor of the per-file-cache-warm mode |
 | B6 | OPEN | Disk time of the cold run's cache write. Its 58 M is callgrind's count only (§12). | the cold run's full cost |
@@ -98,6 +98,98 @@ None of these was run for the report.
 | B8 | DONE (E7 below) | How many of `Type::object`'s 170,696 calls build a class's plain object type, with no arguments, and how many of `int_literal`'s 71,550 build a small integer (N2). Settled from the code and the tokens: 125,364 (73%) are plain, and 92% of the integer literals are 0-255. | whether E7 is worth building |
 | B9 | OPEN | What building the stub data at compile time adds to a build: the reflection crate compiled again for the host, and the stub build in the build script at the `build-override` opt-level, for a clean build and for an incremental one after an edit to the reflection crate (§10.6, §12). | proposal 6's cost to development (D3) |
 | B10 | OPEN | Whether the stub data built for a release target equals the data that target builds at run time, on the two cross-compiled legs (`aarch64-unknown-linux-gnu` on x86_64, `x86_64-apple-darwin` on arm64). Constant folding of `**` calls the platform's `pow` (`types/src/arithmetic.rs:715-717`). This becomes the test that D3 requires, run natively or under emulation (§10.6, §12). | whether the cross-compiled legs can embed what their build script makes |
+
+### How B1-B3 were measured
+
+- **A probe build.** A patch at `2a7befd3` that is not for commit (`~/.cache/prs-profile/off-ledger-b/probe.patch`) does four things:
+  - it answers every purity and property-write question of the check a second time, by a memoized depth-first search from the declaration asked about, and compares each answer with the eager pass's;
+  - it records every body read through `BodySource::summary` and `init_flow` during the check;
+  - it counts, for every run of the tag lexer, what was lexed and what a pulling parser would have lexed;
+  - it records what `rewind_to` and the two dynamic-variable truncations drop.
+- **The runs.** All runs are in the off mode, with outputs in `~/.cache/prs-profile/off-ledger-b/b1/`.
+  - **Piwigo**, as in the profile. Its `out.json` is byte-identical to the profile's.
+  - **Laravel**: `vendor/laravel`, `check-project src`, with its own `vendor/` as context.
+
+### B1. The searches on demand reach 2-4% of the graph, and d ≈ 0.005-0.006
+
+| | Piwigo | Laravel |
+|---|---:|---:|
+| context files, analysed files | 11,459, 2,792 | 12,404, 1,700 |
+| context bodies | 49,533 (17.7 MB) | 38,146 (13.3 MB) |
+| purity questions (function, method, static, `new`) | 39,880, 5,120 of them on stubs | 5,184, 404 on stubs |
+| distinct non-stub callees asked about | 1,572 | 1,930 |
+| of them pure | 0 | 0 |
+| nodes the purity search visits | 1,590 | 1,939 |
+| property-write questions | 26,189, 7,850 on stubs | 2,130, 1,375 on stubs |
+| distinct non-stub callees asked about (nothing, own object, anything) | 2,489 (1,025, 89, 1,375) | 258 (82, 38, 138) |
+| nodes the property-write search visits | 3,007 | 321 |
+| declarations the eager property-write pass classifies | 69,479 | 113,812 |
+| cycles met (purity, property writes) | 0, 14 | 0, 0 |
+| answers that differ from the eager pass | 0 | 0 |
+| context bodies read, all readers | 313 (102 KB) | 192 (71 KB) |
+| **d, by count and by bytes** | **0.0063, 0.0058** | **0.0050, 0.0054** |
+
+- **The search is exact on both trees.** It gives the eager pass's answer for every callee asked about, cycles included.
+- **No non-stub callee the no-op rules asked about is pure**, on either tree. Each search stops at the first impure node, often at the root's gate before any body is read. On Piwigo, the purity search read 123 context bodies and 258 analysed ones, for roots whose own bodies are 227 and 1,288.
+- **The checker itself read no context body.** The uninitialized-property rules are off by default (`rules.check_uninitialized_properties`). The parent-call rule (`project/class_shape.rs:343`) reads only for the methods it is configured with. With those on, the ancestors' bodies they read add to d. That is not measured.
+- **The skimmer's own full parses.** Proposal 8 also parses in full every body that holds a trigger (§10.8). Counted with `token_get_all` over the context files (`b1/triggers.php`):
+
+  | | bodies flagged | share of body tokens | by trigger |
+  |---|---:|---:|---|
+  | Piwigo | 205 of 48,486 (0.42%) | 1.36% | include 148, a nested `function` 33, `new class` 33, a `PHPStan` name 16, `class` 3, `define` 1 |
+  | Laravel | 81 of 38,236 (0.21%) | 0.62% | include 53, `new class` 21, a nested `function` 13, `define` 6 |
+
+  With the bodies read, ≈1-2% of the context body tokens are parsed in full.
+- **Proposal 9.** "Less what is asked for" (§10.9) is ≈2-4% of the nodes, so §10.9's saving stands: ≈0.3-0.4 G beyond item 4, and most of the passes' 0.19 s on the finishing thread.
+- **Proposal 8, at d ≈ 0.02 by tokens:**
+  - **With the verdict cached:** F × (1 − d) ≈ 2.0-2.3 G after the plan, against §11's 1.6-1.85 G at d ≈ 0.2. §11's warm column then leaves ≈9.9-10.2 G, not 10.3-10.6.
+  - **Without it:** S − F × d ≈ 0.55-0.85 G after the plan, against ≈0.15-0.5 G at d ≈ 0.2. Proposal 8 pays on every run, far below the break-even d ≈ 0.26-0.45. A run with no cached verdict leaves ≈11.3-11.6 G, not 11.6-12.0.
+  - **D1's verdict cache** is worth F − S ≈ 1.4 G on a run whose files have verdicts. It no longer decides whether proposal 8 pays.
+
+### B2. Proposal 7: ≈0.37 G off and ≈0.08 G warm
+
+- **What was counted.** For each run of the tag lexer: the tokens and bytes it lexed, and those a pulling parser would have lexed. The parser's share runs up to the last token it looked at before a description, and the `[optional]` test counts as one token. Runs are counted, not tags, so the memos are in the count. Piwigo's 61,615 runs equal `tokenize`'s call count in the profile.
+
+  | phase | lexer runs | bytes lexed | not needed: bytes, tokens | description tokens |
+  |---|---:|---:|---:|---:|
+  | stub build (the same on both trees) | 21,840 | 2,197,804 | 78.9%, 81.2% | 414,584 |
+  | parse, Piwigo | 23,135 | 1,222,438 | 36.4%, 36.3% | 98,541 |
+  | check, Piwigo | 16,640 | 571,023 | 7.4%, 8.1% | 10,638 |
+  | parse, Laravel | 55,377 | 3,698,324 | 21.1%, 18.6% | 64,391 |
+  | check, Laravel | 27,756 | 580,709 | 1.4%, 2.0% | 1,815 |
+
+- **Against §10.7's shares.** For the stubs, §10.7 estimated 84.4% and the count gives 78.9%. For the parse, it estimated 56.5% and the count gives 36.4%. Laravel's parse share is lower still: its `@method` tags are 36,859 of the runs, and 83% of their bytes are needed. The check reads few descriptions.
+- **In Ir, on Piwigo.** The tag lexer's inclusive cost (308.5 M off, 132.7 M warm) is split by phase in proportion to the lexer's self cost per phase. That gives:
+  - off: stub build 175.9 M, parse 90.6 M, check 42.0 M;
+  - warm: parse 84.8 M, check 47.9 M.
+
+  At the measured shares, not lexing those bytes saves 138.8 + 33.0 + 3.1 = 174.9 M off, and 30.9 + 3.5 = 34.4 M warm. `remaining_description` goes entirely: 197.9 M off and 47.5 M warm.
+- **The saving.** ≈0.37 G off and ≈0.08 G warm, against §10.7's 0.34 and 0.1 G.
+  - Four fifths of the off figure is the stub build, which proposal 6 removes, so after proposal 6 both modes save ≈0.08 G.
+  - Item 14's borrowed tokens halve that again: ≈0.04 G, against §11's ≈0.05.
+  - A tree whose doc comments are mostly signatures, such as Laravel's, saves less.
+
+### B3. The loops discard almost nothing; an `extract()` body discards everything
+
+| site | Piwigo | Laravel |
+|---|---:|---:|
+| `rewind_to` from `control_flow.rs:242` | 214 (133 KB) | 285 (27 KB) |
+| `rewind_to` from `loops.rs:105` | 8 | 12 |
+| `rewind_to` from `loops.rs:382` | 48 | 5 |
+| `rewind_to` from `stmt.rs:271` | 0 | 2 |
+| `check_function`'s dynamic-variable truncation (`function_decl.rs:1208`) | 31,660 (1.81 MB) | 2 |
+| `check_program`'s (`checker.rs:1806`) | 0 | 0 |
+| reports the check keeps | 651 | 9,800 |
+
+- **The loops** discard 270 reports on Piwigo and 304 on Laravel. Proposal 11a saves well under 1 M on them.
+- **The `extract()` truncation is where the waste is.** 31,481 of the 31,660 reports are `varTag.variableNotFound`, from the compiled Latte templates in Piwigo's `_analysis/phpstan-latte/`, which hold 34,570 `@var` tags. Each template's function calls `extract($ʟ_args)` and then names every variable with a `@var` tag.
+  - `check_statement_var_tag_names` (`checker/stmt.rs:433`, `:529`) does not count `extract()` as defining a name, so it formats a report for each tag.
+  - `check_function` then drops every report of the body.
+- **The cost, warm run.**
+  - The messages: ≈11 M, at the mean cost of `format_inner`'s 66,295 calls from `check_stmt_impl`.
+  - `report::<&str>` from `check_stmt_impl`: 23.4 M over exactly 31,481 calls. Of that, `DiagnosticBuilder::build` is 16.1 M (14.8 M of it `LineIndex::range`) and the vector's growth 4.6 M.
+  - Together ≈35 M.
+- **Proposal 11a** would save only the formatting, ≈11 M, since the report would still be built. E10 saves all of it, and it applies wherever compiled templates call `extract()`.
 
 ## Investigations in the code or the data, no build
 
@@ -194,15 +286,16 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 
 | # | status | item | gates |
 |---|---|---|---|
-| E1 | OPEN, investigated (E1 below) | The deadlock of C2, present in today's code. The fix (S1-S4 below) and its test wait on a decision. The reproduction was not run. | proposal 5 |
-| E2 | OPEN, investigated (E2 below) | Walk a statement's assigned and defined names only when it has `@var` tags. `check_stmt_impl` computes them for every statement, and only the `@var` targets read them. ≈ −50 M, exact. | — |
-| E3 | OPEN, investigated (E3 below) | Probe a method or static call for a PHPUnit assertion only when its written name starts with `assert`, ignoring case. ≈ −35 M today, ≈ −12 M once item 18.1 infers each node once. Exact. | — |
-| E4 | OPEN, investigated (E4 below) | Store the analysed files in the per-file cache too: their products from the entry, their tree and ignore comments from a parse. ≈0.6 G gross on a run with that cache warm, less the entries' decoding. | B5, which measures the decoding; the F2 result cache, which would remove the same cost and more |
-| E5 | OPEN, investigated (E5 below) | A kind code in the node's 5 free flag bits (scalar family, plain `mixed`, `never`, one scalar value), so the relation's shortcuts read one word per type. ≈ −30 M, an estimate. | — |
-| E6 | OPEN, investigated (E6 below) | Answer a pair of identical nodes (`Arc::ptr_eq`) with Yes before the structural memo and the registry-backed forms. ≈35-110 per pair. | B7 |
-| E7 | OPEN, investigated (E7 below) | A class's plain object type kept with its declaration, the constant class types as statics, and a table of the integers −1..=255. ≈ −55 M. | item 4 for the declaration's slot; item 16, which makes the same calls cheaper |
-| E8 | OPEN, investigated (E8 below) | A cache file's types stored once, in a table its records index, as item 6 step 3 stores names. ≈ −65 M of decoding today, ≈ −25 M after item 6 step 1. | item 6, steps 3 and 5 (the decode context and the format bump) |
+| E1 | DONE (E1 below) | The deadlock of C2, present in today's code. The fix (S1-S4 below) and its test wait on a decision. The reproduction was not run. | proposal 5 |
+| E2 | DONE (E2 below) | Walk a statement's assigned and defined names only when it has `@var` tags. `check_stmt_impl` computes them for every statement, and only the `@var` targets read them. ≈ −50 M, exact. | — |
+| E3 | DONE (E3 below) | Probe a method or static call for a PHPUnit assertion only when its written name starts with `assert`, ignoring case. ≈ −35 M today, ≈ −12 M once item 18.1 infers each node once. Exact. | — |
+| E4 | DONE (E4 below) | Store the analysed files in the per-file cache too: their products from the entry, their tree and ignore comments from a parse. ≈0.6 G gross on a run with that cache warm, less the entries' decoding. | B5, which measures the decoding; the F2 result cache, which would remove the same cost and more |
+| E5 | DONE (E5 below) | A kind code in the node's 5 free flag bits (scalar family, plain `mixed`, `never`, one scalar value), so the relation's shortcuts read one word per type. ≈ −30 M, an estimate. | — |
+| E6 | DONE (E6 below) | Answer a pair of identical nodes (`Arc::ptr_eq`) with Yes before the structural memo and the registry-backed forms. ≈35-110 per pair. | B7 |
+| E7 | DONE (E7 below) | A class's plain object type kept with its declaration, the constant class types as statics, and a table of the integers −1..=255. ≈ −55 M. | item 4 for the declaration's slot; item 16, which makes the same calls cheaper |
+| E8 | DONE (E8 below) | A cache file's types stored once, in a table its records index, as item 6 step 3 stores names. ≈ −65 M of decoding today, ≈ −25 M after item 6 step 1. | item 6, steps 3 and 5 (the decode context and the format bump) |
 | E9 | SKIP (E9 below): F6f's rewrite of the scanner covers it, and ≈1 M is left after F6f's memo | The regex scanner's literal concatenation: `format!` per product (`regex_groups.rs:390-401`). | — |
+| E10 | OPEN, investigated (E10 below) | Report nothing while an enclosing body has called `extract()` or `eval()`: the truncation at its end drops all of it. ≈ −35 M on Piwigo, exact. | — |
 
 ### E1. Where a stub build can deadlock, and the fix
 
@@ -384,6 +477,20 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 
 - `scan_branch` starts its accumulator at `[""]` and calls `concat_literals` once per atom (`regex_groups.rs:778`). That makes a new `Vec` and one `format!` per product (`:390-401`): 6,988 calls, 3.7 M, within `parse_capture_groups`' 11.7 M over 714 scans.
 - F6f's memo scans each of the 170 distinct patterns once instead of ≈3.5 times, which leaves ≈1 M. F6f's rewrite of the scanner ("scanning bytes and keeping slices", 20 G plan, `PROFILE_DRILL_PIWIGO_20G.md:1705`) replaces these `String`s anyway. Extending the left string in place when the right side is one literal belongs in that rewrite, not in a change of its own.
+
+### E10. Reports made inside an `extract()` or `eval()` body: ≈ −35 M, exact
+
+- **What happens.** A body that calls `extract()` or `eval()` sets `saw_dynamic_var_construct`, and every report made after its start is dropped at its end. That happens in `check_function` (`function_decl.rs:1208`) and in `check_program` (`checker.rs:1806`).
+  - The flag only turns on within a body.
+  - A nested function or closure saves the flag, clears it and restores it (`function_decl.rs:885-886`, `:1211`). Its reports land after the enclosing body's start, so the enclosing truncation drops them too.
+  - So a report made while any enclosing body has the flag set is always dropped.
+- **The change.**
+  - The checker keeps a count of the enclosing bodies with the flag set.
+  - `report` and `report_builder` return at once while it is not zero.
+  - `check_statement_var_tag_names` also returns before it formats anything.
+- **Why the output cannot change.** `report` only pushes (`checker.rs:1487-1495`), and everything it would have pushed is truncated. A debug build reports as now and asserts that the truncation drops exactly what the count skipped.
+- **The saving.** ≈35 M on Piwigo (B3). It applies to any tree that analyses templates compiled with `extract()`: Latte, Blade, plain PHP views.
+- **What it leaves.** The rest of such a body's check still runs, because it records facts that outlive the body, such as property assignments and class-level sites. Which of those facts a dropped body needs is not traced.
 
 ## Costs the report says nothing addresses
 
