@@ -10,12 +10,17 @@ Status: OPEN, DONE (hash or answer here), SKIP (reason).
 Section numbers (§) and proposal numbers are the report's. "Item n" is an
 item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
 
+Every item was checked again on 2026-10-14 against the code, the profiles,
+the probe outputs on disk and fresh runs of the scripts, and corrected in
+place. The checks and what each found are in
+`~/.cache/prs-probe/validate/notes.md`; E14 and E15 came from them.
+
 ## Decisions
 
 | # | status | decision | options | gates |
 |---|---|---|---|---|
 | D1 | DONE (D1 below) | Syntax errors inside a skimmed body (§10.8). Today a context file that fails to parse is skipped with a warning and its declarations are lost. | 1. Load the file anyway, and report the error only when something reads the body. 2. Check skimmed bodies with a pass that builds only what its checks read: today's behaviour, with ≈1.3-1.5 G of the 3.8 G saved, and more once each file's verdict is cached. | proposal 8 |
-| D2 | DONE (D2 below) | Where a skimmed body's text comes from when it is read later (§10.8). | Keep it in memory (≈19 MB of body text for Piwigo's context files), or read it again from disk with a hash check. | proposal 8 |
+| D2 | DONE (D2 below) | Where a skimmed body's text comes from when it is read later (§10.8). | Keep it in memory (≈18 MB of body text for Piwigo's context files), or read it again from disk with a hash check. | proposal 8 |
 | D3 | DONE (D3 below) | How a binary carries the stub data (§10.6). | 1. Built at compile time by a build script, and embedded. 2. Appended to the binary by the release step. 3. Packaged beside the binary. | proposal 6 |
 | D4 | DONE (D4 below) | What a binary built from source (`cargo install`, `cargo build`) does, since it carries no cache unless its build makes one (§10.6). | | proposal 6 |
 | D5 | DONE (D5 below) | A cache directory that exists but can't be written (§10.2). | Leave the gap, where the encoding is still paid, or detect it. | proposal 2 |
@@ -25,8 +30,12 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
 ### D1. Option 2, with each file's verdict cached
 
 - **Decided** 2026-10-13. Every skimmed body is checked, by a pass that builds only what its checks read. A cache keyed by the file's bytes and the `syntax` crate holds each file's verdict, so a file is checked once per parser version (§10.8).
-- **Why not option 1.** PHP refuses the whole file for one bad body: none of its classes or functions is declared, for a parse error and for a compile-time error ("Cannot mix keyed and unkeyed array entries"; php 8.5, `~/.cache/prs-probe/syntax-in-body/`). With option 1, whether a file loads would depend on whether an optimization skipped one of its bodies. Option 2 keeps one policy for every file. That policy itself is D6.
-- **Every error is the parser's or the lexer's.** `syntax::parse_watching` is the only step of a load that fails (`project.rs:2892`), and a lexer error anywhere in the file outranks the parser's first error (`syntax/src/parse.rs:106-113`). No later pass over the tree reports one.
+- **Why not option 1.** PHP refuses the whole file for one bad body, so no code after its `include` runs (php 8.5.4, `~/.cache/prs-probe/syntax-in-body/` and `validate/d1/`):
+  - **A parse error** throws a catchable `ParseError`, and nothing the file declares exists.
+  - **A compile-time error** ("Cannot mix keyed and unkeyed array entries", a `goto` to a missing label) is fatal and cannot be caught: the process ends at the `include`. The classes and functions compiled before the error are bound, but only a shutdown function runs to see them. The modifier checks (`zend_compile.c:946-1044`, "Multiple final modifiers are not allowed") are the exception: they throw `CompileError`, which is caught as a `ParseError` is.
+
+  With option 1, whether a file loads would depend on whether an optimization skipped one of its bodies. Option 2 keeps one policy for every file. That policy itself is D6.
+- **Every error is the parser's or the lexer's.** `syntax::parse_watching` is the only step of a load that fails (`project.rs:2892`), and a lexer error anywhere in the file outranks the parser's first error (`syntax/src/parse.rs:116-133`). No later pass over the tree reports one.
 - **Corrections the adversarial pass made:**
   - **The pass cannot build nothing.** The parser checks destructuring after it builds the array, with sets keyed by node id (`syntax/src/parser/expr.rs:402-497`: `long_arrays`, `pattern_only`). It keeps array shapes and node ids.
   - **It saves less than first estimated:** ≈1.3-1.5 G before the plan and ≈0.6-0.9 G after it, not 1.5-2 G. Tree building is at most ≈0.53 G of the parse job's 3.65 G parser block, and the token pipeline (≈1.05 G) and the grammar stay in the pass. The report's §10.8 has the table.
@@ -38,7 +47,7 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
 - **Decided** 2026-10-13 (§10.8).
 - **No read of its own.** Every load reads the file's bytes, if only for the per-file cache's key (`session.rs:631-637`). The copy is taken from them, so a body parsed later reads what the load checked.
 - **Lexing a body alone.** `Lexer::fragment(src, base)` (`syntax/src/lexer.rs:461-473`) lexes a piece with spans absolute in its file. It needs a bytes variant for files that are not UTF-8.
-- **Memory.** About half of each context file is body text (§5), so ≈19 MB of Piwigo's ≈37 MB. The peak is 866 MB, of which ≈420 MB are the context files' trees (the 20 G report's M1). The language server already keeps every file's text (`lsp.rs:294`).
+- **Memory.** About half of each context file is body text: B1's probe counts 17.7 MB in 49,533 bodies of Piwigo's 37.1 MB (§5's estimate was ≈19 MB). The peak is 866 MB, of which ≈420 MB are the context files' trees (the 20 G report's M1). The language server already keeps every file's text (`lsp.rs:294`).
 - **Rejected.**
   - Reading the file again on demand: it may have changed since the load, and a hash check only detects that.
   - Mapping the file: the same problem, and it needs `unsafe`.
@@ -51,9 +60,11 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
   - test binaries;
   - every way the VS Code extension finds one (`serverPath`, `PATH`, a download).
 
-  Options 2 and 3 reach release archives only. The data is a function of the source alone: the build reads no setting and no environment variable besides the cache's location (`stub_cache.rs:33-44`), and `switch_base` applies the PHP versions after the load.
+  Options 2 and 3 reach release archives only. The data is a function of the source alone: the build reads no setting, and `switch_base` applies the PHP versions after the load. The only environment variables it reads are the cache's location (`stub_cache.rs:33-44`) and the pools' sizes (`PHPSTAN_RS_THREADS`, `project.rs:364`, and rayon's own), which B10 shows do not change the data.
 - **Conditions found by the adversarial pass:**
   - **The crate split's reflection layer.** A build script cannot call the crate it builds, and must run the very code the runtime runs. A stub base is built through `Project::finish_loading` → `run_finishing_passes` (`project.rs:1387-1399`), and the registry uses the checker (`registry/init_flow.rs:13`). So proposal 6 lands with level 2 of `WORK_STACK.md`.
+    - Today's bases also run purity and global-variable inference, which the module graph assigns to `analyser` (`gates/module-graph.txt:78-79`) and which the split's C9 moves out of reflection, before C10 extracts it. So a reflection build script could not build today's bases either (C8).
+  - **The key misses an input today (E15).** The build's source hash leaves out `vendor/phpstan-src/stubs`, whose `.stub` files the stub build reads. Embedded data has no key, but the stub cache it would replace does.
   - **A test on every release target that the embedded data equals a runtime build.** Two release legs cross-compile (`release.yml`), and constant folding of `**` calls the platform's `pow` (`types/src/arithmetic.rs:715-717`). `folded_hash` (`syntax/src/name.rs:997`) is the same everywhere. B10: no stub folds `**` today, so the data is equal on every leg, and a host-side test that fails when a fold uses `powf` keeps it so.
   - **Build settings.** A `[profile.*.build-override]` opt-level for the build-dependency (the test profile's comment: 4-6× faster at opt-level 1). The 31 MB `include_bytes!` goes in a small crate of its own, so the main crate's incremental builds do not embed it again.
   - **A borrowed `Reader`**, since `Reader::new` takes an owned `Vec<u8>`.
@@ -63,7 +74,7 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
   - E1's hazard narrows to those runs and to the build script, which runs on a thread of no pool. It does not go away.
   - Proposals 1-5 lose most of their reach (D7).
 - **Against the crate split (C8): the form does not survive, and D3 is decided again after C5's version key.**
-  - C4 and C5 leave no bases to embed. What is left is each stub file's declarations before resolution, read when the file is reached.
+  - C4 and C5 leave no bases to embed. What is left is each stub file's declarations before resolution, read when the file is reached. C9 also takes the purity and global-variable passes, which today's bases run, out of reflection, and stubs get no global-variable summaries after it.
   - The saving falls from 5.05 G to ≈0.2-1.5 G per cold run (≈2 G at the upper bounds), while B9's compile time, B10's test and the `.rodata` stay.
   - The per-file cache, keyed over the crates the declarations depend on, does most of the job with no build script.
   - Checked-in data, as the index is, is unfit: it is binary and changes with every edit to the declaration model.
@@ -74,6 +85,7 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
 - The crate is not published (`publish = false`), and the README's route for a binary other than a release one is building from source.
 - Once D3 lands, every binary built that way carries the data.
 - Until then, such a binary pays one cold run per build, as today.
+- **Reopened with D3 (C8).** If D3 is decided again for the per-file cache over embedding, a binary built from source pays one cold run per change to the crates the stub declarations depend on, not per build.
 
 ### D5. Detect it: one check, at the first store, apart from reading
 
@@ -85,7 +97,8 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
   - One warning when the cache cannot be written.
   - One more on a later write failure: entries sit in 256 shard directories (`file_cache.rs:177`), so one write can fail after the check passed.
   - A load refreshes an entry's mtime after 12 h (`file_cache.rs:190-196`), and a failure there passes silently today.
-- **Which caches:** the per-file cache, the stub cache until proposal 6 removes it, and D1's verdict cache.
+- **Which caches:** the per-file cache, the stub cache until proposal 6 or the crate split's C5 removes it, and D1's verdict cache.
+- **E13's shard directories** are made by this check too, so a run that stores nothing touches nothing on disk.
 - **Stating intent.** A cache that is read-only on purpose (one restored in CI, say) would get a note on every run. An explicit read-only setting states the intent and silences it.
 
 ### D6. Option 2: keep what the file declares, and recover what parses
@@ -95,19 +108,26 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
   - `new`, a static call and `class_exists()` autoload the file and throw `ParseError`. They throw again on every later attempt, since a failed autoload is not remembered.
   - `instanceof`, `::class`, `class_exists($n, false)`, a parameter type and a `catch` clause do not autoload. They behave as if the class were not declared: `false`, the name, `false`, a `TypeError` for an object (`null` passes a nullable type), the next `catch`.
   - A function the file declares is undefined: calling it throws `Error`.
-- **Neither world gives "not found" at a use the analysis continues past.** Where the error is real, a use that needs the class or the function throws, so no code after it runs. Where the error is a gap of our parser, the declarations exist. So the code after a use sees the declarations in both worlds, and keeping them is the union of the two. `instanceof` and `class_exists($n, false)` are false in the first world and either value in the second; keeping the declarations allows both.
-- **What fails in real code.** `php -l` ran over every PHP file under `vendor/`: 111,836 files in 20 trees, 67,252 of them installed dependencies (`~/.cache/prs-probe/d6/php-l-fatal.tsv`, `php-l-class.tsv`). 272 fail.
+  - **A compile-time error is fatal instead** (D1's probe): the autoload ends the process with no exception to catch. 257 of the 272 files below fail that way; the other 15 throw (13 parse errors, and 2 modifier errors as `CompileError`).
+- **Neither world gives "not found" at a use the analysis continues past.** Where the error is real, a use that needs the class or the function throws or ends the process, so no code after it runs. Where the error is a gap of our parser, the declarations exist. So the code after a use sees the declarations in both worlds, and keeping them is the union of the two. `instanceof` and `class_exists($n, false)` are false in the first world and either value in the second; keeping the declarations allows both.
+- **What fails in real code.** `php -l` ran over every PHP file under `vendor/`: 111,836 files in the 18 trees that hold PHP files (two of the 20 directories are empty), 67,252 of them installed dependencies (`~/.cache/prs-probe/d6/php-l-fatal.tsv`, `php-l-class.tsv`). 272 fail.
 
   | kind | files | reaches the analyser as context |
   |---|---:|---|
-  | phpstorm-stubs: built-in functions redeclared, and `function exit` (`Core.php:1193`) | 72 | no: the stub loader reads them |
+  | phpstorm-stubs: 25 built-in functions redeclared, 35 declarations repeated for version gates (18 parameters, 12 methods, 5 functions), `function exit` (`Core.php:1193`), 11 other compile errors | 72 | no: the stub loader reads them |
   | test fixtures | 198 | through `paths` or a scan directory only |
   | rector's `stubs/` | 1 | yes: rector's `phpstan.neon` scans `stubs` |
   | an example | 1 | no |
 
   - **Installed dependencies: none.** 3 of the 67,252 fail: a test script of `php-console`, a fixture of `phpcs-gitlab` and an example of `tracy`. All three lie outside their package's `autoload` directories.
-  - **A root's own `autoload-dev` is never context.** The vendor discovery keeps only paths under the project's `vendor/` (`composer/src/vendor.rs:17-23`). phpstan-src's `autoload-dev` classmap covers its 191 failing fixtures, but they reach the analyser only through `paths`, and PHPStan excludes them there (`excludePaths: ../tests/*/data/*`, `phpstan-src/build/phpstan.neon:30`).
-  - **Kinds of error.** 12 of the 272 are parse errors. The rest are compile errors, most of them of C7's 238 kinds, which the parser accepts. The parser was not run over them.
+  - **A root's own `autoload-dev` is never context.** The vendor discovery keeps only paths under the project's `vendor/` (`composer/src/vendor.rs:17-23`). phpstan-src has 191 failing files:
+    - 184 are in its `autoload-dev` classmap (`tests/PHPStan`): 171 under `tests/*/data/` and 13 under `tests/PHPStan/Analyser/nsrt/`. They reach the analyser only through `paths`, and PHPStan excludes both there (`build/phpstan.neon:30`, `:33`).
+    - 7 are in neither the classmap nor PHPStan's paths: 5 under `turbo-ext/tests/parser-fixtures/` and 2 under `e2e/`.
+  - **Kinds of error.** 13 of the 272 are parse errors. The other 259 are compile errors, most of them of C7's 238 kinds, which the parser accepts. The parser was not run over them.
+- **What our parser refuses in real code, which PHP accepts.** B1's Laravel run warned about two context files that PHP 8.5 lints clean, `aws-sdk-php`'s `AbstractConfigurationProvider.php:41` and `phpseclib`'s `Math/BigInteger.php:177`. Both hold `$x instanceof static::$name` or `self::$name`, a class named by a static property.
+  - The parser reads a name after `instanceof` and leaves `::$name` unread (`syntax/src/parser/expr.rs:106-117`). PHP's grammar takes the same `class_name_reference` there as after `new`, which `parse_new_class_reference` already reads (`primary.rs:83`).
+  - A tokenizer scan of all 111,836 files finds 6 such files, in the installed dependencies of laravel, league-flysystem and monolog (`validate/d6/instanceof_sp.tsv`). Each loses every declaration as context today. E14 is the fix.
+  - The parser has not been run over the whole corpus, so other gaps of this kind are not counted.
 - **Three causes, and what each needs.**
   - **A file broken on purpose,** a test fixture. Nothing refers to what it declares except the test that expects the error.
   - **A file written for analysers only.** `rector-src/stubs/Symfony/Component/Form/FormBuilderInterface.php` declares a class whose method has no body.
@@ -115,13 +135,13 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
     - Rector scans the directory so that its analysis sees the class when `symfony/form` is absent.
     - The parser accepts it today (C7's run: `class A { function f(); }`), so the file loads.
     - Matching PHP exactly, with today's policy plus C7's 238 checks on context files, would drop the one file the project wants read.
-  - **A gap in the parser, by PHP version.**
+  - **A gap in the parser,** for every version (`instanceof static::$name`, above) or by PHP version.
     - `rector-src/build/target-repository/e2e/parse-php7-code/src/Foo.php` reads `$bar{2}`. That is valid in PHP 7 and refused by PHP 8 (`curly.php`).
-    - The parser has one grammar for every version, and its postfix loop has no arm for `{` (`syntax/src/parser/postfix.rs:16-211`). So a project on PHP 7.4 loses a valid file.
+    - The parser has one grammar for every version, and its postfix loop has no arm for `{` (`syntax/src/parser/postfix.rs:16-241`). So a project on PHP 7.4 loses a valid file.
     - The gap also runs the other way: the parser accepts `(real)` and `(unset)` (`syntax/src/ast.rs:1303`, `:1311`), which PHP 8 refuses.
 - **The design.**
   - **Recover what parses.** The declarations that parse are kept.
-    - **Prior art.** Psalm does this: php-parser's `Collecting` handler returns the statements it recovers, and each error becomes one issue (`StatementsProvider.php:367-424`, Psalm 6.20.0, in `~/.cache/prs-probe/d6/upstream/`). PHPStan drops the file (`FileNodesFetcher.php:31-35`, unchanged in 2.3.1).
+    - **Prior art.** Psalm does this: php-parser's `Collecting` handler returns the statements it recovers, and each error becomes one issue (`StatementsProvider.php:367-424`, Psalm 6.20.0, the latest stable; 7.0 is at its second release candidate; in `~/.cache/prs-probe/d6/upstream/`). PHPStan drops the file (`FileNodesFetcher.php:32-36`, unchanged in 2.3.1, the latest release).
     - **A body that fails** keeps its function or method, with an unknown summary. With proposal 8 this needs nothing new, since the skimmer finds a body's end without parsing it.
     - **A member or class header that fails** leaves the class declared with an unknown shape. That is a new kind of registry entry, on which no rule reports.
     - **Without proposal 8** the parser needs recovery points: the end of a member, at class depth, and the end of a top-level statement. That is new.
@@ -132,7 +152,7 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
     - The parse stays a function of the bytes and `syntax`, so C6's verdict key stays exact: the cache holds the marks, and each run applies its own version.
   - **One rule for the batch run and the language server.** On master, the batch run drops a failed context file's declarations (`context_failures`, `project/session.rs:324`, `:2143-2174`). The language server keeps the last version that parsed (`lsp.rs:752`, `parse_failed`). With recovery, both use what the current text declares. A header that fails leaves its class with an unknown shape, not gone, so the server no longer needs the last good version for it.
   - **D1's verdict cache** stores the recovered regions with the verdict.
-- **Why not option 1.** It is wrong for every gap of the parser, and the version gap is in real code. It also ties the parser's strictness to what context files contribute: closing C7's gap in the parser would drop the files written for analysers.
+- **Why not option 1.** It is wrong for every gap of the parser, and both kinds of gap are in real code. It also ties the parser's strictness to what context files contribute: closing C7's gap in the parser would drop the files written for analysers.
 - **Cost.** Recovery in the parser (none for bodies once proposal 8 is in), a registry entry with an unknown shape, and marks for removed syntax.
 
 ### D7. Option 1: build proposals 1-5 now, in four steps
@@ -150,11 +170,13 @@ item of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II).
 - **Until then every cold run pays the build.**
   - The stub cache is keyed by the build's source hash, so the first run after every rebuild is cold: the development loop pays it once per edit.
   - CI's cold jobs pay it.
-  - So does the first language-server start. `tests/lsp_startup.rs` holds that start to 10 s, from an empty stub cache as well as a warm one.
+  - So does the first language-server start. `tests/lsp_startup.rs` on master holds that start to 10 s, from an empty stub cache as well as a warm one.
 - **The crate split deletes what they speed (C8).** C4 makes stub resolution lazy, and C5's stub layer, with a per-file parse memo, "replaces the per-project stub clone and the per-process stub parse" (`CRATE_SPLIT_PLAN.md`, C5's gate). No base is built, no corpus is merged and nothing is stored, so the code of proposals 1-5 goes with the eager build.
   - Their whole value is the cold runs between now and C5. Building them now is the only time they pay.
   - They are small and local, measured against today's eager build.
   - E1's fix is needed until then too, since the deadlock is in today's code.
+  - D5's gate outlives them: it guards the per-file cache and D1's verdict cache, which stay. Only its part for the stub cache, proposal 2, goes.
+  - Until C5, C4 keeps an eager pass over each stub file (`CRATE_SPLIT_PLAN.md`, C4: "the stub pass still resolves each stub file's classes within that file (until C5's stub layer)").
 
 ## Investigations that need a build
 
@@ -162,7 +184,7 @@ None of these was run for the report.
 
 | # | status | question | settles |
 |---|---|---|---|
-| B1 | DONE (B1 below) | What proposal 9's on-demand search reaches, on Piwigo and on a general tree: the distinct callees the no-op rules and the property-write reads ask about, and the nodes the searches visit (§10.9). This also gives d, the share of bodies read. §11 assumes d ≈ 0.2. Measured on Piwigo and Laravel: the searches visit 1.6-3.0 k nodes, against 69-114 k the eager pass classifies, and no answer differs from it; d ≈ 0.005-0.006, and the bodies the skimmer parses in full for a trigger bring the share of body tokens parsed to ≈0.01-0.02. | proposal 9's saving; proposal 8's saving: ≈2.0-2.3 G × (1 − d) after the plan with each file's verdict cached, and without it whether proposal 8 pays at all, since it saves nothing from d ≈ 0.26-0.45 (D1) |
+| B1 | DONE (B1 below) | What proposal 9's on-demand search reaches, on Piwigo and on a general tree: the distinct callees the no-op rules and the property-write reads ask about, and the nodes the searches visit (§10.9). This also gives d, the share of bodies read. §11 assumes d ≈ 0.2. Measured on Piwigo and Laravel: each search visits 0.3-3.0 k nodes, against 69-114 k declarations the eager pass classifies, and no answer differs from it; d ≈ 0.005-0.006, and the bodies the skimmer parses in full for a trigger bring the share of body tokens parsed to ≈0.01-0.02. | proposal 9's saving; proposal 8's saving: ≈2.0-2.3 G × (1 − d) after the plan with each file's verdict cached, and without it whether proposal 8 pays at all, since it saves nothing from d ≈ 0.26-0.45 (D1) |
 | B2 | DONE (B2 below) | Proposal 7's real saving. The estimate counts every tag, not every distinct tag, so the memos may lower it (§10.7). Measured per lexer run, memos included: ≈0.37 G off and ≈0.08 G warm, and ≈0.04 G once proposal 6 and item 14 are in. | proposal 7 |
 | B3 | DONE (B3 below) | How many reports the loops' convergence passes format and then discard (`diagnostics.truncate`: `checker.rs:1278`, `:1807`, `function_decl.rs:1209`; §10.11). The loops discard 270 on Piwigo and 304 on Laravel. The `extract()` truncation discards 31,660 on Piwigo, ≈35 M (E10). | how far proposal 11a reaches |
 | B4 | DONE (B4 below) | Wall time. Nothing is timed, including the 1.6 G of serial stub work on a cold run's critical path, with the other cores idle (§12). Medians of 8 interleaved runs on a quiet machine: off 2.68 s, stub cache cold 2.69 s, stub cache warm 2.31 s, both caches warm 1.60 s. The stub build is 0.37 s, 14% of an off run, and ≈0.4 s of its stretches run on one core. The finishing passes are ≈40% of the wall time with both caches warm. | the wall-time weight of proposals 1-5 |
@@ -170,7 +192,7 @@ None of these was run for the report.
 | B6 | DONE (B6 below) | Disk time of the cold run's cache write. Its 58 M is callgrind's count only (§12). The stub cache's write is ≈10 ms (4 files, 31.4 MB) and does not show in wall time. A cold per-file cache's first write costs ≈0.7 s of CPU, mostly in the kernel, and 0.10 s of wall (E13). | the cold run's full cost |
 | B7 | DONE (B7 below) | How many of `is_super_type_of`'s 1,341,821 questions ask about one node against itself. The profile counts calls, not their operands (N2). A probe run on Piwigo makes 1,479,785 calls. 203,478 (13.8%) are one node against itself, and 164,144 of those pass the shortcuts: 67,631 structural, 96,513 registry-backed. Equal nodes that are not one are 0.6%. E6 nets ≈ −10 M. | E6's saving |
 | B8 | DONE (E7 below) | How many of `Type::object`'s 170,696 calls build a class's plain object type, with no arguments, and how many of `int_literal`'s 71,550 build a small integer (N2). Settled from the code and the tokens: 125,364 (73%) are plain, and 92% of the integer literals are 0-255. | whether E7 is worth building |
-| B9 | DONE (B9 below) | What building the stub data at compile time adds to a build: the reflection crate compiled again for the host, and the stub build in the build script at the `build-override` opt-level, for a clean build and for an incremental one after an edit to the reflection crate (§10.6, §12). Cargo compiles the crate once when no `--target` is passed and the override equals the profile, so only `release.yml`'s legs pay a second compile: ≈140-195 s of units at opt-level 1. The stub build takes 3.67 s at opt-level 0, 0.90 s at 1 and 0.59 s at 3, with byte-identical output, and the embedding ≈0.4 s. An edit to reflection loses up to ≈20 s of pipelining, unless only the binary crate takes the data. | proposal 6's cost to development (D3) |
+| B9 | DONE (B9 below) | What building the stub data at compile time adds to a build: the reflection crate compiled again for the host, and the stub build in the build script at the `build-override` opt-level, for a clean build and for an incremental one after an edit to the reflection crate (§10.6, §12). Cargo compiles the crate once when no `--target` is passed and the override equals the profile, so only `release.yml`'s legs pay a second compile: ≈160-215 s of units at opt-level 1. The stub build takes 3.67 s at opt-level 0, 0.90 s at 1 and 0.59 s at 3, with byte-identical output, and the embedding ≈0.4 s. An edit to reflection loses up to ≈20 s of pipelining, unless only the binary crate takes the data. | proposal 6's cost to development (D3) |
 | B10 | DONE (B10 below) | Whether the stub data built for a release target equals the data that target builds at run time, on the two cross-compiled legs (`aarch64-unknown-linux-gnu` on x86_64, `x86_64-apple-darwin` on arm64). Constant folding of `**` calls the platform's `pow` (`types/src/arithmetic.rs:715-717`). This becomes the test that D3 requires, run natively or under emulation (§10.6, §12). Equal today. The stub build calls `powf` 0 times: the stub sources' four `**` sit in a phpstan-src method body, on operands that are not literals. Nothing else in the build reads the platform, and the data is byte-identical across thread counts, one CPU and opt-levels 0, 1 and 3. A host-side test that fails when a fold uses `powf`, or a pow written in Rust, keeps it equal. | whether the cross-compiled legs can embed what their build script makes |
 
 ### How B1-B3 were measured
@@ -184,7 +206,7 @@ None of these was run for the report.
   - **Piwigo**, as in the profile. Its `out.json` is byte-identical to the profile's.
   - **Laravel**: `vendor/laravel`, `check-project src`, with its own `vendor/` as context.
 
-### B1. The searches on demand reach 2-4% of the graph, and d ≈ 0.005-0.006
+### B1. The searches on demand reach 0.3-4% of the graph, and d ≈ 0.005-0.006
 
 | | Piwigo | Laravel |
 |---|---:|---:|
@@ -206,19 +228,19 @@ None of these was run for the report.
 - **The search is exact on both trees.** It gives the eager pass's answer for every callee asked about, cycles included.
 - **No non-stub callee the no-op rules asked about is pure**, on either tree. Each search stops at the first impure node, often at the root's gate before any body is read. On Piwigo, the purity search read 123 context bodies and 258 analysed ones, for roots whose own bodies are 227 and 1,288.
 - **The checker itself read no context body.** The uninitialized-property rules are off by default (`rules.check_uninitialized_properties`). The parent-call rule (`project/class_shape.rs:343`) reads only for the methods it is configured with. With those on, the ancestors' bodies they read add to d. That is not measured.
-- **The skimmer's own full parses.** Proposal 8 also parses in full every body that holds a trigger (§10.8). Counted with `token_get_all` over the context files (`b1/triggers.php`):
+- **The skimmer's own full parses.** Proposal 8 also parses in full every body that holds a trigger (§10.8). Counted with `token_get_all` over each run's context files (`b1/triggers.php` over `b1/*/context-files.txt`):
 
   | | bodies flagged | share of body tokens | by trigger |
   |---|---:|---:|---|
-  | Piwigo | 205 of 48,486 (0.42%) | 1.36% | include 148, a nested `function` 33, `new class` 33, a `PHPStan` name 16, `class` 3, `define` 1 |
+  | Piwigo | 210 of 49,496 (0.42%) | 1.34% | include 151, `new class` 34, a nested `function` 33, a `PHPStan` name 16, `class` 3, `define` 2 |
   | Laravel | 81 of 38,236 (0.21%) | 0.62% | include 53, `new class` 21, a nested `function` 13, `define` 6 |
 
   With the bodies read, ≈1-2% of the context body tokens are parsed in full.
-- **Proposal 9.** "Less what is asked for" (§10.9) is ≈2-4% of the nodes, so §10.9's saving stands: ≈0.3-0.4 G beyond item 4, and most of the passes' 0.19 s on the finishing thread.
+- **Proposal 9.** "Less what is asked for" (§10.9) is 0.3-4.3% of the declarations per search (Piwigo 2.3% and 4.3%, Laravel 1.7% and 0.3%), so §10.9's saving stands: ≈0.3-0.4 G beyond item 4, and most of the passes' 0.19 s on the finishing thread.
 - **Proposal 8, at d ≈ 0.02 by tokens:**
   - **With the verdict cached:** F × (1 − d) ≈ 2.0-2.3 G after the plan, against §11's 1.6-1.85 G at d ≈ 0.2. §11's warm column then leaves ≈9.9-10.2 G, not 10.3-10.6.
   - **Without it:** S − F × d ≈ 0.55-0.85 G after the plan, against ≈0.15-0.5 G at d ≈ 0.2. Proposal 8 pays on every run, far below the break-even d ≈ 0.26-0.45. A run with no cached verdict leaves ≈11.3-11.6 G, not 11.6-12.0.
-  - **D1's verdict cache** is worth F − S ≈ 1.4 G on a run whose files have verdicts. It no longer decides whether proposal 8 pays.
+  - **D1's verdict cache** is worth F − S ≈ 1.1-1.7 G on a run whose files have verdicts. It no longer decides whether proposal 8 pays.
 
 ### B2. Proposal 7: ≈0.37 G off and ≈0.08 G warm
 
@@ -261,7 +283,7 @@ None of these was run for the report.
   - `check_function` then drops every report of the body.
 - **The cost, warm run.**
   - The messages: ≈11 M, at the mean cost of `format_inner`'s 66,295 calls from `check_stmt_impl`.
-  - `report::<&str>` from `check_stmt_impl`: 23.4 M over exactly 31,481 calls. Of that, `DiagnosticBuilder::build` is 16.1 M (14.8 M of it `LineIndex::range`) and the vector's growth 4.6 M.
+  - `report::<&str>` from `check_stmt_impl`: 23.4 M over exactly 31,481 calls. Over all of `report`'s 32,395 calls, `DiagnosticBuilder::build` is 16.1 M (14.8 M of it `LineIndex::range`) and the vector's growth 4.6 M, so nearly all of it is these.
   - Together ≈35 M.
 - **Proposal 11a** would save only the formatting, ≈11 M, since the report would still be built. E10 saves all of it, and it applies wherever compiled templates call `extract()`.
 
@@ -280,7 +302,7 @@ None of these was run for the report.
   | finishing | 2,475.0 M | 2,617.3 M | +142.3 M |
   | insert (main thread, serial) | 751.2 M | 582.7 M | −168.5 M |
   | vendor discovery | 321.3 M | 321.2 M | 0 |
-  | session and main | 264.8 M | 276.4 M | +11.6 M |
+  | session and main | 267.0 M | 278.8 M | +11.8 M |
   | **total** | **20,572.2 M** | **14,338.3 M** | **−6,233.9 M** |
 
 - **The floor is 14.34 G.**
@@ -344,13 +366,14 @@ None of these was run for the report.
 
 ### B6. The cache writes: ≈10 ms for the stub cache, ≈0.1 s of wall for a cold per-file cache
 
-- **The stub cache.** A cold run writes 4 files, 31.4 MB, each through a temporary and a rename (`stub_cache.rs:73-89`). The system calls take ≈10 ms (strace).
+- **The stub cache.** A cold run writes 4 files, 31.4 MB, each through a temporary and a rename (`stub_cache.rs:73-90`). The writes take ≈10 ms under strace, and all of the stub cache's system calls ≈19 ms.
   - The wall cost is below the noise: cold 2.693 s against off 2.681 s, with a spread of ±0.3 s.
   - With the 58 M of encoding (≈15 ms), the cold run costs what the off run does.
 - **The per-file cache.** The profile's runs had it off. The first run with it on writes 11,459 entries, 48.3 MB.
-  - Per entry, `store` (`file_cache.rs:223-262`) calls `create_dir_all` (a `mkdir`; 11,473 in all), then `getpid` for the temporary's name, then `openat` with `O_CREAT`, `write`, `close` and `rename`.
-  - Then `trim` lists the directory and stats every entry once: 11,430 `statx`, on the main thread (`session.rs:786`).
-- **Its cost.** Perf, one run each, against the stub-warm recording:
+  - Per entry, `store` (`file_cache.rs:223-261`) calls `create_dir_all` (a `mkdir`; 11,473 in all), then `getpid` for the temporary's name, then `openat` with `O_CREAT`, `write`, `close` and `rename`.
+  - When the shard exists, `create_dir_all`'s `mkdir` fails with `EEXIST` and it stats the shard: 11,208 `statx` on the workers.
+  - Then `trim` lists the directory and stats every entry once: 11,459 `statx`, on the main thread (`session.rs:786`).
+- **Its cost.** Perf, one run each, against the stub-warm recording (`b6/classify.py` over `b6/filescold.data` and `b4/perf/stubwarm.data`):
 
   | | CPU, ms |
   |---|---:|
@@ -359,10 +382,10 @@ None of these was run for the report.
   | `mkdir` | +80 |
   | `write` | +76 |
   | `statx`, `getdents64`, `close` | +47 |
-  | postcard encoding | +123 |
+  | postcard encoding | +191 |
 
-  The interleaved runs give +0.51 s of system CPU, +0.18 s of user CPU and +0.10 s of wall (2.405 s against 2.308 s). The parse workers share the cost.
-- **E13** removes the `mkdir`s.
+  The interleaved runs give +0.51 s of system CPU, +0.18 s of user CPU and +0.10 s of wall (2.405 s against 2.308 s). The parse workers share the cost. Single perf runs are noisy: the encoding alone is more than the interleaved runs' user CPU.
+- **E13** removes the `mkdir`s and the shard `statx`s.
 - **Strace's per-call times are not usable here.** Under `-f` it serializes the threads, so the 11,459 writes show as 3.1 s. Its call counts are exact.
 
 ### B7. 13.8% of the questions are one node against itself; 164,144 pass the shortcuts, and E6 nets ≈ −10 M
@@ -373,7 +396,7 @@ None of these was run for the report.
   - where an equal pair is answered: the scalar-value shortcut, the `mixed`/`never` shortcut, or past them, where E6's test would sit.
 
   The run is Piwigo, off mode, once. The data is in `~/.cache/prs-profile/off-ledger-b/b7/`.
-- **The counts.** 1,479,785 calls, 10% more than the profile's 1,341,821, which was built at an earlier commit. The check asks 1,156,025 of them.
+- **The counts.** 1,479,785 calls, 1.9% more than the off profile's 1,451,853 (the warm run's is 1,341,821). The code is the same: the probe counts every entry, inlined or not, while callgrind counts only the calls into the function's own code, in a build of another profile. The check asks 1,156,025 of them.
 
   | | calls | of all |
   |---|---:|---:|
@@ -415,11 +438,11 @@ None of these was run for the report.
     - An unset field must stay unset. The test profile passes no `-C codegen-units`, so an override that sets 256 is a different unit.
   - **Not shared:** every leg of `release.yml`, the native ones too, since each passes `--target` (`release.yml:101`). Those compile the reflection crate a second time for the host.
 - **A clean build.** The opt-level-1 host build of the whole library takes 2 min 44 s of wall and 994 s of user CPU, alone on 8 cores. Its units sum to 721 s.
-  - **The reflection crate's share.** The closure of `syntax`, `types`, `phpdoc`, `diagnostics`, `stub-sources` and the outside crates the registry uses (rayon, imbl, hashbrown, postcard, twox-hash, crc32fast, rustc-hash, serde, memchr, arrayvec) is 86 units and 139 s.
-    - With at most the main crate's 54 s, that is ≈140-195 s, or 19-27% of the units.
+  - **The reflection crate's share.** The closure of `syntax`, `types`, `phpdoc`, `diagnostics`, `stub-sources` and the outside crates the registry uses (rayon, imbl, hashbrown, postcard, twox-hash, crc32fast, rustc-hash, serde, memchr, arrayvec) is 86 units and 139 s. The module graph also lets reflection depend on `composer` and `config` (`gates/module-graph.txt`), whose closure adds 15 units and 23 s (toml, serde_json and theirs): 101 units and 162 s.
+    - With at most the main crate's 54 s, that is ≈160-215 s, or 22-30% of the units.
     - The closure's last unit ends at 80 s, so its critical path is ≈80 s plus the reflection crate itself.
     - None of `sqlparser`, the SQL drivers, aws-lc, lsp-types or clap is in the closure. Those are most of the rest.
-  - **On `release.yml`'s legs,** that ≈140-195 s of units is added, at the override's opt-level and on the runner's cores. It runs beside the target build, which on this machine takes 9 min 36 s for the gate profile (`~/.cache/prs-b/gate-build.log`, load not logged).
+  - **On `release.yml`'s legs,** that ≈160-215 s of units is added, at the override's opt-level and on the runner's cores. It runs beside the target build, which on this machine takes 9 min 36 s for the gate profile (`~/.cache/prs-b/gate-build.log`, load not logged).
 - **The stub build in the build script.** All four containers:
 
   | opt-level | wall | CPU (user + sys) |
@@ -431,7 +454,7 @@ None of these was run for the report.
   - Opt-level 1 is 4.1× faster than 0, within the test profile's 4-6×, and 1.5× slower than 3.
   - **The output is the same at every level.** The four files compare equal byte for byte at opt-levels 0, 1 and 3.
   - Under C8's form, the build script parses every stub file and builds no base: by §4.1's split, ≈3.50 G of today's 5.05 G. Not measured.
-- **The embedding.** A crate holding the four files through `include_bytes!` takes 0.3-1.0 s to compile in release: 0.97 s the first time, +0.3-0.4 s on a rebuild. A thin-LTO relink of a binary that uses it takes 2.79 s, against 2.73 s for one that does not.
+- **The embedding.** A crate holding the four files through `include_bytes!` takes 0.3-1.0 s to compile in release: 0.97 s the first time, +0.3-0.4 s on a rebuild. A thin-LTO relink of a binary that uses it takes 2.79 s, against 2.73 s for one that does not. These timings, and the edit's codegen share below, were read off the console and not kept; the unit sharing above is also visible in `b9/share/target-*`, one `refl` rlib per compile.
 - **An edit to the reflection crate.** At opt-level 1, the host rebuild of today's library takes 26 s of wall and 89 s of CPU after a one-line edit to `registry/index.rs`, 87% of it codegen. A comment added in `types` takes 30 s.
   - **With the unit shared,** nothing is compiled twice. A serial stretch is added instead:
     - the build script needs the reflection crate's rlib, not just its metadata;
@@ -443,7 +466,7 @@ None of these was run for the report.
   - **With the unit not shared** (`--target`), the host rebuild runs beside the target one, at opt-level 1 against 3, so it ends first.
   - **An edit to any other crate** reruns nothing.
 - **For D3.** The override should equal the profile in test, gate and release. Dev's opt-level is 0, so it chooses between 3.7 s of stub build per rerun (equal) and a second compile at opt-level 1. The compile cost is then:
-  - a second compile only on the release legs, ≈2-3 min of units;
+  - a second compile only on the release legs, ≈2.7-3.6 min of units;
   - 0.6-0.9 s of stub build and ≈0.4 s of embedding per edit to reflection or below;
   - the lost pipelining, unless the data enters at the binary crate.
 
@@ -462,7 +485,7 @@ None of these was run for the report.
   - Folding's other float operations are `+`, `-`, `*`, `/` and comparisons, which IEEE 754 makes exact on every target.
   - `%` folds on integers (`arithmetic.rs`'s `Mod` arm), and `php_float_to_int`'s `rem_euclid` (`coercion.rs:329`) is exact. No other libm function is called.
   - Floats are parsed (`str::parse`) and formatted (`format_php_float`) by Rust's code, not the C library's.
-  - `folded_hash` is fixed (D3), and all six release targets are 64-bit and little-endian.
+  - `folded_hash` is fixed (D3), and all five release targets are 64-bit and little-endian.
   - The one target-dependent value is `MAIN_SEPARATOR`, for `DIRECTORY_SEPARATOR` in include paths (`checker/includes.rs:214`). The Windows leg is native.
 - **Nor scheduling, nor optimization.** The four files are byte-identical across 1, 2, 3 and 8 threads, one rayon thread, one CPU, and opt-levels 0, 1 and 3. The merge runs in file order (`registry/stubs.rs:1479-1480`).
 - **The answer.** With today's sources, the data that the `aarch64-unknown-linux-gnu` and `x86_64-apple-darwin` build scripts write equals what those targets build at run time.
@@ -547,14 +570,14 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
     - The plain base has no class that uses a trait (`trait_users` is empty in its file), so its first pass changes nothing and `flatten_traits` stops after one pass over its 1,542 classes (`resolve.rs:127-134`).
     - PHPStan's base has 30 trait users and takes three passes over its 3,495 classes.
     - The project takes three passes over its 15,626 classes.
-  - **On worker 09,** that closure ran 10,485 = 3 × 3,495 times. So did the other per-class and per-function closures of that run: `resolve_deferred_value_of` 3,495, `classify_purity` 3,495 (classes) and 5,282 (functions), and `drop_doc_members_excluded_by_native` 5,282 (functions). These are PHPStan's base's 3,495 classes and 5,282 functions.
+  - **On worker 09,** that closure ran 10,485 = 3 × 3,495 times. So did the other per-class and per-function closures of that run: `resolve_deferred_value_of` 3,495, and `classify_purity` 3,495 (classes) and 5,282 (functions). These are PHPStan's base's 3,495 classes and 5,282 functions. (`drop_doc_members_excluded_by_native` runs one closure per signature, methods and functions alike, `resolve.rs:1742`: 34,969 calls on worker 09, so it does not count functions alone.)
   - **On the other workers,** `classify_purity`'s class closure ran 5,448 times on worker 02 and 11,720 times on worker 04: 17,168 = 1,542 + 15,626. That is the plain base and the project.
 - **So** worker 09 ran PHPStan's base's finishing run, and the plain base's run shared worker 02 with the project's run. Proposal 1, which removes the plain base, removes the run that is not the 117.2 M one (C5).
 
 ### C5. The two stub bases' finishing runs cost ≈0.15-0.17 G, not ≈0.21 G
 
 - **PHPStan's base: 117.2 M, measured.** Nothing of its run ran on another worker: every closure counted in C4 ran on worker 09 exactly once per class or function of that base. The main thread was blocked in `install` and the pool had no other work, so everything under that frame on worker 09 is that run's.
-- **The plain base: ≈33-52 M, estimated.** Its run shares worker 02 with the project's run, and the counts cannot separate their costs.
+- **The plain base: ≈35-52 M, estimated.** Its run shares worker 02 with the project's run, and the counts cannot separate their costs.
   - Its classes and functions are a subset of PHPStan's base (`builtin_stubs` filters out `entry.phpstan`, `stubs.rs:937-944`), so it costs at most about 117.2 M.
   - The passes' work is mostly per class. Scaled by class count (1,542 against 3,495), it is ≈52 M. Scaled by the class tables' bytes (4.40 against 14.69 MB), it is ≈35 M.
 - **Together, ≈150-170 M** against §4.4's ≈211 M. The ≈40-60 M left over in §4.4's block differences is cost that stolen jobs moved between blocks, not stub-base work.
@@ -563,7 +586,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 
 ### C6. A file's parse verdict depends only on its bytes and the `syntax` crate
 
-- **The only step of a load that fails** is `syntax::parse_watching` (`project.rs:2892`, through `parse_with_ignores`). What `parse_file_with_names` does after it, the declarations and the references, returns no error (`project.rs:3003-3027`).
+- **The only step of a load that fails** is `syntax::parse_watching` (`project.rs:2892`, through `parse_with_ignores`). What `parse_file_with_names` does after it, the declarations and the references, returns no error (`project.rs:3003-3071`).
 - **The watch list** is the one input from outside `syntax`, and it sets only bits of `facts.mentions` (`syntax/src/lexer.rs:416-419`), never an error.
 - **No stub mode.** `is_stub` is read only after the parse, by `file_declarations::collect`.
 - **No feature changes the parse.** `syntax`'s only feature, `fuzzing`, derives `Arbitrary` (`php_string.rs:13`, `name.rs:263`).
@@ -579,9 +602,9 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
     - the `E_ERROR` that attributes raise while compiling.
 
     That is 229 sites in `zend_compile.c`, 54 in `zend_inheritance.c`, and the rest in `zend_enum.c`, `zend_API.c`, `zend_opcode.c`, `zend_attributes.c` and the scanner.
-  - **One trigger file per site,** 299 files in `~/.cache/prs-probe/c7/cases/`. Each file is run twice:
+  - **At least one trigger file per site,** 299 files in `~/.cache/prs-probe/c7/cases/`: `:7639` has four, and 16 sites whose first trigger hit another message have a second (`r2`). Each file is run twice:
     - with `php -l`;
-    - with `echo "RAN\n";` as its first statement. An error that comes before `RAN` is a compile-time refusal: nothing in the file runs, and nothing it declares exists.
+    - with `echo "RAN\n";` as its first statement. An error that comes before `RAN` is a compile-time refusal: nothing in the file runs, and no code after its `include` runs (a fatal error ends the process; D1).
 
     `scripts/run.py` makes both runs. `verdicts.tsv` holds each file's result.
   - **Our side: run.** `phpstan-rs check`, which parses only, ran over the 299 files. The binary was the one saved for `4db8f996` (`.corpus-runs/gate/bin/4db8f996/gate/`), whose `crates/syntax` is HEAD's. Its result for each file is in `verdicts_run.tsv`.
@@ -605,7 +628,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
       - an unmatched `)`;
       - four hook forms: `get()`, `set` with two parameters, a variadic one, and one with a default;
       - `static` or `abstract` on a trait alias (2).
-  - **It accepts the other 238.** PHP refuses those files, while we load their declarations. By the function that raises the error:
+  - **It accepts the other 238.** PHP refuses those files, while we load their declarations. By the function that raises the error (the groups were assigned by hand and add to 236; two sites are in none):
 
 | group | sites | examples |
 |---|---|---|
@@ -624,7 +647,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 | inheritance in one file | 5 | a final method overridden by a class declared later in the same file |
 | lexer | 4 | `(real)`, an unterminated `/*`, a heredoc whose indentation mixes tabs with spaces or is too shallow |
 
-- **When the parser fails, PHP refuses too:** that held for all 30, and the parser rejected none of the files PHP accepts at compile time. The gap runs the other way: PHP refuses many files that we load.
+- **When the parser fails, PHP refuses too:** that held for all 30, and the parser rejected none of the triggers PHP accepts at compile time. The gap runs the other way: PHP refuses many files that we load. Real code shows the converse failing too: the parser refuses `$x instanceof static::$name`, which PHP 8.5 accepts (D6, E14).
 - **Almost all 238 are local to the file.** A pass over the tree after the parse can decide them. The checker already reports some of them as diagnostics, for instance `case` outside an enum and `goto` to a missing label (`checker/keywords.rs:180`). It reports them only in analysed files, so a context file with one of these errors keeps its declarations. Which of the 238 the checker reports was not counted.
 - **What is not a compile-time refusal.** 19 triggers fail only when the declaration runs, after the statements before it have run:
   - a class declared twice;
@@ -632,7 +655,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
   - a trait that does not exist;
   - an interface implemented twice.
 
-  `zend_inheritance.c`'s checks refuse the file at compile time only when the parent and the interfaces are declared earlier in the same file (early binding). Otherwise they fail at declaration time. 13 of its 54 sites were triggered: the 9 compile-time ones counted above, which include the hooked-property checks and `#[\Override]` that need no other class, and the 2 declaration-time ones. The other 41 are linking checks of the same kind, and were not triggered one by one.
+  `zend_inheritance.c`'s checks refuse the file at compile time only when the parent and the interfaces are declared earlier in the same file (early binding). Otherwise they fail at declaration time. 13 of its 54 sites were triggered: the 11 compile-time ones counted above, which include the hooked-property checks and `#[\Override]` that need no other class, and the 2 declaration-time ones. The other 41 are linking checks of the same kind, and were not triggered one by one.
 - **Not reached from source:**
   - PHP itself raises an earlier error first: `namespace\self` at `:1153`, `readonly` on a method at `:8253` (the modifier check), `__halt_compiler()` in a braced namespace at `:9810` (an unclosed brace).
   - The value is folded to a string first: `:11120`.
@@ -643,7 +666,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
   - It refuses `$s{0}`, which PHP 7 accepts. D6's lint found it in real code: rector's `build/target-repository/e2e/parse-php7-code/src/Foo.php`.
   - It accepts `(real)` and `(unset)`, which only PHP 7 accepts.
 
-  So for a project on PHP 7 the parser refuses a valid file, and "when the parser fails, PHP refuses too" does not hold. D6 makes validity follow the configured version.
+  So for a project on PHP 7 the parser refuses a valid file, and "when the parser fails, PHP refuses too" does not hold. D6 makes validity follow the configured version. With `instanceof static::$name` it does not hold on PHP 8.5 either.
 
 ### C8. After the crate split there are no bases to embed; what is left is each stub file's declarations, worth ≈0.2-1.5 G per cold run
 
@@ -654,13 +677,16 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
     - the reached symbols are closed over the index's ancestors (the lower bound), or also over every class name the reached stub files mention, to a fixed point (the upper bound);
     - each reached symbol brings in its declaring files, as a per-file parse memo parses them.
   - **The files a run loads:** the package's own autoload directories as the analysed files, and the context files that `composer/src/vendor.rs` discovers (`scripts/context.php`). Piwigo's analysed files are those `phpstan-rs.toml` names.
+    - `context.php` also walks PSR-0 directories, which `vendor.rs` skips when `autoload_static.php` exists, as it does in all ten. That adds 32 `doctrine/couchdb` files to monolog's list; its row below is recomputed without them (`validate/c8/`). Psalm's two PSR-0 files are in its classmap anyway.
+    - It leaves out `ClassLoader.php` and Piwigo's two scan-path stubs, and keeps Laravel's two files the parser rejects (D6), so each list is within three files of what the analyser loads.
   - **The phpstan-src corpus counts** when the files name a `PHPStan\` class it declares.
 - **What the crate split plans.**
   - **No bases.**
     - C4 resolves each class lazily through five memo levels. Its gate: "no stub class resolves unless something reaches it".
     - C5's stub layer is process-wide and keyed by PHP version. It holds C4's memos for stub classes, and parses each file once per version, when the file is reached: `names(kind, layer)` comes from the index "without parsing".
-    - Today's `stub-base` and `stub-base-phpstan`, 20.6 of the 31.35 MB, are registries after the finishing passes over every stub class. Nothing builds them once C4 lands.
-  - **No corpus merge.** The checked-in index answers which file declares a name. It is B9's, done on master: 1.66 MB of text, 17,051 symbols, written by `cargo xtask stub-index` and verified by a regeneration test (`crates/phpstan-rs/tests/stub_index.rs`). Master does not read it at run time yet: its run-time index is still built from the sources or loaded from the stub cache (`registry/stubs.rs:1482-1500`).
+    - Today's `stub-base` and `stub-base-phpstan`, 20.6 of the 31.35 MB, are registries after the finishing passes over every stub class. Nothing builds them once C4 lands. C4 keeps an eager pass over each stub file until C5, and restricts purity classification to analysed and context declarations.
+    - C9 takes purity and global-variable inference out of reflection: "Stubs get no global-variable summaries. Builtin purity comes from `functionMetadata`." Today's bases run both, so a build script on the reflection crate of C10 could not build them either.
+  - **No corpus merge.** The checked-in index answers which file declares a name. It is the crate split's stage B9, done on master: 1.66 MB of text, 17,051 symbols, written by `cargo xtask stub-index` and verified by a regeneration test (`crates/phpstan-rs/tests/stub_index.rs`). Master does not read it at run time yet: its run-time index is still built from the sources or loaded from the stub cache (`registry/stubs.rs:1482-1500`).
   - **No word on the stub cache.** It came on 2026-10-01 (`d1fe66ca`), and the plan never mentions it.
   - **The version key** is "decided first" in C5, and Appendix F has no entry for it yet.
 - **What a run reaches.** All stub sources are 16.34 MB: phpstorm-stubs 9.41 MB and phpstan-src's `src` 6.93 MB.
@@ -669,20 +695,21 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
   |---|---:|---:|---|---:|---:|---:|
   | amphp | 26 | 26 | no | 0.51 MB (3.1%) | 0.98 MB (6.0%) | 1.58 MB (9.6%) |
   | guzzle | 70 | 99 | no | 1.46 MB (8.9%) | 1.47 MB (9.0%) | 1.66 MB (10.1%) |
-  | monolog | 125 | 7,683 | yes | 1.84 MB (11.3%) | 4.03 MB (24.7%) | 7.38 MB (45.1%) |
+  | monolog | 125 | 7,651 | yes | 1.84 MB (11.3%) | 3.93 MB (24.1%) | 7.28 MB (44.5%) |
   | league-flysystem | 173 | 8,975 | yes | 1.13 MB (6.9%) | 4.23 MB (25.9%) | 6.60 MB (40.4%) |
   | doctrine-orm | 471 | 3,336 | yes | 1.37 MB (8.4%) | 4.13 MB (25.3%) | 6.96 MB (42.6%) |
   | composer | 308 | 658 | yes | 2.24 MB (13.7%) | 3.51 MB (21.5%) | 6.22 MB (38.1%) |
   | laravel | 1,700 | 12,405 | yes | 2.61 MB (16.0%) | 5.15 MB (31.5%) | 8.05 MB (49.3%) |
   | symfony | 11,748 | 7,386 | yes | 4.57 MB (27.9%) | 5.47 MB (33.4%) | 5.67 MB (34.7%) |
   | psalm | 1,196 | 1,361 | yes | 1.90 MB (11.6%) | 3.29 MB (20.2%) | 5.65 MB (34.6%) |
-  | Piwigo | 2,794 | 11,456 | yes | 3.09 MB (18.9%) | 7.07 MB (43.2%) | 9.40 MB (57.5%) |
+  | Piwigo | 2,792 | 11,456 | yes | 3.11 MB (19.0%) | 7.07 MB (43.2%) | 9.40 MB (57.5%) |
 
   - **Bounds.**
     - C5's composer locator loads context classes on demand, so a run reaches less than "with context" and more than "analysed files alone".
     - phpstan-src's files are real source with bodies, which name classes their signatures do not. So its upper bound is loose.
-  - **Bytes run ahead of classes.** At the lower bounds the reach is 2-18% of the classes but 3-43% of the bytes. A phpstorm-stubs file holds a whole extension: one call to `strlen()` parses `Core/Core.php`, and ten `standard_*.php` files hold most functions.
-  - **Seven of the ten need phpstan-src**, through a PHPStan extension their dependencies autoload.
+  - **Bytes run ahead of classes.** At the lower bounds the reach is 2-18% of the classes but 3-43% of the bytes. A phpstorm-stubs file holds a whole extension: one call to `strlen()` parses `Core/Core.php`, and the standard extension's 552 functions sit in twelve `standard_*.php` files (0.45 MB), eleven of which even amphp's run reaches.
+  - **Eight of the ten need phpstan-src**, through a PHPStan extension their dependencies autoload; Piwigo's own files name PHPStan classes too.
+  - **The rate.** ≈0.21 G per MB averages both corpora; phpstan-src's files are mostly bodies and phpstorm-stubs' mostly doc comments, so a run that reaches mostly one of them may cost more or less per MB.
 - **What proposal 6 still saves after C4 and C5.**
   - **The parse of the reached files.** Today's average is ≈0.21 G per MB of stub source (3.50 G for 16.34 MB, §4.1). That gives ≈0.2-1.5 G per cold run at the lower bounds with context (0.1-1.0 G for the analysed files alone) and ≈0.3-2.0 G at the upper bounds, against 5.05 G today. On Piwigo, B4's stretch of the stub sources (3.50 G in ≈0.2 s on ≈4 cores, under perf) puts 1.5 G at ≈0.1 s of wall if it is parsed as widely, against the 0.37 s the stub build costs today. A file parsed on demand is parsed by the thread that reaches it, so it may be less parallel.
   - **Not resolution.** Every run pays C4's memos in memory, embedded or not, because the embedded form holds no resolved class.
@@ -690,9 +717,9 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 - **What would be embedded: each stub file's declarations, before resolution, decoded when the file is first reached.** That is what the per-file cache stores for a context file today: its declarations as built, names, references and summaries (`project/file_cache.rs`). Its key already has a stub mode (`is_stub`).
 - **The version key decides whether those declarations are a function of the source.**
   - **Parsed per version, as C5 is written.**
-    - 81 phpstorm-stubs files carry version gates, 2.99 MB, by this count (`LanguageLevelTypeAware` keys and `PhpStormStubsElementAvailable` bounds). The plan counts 88.
-    - Over the 15 versions the analyser knows (`types::KNOWN_PHP_VERSIONS`, 5.3-8.5), those files have 331 distinct readings, 2 to 10 per file.
-    - Embedding every reading parses 15.06 MB of source instead of 2.99 MB, and the phpstorm-stubs part grows ≈2.3×. A key per range, with readings merged, has more keys still.
+    - 90 phpstorm-stubs files carry version gates, 3.45 MB: 712 `PhpStormStubsElementAvailable` and 2,492 `LanguageLevelTypeAware` attributes (`validate/c8/gates.php`). The count resolves the aliases `stub_attributes` resolves (`LanguageAware`, `PhpVersionAware`, `Available`, `ElementAvailable`, in `intl.php` and `ldap.php`). Without them it is 88 files, as the plan counts.
+    - Over the 15 versions the analyser knows (`types::KNOWN_PHP_VERSIONS`, 5.3-8.5), those files have 388 distinct readings, 2 to 10 per file.
+    - Embedding every reading parses 19.27 MB of source instead of 3.45 MB, and the phpstorm-stubs part grows ≈2.7×. A key per range, with readings merged, has more keys still.
   - **Gates kept as data.**
     - The lexer reads the attributes as conditions on the declaration, and resolution picks by the configured range.
     - One parse per file, and a range is answered with every reading in it, which keeps every possibility.
@@ -709,7 +736,7 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
   - **Not embedded.** The stub files go through the per-file cache, as context files do.
     - A warm run decodes only the files it reaches, and a cold run parses them, the ≈0.2-1.5 G above.
     - The cache's key holds the build's source hash, so in development every rebuild makes the next run cold.
-    - After the split, a key over the crates the declarations depend on (`syntax`, `types`, `phpdoc`, `reflection`, with the manifest, `Cargo.lock` and the target, as C6 keys the verdict) keeps the entries across other edits. §10.12 rejected a narrower key only because today's stub build reads most of the main crate.
+    - After the split, a key over the crates the declarations depend on (`reflection` and the workspace crates the module graph lets it depend on: `syntax`, `types`, `phpdoc`, `stub-sources`, `composer`, `config`, `diagnostics`, `semantics`; with the manifest, `Cargo.lock` and the target, as C6 keys the verdict) keeps the entries across other edits. §10.12 rejected a narrower key only because today's stub build reads most of the main crate.
 - **For D3.** Its decision, the data built at compile time into every binary, can still stand. Its form and its saving do not:
   - the four files and the eager build go, since C4 and C5 leave per-file declarations, read lazily;
   - the saving falls from 5.05 G to ≈0.2-1.5 G per cold run (≈2 G at the upper bounds);
@@ -735,7 +762,9 @@ The per-thread call counts were read from the raw callgrind files (`off/cg.out-N
 | E10 | DONE (E10 below) | Report nothing while an enclosing body has called `extract()` or `eval()`: the truncation at its end drops all of it. ≈ −35 M on Piwigo, exact. | — |
 | E11 | DONE (E11 below) | Decode a cached file's origins as the one `Arc<Path>` the file table binds, so its declarations' summary reads find the file by address. ≈ −116 M with the per-file cache warm, exact. | E8's decode context (item 6, step 3) |
 | E12 | DONE (E12 below) | Carry each class's assert-tagged method names in its `BuiltDecl`, so inserting a cached class decodes none of its lazily stored methods. ≈ −0.35-0.4 G with the per-file cache warm, on the serial insert, exact. | — |
-| E13 | DONE (E13 below) | Make the per-file cache's 256 shard directories once, instead of `create_dir_all` per entry, and read the process id once. ≈ −80 ms of kernel CPU on a run that writes the cache, ≈ −10 ms of wall. Exact. | — |
+| E13 | DONE (E13 below) | Make the per-file cache's 256 shard directories once, at D5's first-store check, instead of `create_dir_all` per entry, and read the process id once. ≈ −80 ms of kernel CPU in `mkdir`, and the shards' `statx`, on a run that writes the cache, ≈ −10 ms of wall. Exact. | D5 |
+| E14 | DONE (E14 below) | The parser refuses `$x instanceof static::$name` (or `self::`, a class name), valid PHP: it reads a name after `instanceof` and stops before `::$name`. Six files in the installed dependencies of three trees lose every declaration as context. Read `instanceof`'s right side as `new`'s class reference. | D6 |
+| E15 | DONE (E15 below) | The build's source hash leaves out `vendor/phpstan-src/stubs`, whose `.stub` files the stub build reads: an edit to them alone keeps the stub cache's key, and the cache is read stale. Hash the directory too. | — |
 
 ### E1. Where a stub build can deadlock, and the fix
 
@@ -789,7 +818,7 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
   - **The free functions of `stubs.rs` become methods of `Corpus`:** `stub_index`, `generated_stub_data`, `builtin_function_extension`, `builtin_class_extension`, `stub_file_closure`, `stub_dependent_files`, `stub_file_names`, `phpstan_stub_names` and the `generated_stub*_named` family. The `Registry` keeps an `Arc<Corpus>` (`#[serde(skip)]`).
   - **No project or registry stores the `Stubs` value.** They hold only built values: the `Arc<Corpus>` and the base.
     - The two calls that may need a base take `&Stubs` as an argument: `expect_files` (S4), and `finish_loading` for its late switch (`sync_phpstan_stubs`, `project.rs:1180-1188`). That switch is for a project that is not finished and that gains a file mentioning `PHPStan\` after `expect_files`.
-    - Their production callers are the entry points and the session, which hold the value: `session.rs:791`, `:871`, `lsp.rs:569` and `incremental_bench.rs:47`.
+    - Their production callers are the entry points and the session, which hold the value: `session.rs:791`, `:871`, `lsp.rs:428` (through `Project::load_files`, whose `expect_files` is at `project.rs:1157`), `lsp.rs:569` and `incremental_bench.rs:47`.
   - **Pool jobs cannot start or wait for a build.** They are given a `&Project` or a `&Registry`:
     - the parse (`session.rs:748-781`, `project.rs:1148-1155`);
     - the checker (`builtin_calls.rs:36`, through `Checker::registry`, `checker.rs:277`);
@@ -838,12 +867,13 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
   - **Waiting with `rayon::yield_now` in a loop**: the jobs it runs sit above the build's frame on the same stack, so the build cannot resume until they return.
   - **Building outside the lock and then publishing**: two threads could both build the 5 G corpus.
   - **A once-cell that panics on re-entry**: it turns the hang into a crash, but it doesn't fix the cause.
+- **After the crate split.** C4's memo levels are per-class `OnceLock`s whose re-entry panics and leaves the cell retryable (`CRATE_SPLIT_PLAN.md`, C4), and C5's per-file parse memo is forced from pool jobs. E1's rule applies to both: nothing parallel runs under a lock a pool job can wait on. A per-file parse is serial; whether the index build uses `rayon` is still to be decided (C5).
 
 
 ### E2. The `@var` targets: exact, ≈ −50 M
 
 - **What runs.** For every statement (145,081), `check_stmt_impl` calls `inline_var_annotations` (`checker/stmt.rs:624`), which calls `statement_defined_variable_names` (`:1562`). It then calls `statement_assigned_variable_names` (`:628`), and `statement_defined_variable_names` again (`:1260`).
-- **What reads them.** Only the two loops over `inline_var`, the statement's `@var` assertions (`:629-636`, `:1261-1266`), and the inlay-hint test, which reads `inline_var` itself. `statement_var_tags_of` (`:1542-1555`) returns nothing unless the statement has a doc comment holding `var`. `var_tag_nodes` ran for 1,645 statements.
+- **What reads them.** Only the two loops over `inline_var`, the statement's `@var` assertions (`:629-636`, `:1261-1266`). The inlay-hint test and `check_foreach` (`:999`) read `inline_var` itself, which is empty either way when the statement has no tag. `statement_var_tags_of` (`:1542-1555`) returns nothing unless the statement has a doc comment holding `var`. `var_tag_nodes` ran for 1,645 statements.
 - **The cost.** `statement_defined_variable_names`: 290,162 calls, 36.3 M. The direct `statement_assigned_variable_names::collect`: 43,445 calls, 12.0 M. Each name is made a `String` through `Name`'s `Display` (18.6 M of the 35.9 M in `collect`) and pushed into a fresh `Vec` (11.6 M of growth). The frees come on top, about 4 M of `check_stmt_impl`'s `mi_free`.
 - **The change.** `inline_var_annotations` returns at once when `tags` is empty. `assigned` and `defined` are computed only when `inline_var` is not empty. Nothing else reads them, so the output cannot change.
 
@@ -854,7 +884,7 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
   - Static calls: the target class is resolved (8,324 calls, 11.1 M, ≈1,330 each), then the method is looked up (1.9 M).
   - Function calls: `resolve_function`, 12,674 calls, 3.6 M.
   - Then the owner is compared with `PHPUnit\Framework\Assert`.
-- **Why the name is enough.** The name `assertion_check` reads is the written one (`method.to_ascii_lowercase()`), and every name it matches starts with `assert`: its 60-odd arms, and the `assertis`/`assertisnot` prefixes (`:127-258`). For any other written name it returns `None`. Gating the two arms on `method`'s first six bytes (`eq_ignore_ascii_case("assert")`) cannot change the result. A dynamic name is `DynamicMethodCall` or `DynamicStaticCall`, never probed today.
+- **Why the name is enough.** The name `assertion_check` reads is the written one (`method.to_ascii_lowercase()`), and every name it matches starts with `assert`: the 55 names of its arms, and the `assertis`/`assertisnot` prefixes (`:127-258`). For any other written name it returns `None`. Gating the two arms on `method`'s first six bytes (`eq_ignore_ascii_case("assert")`) cannot change the result. A dynamic name is `DynamicMethodCall` or `DynamicStaticCall`, never probed today.
 - **What stays.** The function-call arm, since `use function … as` can rename an assertion. And the real assertions: Piwigo's tests make 4,553 `self::assert*` calls and 890 method calls named `assert*`, out of 33,777 static and 49,421 method calls in the analysed files (`analysis/ee/asserts.php`). Most of the static calls that statements make are therefore real assertions, and they keep their 11.1 M.
 - **The saving.** ≈28 M of the method arm, ≈5 M of the static arm, and their allocations: ≈ −35 M.
 - **Item 18.1 shrinks it.** The receiver's inference repeats the statement's own (`check_expr` ran it just before). Once one inference per node is built, those 23.6 M become a lookup, and E3 saves ≈12 M. It is still one condition.
@@ -951,7 +981,7 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 
 - **What runs.** `insert_built_decl` calls `record_assert_tagged_names` (`registry/index.rs:153`, `:461-487`). For a class, it walks `info.methods.iter()` and reads `sig.assert`. A cached class's methods are stored lazily (`name_table::Lazy`), and that read forces each one's decode: 51,750 methods, 419.2 M, on the main thread (B5).
   - With the cache off, the methods are already built, and the walk costs little.
-  - Which of the 51,750 a later step would read is hidden, because the insert decodes them first. The later decodes number 35,391, against 35,397 with the cache off: the stub bases' own.
+  - Which of the 51,750 a later step would read is hidden, because the insert decodes them first. The later decodes number 35,397, against 35,398 with the cache off: the stub bases' own.
   - The check asks about 1,572 purity callees and 2,489 property-write callees (B1), so at ≈8.1 K per method, the methods it reads cost tens of M at most.
 - **The change.** `BuiltDecl::Class` carries the names of its methods that have assert tags, computed when the declaration is built. The cache stores it, and `record_assert_tagged_names` reads it without touching the methods.
 - **The saving.** ≈0.35-0.4 G, less any of those methods a later step decodes, on the main thread's serial insert. E12 is also a wall-time cut (B4).
@@ -959,13 +989,29 @@ The test needs a watchdog: run the body on a thread and fail if a channel's `rec
 
 ### E13. The per-file cache's directories, made once
 
-- **What runs.** `store` calls `fs::create_dir_all` on the entry's shard for every entry (`file_cache.rs:240`). That is 11,473 `mkdir`s on a cold Piwigo run, all but the first in each of the 256 shards failing with `EEXIST`: ≈80 ms of kernel time (B6). Each temporary's name also calls `std::process::id()` (`:245`), one `getpid` per entry.
+- **What runs.** `store` calls `fs::create_dir_all` on the entry's shard for every entry (`file_cache.rs:240`). That is 11,473 `mkdir`s on a cold Piwigo run, all but the first in each of the 256 shards failing with `EEXIST`, after which `create_dir_all` stats the shard (11,208 `statx`): ≈80 ms of kernel time in `mkdir` alone (B6). Each temporary's name also calls `std::process::id()` (`:245`), one `getpid` per entry.
 - **The change.**
-  - The build's directory and its 256 shards are made once, when `directory()` (`:62`) first finds the cache on.
+  - The build's directory and its 256 shards are made once, by D5's check at the first store. Making them when `directory()` (`:62`) first finds the cache on would cost every run 257 `mkdir`s, a fully warm one and a read-only cache included.
   - The process id is read once.
   - If a shard disappears during the run, the temporary's open fails and `store` skips that entry, as it does for any failed write.
-- **The saving.** ≈80 ms of CPU and ≈10 ms of wall, on runs that write entries.
+- **The saving.** ≈80 ms of CPU and the shards' `statx`, and ≈10 ms of wall, on runs that write entries.
 - **What stays.** The `openat`, `write` and `rename` per entry, ≈0.5 s of CPU. Packing entries into fewer files would remove them, but that changes the cache's format and its trim.
+
+### E14. `instanceof` with a static property as the class
+
+- **What fails.** B1's Laravel run warned twice (`b1/laravel/stderr.txt`): "parse error: expected RParen, found DoubleColon" at `aws/aws-sdk-php/src/AbstractConfigurationProvider.php:41:41` (`$found instanceof static::$interfaceClass`) and `phpseclib/phpseclib/phpseclib/Math/BigInteger.php:177:31` (`$x instanceof self::$mainEngine`). `php -l` accepts both.
+- **Why.** After `instanceof`, the parser takes an expression only when a variable or `(` follows, and otherwise a name (`syntax/src/parser/expr.rs:106-117`); the `::$name` after `static` or `self` is left for the enclosing rule. PHP's grammar takes a `class_name_reference` after `instanceof`, as after `new`: a name, or a `new_variable`, which includes `Name::$prop`, `$a->b`, `$a['k']` and `$a::$b`. `parse_new_class_reference` already reads that (`primary.rs:83-188`).
+- **Reach.** A tokenizer scan of every file under `vendor/` finds six, the same two files in the installed dependencies of laravel, league-flysystem and monolog (`validate/d6/instanceof_sp.tsv`). Each one loses every declaration as context today, so `phpseclib\Math\BigInteger` and `Aws\AbstractConfigurationProvider` are unknown classes in those projects.
+- **The change.** Read `instanceof`'s right side with `parse_new_class_reference`: a plain name stays `InstanceofTarget::Name`, and anything else becomes `InstanceofTarget::Expr`, as a variable target does now. A parser test per form, and the two files as fixtures.
+- **What it does not settle.** The parser has never been run over the whole corpus. One `phpstan-rs check` over the 111,836 files under `vendor/`, compared with D6's `php -l` verdicts, lists every file PHP accepts and the parser refuses. That is a run of the binary and was not made.
+
+### E15. The source hash misses PHPStan's `.stub` files
+
+- **What is hashed.** `crates/phpstan-rs/build.rs` hashes `vendor/phpstorm-stubs`, `vendor/phpstan-src/src`, `Cargo.lock`, `Cargo.toml`, every crate's `src`, `Cargo.toml`, `build.rs` and `index.tsv`, and the target. The stub cache and the per-file cache are keyed by it.
+- **What is read.** `crates/stub-sources/build.rs` also embeds `vendor/phpstan-src/stubs/*.stub` (41 files, 74 KB) as `PHPSTAN_STUB_SOURCES`, and reruns when they change. `patch_phpstan_stub_classes` (`registry/stubs.rs:735`) merges their templates, variances, bounds and property types into the stub classes the stub cache stores.
+- **So** an edit to a `.stub` file alone, or a `phpstan-src` bump that changes only `stubs/`, rebuilds the binary with the same `PHPSTAN_RS_SOURCE_HASH`, and its runs read the old stub cache with no error. Master's `build.rs` has the same list (`:205-206`).
+- **The change.** Add `vendor/phpstan-src/stubs` to the hashed inputs. A test that the hash's inputs cover every path `stub-sources`' build script reads keeps them in step.
+- **For §10.6 and D3.** "The cache's key is the build's source hash alone, so what a cold run writes is a function of the build" holds once this is in. §10.12's reason to reject a narrower key, a missed input read stale with no error, is this case.
 
 ## Costs the report says nothing addresses
 
@@ -1028,7 +1074,7 @@ The plan's items reach ≈746 M of it. What no item reaches is 456.3 M over 1,18
 
 ### N3. The analysed files' declarations: ≈0.5-0.6 G, paid only because the per-file cache skips them
 
-The per-file cache stores context files only: "An analysed file is always parsed, since checking needs its tree" (`project/file_cache.rs:7-8`); the session passes `cacheable` false for them (`project/session.rs:620-634`). Its products don't need the tree, though: only the check does.
+The per-file cache stores context files only: "An analysed file is always parsed, since checking needs its tree" (`project/file_cache.rs:7-8`); the session passes `cacheable` false for them (`project/session.rs:762`). Its products don't need the tree, though: only the check does.
 
 Counted with PHP's tokenizer (`analysis/nn/decls.php`, `docs.php`):
 
@@ -1046,6 +1092,6 @@ So a run with the per-file cache warm still pays ≈0.5-0.6 G for analysed files
 
 ### N4. The regex scanner: 714 scans of 170 patterns
 
-`scan_branch`'s 6,988 `format!` calls (3.7 M) run inside 714 `parse_capture_groups` calls, 11.7 M inclusive: 467 from `preg_matches_type`, 247 from `narrow_preg_outcome`. The analysed files hold 203 literal `preg_match` and `preg_match_all` sites, 170 distinct patterns (`analysis/nn/preg.php`), so each pattern is scanned ≈3.5 times (the type and each narrowing). F6f's memo (one analysis per distinct text) removes ≈75% of the 11.7 M. **E9** removes the formatting itself: `concat_literals` (`regex_groups.rs:390-401`) builds each product with `format!("{x}{y}")`.
+`scan_branch`'s 6,988 `format!` calls (3.7 M) run inside 714 `parse_capture_groups` calls, 11.7 M inclusive: 467 from `preg_matches_type`, 247 from `narrow_preg_outcome`. The analysed files hold 203 literal `preg_match` and `preg_match_all` sites, 170 distinct patterns (`analysis/nn/preg.php`), so each pattern is scanned ≈3.5 times (the type and each narrowing). F6f's memo (one analysis per distinct text) removes ≈75% of the 11.7 M. `concat_literals` (`regex_groups.rs:390-401`) builds each product with `format!("{x}{y}")`; E9, which would remove that, is folded into F6f's rewrite of the scanner.
 
-**Reproduction.** The profiles are in `~/.cache/prs-profile/callgrind-20g-modes/` (`warm/warm.pkl`, `off/off.pkl`); `drill-scripts/q.py <pkl> find|callers|callees|lines|tree <pattern>` reads them. N1's split is `analysis/nn/n1split.py` (output `n1split-warm.txt`, `n1split-off.txt`); the counts of N3 and N4 come from the PHP scripts beside it, run over Piwigo's file lists. E3's and E7's counts come from `analysis/ee/asserts.php` and `ints.php`, run over `analysis/n5/analysed.txt`.
+**Reproduction.** The profiles are in `~/.cache/prs-profile/callgrind-20g-modes/` (`warm/warm.pkl`, `off/off.pkl`); `~/.cache/prs-profile/drill-scripts/q.py <pkl> self|incl|find|callers|callees|lines|tree|thread <pattern>` reads them. N1's split is `analysis/nn/n1split.py` (output `n1split-warm.txt`, `n1split-off.txt`); the counts of N3 and N4 come from the PHP scripts beside it, run over Piwigo's file lists. E3's and E7's counts come from `analysis/ee/asserts.php` and `ints.php`, run over `analysis/n5/analysed.txt`.

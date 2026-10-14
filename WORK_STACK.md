@@ -254,7 +254,8 @@ Recommended on 2026-10-13, not yet decided:
   parses is recovered, and what failed is unknown. Validity follows the
   configured PHP version, and the batch run and the language server use one
   rule. The parser refuses `$s{0}`, which PHP 7 accepts, and a real file
-  has it.
+  has it. It also refuses `$x instanceof static::$name`, valid in PHP 8.5
+  (ledger E14).
 - **D7.** Proposals 1-5 are built now, since proposal 6 waits on level 2's
   stage C10. Level 2's C4 and C5 remove the eager stub build they speed, so
   they pay only until then.
@@ -279,6 +280,17 @@ The order, from D7:
 Each is measured with paired cold runs. Proposal 6 is not built in its
 current form; it is decided again with level 2's C5. Proposal 8 waits on
 9; B1 measured d ≈ 0.005-0.006. No proposal is implemented.
+
+The ledger was checked item by item on 2026-10-14 and corrected in place.
+The check found two bugs in today's code, neither fixed:
+
+- **E14.** The parser refuses `instanceof` with a static property as the
+  class; six files in installed dependencies lose every declaration as
+  context. Running the parser over all of `vendor/` against `php -l` would
+  find any other such gap; that run has not been made.
+- **E15.** The build's source hash leaves out `vendor/phpstan-src/stubs`,
+  which the stub build reads, so an edit to a `.stub` file alone leaves a
+  stale stub cache in use.
 
 The heap drill of the same three runs, with whole stacks, is
 `PROFILE_DRILL_PIWIGO_OFF_HEAP.md` (done). Every allocation maps to a 20 G
