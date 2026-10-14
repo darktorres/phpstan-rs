@@ -20,7 +20,7 @@ arrayvec.workspace = true
 crc32fast.workspace = true
 clap = { version = "=4.6.7", features = ["derive"] }
 crossbeam-channel = "=0.5.17"
-dhat = { version = "=0.3.3", optional = true }
+dhat = { path = "../../patches/dhat", optional = true }
 hashbrown.workspace = true
 hotpath.workspace = true
 imbl.workspace = true
@@ -49,6 +49,9 @@ hotpath-alloc = ["hotpath/hotpath-alloc"]
 # which call sites hold live bytes at peak (not just alloc/dealloc churn,
 # which `hotpath-alloc` already covers) - use `--profile dhat` (see that
 # profile below) to keep symbols for a readable dh_view.html call stack.
+# `dhat` is the patched copy in `patches/dhat`: with
+# `PHPSTAN_RS_DHAT_UNTRIMMED=1` and `RUSTFLAGS="-C force-frame-pointers=yes"`
+# it takes whole backtraces at about the cost of trimmed ones.
 dhat-heap = ["dep:dhat"]
 # Phase 46: `regexp.pattern` validation calls real PCRE2 (via the
 # low-level `pcre2-sys` FFI, not the higher-level `pcre2` crate - see

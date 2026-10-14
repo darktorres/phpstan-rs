@@ -192,6 +192,101 @@ docblock is inherited across case-different names; union member order).
   versions not being indexed, and UTF-16/UTF-8 columns in the language server.
 - Two tests of `syntax::span` were wrong and are fixed; expect a few more.
 
+### 8. The off-run drill — `PROFILE_DRILL_PIWIGO_OFF.md` (drilled and validated, nothing implemented)
+
+On branch `callgrind-20g` (at `d520c9fd`, the code of `5fb858c9`). Three
+callgrind runs of one binary on Piwigo:
+
+- off (stub cache and per-file cache off): 25.63 G;
+- cold (stub cache empty): 25.68 G;
+- warm: 20.57 G, the 20 G plan's run.
+
+The stub build is the whole 5.05 G between off and warm. 3.50 G of it
+parses the stub files on a second rayon pool; 1.60 G runs serially on the
+main thread before the parse, with the other cores idle. Every other phase
+matches the warm run, and the 20 G plan's items reach every block of it.
+
+Proposals (§10), numbered as in the report:
+
+- For the stub build (off and cold runs):
+  - 1: resolve only the stub base the files need, −355 M serial;
+  - 2: serialize only what a store keeps, −1.0 G serial, off only;
+  - 3: a hash index for bases built in memory, ≈ −0.29 G;
+  - 4: `build_closures`' dependents looked up once, ≥ −0.2 G serial.
+
+  1-4 overlap, together ≈ −1.5-1.7 G.
+  - 5: the stub corpus built beside the parse, on the worker pool.
+  - 6: the stub data built at compile time into every binary, −5.05 G. It
+    needs level 2's reflection layer, since the build script must run the
+    code the runtime runs. `.rodata` grows from 18.2 to ≈50 MB per binary.
+    Once it lands, 1-5 speed only the off mode and the reflection crate's
+    own tests (and 4 the build script). After level 2's C4 and C5 only each
+    stub file's declarations are left to carry, ≈0.2-1.5 G per cold run
+    (C8).
+- For every run:
+  - 7: a PHPDoc tag's description tokenized only when read, ≈0.1 G warm;
+  - 8: skim context files' function bodies (≈47% of the parse job's
+    tokens) and parse one on demand. Every skimmed body is still checked,
+    by a pass that builds only what its checks read, and each file's
+    verdict is cached by its bytes and the `syntax` crate. After the plan
+    it saves ≈2.0-2.3 G × (1 − d) with the verdict cached; without it,
+    nothing from d ≈ 0.26-0.45;
+  - 9: purity and property writes on demand, exact (a least fixed point),
+    ≈0.3-0.4 G beyond item 4, on the finishing thread;
+  - 10: `simdutf8`, ≈50 M;
+  - 11: text made only when read: a reported message at display (55
+    level-7 messages are formatted and then dropped, 22.5 M) and no
+    class-constant key without dynamic constants (6.6 M).
+- Rejected: one rayon pool as a speed-up by itself, a narrower cache key,
+  a dedicated autoload reader.
+
+With the plan and proposals 6-11, both modes end at ≈10.3-10.6 G; without
+6, the off run ends at ≈13.7-14.1 G.
+
+Decided on 2026-10-13 (ledger D1-D5): the stub data is built at compile
+time (reopened by C8, below); skimmed bodies are checked and their
+verdicts cached; a skimmed body's text is copied from the bytes the load
+reads; each cache checks once, at its first store, whether it can write.
+
+Recommended on 2026-10-13, not yet decided:
+
+- **D6.** A context file that fails to parse keeps what it declares: what
+  parses is recovered, and what failed is unknown. Validity follows the
+  configured PHP version, and the batch run and the language server use one
+  rule. The parser refuses `$s{0}`, which PHP 7 accepts, and a real file
+  has it.
+- **D7.** Proposals 1-5 are built now, since proposal 6 waits on level 2's
+  stage C10. Level 2's C4 and C5 remove the eager stub build they speed, so
+  they pay only until then.
+
+C7 is settled: of PHP 8.5's 268 compile-time errors the parser rejects 30.
+C8 is settled: D3's form does not survive level 2. After C4 and C5 no
+stub bases are left to embed, only each stub file's declarations, and a
+run reaches 6-43% of the stub bytes, so proposal 6 saves ≈0.2-1.5 G per
+cold run instead of 5.05 G. C5's version key should keep the gates as data
+(one parse per file), or the data stops being a function of the source.
+Checked-in binary data is unfit. D3 is decided again once C5 sets its
+version key. These and the investigations are tracked in
+`PROFILE_DRILL_PIWIGO_OFF_LEDGER.md`.
+
+The order, from D7:
+
+1. the deadlock fix (ledger E1), which carries proposals 1 and 5;
+2. D5's write check, which carries proposal 2;
+3. proposal 3;
+4. proposal 4.
+
+Each is measured with paired cold runs. Proposal 6 is not built in its
+current form; it is decided again with level 2's C5. Proposal 8 waits on
+9; B1 measured d ≈ 0.005-0.006. No proposal is implemented.
+
+The heap drill of the same three runs, with whole stacks, is
+`PROFILE_DRILL_PIWIGO_OFF_HEAP.md` (done). Every allocation maps to a 20 G
+item or to proposal 6, and the peak falls in `expect_files` with every tree
+live. It adds H1: write the stub cache file from one buffer, −15.3 MB at
+the cold run's peak. H1 is not implemented. The profiles are taken with the
+patched dhat-rs in `patches/dhat`.
+
 ## Documents with no place in the stack
 
 Standalone research and plans; none blocks anything:

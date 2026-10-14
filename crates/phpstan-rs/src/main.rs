@@ -60,9 +60,16 @@ fn main() {
     // Held for the whole run; its `Drop` writes `dhat-heap.json` on
     // clean exit (every `check-project` error path below that matters
     // for a profiling run falls through to a normal return, not
-    // `process::exit`, so this always flushes).
+    // `process::exit`, so this always flushes). Its backtraces keep ten
+    // frames unless `PHPSTAN_RS_DHAT_UNTRIMMED` is set, which keeps them
+    // whole.
     #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
+    let _profiler = {
+        let frames = std::env::var_os("PHPSTAN_RS_DHAT_UNTRIMMED")
+            .is_none()
+            .then_some(10);
+        dhat::Profiler::builder().trim_backtraces(frames).build()
+    };
 
     let cli = Cli::parse();
     match cli.command {
