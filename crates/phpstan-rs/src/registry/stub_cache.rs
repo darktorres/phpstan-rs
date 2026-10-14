@@ -202,3 +202,29 @@ fn prune(dir: &std::path::Path, name: &str, keep: &std::path::Path) {
         let _ = fs::remove_file(path);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// The key hashes every path the stub build reads: a path read but not
+    /// hashed lets an edit there run on a stale cache.
+    #[test]
+    fn the_key_hashes_every_path_the_stub_build_reads() {
+        let stub_build = include_str!("../../../stub-sources/build.rs");
+        let key_build = include_str!("../../build.rs");
+        let read: Vec<&str> = stub_build
+            .lines()
+            .filter_map(|line| line.split("rerun-if-changed=../../").nth(1))
+            .map(|rest| rest.trim_end_matches(&['"', ')', ';', ' '][..]))
+            .collect();
+        assert!(
+            read.len() >= 3,
+            "no paths found in the stub build: {read:?}"
+        );
+        for path in read {
+            assert!(
+                key_build.contains(&format!("workspace.join(\"{path}\")")),
+                "{path} is read by the stub build but not hashed into the key"
+            );
+        }
+    }
+}

@@ -1,6 +1,6 @@
 //! Sets `PHPSTAN_RS_SOURCE_HASH`: a hash of every workspace crate's
 //! sources, build script and manifest, the lockfile and the vendored stub
-//! sources - the
+//! sources (`phpstorm-stubs`, and PHPStan's `src` and `stubs`) - the
 //! key the stub registry cache (`registry::stub_cache`) is stored under,
 //! so a build whose code or stubs differ in any way never reads another's.
 
@@ -29,6 +29,7 @@ fn main() {
     let mut inputs = vec![
         workspace.join("vendor/phpstorm-stubs"),
         workspace.join("vendor/phpstan-src/src"),
+        workspace.join("vendor/phpstan-src/stubs"),
         workspace.join("Cargo.lock"),
         workspace.join("Cargo.toml"),
     ];
