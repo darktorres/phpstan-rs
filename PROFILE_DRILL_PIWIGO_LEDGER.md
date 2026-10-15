@@ -200,6 +200,7 @@ These rows are open with every need met:
 - **PROD:** PROD-5.2, 5.3, 5.5 and 5.6; PROD-5.8 (the record of written names, decision 2).
 - **DOC:** DOC-2.1, 2.3, 2.4, 2.7 and 2.8.
 - **NAME:** NAME-1.1, 1.2, 1.5 and 1.6; NAME-2.1, 2.2 and 2.3.
+- **TYPE:** TYPE-5 (`iterable<K, V>`'s array keys, decision 8).
 - **REG:**
   - the crate split's C4, in its order: REG-2; the open parts of REG-4 (4.2, 4.5, 4.7, 4.9, 4.10 and 4.12 to 4.14; 4.11 waits on a rule, and 4.15 on 4.2 and 4.12); what is left of REG-5; REG-6; then REG-7 from REG-7.1, once REG-4.2 and the engine (REG-16.3) are in;
   - REG-16.1, the engine's measurement (decision 3);
@@ -217,6 +218,7 @@ These rows are open with every need met:
 - **What follows REG-7 and STUB-7:**
   - REG-16.3 → TYPE-4 → NAME-2.4;
   - REG-7.6 → CHECK-7;
+  - REG-7.5 → CHECK-8;
   - REG-7 → STUB-9;
   - STUB-7.6 and REG-16.1 → CACHE-9 and CACHE-10 → CACHE-11 → CACHE-12;
   - STUB-7 → STUB-8;
@@ -248,7 +250,7 @@ The estimates are the 20 G report's. REG-13's estimate no longer held, and REG-1
 
 ### 2.4 Decisions
 
-Merging the sources into one list found six places where two of them disagree, or where a design cannot be built as written. A seventh decision waited from before the merge. All seven were decided on 2026-10-15, on what PHP does at run time and on what is most proper; churn and PHPStan's output were given no weight. Rows cite them as "decision n".
+Merging the sources into one list found six places where two of them disagree, or where a design cannot be built as written. A seventh decision waited from before the merge. All seven were decided on 2026-10-15, on what PHP does at run time and on what is most proper; churn and PHPStan's output were given no weight. An eighth, REG-7.5's combination of native and PHPDoc types, was decided the same day on the same grounds. Rows cite them as "decision n".
 
 1. **What evaluating a constant yields.**
    - *The question was* how a constant on a reference cycle types. REG-7.6 typed it as `mixed`, an approved delta of the crate split; TYPE-4.2 read each member as `never` and reported it, approved as VAL-2.5.
@@ -426,6 +428,61 @@ Merging the sources into one list found six places where two of them disagree, o
      - STUB-13 is new, its phar locator in STUB-7.4's chain;
      - Q-8 follows;
      - the off drill's D3 is decided again (§1).
+8. **A PHPDoc type refines the kinds its native type admits; it never removes one.**
+   - *The question was* REG-7.5. The crate split's text takes PHPStan's `TypehintHelper::decideType` (2.2.16; the latest, 2.3.1, adds one rule) whole, and nothing had checked that against PHP.
+   - *What PHP does* (PHP 8.5.4; the probes are in `~/.cache/prs-ledger/reg75/probes/`):
+     - a native type is enforced at each call, return and typed-property write, after coercion in coercive mode; `null` to a non-nullable `int` is a `TypeError` in that mode too;
+     - a PHPDoc type is never enforced;
+     - `iterable` admits what `Traversable|array` admits (a `Generator`, an `ArrayIterator`, an array), though reflection names it `iterable`;
+     - a resource passed to `object` is a `TypeError`;
+     - `Foo $x = null` declares `?Foo` (deprecated since 8.4);
+     - a `void` function gives its caller `null`, and a `never` function that returns is a `TypeError`;
+     - a variadic collects named arguments under string keys: `f(1, 2, a: 3)` gives `[0 => 1, 1 => 2, 'a' => 3]`;
+     - an array stores a decimal-int string key as an int; a generator's keys are not converted.
+   - *So:*
+     - A value can have any kind its native type names, whatever its PHPDoc says.
+     - The PHPDoc is checked only where both ends are analysed: an analysed caller for a parameter, an analysed write for a property, an analysed body for a return. Callers through `call_user_func`, a framework or a library's users are not checked, nor are hydrating writes, nor the bodies of vendor and stub code.
+     - The PHPDoc in use was written under PHPStan's rule, which ignores a kind the PHPDoc leaves out (`@return Foo` on `?Foo` is `Foo|null` there), so no author was told of one.
+     - So one rule serves parameters, returns, properties and typed constants alike. A combination that depended on whether a body is analysed would type a declaration differently once its file is opened.
+   - *The rule:*
+     - The native type's kinds are the members of its union form: `?T` is `T|null`, `iterable` is `array|Traversable`, and an intersection (`A&B`) is one kind. `mixed`, written or not, names no kind: the PHPDoc type is then the declared type, as today.
+     - A PHPDoc member that shares no value with any kind is dropped, since no run can produce it; `removeNull` is one case. At the final level the relation reads the class hierarchy, so a named class, `object`, a template and a callable are judged like any other member. Today they are kept unjudged, because the combination runs while the registry is built (`types/src/decide.rs:211`).
+     - A PHPDoc member that shares values with a kind is intersected with it:
+       - `callable(int): string` on `Closure` is `Closure(int): string`; today, and in PHPStan, it loses `Closure`;
+       - `T` on `Foo` is `T&Foo`, so `T` is bound from the argument and the body sees `Foo`'s members. Today it is `T` alone; PHPStan drops `T` unless its bound is within `Foo`;
+       - an inherited `@return Baz` on `: Bar`, `Baz` a subclass, is `Baz` (the plan's change).
+     - A kind that no PHPDoc member shares values with is kept as the native type has it:
+       - `@param string[]` on `string|array|A` is `array<string>|string|A`; today `A` is lost, since no class is added back (`native_member_addable`, `types/src/decide.rs:120`);
+       - `@return Foo` on `?Foo` is `Foo|null`, as today.
+     - An array PHPDoc member other than a shape (`T[]`, `array<K, V>`, `list<V>`, `non-empty-array<V>`) also gives a native `Traversable` kind its key and value types:
+       - on `iterable` it describes the iteration, which an array argument and a `Traversable` argument share, and it is checked no less for one than for the other;
+       - `@param array<int> $x` on `iterable` is `array<int>|Traversable<mixed, int>`, where today it is `array<int>`;
+       - a shape describes an array only;
+       - PHPStan widens only `T[]` and `array<V>`, and for any other array member it keeps no `Traversable` kind at all.
+     - When no PHPDoc member is kept, the native type applies, and `parameter.phpDocType`, `return.phpDocType` or `property.phpDocType` reports the PHPDoc.
+       - This is decided member by member: `@return non-empty-string|false` on `string` is `non-empty-string`, as today.
+       - `decideType` instead drops the whole PHPDoc type when any member is outside the native type. REG-7.5's earlier text asked for both.
+     - A written `never` is kept over any native type: it is within every kind, and the body is checked against it (`return.never`, `checker/function_decl.rs:1029`). A PHPDoc type that has no value without writing `never` (`int&string`) is contradictory: the native type applies, and the tag is reported as unresolvable (`parameter.unresolvableType`, `return.unresolvableType`; PHPStan's `UnresolvableTypeHelper` counts such a `never` the same way).
+     - A conditional type is judged branch by branch. A kind is kept only when no branch shares values with it, so `($c is true ? void : never)` on `: void` keeps both branches (the plan's `bug-10337.php`). Today the add-back is skipped for any conditional, and under `void` only `void` and `never` survive the filter.
+     - `void` admits only `void` and `never`, so `@return null` on `: void` stays `void` (the fixture REG-7's commit adds).
+     - A member that resolves only later carries the native type and is combined by this rule where it resolves: `static::FOO_*` for the called class, and `value-of`, `key-of` and `T[K]` on a template for its binding. This is 2.3.1's `withNativeType`; today `resolve_deferred_value_of_with_native_fallback` does it for `value-of` alone.
+     - The PHPDoc is read with its aliases resolved (the plan's change). Today `substitute_type_aliases` runs after the combination (`registry/function_sig.rs:734`).
+     - A variadic parameter with no native type and an array PHPDoc type takes the array's value type for each argument (the plan's change).
+       - The runtime cannot tell which reading an author meant.
+       - The PHPDoc in use follows this one: PHPStan applies it, and our PHPDoc check applies it when the native type is not an array (`checker/phpdoc_type_compat.rs:99`).
+       - In the body the parameter is `array<int|string, V>`, as it already is (`checker/function_decl.rs:501`).
+     - PHPStan returns a benevolent native type whole. That rule has no case here, since no written native type is a benevolent union. For a builtin, the native type is the reading decision 6 gives, and the `.stub` PHPDoc is combined with it by this rule.
+   - *What goes:*
+     - `reconcile_doc_with_native`'s exclusion of `object` (`registry/function_sig/type_resolution.rs:153`). Both cases in its comment have `mixed` natives (the fixture `a_mixed_native_hint_does_not_override_a_docblocks_resource_member.php`), and a resource under `object` is a `TypeError`.
+     - Its separate `?T` null union (`:113`); the kept-kind rule covers it.
+     - `native_member_addable`, and the add-back's skips for templates, conditionals and deferred members (`types/src/decide.rs:66`). The template, branch and deferred rules replace them.
+     - `member_possible_given_native`'s list of members kept unjudged.
+   - *A new check, opt-in (CHECK-8):* a PHPDoc type that leaves out a kind its native type names (`@param int` on `int|string`, `@param Foo` on `Foo $x = null`) is reported at the tag. It is correct, since the PHPDoc misstates what the declaration admits. It is off by default because every earlier tool accepted such PHPDoc.
+   - *Rows:*
+     - REG-7.5 and REG-7.12 are re-specified;
+     - VAL-2.9 and VAL-2.10 list the output changes;
+     - CHECK-8 is new;
+     - TYPE-5 is new: `iterable<K, V>`'s array member ignores `K`, found while this was judged.
 
 ## 3. LOAD: the session, the walk, the load's merge, how long a tree lives
 
@@ -745,6 +802,7 @@ Merging the sources into one list found six places where two of them disagree, o
 | TYPE-4.2 | **One memo, keyed `(sup node, sub node)` under the revision, storing only final answers.** An answer found while the engine is resolving a cycle is provisional and is not stored. The relation's code is first read for any input beyond the key. The plan's rule for constants on a cycle is REG-7.6's since decision 1 | 20 G 7; decision 1 | OPEN | TYPE-4.1 |
 | TYPE-4.3 | **Bounded within a generation:** at most 2^17 entries per thread, in two segments; the older is dropped when the current one fills | 20 G 7 | OPEN | TYPE-4.2 |
 | TYPE-4.4 | **A runtime switch,** `PHPSTAN_RS_NO_RELATION_MEMO`, turns the memo off in any build, for the oracle | 20 G 7 | OPEN | TYPE-4.2 |
+| TYPE-5 | **`iterable<K, V>` is `array<K, V>\|Traversable<K, V>`:** its array member takes `K` as `array<K, V>` does, so a key no array can have (`float`, an object) leaves only the empty array. Today the array member's key is `array-key` whatever `K` (`types/src/parse.rs:1348`): an `iterable<int, V>` accepts an `array<string, V>`, and `foreach` over `iterable<string, int>` gives `int\|string` keys, which the fixture `foreach_over_a_generic_iterable_or_traversable_infers_its_key_and_value.php` pins and which becomes `string`: an array that has string keys has no decimal-int string among them, since PHP stores such a key as an int, and a `Traversable` keeps its keys as they are | decision 8 | READY | — |
 
 ### Targets
 
@@ -821,14 +879,14 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | REG-7.2 | **Own level:** own members composed with the `use` closure's declared members, `@method` tags, every type resolved in the class's context (imported aliases, `value-of` and class-constant types, constant-named types), and the interim assertion step. It includes item 6's step 1, deferred types on demand: `class_has_deferred_type`, `function_has_deferred_type` and the eager pass go, and the stub cache asserts that no stub record holds a deferred type | split C4 memo; 20 G 6.1 | OPEN | REG-7.1 |
 | REG-7.3 | **Inherited level:** PHPDoc inheritance and property hooks, from the ancestors' inherited level | split C4 memo | OPEN | REG-7.2 |
 | REG-7.4 | **Members level:** each `@mixin` target's public methods and properties, then the member owners | split C4 memo | OPEN | REG-7.3 |
-| REG-7.5 | **Final level:** the PHPDoc members the native type excludes are dropped, and the native and PHPDoc combination is PHPStan's `TypehintHelper::decideType` whole (the plan's Appendix H causes for C4) | split C4 memo | OPEN | REG-7.4 |
+| REG-7.5 | **Final level:** each declared type is its native and PHPDoc types combined by decision 8's rule, the relation reading the class hierarchy. A PHPDoc member that shares no value with the native type is dropped; one that shares values with a native kind is intersected with it; a native kind that no member shares values with is kept; a member that resolves later carries the native type until it does. The PHPDoc is read with its aliases resolved. The crate split's text took PHPStan's `TypehintHelper::decideType` whole: decision 8 keeps its added-back union members, its variadic reading and its `iterable` widening (generalized), and replaces the rest. The plan's Appendix H causes for C4 stay here | split C4 memo; decision 8 | OPEN | REG-7.4 |
 | REG-7.6 | **Class constants through the `ConstantResolver`** (the crate split's C2 follow-up lands first), reading the ancestor level's declarations with the imported aliases substituted. An enum's case values are constants to the resolver too. A constant's result is its value type plus the throws its evaluation can raise, each definite or possible. A cycle over value edges, or arithmetic that fails on literal operands, is definite: every read is `never`. An unknown constant or class is possible: the value stays unknown. Each cause is reported at the constant that has it. A PHPDoc edge is not evaluated: a constant whose PHPDoc reaches a cycle keeps its type without that PHPDoc, which is reported as unresolvable. The engine finds the cycles, over value edges only; no `*` pattern is expanded. The plan's `mixed` for a cycle is withdrawn | split C4 memo; decision 1 | OPEN; a delta, approved (VAL-2.5) | REG-7.1 |
 | REG-7.7 | **Build scratch leaves `ClassReflection`** for the merged declaration kept beside each level: `method_tags`, `trait_aliases`, `resolved_trait_conflicts` and `type_imports`. The rules reading that scratch query the declaration. Since decisions 2 and 3, `redeclared_methods` goes (REG-8.5), the `*case_refs` leave for the record of written names (REG-14.1), and the parsed doc blocks are the file's product (DOC-2.9), not the declaration's | split C4 memo; decisions 2, 3 | OPEN | REG-7.1 |
 | REG-7.8 | **`Project::finish_loading` keeps only the whole-program passes,** and stays the batch entry point (69 call sites) until the crate split's F1. About 100 comments naming a deleted pass are rewritten. `index_and_flatten` is deleted. `Registry::build` indexes and runs the whole-program passes until its callers move onto `apply` (REG-10). The stub pass resolves each stub file's classes within that file, until STUB-7.6 | split C4 memo | OPEN | REG-7.1 to REG-7.5 |
 | REG-7.9 | **No query waits on itself.** A query that reaches itself is a cycle, which the engine finds. A hierarchy cycle and a constant cycle are resolved by their rules (REG-7.1, REG-7.6); any other is a bug, reported as one. A panic inside a query leaves it retryable, so `check-project`'s per-file `catch_unwind` resumes cleanly. A panic-injection test and a parallel-resolution test run over cyclic fixtures | split C4 memo; decision 3 | OPEN | REG-7.1 |
 | REG-7.10 | **A whole-registry iteration decides before resolving a class,** from the declarations, provenance and the ancestor level, until STUB-7.8 replaces it. This covers the two `native_type_hints.rs` scans, the concrete-implementor scan in `checker.rs`, the whole-program passes (dead abstract classes, dead enum cases, dead members, namespace cycles), `class_shape`, `classes_using_trait`, `doctrine_entity_for_table`, `repository_entity`, `Project::run_reflection_rules`, LSP workspace symbols and completion. `demo` resolves everything it prints | split C4 memo | OPEN | REG-7.1 |
 | REG-7.11 | **Trait and mixin members no longer outlive a change to their source.** `removing_a_files_trait_does_not_retroactively_unbake_its_members_from_existing_users` inverts, renamed through `gates/test-renames`, and `remove_files`' known-limitation comment goes | split C4 memo | OPEN; it lands with the snapshots | REG-8 |
-| REG-7.12 | **A function resolves lazily the same way:** value types, constant-named types, native-excluded members, the interim assertion step. `finalize_standalone_sig` (`registry/resolve.rs:2119`) is that resolver | split C4 memo | OPEN | REG-7.2 |
+| REG-7.12 | **A function resolves lazily the same way:** value types, constant-named types, decision 8's combination of native and PHPDoc types, the interim assertion step. `finalize_standalone_sig` (`registry/resolve.rs:2119`) is that resolver | split C4 memo; decision 8 | OPEN | REG-7.2 |
 | REG-8 | `ReflectionBuilder::apply` snapshots, as the engine's revisions | split C4 snapshots; decision 3 | OPEN | REG-7 |
 | REG-8.1 | **`FileDelta`** carries a file's role and its new declarations, or its removal; the initial load is one apply, built per file in parallel. On the engine a delta is an input change, and a revision what follows it. A name's entry is a query over its declaring files, which applies the collision policy in canonical order (the embedded stubs, then context files, then analysed files, each by path), not in arrival order. Declarations are shared between revisions by `Arc`, and what a change does not reach keeps its value | split C4 snapshots; decision 3 | OPEN; a delta the server shows: a file created later no longer wins a collision by arriving last | — |
 | REG-8.2 | **Read sets.** Each memo records every folded class and constant name it looked up, absent ones included. A delta invalidates the transitive readers; a change to any other reflection input invalidates everything. Purity and global-variable inference run again per snapshot, until the crate split's C9 | split C4 snapshots | SUPERSEDED by REG-16.3 (decision 3): the read sets are the dependencies the engine records, absent names included | — |
@@ -911,7 +969,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
   - The plan's approved deltas, each fixtured:
     - a method that two nested traits both supply resolves by `use` order, depth-first (REG-7.2);
     - a constant on a reference cycle types as `mixed` (REG-7.6). Decision 1 withdrew this one: REG-7.6 has the rule that replaced it, approved as VAL-2.5.
-  - The final level's combination of native and PHPDoc types changes reports too, each with its fixture in the plan: for example, a PHPDoc `never` return over a native `void` applies (REG-7.5).
+  - The final level's combination of native and PHPDoc types changes reports too, as decision 8 has them, each with a fixture (the plan's where it has one): for example, a PHPDoc conditional of `void` and `never` over a native `void` applies, and `@param string[]` on `string|array|A` keeps `A` (REG-7.5).
   - Purity moving after resolution changes nothing; a fixture pins `@return null` on `: void`.
   - The commit runs the full gate tier. Peak RSS stays at or below the phase start, and a test pins that loading a project and checking one file resolves no class the file doesn't reach.
   - `has_unresolvable_ancestor` reads the unresolved edges. The boolean `is_subclass_of` keeps counting an unresolved name as an ancestor until the crate split's C8.
@@ -1218,6 +1276,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | CHECK-6.17 | **F4: third-party parsers.** The SQL extension parses a query's text once per distinct text, and regex matches are read through one reused `Captures` | 20 G 18.10 (F4) | READY | — |
 | CHECK-6.18 | **One checker per worker,** reset for each file | 20 G 18.10 | READY | — |
 | CHECK-7 | **A constant's throws, where PHP evaluates it.** Each place inherits REG-7.6's outcome for the constant. A definite throw makes the code after it unreachable; a possible one is a throw point that the `try`/`catch` and `@throws` rules see. The places: a read and `defined()`; a parameter's default, where the argument is omitted; a static variable's initializer; a global `const`; an attribute's arguments, where they are read; and every operation that initializes the class's constants. Those are `new` of the class, of a subclass, of an implementer of an interface or of a user of a trait that holds the cause; `newInstanceWithoutConstructor`; a static property read; `getConstants`, and `getConstant` of any name; a backed enum's case access, `from()` and `tryFrom()` (every constant of the enum); and its `cases()` (the case values). The list is read from php-src when the row is built, not from the probes of §2.4 | decision 1 | OPEN; a delta, approved (VAL-2.5) | REG-7.6 |
+| CHECK-8 | **A PHPDoc type that leaves out a kind its native type names, reported at the tag, off by default:** `@param int` on `int\|string`, `@param Foo` on `Foo $x = null`, `@return Foo` on `?Foo`. Under decision 8 the kind is kept, so nothing else reports the omission. The check compares the PHPDoc's members with the native kinds as REG-7.5 forms them, with an identifier of its own and a configuration switch | decision 8 | OPEN | REG-7.5 |
 
 ### Targets
 
@@ -1306,8 +1365,8 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | VAL-2.6 | A `@property` tag shadowed by a declared property is checked against the tag's own names, which the record of written names holds at the tag (REG-14.1, PROD-5.8) | 20 G 8; decision 2 | DONE: approved | — |
 | VAL-2.7 | Container-field keys canonical as PHP's array keys (NAME-1.2) | 20 G 15 | DONE: approved | — |
 | VAL-2.8 | The rule families of §12.10: observers, one inference per node (CHECK-6.1) | 20 G 18 | DONE: approved in principle; each family's output diff is read at VAL-1, and anything that is not an improvement is fixed or reverted per family | — |
-| VAL-2.9 | **The crate split's output changes, each on its own row:** REG-4.3, REG-4.4 and REG-4.8 (done; see their records); REG-4.2, REG-4.14, REG-5, REG-6, REG-7 (REG-7.2's order for a method two nested traits both supply, REG-7.5's native and PHPDoc combination; REG-7.6's constants are VAL-2.5's since decision 1), REG-8.1, REG-8.5, REG-9 and REG-11; STUB-7.1, 7.2, 7.3, 7.5, 7.9 and 7.10. The plan states each as a change of its design, most with a fixture, and lists some as approved deltas; this ledger lists them so that VAL-1.13 can name them | split | OPEN: read at VAL-1, as they land | — |
-| VAL-2.10 | **The decisions' output changes** beyond VAL-2.5, 2.6 and 2.9: PHPStan's classes read from the PHPStan the project installs (STUB-13); the builtin knowledge from php-src's stubs and real binaries' dumps (STUB-12); a file that fails to parse keeping what parses (SYN-1.9 with Q-10). Each is listed with its file and read at VAL-1 as it lands | decisions 4, 6, 7 | OPEN: read at VAL-1, as they land | — |
+| VAL-2.9 | **The crate split's output changes, each on its own row:** REG-4.3, REG-4.4 and REG-4.8 (done; see their records); REG-4.2, REG-4.14, REG-5, REG-6, REG-7 (REG-7.2's order for a method two nested traits both supply, REG-7.5's native and PHPDoc combination where decision 8 keeps the plan's, VAL-2.10 having the rest; REG-7.6's constants are VAL-2.5's since decision 1), REG-8.1, REG-8.5, REG-9 and REG-11; STUB-7.1, 7.2, 7.3, 7.5, 7.9 and 7.10. The plan states each as a change of its design, most with a fixture, and lists some as approved deltas; this ledger lists them so that VAL-1.13 can name them | split | OPEN: read at VAL-1, as they land | — |
+| VAL-2.10 | **The decisions' output changes** beyond VAL-2.5, 2.6 and 2.9: PHPStan's classes read from the PHPStan the project installs (STUB-13); the builtin knowledge from php-src's stubs and real binaries' dumps (STUB-12); a file that fails to parse keeping what parses (SYN-1.9 with Q-10); decision 8's combination where it departs from the plan's (REG-7.5, REG-7.12): a PHPDoc member intersected with its native kind (`Closure(int): string`, `T&Foo`), a class kind kept (`string\|array\|A`'s `A`), every array member but a shape giving `iterable`'s `Traversable` its key and value types, a kind no branch of a conditional covers kept, a template member judged by the relation, a resource under `object` dropped; `iterable<K, V>`'s array keys (TYPE-5); CHECK-8's reports where it is turned on. Each is listed with its file and read at VAL-1 as it lands | decisions 4, 6, 7, 8 | OPEN: read at VAL-1, as they land | — |
 
 ### Notes
 
