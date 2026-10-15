@@ -4,9 +4,7 @@ use crate::checker::{
     ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, generator_missing_return_type,
     is_constant_condition_family_identifier, type_allows_generator_return,
 };
-use crate::registry::{
-    self, ClassReflection, FunctionReflection, mark_template_params, resolve_names_in_type,
-};
+use crate::registry::{self, ClassReflection, FunctionReflection};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
@@ -336,13 +334,12 @@ impl<'a> Checker<'a> {
         // validity family plus `method.shadowTemplate`, method-level -
         // see `check_class_generic_bounds`'s identical class-level call
         // for the shared-check doc comment. Re-parses `f.doc_comment`
-        // fresh (mirroring `registry::function_sig::generics::
-        // build_template_params`'s shallow-then-resolve pipeline exactly,
-        // so a bound/default referencing a sibling template on the same
-        // docblock - `@template A` `@template B of A` - classifies
-        // correctly instead of misreading `A` as an unknown class) since
-        // `FunctionReflection` has no persisted raw template-bound/-default map
-        // of its own. Cheap substring pre-filter before the real
+        // fresh through the builder the registry's own declarations use
+        // (`declared_template_params`), so a bound/default referencing a
+        // sibling template on the same docblock - `@template A`
+        // `@template B of A` - classifies correctly instead of misreading
+        // `A` as an unknown class, since `FunctionReflection` has no
+        // persisted raw template-bound/-default map of its own. Cheap substring pre-filter before the real
         // docblock::parse_shared below - most documented methods declare no
         // `@template` at all, so this skips a real parse cost on every
         // one. Matched on the bare `template` substring rather than
@@ -358,27 +355,8 @@ impl<'a> Checker<'a> {
             && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse_shared)
             && !doc.templates.is_empty()
         {
-            let shallow: rustc_hash::FxHashMap<String, types::TemplateParam> = doc
-                .templates
-                .iter()
-                .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
-                .collect();
-            let resolve = |node: &phpdoc::DocType| -> Type {
-                let ty = crate::registry::parse_type_node(node);
-                let ty = mark_template_params(ty, &shallow);
-                resolve_names_in_type(ty, &self.name_ctx)
-            };
-            let templates: Vec<Name> = doc.templates.iter().map(Name::from).collect();
-            let bounds: syntax::name::NameMap<Type> = doc
-                .template_bounds
-                .iter()
-                .map(|(k, v)| (Name::from(k), resolve(v)))
-                .collect();
-            let defaults: syntax::name::NameMap<Type> = doc
-                .template_defaults
-                .iter()
-                .map(|(k, v)| (Name::from(k), resolve(v)))
-                .collect();
+            let templates =
+                crate::registry::declared_template_params(&doc, &f.name, &self.name_ctx);
             let type_aliases = class_name
                 .and_then(|c| self.registry.classes.get(c))
                 .map(|info| info.type_aliases().clone())
@@ -389,8 +367,6 @@ impl<'a> Checker<'a> {
             };
             self.check_template_declaration_validity(
                 &templates,
-                &bounds,
-                &defaults,
                 &type_aliases,
                 crate::checker::generics::TemplateSubject::Declared {
                     display_name: &display_name,
@@ -405,7 +381,7 @@ impl<'a> Checker<'a> {
                 let mut shadowed: Vec<&String> = doc
                     .templates
                     .iter()
-                    .filter(|n| info.templates().iter().any(|t| t.as_ref() == n.as_str()))
+                    .filter(|n| info.template(n).is_some())
                     .collect();
                 shadowed.sort();
                 for name in shadowed {

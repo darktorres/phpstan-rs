@@ -156,6 +156,19 @@ pub(crate) fn build_template_params(
     scope: &str,
     ctx: &NameContext,
 ) -> FxHashMap<String, TemplateParam> {
+    declared_template_params(doc, scope, ctx)
+        .into_iter()
+        .map(|param| (param.name.clone(), param))
+        .collect()
+}
+
+/// `build_template_params`' parameters in the order `doc` declares them,
+/// which is the order a generic reference binds its arguments in.
+pub(crate) fn declared_template_params(
+    doc: &DocBlock,
+    scope: &str,
+    ctx: &NameContext,
+) -> Vec<TemplateParam> {
     // A bound or default can itself reference a sibling template
     // declared on the very same docblock (`@template A` `@template B of
     // A`, or `@template B = A`) - this shallow, metadata-free pass
@@ -216,13 +229,14 @@ pub(crate) fn build_template_params(
                 .flatten()
         })
     };
-    built
+    doc.templates
         .iter()
-        .map(|(name, tp)| {
+        .filter_map(|name| built.get(name))
+        .map(|tp| {
             let mut tp = tp.clone();
             tp.bound = Box::new(with_siblings(&tp.bound));
             tp.default = tp.default.as_deref().map(|d| Box::new(with_siblings(d)));
-            (name.clone(), tp)
+            tp
         })
         .collect()
 }

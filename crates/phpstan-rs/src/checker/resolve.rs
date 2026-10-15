@@ -141,30 +141,12 @@ impl<'a> Checker<'a> {
         };
         info.templates()
             .iter()
-            .map(|name| {
-                let variance = if info.covariant_templates().contains(name) {
-                    types::Variance::Covariant
-                } else if info.contravariant_templates().contains(name) {
-                    types::Variance::Contravariant
-                } else {
-                    types::Variance::Invariant
-                };
+            .map(|template| {
                 (
-                    name.to_string(),
+                    template.name.clone(),
                     types::TemplateParam {
-                        name: name.to_string(),
-                        bound: Box::new(
-                            info.template_bounds()
-                                .get(name)
-                                .cloned()
-                                // No `of`/`as` clause at all - explicit
-                                // mixed, matching `TemplateParam::
-                                // unbounded`'s own identical reasoning.
-                                .unwrap_or(Type::explicit_mixed()),
-                        ),
-                        variance,
                         scope: Some(class.clone()),
-                        default: None,
+                        ..template.clone()
                     },
                 )
             })

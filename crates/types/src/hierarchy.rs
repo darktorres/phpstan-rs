@@ -4,14 +4,17 @@
 use rustc_hash::FxHashMap;
 use syntax::ast::ClassKind;
 
-use crate::{CallSiteVariance, CallableSig, Name, Repr, TrinaryLogic, Type, Variance};
+use crate::{
+    CallSiteVariance, CallableSig, Name, Repr, TemplateParam, TrinaryLogic, Type, Variance,
+};
 
 /// A class as a type relation sees it.
 pub struct ClassFacts<'a> {
     pub kind: ClassKind,
     pub is_final: bool,
-    /// Its own `@template` names, in declaration order.
-    pub templates: &'a [Name],
+    /// Its own `@template` parameters, in declaration order, each with its
+    /// bound, variance and default.
+    pub templates: &'a [TemplateParam],
 }
 
 pub trait ClassHierarchy {
@@ -49,11 +52,6 @@ pub trait ClassHierarchy {
     /// The declared type of `class`'s property `property`.
     fn property_type(&self, class: &str, property: &str) -> Option<Type>;
 
-    /// The variance `class` declares for its template slot `index`:
-    /// `Invariant` when it declares none, `None` when `class` or the
-    /// slot is unknown.
-    fn slot_variance(&self, class: &str, index: usize) -> Option<Variance>;
-
     /// What `ancestor`'s templates are bound to in `class<args>`.
     fn ancestor_template_bindings(
         &self,
@@ -77,8 +75,23 @@ pub(crate) fn effective_slot_variance(
         Repr::VarianceArg(CallSiteVariance::Covariant, _) => Some(Variance::Covariant),
         Repr::VarianceArg(CallSiteVariance::Contravariant, _) => Some(Variance::Contravariant),
         Repr::VarianceArg(CallSiteVariance::Bivariant, _) => None,
-        _ => hierarchy.slot_variance(class, index),
+        _ => slot_variance(hierarchy, class, index),
     }
+}
+
+/// The variance `class` declares for its template slot `index`:
+/// `Invariant` when it declares none, `None` when `class` or the slot is
+/// unknown.
+pub(crate) fn slot_variance(
+    hierarchy: &dyn ClassHierarchy,
+    class: &str,
+    index: usize,
+) -> Option<Variance> {
+    hierarchy
+        .find_class(class)?
+        .templates
+        .get(index)
+        .map(|template| template.variance)
 }
 
 /// A hierarchy that knows no classes: a class is only itself. The
@@ -123,10 +136,6 @@ impl ClassHierarchy for NoClasses {
     }
 
     fn property_type(&self, _: &str, _: &str) -> Option<Type> {
-        None
-    }
-
-    fn slot_variance(&self, _: &str, _: usize) -> Option<Variance> {
         None
     }
 

@@ -130,7 +130,7 @@ fn an_error_absorbs_a_union() {
 mod past_the_cap {
     use crate::{
         CallableSig, ClassFacts, ClassHierarchy, ClassKind, MAX_UNION_MEMBERS, Relation, Shape,
-        ShapeField, ShapeKey, TrinaryLogic, Type, Variance,
+        ShapeField, ShapeKey, TrinaryLogic, Type,
     };
     use rustc_hash::FxHashMap;
     use syntax::name::Name;
@@ -138,11 +138,11 @@ mod past_the_cap {
     /// `C0`..`C69` implement `I`, the even ones `J` too, all use the trait
     /// `T`; `D0`..`D69` extend nothing; `Collection` has one template.
     struct Classes {
-        templates: Vec<Name>,
+        templates: Vec<crate::TemplateParam>,
     }
 
     static CLASSES: std::sync::LazyLock<Classes> = std::sync::LazyLock::new(|| Classes {
-        templates: vec![Name::from("V")],
+        templates: vec![crate::TemplateParam::unbounded("V".to_string())],
     });
 
     impl ClassHierarchy for Classes {
@@ -200,10 +200,6 @@ mod past_the_cap {
         }
 
         fn property_type(&self, _: &str, _: &str) -> Option<Type> {
-            None
-        }
-
-        fn slot_variance(&self, _: &str, _: usize) -> Option<Variance> {
             None
         }
 

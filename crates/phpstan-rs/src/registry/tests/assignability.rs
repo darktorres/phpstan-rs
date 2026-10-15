@@ -367,7 +367,7 @@ fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() 
     assert!(!r.accepts(&case("ITERABLE"), &case("ARRAY")).yes());
     assert!(
         r.accepts(
-            &r.classes["ProbeTb\\Generic"].template_bounds["T"],
+            &r.classes["ProbeTb\\Generic"].template("T").unwrap().bound,
             &args[0]
         )
         .yes()

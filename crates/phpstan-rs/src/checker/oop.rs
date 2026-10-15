@@ -314,25 +314,23 @@ impl<'a> Checker<'a> {
                 );
                 crate::registry::resolve_names_in_type(ty, &self.name_ctx)
             };
-            let names: Vec<Name> = tag
+            let declared: Vec<types::TemplateParam> = tag
                 .templates
                 .iter()
-                .map(|t| t.name.as_str().into())
-                .collect();
-            let bounds = tag
-                .templates
-                .iter()
-                .filter_map(|t| Some((t.name.as_str().into(), resolve(t.bound.as_ref()?))))
-                .collect();
-            let defaults = tag
-                .templates
-                .iter()
-                .filter_map(|t| Some((t.name.as_str().into(), resolve(t.default.as_ref()?))))
+                .map(|t| types::TemplateParam {
+                    name: t.name.clone(),
+                    bound: Box::new(
+                        t.bound
+                            .as_ref()
+                            .map_or_else(Type::explicit_mixed, |bound| resolve(bound)),
+                    ),
+                    variance: types::Variance::Invariant,
+                    scope: None,
+                    default: t.default.as_ref().map(|default| Box::new(resolve(default))),
+                })
                 .collect();
             self.check_template_declaration_validity(
-                &names,
-                &bounds,
-                &defaults,
+                &declared,
                 &type_aliases,
                 crate::checker::generics::TemplateSubject::MethodTag {
                     class: fqn,

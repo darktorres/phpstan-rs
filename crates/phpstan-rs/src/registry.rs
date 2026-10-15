@@ -60,7 +60,8 @@ pub(crate) use function_sig::param_label;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionReflection, ParameterReflection};
 pub(crate) use function_sig::{DeclaredType, declared_type};
 pub(crate) use function_sig::{
-    build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
+    build_template_params, declared_template_params, infer_const_type, mark_template_params,
+    substitute_type_aliases,
 };
 pub use global_vars::GlobalFacts;
 pub use init_flow::InitFlow;

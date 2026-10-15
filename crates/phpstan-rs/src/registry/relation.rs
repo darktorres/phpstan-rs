@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 use crate::registry::Registry;
 use types::{
     AcceptsResult, CallableParam, CallableSig, ClassFacts, ClassHierarchy, Relation, TrinaryLogic,
-    Type, Variance,
+    Type,
 };
 
 /// Every class name is looked up as PHP resolves it, case-insensitively:
@@ -81,10 +81,6 @@ impl ClassHierarchy for Registry {
     fn property_type(&self, class: &str, property: &str) -> Option<Type> {
         self.lookup_property(self.canonical_class_name(class), property)
             .map(|p| p.ty.clone())
-    }
-
-    fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
-        Registry::slot_variance(self, self.canonical_class_name(class), index)
     }
 
     fn ancestor_template_bindings(

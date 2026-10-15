@@ -91,7 +91,7 @@ fn patch_spl_iterator_templates_gives_real_generic_spl_classes_their_missing_tem
     ];
     for (name, templates) in expected {
         let info = class(name);
-        let got_names: Vec<&str> = info.templates.iter().map(|t| t.as_ref()).collect();
+        let got_names: Vec<&str> = info.template_names().collect();
         assert_eq!(&got_names, templates, "{name}'s own template list");
     }
 }

@@ -3,7 +3,7 @@ use crate::registry::FunctionReflection;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::span::Span;
-use types::{self, PositionVariance, Type};
+use types::{self, PositionVariance, Type, Variance};
 
 impl<'a> Checker<'a> {
     /// Variance-enforcement: composes variance through nested generics
@@ -45,7 +45,11 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(class_name) else {
             return;
         };
-        if info.covariant_templates().is_empty() && info.contravariant_templates().is_empty() {
+        if info
+            .templates()
+            .iter()
+            .all(|t| t.variance == Variance::Invariant)
+        {
             return;
         }
         let mut violations: Vec<String> = Vec::new();
@@ -178,7 +182,11 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(fqn) else {
             return;
         };
-        if info.covariant_templates().is_empty() && info.contravariant_templates().is_empty() {
+        if info
+            .templates()
+            .iter()
+            .all(|t| t.variance == Variance::Invariant)
+        {
             return;
         }
         for p in &c.properties {

@@ -80,16 +80,14 @@ impl<'a> Checker<'a> {
             // (`@template T = 'array'`, so a conditional on `T` resolves),
             // or else its bound: what a value of it is surely known to be.
             if let Some(info) = self.registry.classes.get(owner) {
-                for name in info.templates() {
-                    if !bindings.contains_key(name.as_ref())
-                        && let Some(erased) = info
-                            .template_defaults()
-                            .get(name)
-                            .or_else(|| info.template_bounds().get(name))
-                    {
-                        let erased =
-                            erased.substitute_templates_of(&bindings, owner, &self.relation());
-                        bindings.insert(name.to_string(), erased);
+                for template in info.templates() {
+                    if !bindings.contains_key(template.name.as_str()) {
+                        let erased = template
+                            .default
+                            .as_deref()
+                            .unwrap_or(&template.bound)
+                            .substitute_templates_of(&bindings, owner, &self.relation());
+                        bindings.insert(template.name.clone(), erased);
                     }
                 }
             }

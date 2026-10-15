@@ -7,7 +7,7 @@ use syntax::name::Name;
 
 use crate::{
     CallableSig, ClassFacts, ClassHierarchy, ClassKind, OrderingOp, Outcomes, PhpVersion, Relation,
-    Shape, ShapeField, ShapeKey, TrinaryLogic, Type, Variance,
+    Shape, ShapeField, ShapeKey, TrinaryLogic, Type,
 };
 
 /// The matrix's classes: `P` and `Q` unrelated, `S` with `__toString`,
@@ -60,10 +60,6 @@ impl ClassHierarchy for MatrixClasses {
     }
 
     fn property_type(&self, _: &str, _: &str) -> Option<Type> {
-        None
-    }
-
-    fn slot_variance(&self, _: &str, _: usize) -> Option<Variance> {
         None
     }
 

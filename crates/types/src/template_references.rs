@@ -97,7 +97,7 @@ impl Type {
                 for (i, arg) in args.iter().enumerate() {
                     let (slot, arg) = match arg.repr() {
                         Repr::VarianceArg(variance, inner) => ((*variance).into(), inner),
-                        _ => match hierarchy.slot_variance(class, i) {
+                        _ => match crate::slot_variance(hierarchy, class, i) {
                             Some(variance) => (variance.into(), arg),
                             None if hierarchy.find_class(class).is_some() => {
                                 (PositionVariance::Invariant, arg)

@@ -479,12 +479,12 @@ impl<'a> Checker<'a> {
                 let required = info
                     .templates()
                     .iter()
-                    .filter(|t| !info.template_defaults().contains_key(*t))
+                    .filter(|t| t.default.is_none())
                     .count();
                 if required == 0 {
                     continue;
                 }
-                let mut list = syntax::name::join(info.templates(), ", ");
+                let mut list = info.template_names().collect::<Vec<_>>().join(", ");
                 if required != total {
                     list.push_str(&format!(" ({required}-{total} required)"));
                 }

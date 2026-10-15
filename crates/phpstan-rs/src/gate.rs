@@ -54,12 +54,12 @@ pub fn template_scope_at(registry: &Registry, stmts: &[Stmt], at: u32) -> Templa
     if let Some(class) = finder.class
         && let Some(info) = registry.classes.get(class.fq_name())
     {
-        for (name, arg) in info
+        for (template, arg) in info
             .templates()
             .iter()
             .zip(info.own_template_args(class.fq_name()))
         {
-            templates.insert(name.to_string(), arg);
+            templates.insert(template.name.clone(), arg);
         }
     }
     if let Some(function) = finder.function

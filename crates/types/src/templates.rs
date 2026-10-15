@@ -173,7 +173,12 @@ impl Relation<'_> {
                 Some(
                     templates
                         .iter()
-                        .map(|name| bound.get(name.as_ref()).cloned().unwrap_or(Type::mixed()))
+                        .map(|template| {
+                            bound
+                                .get(template.name.as_str())
+                                .cloned()
+                                .unwrap_or(Type::mixed())
+                        })
                         .collect(),
                 )
             }

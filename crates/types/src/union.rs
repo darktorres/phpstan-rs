@@ -636,7 +636,7 @@ fn common_supertype(classes: &[(crate::Name, Vec<Type>)], hierarchy: &dyn ClassH
     let parts: Vec<Type> = minimal
         .into_iter()
         .map(|ancestor| {
-            let templates: Vec<crate::Name> = hierarchy
+            let templates: Vec<crate::TemplateParam> = hierarchy
                 .find_class(&ancestor)
                 .map(|facts| facts.templates.to_vec())
                 .unwrap_or_default();
@@ -648,7 +648,7 @@ fn common_supertype(classes: &[(crate::Name, Vec<Type>)], hierarchy: &dyn ClassH
                         .map(|(class, args)| {
                             hierarchy
                                 .ancestor_template_bindings(class, args, &ancestor)
-                                .get(template.as_ref())
+                                .get(template.name.as_str())
                                 .cloned()
                                 .unwrap_or_else(Type::mixed)
                         })

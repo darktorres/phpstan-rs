@@ -80,9 +80,10 @@ impl<'a> Checker<'a> {
             let Some(info) = self.registry.classes.get(iface.as_str()) else {
                 continue;
             };
-            let Some(template_name) = info.templates().get(idx) else {
+            let Some(template) = info.templates().get(idx) else {
                 continue;
             };
+            let template_name = &template.name;
             self.report(format!(
                     "{kind_word} {fqn} specifies template type {template_name} of interface {iface} as {new_ty} but it's already specified as {old_ty}."
                 ),
@@ -211,9 +212,8 @@ impl<'a> Checker<'a> {
             }
         }
         let next_bindings: FxHashMap<String, Type> = info
-            .templates()
-            .iter()
-            .map(|s| s.to_string())
+            .template_names()
+            .map(str::to_string)
             .zip(concrete_args.iter().cloned())
             .collect();
         self.walk_for_interface_conflicts(name, &next_bindings, found, diagnostics, visited);
@@ -221,9 +221,8 @@ impl<'a> Checker<'a> {
 }
 
 fn identity_template_bindings(info: &ClassReflection, class: &str) -> FxHashMap<String, Type> {
-    info.templates()
-        .iter()
-        .map(|name| name.to_string())
+    info.template_names()
+        .map(str::to_string)
         .zip(info.own_template_args(class))
         .collect()
 }

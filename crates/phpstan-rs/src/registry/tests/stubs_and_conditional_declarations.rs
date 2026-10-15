@@ -574,7 +574,10 @@ fn an_analyzed_files_redeclaration_of_a_built_in_stub_class_still_keeps_its_gene
         .classes
         .take("ArrayIterator")
         .unwrap();
-    assert_eq!(built_in.templates, vec!["TKey", "TValue"]);
+    assert_eq!(
+        built_in.template_names().collect::<Vec<_>>(),
+        ["TKey", "TValue"]
+    );
 
     let mut r = Registry::default();
     r.merge_stub_classes(vec![("ArrayIterator".to_string(), built_in)]);
@@ -589,8 +592,10 @@ fn an_analyzed_files_redeclaration_of_a_built_in_stub_class_still_keeps_its_gene
     r.index(&program, &Origin::Unknown, true);
 
     assert_eq!(
-        r.classes["ArrayIterator"].templates,
-        vec!["TKey", "TValue"],
+        r.classes["ArrayIterator"]
+            .template_names()
+            .collect::<Vec<_>>(),
+        ["TKey", "TValue"],
         "an analyzed re-declaration must not discard the built-in stub's own templates"
     );
 }

@@ -1,5 +1,4 @@
 use syntax::name::NameMap;
-use types::Name;
 
 use crate::checker::{
     Checker, ITERABLE_GENERIC_CLASS_NAMES, TemplateBindings, class_kind_identifier,
@@ -7,7 +6,7 @@ use crate::checker::{
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::span::Span;
-use types::{self, Type};
+use types::{self, TemplateParam, Type};
 
 impl<'a> Checker<'a> {
     /// Walks `ty` for every `Object(class, args)` naming a class with
@@ -69,7 +68,7 @@ impl<'a> Checker<'a> {
             Some((class, args)) => {
                 if !args.is_empty()
                     && let Some(info) = self.registry.classes.get(class.as_str())
-                    && !info.template_bounds().is_empty()
+                    && info.templates().iter().any(|t| !t.bound.is_mixed())
                 {
                     // Bound-checking cares about the real referenced
                     // type, not a call-site variance marker wrapping it
@@ -82,20 +81,22 @@ impl<'a> Checker<'a> {
                     // original, marker-and-all, so a violation message
                     // still shows `covariant Foo`.
                     let bindings: TemplateBindings = info
-                        .templates()
-                        .iter()
-                        .map(|s| s.to_string())
+                        .template_names()
+                        .map(str::to_string)
                         .zip(args.iter().map(|a| {
                             a.without_call_site_variance()
                                 .cloned()
                                 .unwrap_or(Type::mixed())
                         }))
                         .collect();
-                    for (name, arg) in info.templates().iter().zip(args.iter()) {
-                        let Some(bound) = info.template_bounds().get(name) else {
+                    for (template, arg) in info.templates().iter().zip(args.iter()) {
+                        let name = template.name.as_str();
+                        if template.bound.is_mixed() {
                             continue;
-                        };
-                        let bound = bound.substitute_templates(&bindings, &self.relation());
+                        }
+                        let bound = template
+                            .bound
+                            .substitute_templates(&bindings, &self.relation());
                         let Some(checked_arg) = arg.without_call_site_variance() else {
                             continue;
                         };
@@ -225,14 +226,10 @@ impl<'a> Checker<'a> {
         // `ClassTemplateTypeRule` entirely.
         if !info.templates().is_empty() {
             let display_name = format!("{} {fqn}", class_kind_identifier(&c.def.kind));
-            let templates = info.templates().clone();
-            let bounds = info.template_bounds().clone();
-            let defaults = info.template_defaults().clone();
+            let templates = info.templates().to_vec();
             let type_aliases = info.type_aliases().clone();
             self.check_template_declaration_validity(
                 &templates,
-                &bounds,
-                &defaults,
                 &type_aliases,
                 TemplateSubject::Declared {
                     display_name: &display_name,
@@ -324,7 +321,7 @@ impl<'a> Checker<'a> {
     /// the mismatch. Called pervasively from
     /// `check_generic_bounds_and_arity`, matching real PHPStan's
     /// `IncompatiblePhpDocTypeCheck`. Every template with its own
-    /// `@template T = Default` (`template_defaults`) is optional - only
+    /// `@template T = Default` (`TemplateParam::default`) is optional - only
     /// a template with *no* default is "required" for `lessTypes`
     /// purposes.
     ///
@@ -378,9 +375,8 @@ impl<'a> Checker<'a> {
         // pads a single given argument into `<mixed, V>` before this
         // check ever runs, and `Generator<V>`/`Generator<K, V>` pads to
         // the full `<K, V, mixed, mixed>` shape - neither ever reaches
-        // `lessTypes`, even though `template_defaults` correctly records
-        // no `@template ... = Default` for any of their four template
-        // names. This project doesn't model that resolution-time padding
+        // `lessTypes`, even though none of their four templates declares
+        // a `@template ... = Default`. This project doesn't model that resolution-time padding
         // itself, so this narrowly special-cases the exact same argument
         // counts real PHPStan's hardcoded list treats as pre-padded
         // (real `phpstan/phpstan` flags neither `@return
@@ -398,15 +394,10 @@ impl<'a> Checker<'a> {
         let required = info
             .templates()
             .iter()
-            .filter(|name| !info.template_defaults().contains_key(*name))
+            .filter(|template| template.default.is_none())
             .count();
         let total = info.templates().len();
-        let list = info
-            .templates()
-            .iter()
-            .map(|t| t.as_ref())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let list = info.template_names().collect::<Vec<_>>().join(", ");
         if required > args.len() {
             let list = if required == total {
                 list
@@ -473,12 +464,11 @@ impl<'a> Checker<'a> {
                 // own doc comment.
                 _ => continue,
             };
-            let Some(declared) = self.registry.slot_variance(class, i) else {
+            let Some(template) = info.templates().get(i) else {
                 continue;
             };
-            let Some(template_name) = info.templates().get(i) else {
-                continue;
-            };
+            let declared = template.variance;
+            let template_name = &template.name;
             if declared == call_site {
                 self.report(format!(
                         "Call-site variance of {arg} in generic type {ty} in {location} is redundant, template type {template_name} of {kind} {class} has the same variance."
@@ -509,10 +499,9 @@ impl<'a> Checker<'a> {
     /// `TemplateTypeCheck`'s own declaration-validity family -
     /// validates a `@template` tag's own declaration, not a usage site.
     /// Shared between a class/interface/trait's own templates
-    /// (`templates`/`bounds`/`defaults` read straight off its
-    /// `ClassReflection`) and a method's own (re-parsed fresh from its own doc
-    /// comment, since `FunctionReflection` has no persisted raw
-    /// template-bound/-default map - see
+    /// (read straight off its `ClassReflection`) and a method's own
+    /// (re-parsed fresh from its own doc comment, since `FunctionReflection`
+    /// has no persisted raw template-bound/-default map - see
     /// `Checker::current_function_template_params`) - `type_aliases` is
     /// always the *enclosing class's* map either way (a type alias is
     /// class-scoped).
@@ -533,15 +522,15 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_template_declaration_validity(
         &mut self,
-        templates: &[Name],
-        bounds: &NameMap<Type>,
-        defaults: &NameMap<Type>,
+        templates: &[TemplateParam],
         type_aliases: &NameMap<Type>,
         subject: TemplateSubject<'_>,
         span: Span,
     ) {
-        let mut template_with_default: Option<&Name> = None;
-        for name in templates {
+        let mut template_with_default: Option<&str> = None;
+        for template in templates {
+            let name = template.name.as_str();
+            let bound = &*template.bound;
             if self.class_name_exists(name) {
                 self.report(
                     subject.existing_class(name),
@@ -558,9 +547,7 @@ impl<'a> Checker<'a> {
                     "generics.existingTypeAlias",
                 );
             }
-            if let Some(bound) = bounds.get(name)
-                && !bound.can_bound_a_template()
-            {
+            if !bound.can_bound_a_template() {
                 self.report(
                     subject.unsupported_bound(name, bound),
                     span,
@@ -568,7 +555,7 @@ impl<'a> Checker<'a> {
                     "generics.notSupportedBound",
                 );
             }
-            match defaults.get(name) {
+            match template.default.as_deref() {
                 None => {
                     if let Some(prev) = template_with_default {
                         self.report(
@@ -581,8 +568,7 @@ impl<'a> Checker<'a> {
                 }
                 Some(default) => {
                     template_with_default = Some(name);
-                    if let Some(bound) = bounds.get(name)
-                        && self.is_type_fully_known(default)
+                    if self.is_type_fully_known(default)
                         && self.is_type_fully_known(bound)
                         && !self.accepts(bound, default).yes()
                     {

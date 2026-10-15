@@ -326,9 +326,9 @@ impl Relation<'_> {
             class_b
                 .templates
                 .iter()
-                .map(|name| {
+                .map(|template| {
                     bindings
-                        .get(name.as_ref())
+                        .get(template.name.as_str())
                         .cloned()
                         .unwrap_or(Type::mixed())
                 })

@@ -14,7 +14,7 @@ use crate::registry::{
     substitute_type_aliases,
 };
 use syntax::ast::{ClassKind, Visibility};
-use types::{self, Type};
+use types::{self, TemplateParam, Type};
 
 impl Registry {
     /// PHP resolves class/interface/trait/enum names case-insensitively
@@ -684,14 +684,18 @@ impl Registry {
                 c.ty = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
             }
         }
-        for bound in info.template_bounds.values_mut() {
-            if bound.contains_deferred() {
-                let ty = bind_class_const_self(
-                    std::mem::replace(bound, Type::mixed()),
-                    class_name,
-                    &own_consts,
-                );
-                *bound = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+        for template in &mut info.templates {
+            let bounds =
+                std::iter::once(&mut *template.bound).chain(template.default.as_deref_mut());
+            for bound in bounds {
+                if bound.contains_deferred() {
+                    let ty = bind_class_const_self(
+                        std::mem::replace(bound, Type::mixed()),
+                        class_name,
+                        &own_consts,
+                    );
+                    *bound = resolve_deferred_value_of_in_type(ty, &self.classes, Some(class_name));
+                }
             }
         }
         // `@extends Lexer<self::T_*>`: what inherited PHPDoc binds to.
@@ -1498,7 +1502,9 @@ fn class_has_deferred_type(info: &ClassReflection) -> bool {
             .values()
             .any(|p| property_has_deferred_type(p))
         || info.consts.values().any(|c| c.ty.contains_deferred())
-        || info.template_bounds.values().any(Type::contains_deferred)
+        || info.templates.iter().any(|t| {
+            t.bound.contains_deferred() || t.default.as_deref().is_some_and(Type::contains_deferred)
+        })
 }
 
 /// Every constant visible on `fqn` - its own, then each parent's and
@@ -1688,7 +1694,7 @@ fn is_enum_interface(fqn: &str, classes: &NameTable<ClassReflection>, depth: usi
 /// they're the only two places this registry persists a native-only
 /// counterpart type to fall back to (`ParameterReflection::ty_native`/
 /// `FunctionReflection::return_type_native`). `PropertyReflection`/`ConstantReflection`/
-/// `ClassReflection::template_bounds` have no such counterpart stored - an
+/// `ClassReflection`'s templates have no such counterpart stored - an
 /// unresolvable `value-of<T>` there stays plain `Mixed`.
 fn resolve_deferred_value_of_with_native_fallback(
     ty: Type,
@@ -1711,25 +1717,10 @@ impl ClassReflection {
     pub(crate) fn own_template_args(&self, class_name: &str) -> Vec<Type> {
         self.templates
             .iter()
-            .map(|name| {
-                let variance = if self.covariant_templates.contains(name) {
-                    types::Variance::Covariant
-                } else if self.contravariant_templates.contains(name) {
-                    types::Variance::Contravariant
-                } else {
-                    types::Variance::Invariant
-                };
-                Type::template_param(types::TemplateParam {
-                    name: name.to_string(),
-                    bound: Box::new(
-                        self.template_bounds
-                            .get(name)
-                            .cloned()
-                            .unwrap_or(Type::mixed()),
-                    ),
-                    variance,
+            .map(|template| {
+                Type::template_param(TemplateParam {
                     scope: Some(class_name.to_string()),
-                    default: self.template_defaults.get(name).cloned().map(Box::new),
+                    ..template.clone()
                 })
             })
             .collect()

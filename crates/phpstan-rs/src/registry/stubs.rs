@@ -399,11 +399,10 @@ impl Corpus {
 /// additionally carries phpstorm-stubs' own
 /// `#[LanguageLevelTypeAware(...)]` attribute. Reuses the exact template
 /// metadata `ReflectionClass`'s own already-correctly-parsed `ClassReflection`
-/// carries for `T` (`templates`/`template_bounds`/`covariant_templates`/
-/// `contravariant_templates`/`template_defaults`) rather than hand-guessing
-/// a fresh bound/variance/default - `TemplateParam` is a plain value type,
-/// not identity-sensitive, so building one from those exact field values
-/// is equivalent to "reusing" any other node that would carry them.
+/// carries for `T` (its `TemplateParam`) rather than hand-guessing a fresh
+/// bound/variance/default - `TemplateParam` is a plain value type, not
+/// identity-sensitive, so a copy is equivalent to "reusing" any other node
+/// that would carry the same values.
 ///
 /// `new ReflectionClass(Foo::class)`, `new ReflectionClass('Foo')` and
 /// `new ReflectionClass($foo)` all bind `T` to `Foo`: the class-string
@@ -419,26 +418,12 @@ fn patch_reflection_class_constructor_template(classes: &mut [(Name, ClassReflec
     else {
         return;
     };
-    if !info.templates.iter().any(|t| t.as_ref() == "T") {
+    let Some(tp) = info.template("T").cloned() else {
         return;
-    }
+    };
     let tp = TemplateParam {
-        name: "T".to_string(),
-        bound: Box::new(
-            info.template_bounds
-                .get("T")
-                .cloned()
-                .unwrap_or(Type::explicit_mixed()),
-        ),
-        variance: if info.covariant_templates.contains("T") {
-            types::Variance::Covariant
-        } else if info.contravariant_templates.contains("T") {
-            types::Variance::Contravariant
-        } else {
-            types::Variance::Invariant
-        },
         scope: Some("ReflectionClass".to_string()),
-        default: info.template_defaults.get("T").cloned().map(Box::new),
+        ..tp
     };
     let Some(ctor) = info.methods.get_mut("__construct") else {
         return;
@@ -508,13 +493,9 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Name, ClassRef
         else {
             continue;
         };
-        if info.templates.iter().any(|t| t.as_ref() == "TClass") {
+        if info.template("TClass").is_some() {
             continue;
         }
-        info.templates.push(Name::from("TClass"));
-        info.covariant_templates.insert(Name::from("TClass"));
-        info.template_bounds
-            .insert(Name::from("TClass"), Type::object_without_class());
         let tp = TemplateParam {
             name: "TClass".to_string(),
             bound: Box::new(Type::object_without_class()),
@@ -522,6 +503,7 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Name, ClassRef
             scope: Some(class_name.to_string()),
             default: None,
         };
+        info.templates.push(tp.clone());
         if let Some(m) = info.methods.get_mut("getDeclaringClass") {
             m.return_type = Type::object("ReflectionClass".into(), vec![Type::template_param(tp)]);
         }
@@ -536,26 +518,9 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Name, ClassRef
         .iter()
         .find(|(name, _)| name.as_ref() == "ReflectionClass")
         .and_then(|(_, info)| {
-            if !info.templates.iter().any(|t| t.as_ref() == "T") {
-                return None;
-            }
             Some(Type::template_param(TemplateParam {
-                name: "T".to_string(),
-                bound: Box::new(
-                    info.template_bounds
-                        .get("T")
-                        .cloned()
-                        .unwrap_or(Type::explicit_mixed()),
-                ),
-                variance: if info.covariant_templates.contains("T") {
-                    types::Variance::Covariant
-                } else if info.contravariant_templates.contains("T") {
-                    types::Variance::Contravariant
-                } else {
-                    types::Variance::Invariant
-                },
                 scope: Some("ReflectionClass".to_string()),
-                default: info.template_defaults.get("T").cloned().map(Box::new),
+                ..info.template("T")?.clone()
             }))
         })
     else {
@@ -717,7 +682,13 @@ fn patch_spl_iterator_templates(classes: &mut [(Name, ClassReflection)]) {
         if !info.templates.is_empty() {
             continue;
         }
-        info.templates = template_names.iter().map(|t| Name::from(*t)).collect();
+        info.templates = template_names
+            .iter()
+            .map(|t| TemplateParam {
+                scope: Some(class_name.to_string()),
+                ..TemplateParam::unbounded((*t).to_string())
+            })
+            .collect();
     }
 }
 
@@ -735,6 +706,10 @@ fn patch_spl_iterator_templates(classes: &mut [(Name, ClassReflection)]) {
 /// that type, as long as the class ends up with the stub's own template
 /// names, since the type may refer to them.
 fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
+    fn same_template_names(a: &[TemplateParam], b: &[TemplateParam]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.name == b.name)
+    }
+
     for source in PHPSTAN_STUB_SOURCES {
         let Ok(parsed) = syntax::parse(source.as_bytes()) else {
             continue;
@@ -743,7 +718,7 @@ fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
         crate::stub_attributes::apply_stub_attributes(&mut program);
         let registry = Registry::index_and_flatten(&program, &Origin::Unknown);
         for (name, stub) in registry.classes {
-            let Some((_, info)) = classes
+            let Some((class_name, info)) = classes
                 .iter_mut()
                 .find(|(n, _)| n.eq_ignore_ascii_case(&name))
             else {
@@ -752,11 +727,14 @@ fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
             if stub.templates.is_empty() {
                 // Nothing to merge.
             } else if info.templates.is_empty() {
-                info.templates = stub.templates.clone();
-                info.template_bounds = stub.template_bounds.clone();
-                info.template_defaults = stub.template_defaults.clone();
-                info.covariant_templates = stub.covariant_templates.clone();
-                info.contravariant_templates = stub.contravariant_templates.clone();
+                info.templates = stub
+                    .templates
+                    .iter()
+                    .map(|template| TemplateParam {
+                        scope: Some(class_name.to_string()),
+                        ..template.clone()
+                    })
+                    .collect();
                 if info.extends_args.is_empty() {
                     info.extends_args = stub.extends_args.clone();
                 }
@@ -765,21 +743,18 @@ fn patch_phpstan_stub_classes(classes: &mut [(Name, ClassReflection)]) {
                         .entry(iface.clone())
                         .or_insert_with(|| args.clone());
                 }
-            } else if info.templates == stub.templates {
-                info.covariant_templates = stub.covariant_templates.clone();
-                info.contravariant_templates = stub.contravariant_templates.clone();
-                for (t, bound) in &stub.template_bounds {
-                    info.template_bounds
-                        .entry(t.clone())
-                        .or_insert_with(|| bound.clone());
-                }
-                for (t, default) in &stub.template_defaults {
-                    info.template_defaults
-                        .entry(t.clone())
-                        .or_insert_with(|| default.clone());
+            } else if same_template_names(&info.templates, &stub.templates) {
+                for (own, stub) in info.templates.iter_mut().zip(&stub.templates) {
+                    own.variance = stub.variance;
+                    if own.bound.is_mixed() {
+                        own.bound = stub.bound.clone();
+                    }
+                    if own.default.is_none() {
+                        own.default = stub.default.clone();
+                    }
                 }
             }
-            if info.templates != stub.templates {
+            if !same_template_names(&info.templates, &stub.templates) {
                 continue;
             }
             for (prop, stub_sig) in &stub.properties {

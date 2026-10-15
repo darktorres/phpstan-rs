@@ -2,34 +2,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::name::NameMap;
 
 use crate::registry::Registry;
-use types::{self, Type, Variance};
+use types::{self, Type};
 
 impl Registry {
-    /// This class's own declared variance for the `index`-th `@template`
-    /// of `class` (`Covariant`/`Contravariant`/`Invariant` - the same
-    /// three-way classification `TemplateParam::variance` itself carries,
-    /// just looked up by position rather than read off an already-marked
-    /// node) - `None` when `class` isn't a registered class at all, or
-    /// declares fewer templates than `index` needs, either of which means
-    /// this project has no real basis to say whether subtyping flows
-    /// through that slot at all, let alone which direction. Callers treat
-    /// `None` as "don't know, don't guess" - matching this project's
-    /// general leniency elsewhere - rather than defaulting to `Invariant`
-    /// and risking a false positive on a real but unregistered
-    /// (uninstalled dependency, PHAR-bundled `phpstan/phpstan` itself, ...)
-    /// generic class.
-    pub(crate) fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
-        let info = self.classes.get(class)?;
-        let name = info.templates.get(index)?;
-        Some(if info.covariant_templates.contains(name) {
-            Variance::Covariant
-        } else if info.contravariant_templates.contains(name) {
-            Variance::Contravariant
-        } else {
-            Variance::Invariant
-        })
-    }
-
     /// Binds a generic-typed receiver's own carried type arguments
     /// (`Collection<User>` -> `{"T": Object("User", [])}`) against
     /// `target`'s own declared `@template` parameter names, walking up
@@ -93,7 +68,7 @@ impl Registry {
             let own_bindings: FxHashMap<String, Type> = info
                 .templates
                 .iter()
-                .map(|s| s.to_string())
+                .map(|template| template.name.clone())
                 .zip(type_args.iter().cloned())
                 .collect();
 

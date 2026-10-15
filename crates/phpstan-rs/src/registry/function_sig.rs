@@ -20,7 +20,8 @@ mod type_resolution;
 pub(crate) use asserts::resolve_assert_tags;
 pub use asserts::{AssertInfo, AssertTarget};
 pub(crate) use generics::{
-    build_template_params, build_type_aliases, mark_template_params, substitute_type_aliases,
+    build_template_params, build_type_aliases, declared_template_params, mark_template_params,
+    substitute_type_aliases,
 };
 pub(crate) use type_resolution::{DeclaredType, apply_implicit_nullable_default, declared_type};
 

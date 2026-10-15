@@ -71,19 +71,11 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// its literal - `new Box(5)` is `Box<int>`, so it can later hold a `6` -
 /// unless the template's bound is itself scalar (`T of int` keeps `5`),
 /// an `array-key` bound widening any scalar.
-fn generalize_inferred_class_template(
-    info: &crate::registry::ClassReflection,
-    template: &Name,
-    ty: &Type,
-) -> Type {
-    if info.covariant_templates().contains(template) {
+fn generalize_inferred_class_template(template: &types::TemplateParam, ty: &Type) -> Type {
+    if template.variance == types::Variance::Covariant {
         return ty.clone();
     }
-    let bound = info
-        .template_bounds()
-        .get(template)
-        .cloned()
-        .unwrap_or_else(Type::mixed);
+    let bound = (*template.bound).clone();
     let array_key_bound =
         bound == Type::unknown_array_key() || bound == Type::benevolent_array_key();
     let widens = if ty.is_scalar().yes() && array_key_bound {
@@ -4719,7 +4711,7 @@ impl<'a> Checker<'a> {
                             .registry
                             .classes
                             .get(canonical.as_str())
-                            .map(|info| info.templates().as_slice())
+                            .map(|info| info.templates())
                             .unwrap_or(&[]);
                         if templates.is_empty() {
                             Type::object(canonical.into(), Vec::new())
@@ -4768,19 +4760,13 @@ impl<'a> Checker<'a> {
                             // `Mixed` there.
                             let last_bound = templates
                                 .iter()
-                                .rposition(|t| bindings.contains_key(t.as_ref()))
+                                .rposition(|t| bindings.contains_key(t.name.as_str()))
                                 .map(|i| i + 1)
                                 .unwrap_or(0);
-                            let info = self.registry.classes.get(canonical.as_str());
                             let bound_args = templates[..last_bound]
                                 .iter()
-                                .map(|t| match bindings.get(t.as_ref()) {
-                                    Some(ty) => match info {
-                                        Some(info) => {
-                                            generalize_inferred_class_template(info, t, ty)
-                                        }
-                                        None => ty.clone(),
-                                    },
+                                .map(|t| match bindings.get(t.name.as_str()) {
+                                    Some(ty) => generalize_inferred_class_template(t, ty),
                                     None => Type::mixed(),
                                 })
                                 .collect();

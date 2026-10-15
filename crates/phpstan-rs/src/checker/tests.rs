@@ -6,3 +6,4 @@ mod helpers;
 mod locals_keys;
 mod method_memo;
 mod narrowing;
+mod template_params;

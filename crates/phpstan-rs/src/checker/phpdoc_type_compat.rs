@@ -195,33 +195,15 @@ impl<'a> Checker<'a> {
             .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
         let class_templates: Vec<String> = class_info
-            .map(|info| info.templates().iter().map(|t| t.to_string()).collect())
+            .map(|info| info.template_names().map(str::to_string).collect())
             .unwrap_or_default();
         for callable in callables {
             let Some(sig) = callable.callable_sig() else {
                 continue;
             };
             let description = callable.to_string();
-            let names: Vec<Name> = sig
-                .templates
-                .iter()
-                .map(|t| t.name.as_str().into())
-                .collect();
-            let bounds = sig
-                .templates
-                .iter()
-                .filter(|t| !t.bound.is_mixed())
-                .map(|t| (t.name.as_str().into(), (*t.bound).clone()))
-                .collect();
-            let defaults = sig
-                .templates
-                .iter()
-                .filter_map(|t| Some((t.name.as_str().into(), (**t.default.as_ref()?).clone())))
-                .collect();
             self.check_template_declaration_validity(
-                &names,
-                &bounds,
-                &defaults,
+                &sig.templates,
                 &type_aliases,
                 crate::checker::generics::TemplateSubject::Callable {
                     location,
@@ -613,7 +595,7 @@ impl<'a> Checker<'a> {
             .map(|d| docblock::parse_shared(d).templates.clone())
             .unwrap_or_default();
         if let Some(info) = class_name.and_then(|c| self.registry.classes.get(c)) {
-            names.extend(info.templates().iter().map(|t| t.to_string()));
+            names.extend(info.template_names().map(str::to_string));
         }
         names
     }

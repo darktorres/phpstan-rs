@@ -116,16 +116,10 @@ impl Relation<'_> {
                     // (`accepts(bound, concrete)` fails whenever
                     // `concrete` is a strict subtype of `bound`) - a real,
                     // dangerous new false-positive class this project doesn't
-                    // have data to avoid anyway: `ClassReflection` only persists
-                    // `template_bounds`, never a class-level `@template T =
-                    // Default` map the way `TemplateParam.default` carries
-                    // one for a function/method's own templates (`crate::
-                    // Type::substitute_templates`'s own real, shipped behavior pads
-                    // with `.default`, falling back to `Mixed` - never the
-                    // bound). Plain `Mixed` is both what's actually available
-                    // and what already skips this slot's comparison entirely
-                    // via the "either side Mixed" rule below - correctly
-                    // lenient for the common case without guessing wrong.
+                    // have data to avoid anyway. Plain `Mixed` is what
+                    // already skips this slot's comparison entirely via the
+                    // "either side Mixed" rule below - correctly lenient for
+                    // the common case without guessing wrong.
                     // `args_a` is in `a`'s own frame - map it into `b`'s own
                     // template names via the same ancestor-substitution walk
                     // `extends_args`/`implements_args` already use elsewhere,
@@ -137,9 +131,9 @@ impl Relation<'_> {
                         info_b
                             .templates
                             .iter()
-                            .map(|name| {
+                            .map(|template| {
                                 bindings
-                                    .get(name.as_ref())
+                                    .get(template.name.as_str())
                                     .cloned()
                                     .unwrap_or(Type::mixed())
                             })

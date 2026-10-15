@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 
 use crate::registry::function_sig::{
     DeclaredType, FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
-    build_template_params, build_type_aliases, declared_type, infer_class_const_type,
+    build_type_aliases, declared_template_params, declared_type, infer_class_const_type,
     mark_template_params, substitute_type_aliases,
 };
 use crate::registry::name_context::{
@@ -416,11 +416,17 @@ pub struct ClassReflection {
     // `insteadof` (whose actual trait-selection this project doesn't
     // otherwise model).
     pub(in crate::registry) resolved_trait_conflicts: NameSet,
-    // This class's own `@template T` names, in declaration order - order
+    // This class's own `@template` parameters, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
-    // class_template_bindings`). Empty for a non-generic class.
-    pub(in crate::registry) templates: Vec<Name>,
+    // class_template_bindings`). Each carries its bound (explicit `mixed`
+    // without an `of` clause, checked wherever the class is referenced
+    // with concrete arguments), its variance (`@template-covariant`/
+    // `-contravariant`, invariant otherwise), its default (what an
+    // omitted argument is, so a reference supplying fewer arguments than
+    // there are templates is an arity error only for a template without
+    // one) and the class as its scope. Empty for a non-generic class.
+    pub(in crate::registry) templates: Vec<TemplateParam>,
     // `@extends Parent<Arg, ...>`'s argument list - fixes
     // `extends.first()`'s `@template` names for every instance of this
     // class, independent of whether this class is itself generic (e.g.
@@ -447,24 +453,6 @@ pub struct ClassReflection {
     // TemplateTypeTrait;`, not the class's separate `/** @api */`
     // docblock above it) - see `TraitUse::doc_comment`.
     pub(in crate::registry) uses_args: NameMap<Vec<Type>>,
-    // `@template T of Bound` - the resolved bound for whichever of
-    // `templates` above declared one. Checked by
-    // `checker::check_generic_bounds` wherever this class is referenced
-    // with concrete type arguments (`Collection<Foo>`).
-    pub(in crate::registry) template_bounds: NameMap<Type>,
-    // `@template T = Default` - the resolved default for whichever of
-    // `templates` above declared one, mirroring `template_bounds`'s
-    // shape/construction exactly. A generic reference supplying fewer
-    // type arguments than `templates.len()` is only a real arity error
-    // (`check_generic_reference_arity`, `checker/generics.rs`) for a
-    // template name absent from this map - one with a default is
-    // legitimately optional to supply.
-    pub(in crate::registry) template_defaults: NameMap<Type>,
-    // Names from `templates` above additionally declared
-    // `@template-covariant`/`@template-contravariant` - a name absent
-    // from both stays invariant.
-    pub(in crate::registry) covariant_templates: NameSet,
-    pub(in crate::registry) contravariant_templates: NameSet,
     // This class/interface/trait's own docblock carries `@api` (or,
     // equivalently, `@api-do-not-implement`, which implies it - see
     // `DocBlock::api`'s doc comment). Consulted only by
@@ -707,8 +695,18 @@ impl ClassReflection {
         &self.resolved_trait_conflicts
     }
 
-    pub fn templates(&self) -> &Vec<Name> {
+    pub fn templates(&self) -> &[TemplateParam] {
         &self.templates
+    }
+
+    /// The template `name`, which this class declares.
+    pub fn template(&self, name: &str) -> Option<&TemplateParam> {
+        self.templates.iter().find(|t| t.name == name)
+    }
+
+    /// The names of the templates, in declaration order.
+    pub fn template_names(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.templates.iter().map(|t| t.name.as_str())
     }
 
     pub fn extends_args(&self) -> &Vec<Type> {
@@ -721,22 +719,6 @@ impl ClassReflection {
 
     pub fn uses_args(&self) -> &NameMap<Vec<Type>> {
         &self.uses_args
-    }
-
-    pub fn template_bounds(&self) -> &NameMap<Type> {
-        &self.template_bounds
-    }
-
-    pub fn template_defaults(&self) -> &NameMap<Type> {
-        &self.template_defaults
-    }
-
-    pub fn covariant_templates(&self) -> &NameSet {
-        &self.covariant_templates
-    }
-
-    pub fn contravariant_templates(&self) -> &NameSet {
-        &self.contravariant_templates
     }
 
     pub fn is_api(&self) -> bool {
@@ -982,21 +964,19 @@ impl ClassReflection {
             c.doc_comment.as_deref().map(docblock::parse_shared);
         // An enum can't be generic; its `@template` tags declare nothing.
         let template_doc = class_doc.as_ref().filter(|_| c.kind != ClassKind::Enum);
-        let templates: Vec<Name> = template_doc
-            .map(|d| d.templates.iter().map(Name::from).collect())
-            .unwrap_or_default();
         // This class's `@template` metadata (bound/variance/default),
-        // keyed by name - `templates` above stays a plain `Vec<String>`
-        // (positional order still drives type-argument binding
-        // elsewhere, e.g. `checker::class_template_bindings_rec`), but
-        // every template this class's docblock produces
+        // keyed by name - every template this class's docblock produces
         // (properties, consts, `@extends`/`@implements` args, and every
         // method's params/return type below) carries the real metadata
         // from here instead of a bare name.
         let class_scope = name.to_string();
-        let template_params: FxHashMap<String, TemplateParam> = template_doc
-            .map(|d| build_template_params(d, &class_scope, ctx))
+        let declared_templates: Vec<TemplateParam> = template_doc
+            .map(|d| declared_template_params(d, &class_scope, ctx))
             .unwrap_or_default();
+        let template_params: FxHashMap<String, TemplateParam> = declared_templates
+            .iter()
+            .map(|param| (param.name.clone(), param.clone()))
+            .collect();
         // `@phpstan-type Name TypeExpr` local aliases - resolved once,
         // here, and spliced into every member's `ty` below (never
         // `ty_native`, which by definition never reflects a docblock) via
@@ -1005,6 +985,18 @@ impl ClassReflection {
         // member's surrounding type, not before.
         let (type_aliases, type_alias_case_refs) =
             build_type_aliases(class_doc.as_deref(), &template_params, ctx);
+        // The templates in declaration order, a bound or default naming one
+        // of the class's `@phpstan-type` aliases spelled out.
+        let templates: Vec<TemplateParam> = declared_templates
+            .into_iter()
+            .map(|param| TemplateParam {
+                bound: Box::new(substitute_type_aliases(*param.bound, &type_aliases)),
+                default: param
+                    .default
+                    .map(|default| Box::new(substitute_type_aliases(*default, &type_aliases))),
+                ..param
+            })
+            .collect();
         // `@phpstan-import-type` - resolved just enough here (both names,
         // via this class's `ctx`) to be looked up in the source class's
         // `type_aliases` once it's indexed too; see `ResolvedTypeImport`'s
@@ -1454,33 +1446,6 @@ impl ClassReflection {
             .flat_map(|d| d.uses.clone())
             .filter_map(|raw| class_and_args(&resolve_generic_tag(&raw)))
             .collect();
-        let template_bounds: NameMap<Type> = class_doc
-            .as_ref()
-            .map(|d| {
-                d.template_bounds
-                    .iter()
-                    .map(|(name, raw)| (Name::from(name), resolve_generic_tag(raw)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let template_defaults: NameMap<Type> = class_doc
-            .as_ref()
-            .map(|d| {
-                d.template_defaults
-                    .iter()
-                    .map(|(name, raw)| (Name::from(name), resolve_generic_tag(raw)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let covariant_templates: NameSet = class_doc
-            .as_ref()
-            .map(|d| d.covariant_templates.iter().map(Name::from).collect())
-            .unwrap_or_default();
-        let contravariant_templates: NameSet = class_doc
-            .as_ref()
-            .map(|d| d.contravariant_templates.iter().map(Name::from).collect())
-            .unwrap_or_default();
-
         // Real PHP (8.0+) makes any class declaring a public
         // `__toString()` automatically implement `Stringable`, with no
         // `implements Stringable` needed - added specifically so the
@@ -1620,10 +1585,6 @@ impl ClassReflection {
             extends_args,
             implements_args,
             uses_args,
-            template_bounds,
-            template_defaults,
-            covariant_templates,
-            contravariant_templates,
             is_api,
             is_api_do_not_implement,
             is_internal,
@@ -2061,11 +2022,6 @@ impl ClassReflection {
             .extend(other.final_methods_by_phpdoc);
         self.resolved_trait_conflicts
             .extend(other.resolved_trait_conflicts);
-        self.covariant_templates.extend(other.covariant_templates);
-        self.contravariant_templates
-            .extend(other.contravariant_templates);
-        self.template_bounds.extend(other.template_bounds);
-        self.template_defaults.extend(other.template_defaults);
         self.implements_args.extend(other.implements_args);
         self.uses_args.extend(other.uses_args);
         // Same "a tag present on either declaration sticks" reasoning as
