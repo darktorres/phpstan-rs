@@ -20,6 +20,7 @@ use std::time::Instant;
 
 mod arch;
 mod front_end;
+mod gatetime;
 mod modgraph;
 mod stub_index;
 #[cfg(test)]
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
         Some("type-drift") => type_drift(&args[1..]),
         Some("perf") => perf(),
         Some("buildtime") => buildtime(),
+        Some("gatetime") => gatetime::gatetime(&args[1..]),
         Some("tests") => test_manifest(),
         Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
         Some("arch") => arch::arch(&root()),
@@ -69,6 +71,10 @@ const USAGE: &str = "usage: cargo xtask <command>
   perf                   record wall time and peak memory of the scoped run
   buildtime              record incremental rebuild times
   tests                  record and check the test-name manifest
+  gatetime (--record | --since <hash>)
+                         median wall time of the lib tests and the fixture
+                         suite over three runs on prebuilt binaries;
+                         --since fails on any step not lower than <hash>'s
   modgraph [--inventory] check the module graph against
                          gates/module-graph.txt (--inventory lists every
                          crossing edge)
