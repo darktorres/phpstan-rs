@@ -1,284 +1,92 @@
 # Piwigo performance ledger
 
-Every optimization task for the Piwigo profile, on both lines of work, with its state and what blocks it. State as of 2026-10-15: this branch (`callgrind-20g`) at `36815464`, `master` at `975b3f05`.
+Every optimization task for the Piwigo profile on this branch (`callgrind-20g`), with its state and what blocks it. State as of 2026-10-15, at `36815464`.
 
-It replaces `PROFILE_DRILL_PIWIGO_OFF_BUILD_LEDGER.md` (folded in, Appendix A) and the status text of `PROFILE_DRILL_PIWIGO_20G.md`. The 20 G report stays as the plan's design text. The copy on this branch is the one written at `d520c9fd` (2,002 lines); the current one is on `master` (3,354 lines). Its status claims were written at `5fb858c9` and are out of date: Appendix B re-evaluates every item against the code and the profiles, and Appendix C says how.
+It replaces `PROFILE_DRILL_PIWIGO_OFF_BUILD_LEDGER.md` (folded in, Appendix A) and the status text of `PROFILE_DRILL_PIWIGO_20G.md`. The 20 G report stays as the plan's design text. Its status claims were written at `5fb858c9`, before the off drill's rows changed the code under them, so each of its twenty items is re-evaluated here against the code and the latest profile.
 
-**Status words.** DONE (hash), PART (what is left), OPEN, READY (open, nothing blocks it), BLOCKED (on what), DUPLICATE (the other line has it), SKIP (reason), SUPERSEDED, DEFERRED (not an optimization, or waits on one that is not).
+**Status words.** DONE (hash), OPEN, READY (open, nothing blocks it), BLOCKED (on what), SKIP (reason), SUPERSEDED (an earlier row of this ledger did the work), PART (what is left).
 
-**Ids.** `OFF-x` is a row of the off drill, built on this branch (Appendix A has its full text under the id `x`). `20G-n.m` is a row of `master`'s `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` (1,141 lines, about 1,100 rows; this ledger keeps the parent rows and names the child rows by range). `HEAD-Ox` is a row of `master`'s `PROFILE_DRILL_PIWIGO_HEAD_LEDGER.md`. `INT`, `GATE`, `DEC`, `CRATE` and `MEAS` rows are new here: the tasks that block optimization rows.
+**Ids.** `OFF-x` is a row of the off drill (Appendix A has its full text under the id `x`). `20G-n` is item n of the 20 G plan (`PROFILE_DRILL_PIWIGO_20G.md`, Part II), `20G-n.s` its step s. `DEC`, `CRATE` and `VAL` rows are blocking tasks that are not optimizations.
 
 **Rules.**
 
 - One commit per row, made as soon as the row's own check passes, with a pathspec (`git commit -m … -- <paths>`).
 - A row that changes behaviour or layout keeps the Piwigo output byte-identical to the base's (`LC_ALL=C sort` both before diffing), unless the row says why it cannot.
-- A saving is claimed only from a paired measurement: callgrind `Ir` summed over threads for instructions; `hyperfine -N`, alternating A B A B, `nice -n 19`, `/proc/loadavg` noted, for wall time. A "target" in this ledger is the cost of the code a row would replace, read from a profile. It is not a saving.
-- `master`'s keep rule applies to rows built there: a change is kept only if it lowers instructions for its own targets and wall time does not get worse.
+- A saving is claimed only from a measurement: callgrind `Ir` summed over threads against the previous row's commit, off mode, `dhat` profile with frame pointers; wall time by `hyperfine -N`, alternating A B A B, `nice -n 19`, `/proc/loadavg` noted. A "target" in this ledger is the cost of the code a row would replace, read from a profile. It is not a saving.
 - Builds, profiling runs and `check-project` probes need the user's go-ahead. Heavy jobs run one at a time.
 
-## 1. Two lines of work
+## 1. Where the branch stands
 
-Both lines were cut from `d520c9fd` (2026-10-03, the commit that added the 20 G plan). Neither has any row of the other.
+| | |
+|---|---|
+| base | `5fb858c9`'s code (the 20 G plan's), off mode: 25,625,190,065 Ir |
+| now | `791d29cb` (P8b): 20,928,053,254 Ir, −4.70 G (−18.3%); output byte-identical at every row |
+| profile | `~/.cache/prs-profile/p8b/cg` (off mode: stub cache and file cache off, so the 3.4 G stub build is in it) |
 
-| | `callgrind-20g` (this checkout) | `master` |
-|---|---|---|
-| head | `36815464` | `975b3f05` (`master2` and `master3` share `e32fd95d` with it and hold the builtin-runs and PHP-catalog work) |
-| built | the off drill's rows (`OFF-`): 18 code commits, `3d5434b3` to `791d29cb` | the 20 G plan's items 0-9 and 10.1-10.2 (the 1,141-line ledger), effect resolution (ledger item E) and the batch of 128 `perf` commits that cut its cost (`PROFILE_DRILL_PIWIGO_9071_BATCH_PLAN.md`), then the level-9 drill (HEAD ledger) |
-| ledgers | this file | the three files above and `WORK_STACK.md` (state 2026-10-11) |
-| measured | off 25,625,190,065 → 20,928,053,254 Ir (−4.70 G, −18.3%) | at `97b8f3f0`: off 49.34 G, warm 39.37 G, cold with store 53.13 G; heap 6.28 GB allocated, 1.41 GB peak, 1.08 GB at exit; wall 4.12 s off, 3.77 s warm |
-| what "off" means | stub cache and file cache both off | file cache off, stub cache warm |
+Where the 20.93 G sits (threads summed): the parse job on the workers 8.66 G (`read_and_parse_file`, 14,251 files); the check 6.42 G (`check_files`, 2,792 files); the stub build 3.18 G on its pool; the finishing passes 0.97 G on their thread plus ≈0.7 G stolen by other threads; the main thread 0.71 G; the autoload thread 0.32 G. Of the parse job's `parse_file` cost 78% is the project's files, 20% the stub files, 2% the autoload files.
 
-- **The totals do not compare.** In `master`'s mode the code measured 20.58 G at `5fb858c9` and 49.34 G at `97b8f3f0` (`HEAD-C6`, `HEAD-C9`). About 26 G of the 49.34 G is effect resolution: `Registry::classify` 16.6 G on the workers (over every non-stub function, method, file top level and property hook), `Registry::resolve_effects` 4.5 G on the finishing thread (called from `resolve_transitive_purity`), `BodySummary::summarize` 5.4 G in the load. This line's code has none of it.
-- **The lines conflict.** Merging `callgrind-20g` into `master` conflicts in 49 files (`git merge-tree`, nothing touched), among them `project.rs`, `session.rs`, `parser.rs`, `lexer.rs`, `relation.rs` and `purity.rs`. Applying each of this line's code commits to `master` alone gives the conflicts in §3C.
-- **Savings from this line were measured on the `5fb858c9` code.** `master` has changed the code under most of them, so none carries over without a new measurement (INT-1).
-- **The 20 G plan's status is `master`'s.** On this branch none of the plan's items is built; on `master` items 0-9 and 10.1-10.2 are.
+None of the 20 G plan's twenty items is built. Four of the off drill's rows changed what some of them would save (P7 and item 14; P8 and items 3 and 13; P9 and item 4; E5-E7 and items 7 and 16); §3B says how.
 
 ## 2. Blocking tasks
 
 These are not optimizations. Each gates optimization rows.
 
-| id | task | kind | blocks | state |
-|---|---|---|---|---|
-| INT-1 | Decide how the two lines meet. Options: (a) apply this line's rows to `master` one at a time, each measured again in `master`'s protocol; (b) merge `callgrind-20g` into `master` and resolve the 49 files once; (c) drop the rows that duplicate or do not apply (INT-2, INT-3) and apply only the stub-build rows (`OFF-E1`, `P1`, `P2`, `P4`, `P5`) and the independent cuts and defect fixes. Recommended: (c), then (a) for what is left, because `OFF-P4` applies cleanly and most of the cuts conflict in one file, while a merge would settle P8 and P9 by accident. | decision, yours | every `OFF-` row's reaching `master`; `OFF-E8`; any comparison between the lines | OPEN |
-| INT-2 | Rows that exist on both lines, to drop on one: `OFF-P3` is `master`'s `5ca07bd1` (built name bases get a hash index); `OFF-E2` is already in `master` (`stmt.rs` gates on `inline_var.is_empty()`); `OFF-E8` is `master`'s `3f2309b1` and `ffb3b177` (a cache file holds each distinct type and call once); `OFF-E4` is `master`'s `30e0af82` (an analysed file's derived data in the file cache), which this line measured and rejected (`OFF-E4`: warm −2% to −5%, cold +9% to +14% on two trees). | cleanup | `OFF-P3`, `E2`, `E4`, `E8` | OPEN |
-| INT-3 | `OFF-P8a`, `P8b` and `P9` assume a context body is rarely read. On `master` effect resolution reads every body: `Registry::resolve_effects` classifies every non-stub function and method (`effects.rs`, `own_functions_by_id`, `members_with_slots`), and `BodySummary::summarize` costs 5.4 G in the load (4.3 G over 59,926 function bodies). So their saving on `master` is close to nothing unless classification becomes demand-driven (only declarations that analysed code can reach), and no row on either line asks for that. Needs a design before any port. | design, yours | `OFF-P8a`, `P8b`, `P9` | OPEN |
-| GATE-1 | The Piwigo output gate is open: 613 findings against the batch's 611 (`HEAD-Q4`: find the commit between `9071f48f` and `97df097c` that adds `SearchFilterRenderer.php:442` and `ResponseBodyCallSiteVisitor.php:79`, judge each). | verification | GATE-2 | OPEN |
-| GATE-2 | `20G-E2.V`: workspace tests, fixtures, report equal to the Part 1 baseline, `oracle` pass, callgrind, heap, `hyperfine`. `master`'s batch plan runs its verification once, after the batch's last item. | verification | `20G-E2.6`, `20G-E2.12.27`, `20G-E1.2.4` and `EG.2` (decided to be built after it) | OPEN (needs `20G-E2.11`) |
-| GATE-3 | Order on `master`: level 9 first (the HEAD ledger's tasks, one at a time), then level 7 resumes at `20G-10.3`. Items run in order, each closed by its gate `10.V` to `19.V` (workspace tests, item tests, one callgrind run, one heap run), then `V.0`-`V.2` once. This is a process rule, not a technical dependency; the technical `needs` are in §3B. | process | every `20G-1x` row, as a sequence | in force |
-| GATE-4 | Runs that wait for your go-ahead: `HEAD-O2` (the instrumented run), `O5` (parse-cost measurement), `O6` (release measurement), `O7` (counting duplicate pushes); on this line every build, profile or `check-project` probe. | approval | those rows | OPEN |
-| DEC-1 | `OFF-D3`: how a binary carries the stub data (compile time or not). Decided again once the crate split's C5 sets its version key, on ≈0.2-1.5 G per cold run (C8) against 5.05 G in the old code. | decision | `OFF-P6` | OPEN |
-| CRATE-1 | Level 2, the crate split from Stage C on (C4 lazy resolution, C5 stub layer, C10 reflection crate). Paused behind level 3 (140 review tasks) and level 6; `master`'s `WORK_STACK.md` has the order. C4 and C5 remove the eager stub build that `OFF-P1`-`P4` speed, so those rows pay only until then. | other plan | `OFF-P6`; the lifetime of `OFF-P1`-`P4` | paused |
-| DEC-2 | `20G-17.1`'s stat index against the batch plan's recorded exclusion: a `stat`/`mtime` shortcut was judged unsound because a same-size rewrite that keeps its mtime (`rsync -t`, `tar`, composer installs) is served stale data. The design adds inode, device and the racy-file rule; whether it also compares `ctime` (which such a rewrite changes) is not written down. | decision | `20G-17.1`, `17.3` | OPEN |
-| SEM-1 | Deferred semantic rows under a perf row: `20G-17.4` (cache key adds the configured versions and `short_open_tag`) needs `10.8` and `12.13`, and `12.13` needs `6.3`, which needs `6.2` (the stub index's version ranges). All are marked "after O3, not optimization". | other plan | `20G-17.4` | DEFERRED |
-| MEAS-1 | Memory is up where the plan promised it would shrink. At `97b8f3f0` (cache off) the peak is 1.48 GB and 1.13 GB are held at exit, against 0.88 GB and 0.66 GB at `df603944` (the cache setting of that run is not recorded); the paired run with both caches warm gives 1.41 GB and 1.08 GB. The plan's end state was ≈0.37 GB at the start of the check. The batch plan lists the growth as unexplained. Until it is, a memory saving for `20G-19.x`, `HEAD-O9` or item 16 has no baseline. | measurement | memory claims of `19.x`, `16.x`, `HEAD-O9` | OPEN |
-| MEAS-2 | Wall time stops improving after four threads (≈5.0 s at 4 and at 8 threads; serial ≈2.1 s, parallel ≈10.4 s at one thread; load average not logged for the 8-thread runs). The cause is not known (`HEAD-Q3`). | measurement | wall claims for any row that adds parallelism | OPEN |
+| id | task | blocks | state |
+|---|---|---|---|
+| DEC-1 | `OFF-D3`: how a binary carries the stub data (compile time or not). Decided again once the crate split's C5 sets its version key, on ≈0.2-1.5 G per cold run (C8) against 5.05 G in the old code. | `OFF-P6` | OPEN |
+| CRATE-1 | Level 2, the crate split from Stage C on (C4 lazy resolution, C5 stub layer, C10 reflection crate), paused behind levels 3 and 6 (`WORK_STACK.md`). C4 and C5 reshape the stub layer, so they decide the form of `OFF-P6`, `OFF-E8`, `OFF-E11`, `20G-6` and `20G-17`, and they remove the eager stub build that `OFF-P1`-`P4` speed. | `OFF-P6`; the form of `20G-6`, `20G-17`, `OFF-E8`, `OFF-E11` | paused |
+| DEC-2 | The output-changing rows. The plan's §11 lists where output may differ: item 1 (links, roles, server), item 2 (link cycles), item 4 (member order), item 6 step 2 (guards on stub availability, a new polyfill check), item 7 (constants on a cycle read `never`), item 8 (one `@property` case), item 15 (container-field keys canonical), item 18 (§12.10's rule families). Each needs your decision before it is built; the rest of the plan is exact. | `20G-1`, `2` (link cycles), `4` (member order), `6.2`, `7` (cycles), `8`, `15.2`, `18.1`, `18.3`, `18.7` | OPEN |
+| VAL-1 | The plan validates once, after item 19 (§11): dumps of the front end, the registry, the types and the diagnostics taken from the starting commit and compared at the end, an `oracle` profile that runs the debug oracles over everything, an edit replay, the server session. On this branch the rows were validated one at a time (output byte-identical, a debug oracle per row, the touched module's tests). So item 0 is not a precondition for a row; it is what the plan's own end validation needs. `20G-0` | the plan's final validation | OPEN |
+| MEAS-1 | Warm-mode costs are not measured at this branch's code. Items 6 and 17 and rows `OFF-E8` and `OFF-E11` act on decoding and reading cache files, which an off-mode run does not do. The last warm profile is `cl-20g` at `5fb858c9`, before P1-P9. One warm callgrind run at HEAD settles their targets and needs your go-ahead. | targets of `20G-6`, `20G-17`, `OFF-E8`, `OFF-E11` | OPEN |
+| MEAS-2 | Memory is not measured at this branch's code. The plan's memory claims (items 3, 4, 9, 14, 16, 19) rest on the dhat profile at `5fb858c9`; P8a keeps ≈18 MB of text and P8b parses fewer trees, so the baseline moved. A heap run needs your go-ahead. | memory claims of `20G-3`, `4`, `9`, `14`, `16`, `19` | OPEN |
 
 ## 3. Open optimization tasks
 
-**How to read the numbers.** "Target" is the inclusive cost, in millions of instructions, of the code a row would replace, read from `master`'s off-mode callgrind profile at `97b8f3f0` (`cl-97b8f3f0-off`, 49.36 G, summed over all threads, calls in brackets). A target is the most a row could remove, not what it saves; a row's saving is claimed only from its own paired run. Rows whose work is memory or allocation count, or sits in a mode the off profile does not show, say so.
+**How to read the numbers.** "Target" is the inclusive cost, in millions of instructions, of the code a row would replace, read from the P8b off-mode profile (calls in brackets). It is the most the row could remove, not what it saves. Inclusive figures of recursive functions count nested calls more than once and are not quoted. Rows about memory or allocation counts say so.
 
-### 3A. `master`: level 9 and effect resolution
+### 3A. The off drill's open rows
 
-Effect resolution is about 26 G of the run (§1). The rows here are the ones the HEAD ledger and the effect part of the 20 G ledger still carry.
-
-| id | task | target or evidence | state | blocked by |
-|---|---|---|---|---|
-| HEAD-O2 | Stop retaining implicit operations: `scope.calls` holds 98.6 MB at peak (74.2 through `destroy_overwritten`, 24.4 through `dies`, about 140 bytes per `CallWrites`) and `Arc<[Origin]>` another 71.7 MB; 699,322 records per run. The plan (`~/.claude/plans/recursive-growing-unicorn.md`, outside the repo) derives call-result destroys from a flag on the call, derives scope-end destroys from the stored origins, interns what stays and stores it once per cache file. | steps 0-3 committed (`6598647a`, `4a3a1f40`, `95b86df6`, `e4af599d`, `e15e1cae`, `14a156b4`, `975b3f05`); steps 4-11 open: box `Origin`'s `Place` payload, the interner, move the remaining operations, the cache table, the seed and builtin-scalar results and program-wide pruning each decided by measurement, validation, measurements, ledger. Last recorded gate: monolog `check-project` +0.51% instructions at `e4af599d`, so the keep rule was not met then. Warm profile: the cache decode of summaries is `Callee` 1,232 M (1.19 M calls) and `Vec<Origin>` 737 M (848,635 calls), which the plan's step 7 targets | PART (steps 0-3 committed on `master`) | GATE-4 (the instrumented run) |
-| HEAD-O3 | `classify` reserves `calls` to `listed` (`effects.rs`); probe: 3.17 M pushes against 0.69 M reserved. Peak site 67.1 MB | open | READY | — |
-| HEAD-O4 | `Origin::Returned` holds an `Arc<Callee>` allocated per origin (since `e9215833`): 38 MB retained at peak. Overlaps O2, which changes origins | open | READY (sequence after O2's step 6) | — |
-| HEAD-O5 | The tag memo (`Memo<DocBlock>` in `tag_block`) holds 57.8 MB at peak; probe: 211,804 requests, 115,886 misses, 95,918 hits (45%); bound 16,384 entries | open; `20G-14.1` and `14.3` (a fingerprint-keyed memo bounded by weight) replace it, so build it there or settle which comes first | OPEN, needs approval | GATE-4; the choice against `14.1` |
-| HEAD-O6 | `Parser::token_ref` has no `#[inline]`: 480 M self over 16.1 M calls in this profile (a `dhat` profile, `lto = false`; the shipped release is thin LTO) | open; measure in a release build | OPEN, needs approval | GATE-4 |
-| HEAD-O7 | 6,801 target sets reach the set path at exactly 12 entries, receiving about 7.5 M pushes | open; count the duplicate pushes first | OPEN, needs approval | GATE-4 |
-| HEAD-O9 | Memory sites that wait for the tree release: the expression arena (78.5 MB at peak, 57.7 MB at exit), `FileTable::with_paths` (27.2 MB), `ReferenceIndex::from_file_refs` (19.3 MB), the effect table's buckets (15.7 MB) | open | BLOCKED | `20G-19.2`; MEAS-1 |
-| 20G-E2.3 | Effects on ids end to end. Landed: name-keyed lookups through the held `Name`, `TargetSet`, handle targets. Left: `Holder::Classes(Arc<[ClassId]>)`. A holder names classes that may not be loaded (an annotated type of a missing vendor class), which an id cannot say, so the id form needs a place for unloaded names first | `Holder` still holds `Arc<[Name]>` | PART | a design for unloaded classes |
-| 20G-E2.4 | `ReachMemo` and the descendants index. Left: `classes_declaring` as `&[ClassId]`, implicit sets for unknown holders, the descendants index built with the relation passes, the debug comparison with `effects/reference.rs` | memoises `implementations`, `every_method`, `overrides_of_builtin`, `methods_named`, the descendants walk | PART | `20G-E2.3` |
-| 20G-E2.6 | Cached classifications on warm runs, under a whole-run key (every file's path and content hash, the settings, the build). The row records that a key made of memo reads is unsound and only the whole-run key is | warm profile (39.37 G): `resolve_effects` 5.0 G on the finishing thread and `classify` 16.5 G on the workers, redone although nothing changed | OPEN | GATE-2 |
-| 20G-E2.8 | Deferred class results by slot. Left: `deferred_class_result` (0.33 G, one map probe per call) and the per-call `resolved_deferred_class` scan | warm: `resolved_deferred_class` 303.4 M decoding 59,434 stub methods (the cost the 20 G report named R5, now reached through the deferred-result path); `lookup_own_method` decodes another 34,991 (164.0 M) | PART | — |
-| 20G-E2.11 | Check-phase residual after E2.2-E2.9: fix only what the callgrind rerun shows. Left in the row: `&str` entry points that hash and compare the class name per call, the siteless dedupe of the list path, `builtin_runs` with arguments (0.99 G, 79 K calls), `relation_memo` | `<str>::is_folded_eq` 528 M (5.8 M calls), `<str>::fold_hash` 394 M (7.1 M calls); `Name::is_folded_eq` 557 M and `Name::fold_hash` 190 M over 32 M calls | PART | — |
-| 20G-E2.12.17 | `call_effect` by handle. Landed: handle reads. Not done, by soundness: `stub_effect_results` and `effects` stay keyed by `EffectId`, because handles reset at `begin_declaration_changes` while both maps survive it | | PART | a design that survives the reset |
-| 20G-E2.12.25 | `resolve_pseudo_at` returning `Cow<Type>` | re-evaluated, not built: a `Type` is a hash-consed `Arc`, so nothing is copied | SKIP | — |
-| 20G-E2.12.27 | `class_result_overlay` skip: `end_declaration_changes` returns before building overlays unless resolved declarations are set | | OPEN (waits for E2.V) | GATE-2 |
-| 20G-E2.12.28 | `Callee` node table in the cache, the vendor autoload cache and byte-prefix tests | built in code (`ffb3b177`, `f6f914d1`, `3c711a42`) | DONE in code, validation at E2.V | GATE-2 |
-
-### 3B. `master`: the 20 G plan's remaining items
-
-Rows keep `master`'s ids. "(changes output)" marks a row `master`'s ledger calls semantic: it is an optimization whose result may differ from today's. "Blocked by" is the open `needs` of the row in `master`'s ledger; a row with none is READY, apart from the process order of GATE-3. Child rows are in `master`'s ledger under `N.m.a`.
-
-**Item 10, tokens in flat arrays** (plan estimate ≈1.7 G; `20G-10.1` and `10.2` are done, and `master`'s end-of-batch run puts the lexer-and-parser group at −2.6 G). Cost left: lexing 3,619 M (`lex_token_stream_with_worker_scratch`, 16,419 files; `Lexer::next_token` 2,454 M of it), the parser's cursor (`Parser::token_ref` 480 M self over 16.1 M calls, `skip` 324 M self over 6.8 M).
-
-| row | task | target now | blocked by |
+| row | task | state | blocked by |
 |---|---|---|---|
-| 10.3 | `__halt_compiler` ends the stream where parsing ends today, its offset recorded | none (keeps behaviour) | — |
-| 10.5 | String parts lexed inline in the parent stream; `Lexer::fragment`, the sub-parser, the context clone, the recorder fork and the scratch streams go | `build_interpolated` 84.9 M + `scan_interpolated` 71.8 M (148,947 strings) | — |
-| 10.9 | Comments recorded only when asked; stub-rule type strings lexed through a scratch stream; completion its own stream; `Parser::new(TokenStream)` for tests | allocations; not in the profile | — |
-| 10.V | Gate: workspace tests, token-stream, lexer, parser and Phar-stub tests, callgrind, heap | | 10.9 |
+| OFF-H1 | Write the cache file from one buffer instead of building the file in a second `Vec` beside the body (`Writer::finish`, `container.rs`). −15.3 MB at the cold run's peak and −31.4 MB allocated per cold run, measured with the PHPStan base on the code of `5fb858c9`; a memory row, no instruction saving is claimed (`PROFILE_DRILL_PIWIGO_OFF_HEAP.md` §11) | READY | — |
+| OFF-P6 | Stub data built at compile time. −5.05 G on the old code; ≈0.2-1.5 G per cold run after the crate split's C4 and C5. Not built in today's form | BLOCKED | DEC-1, CRATE-1 |
+| OFF-E8 | A cache file's types stored once, in a table its records index: ≈ −65 M, ≈ −25 M after `20G-6`. Warm-cache runs only | BLOCKED | `20G-6` steps 3 and 5 (the name table by index, `read_at` records, a decode context: one format bump); MEAS-1 |
+| OFF-E11 | A cached file's origins decoded as the one `Arc<Path>` its file binds: ≈ −116 M, per-file cache warm | BLOCKED | `OFF-E8`'s decode context |
 
-**Item 11, line starts and columns** (plan estimate ≈0.2 G). Since `b188d671` the line index is built at the first question, not for every file; 11,945 builds still cost 252.7 M, asked for by `member_removal_span` (181.6 M, a fix-it span computed for every class member), `record_doc` (52.4 M) and `mark_ignore` (16.9 M).
+### 3B. The 20 G plan, item by item
 
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 11.1 | `LineStarts` for every file, the column tables only for analysed files and open documents; `enum Lines` in `FileState` | the 252.7 M above | — |
-| 11.3 | The block pass on `wide::u8x16` | part of the 252.7 M | 11.1 |
-| 11.4 | Lexer warnings and parse failures record line and column on the worker; fragment lexers build no index | small | 11.1 |
-| 11.5 | The server indexes context files on demand: the overlay first, the hash check otherwise | server only | — |
-| 11.6 | The per-file cache stores `LineStarts`; no `Arc<LineIndex>` | warm only; not measured | 11.1 |
-| 11.7 | Nothing in the front end reads lines: ignore marks, member spans and doc lines become offsets; anonymous-class lines come from `LineStarts` | the three callers above, 251 M | 11.1 |
+"Needs" are the plan's own dependencies (its text, Part II). The items are numbered in the order the plan builds them, each closed by a tests-only gate; that order is a process rule, and a row with no "needs" is READY apart from it. Estimates are the report's (§12 table), from the 20.57 G profile; "target now" is read from the P8b profile.
 
-**Item 12, lexer details** (plan estimate ≈0.35 G).
+| item | what the plan does | state and what the off drill changed | target now | report's estimate | blocked by |
+|---|---|---|---|---|---|
+| 20G-0 | Baseline dumps, canonical printers, an `oracle` profile; the debug oracles retired | OPEN. Only `xtask front-end-dump` (syntax crate, hashes) exists | none | none | VAL-1 |
+| 20G-1 | One session for the CLI, the server and the tests: one identity, one configuration, one load, one analysis; `built_once` split | OPEN. Mostly semantic (DEC-2). P8b added a third use of `built_once` (it decides whether skipped bodies' references are completed), so the split must keep that. The perf part: the server stops keeping context trees and unopened sources | server memory | the server's ≈420 MB of context trees | DEC-2 |
+| 20G-2 | A parallel walk, one listing per directory, path data from the walk, each path stored once | OPEN, unchanged by the off drill | `collect_php_files` 75.3 M serial, `sort_paths` 112.3 M (4 calls, the main and vendor threads), `strip_prefix` 38.1 M (29,756), `PackageIndex::owner` 69.3 M, `absolute_path` 54.1 M, `FileTable::id_for` 33.7 M, `Components::next` 139.4 M across the run; vendor discovery 321.3 M on its own thread | ≈0.3 G and ≈0.15 s serial start | `20G-1` (identity rules; roles known before the parse) |
+| 20G-3 | Context trees dropped on the worker that parsed them | OPEN, premise halved by P8b: skimmed bodies are not trees, so the drop fell from 575.5 M to 267.8 M (11,459 context trees, still on the main thread inside `insert_numbered_file`) | 267.8 M serial | ≈0.3 G and 0.58 G off the serial path; peak −≤209 MB | `20G-2` (a file's role final before its parse), `20G-1` (`keeps_tree` in `update_file`); MEAS-2 |
+| 20G-4 | The registry by declaration ids; passes as parallel maps; scope as a bitset | OPEN, **premise mostly gone**: P9 deleted the eager purity and property-write passes, which held its largest costs (string keys ≈0.5 G, `Members::eq` 96.9 M, 59,637 member copies). Now `Members::eq` is 4.8 M and `reset_scoped` 43.8 M. What is left is the other passes: `flatten_phpdoc_inheritance` 162.1 M, `precompute_ancestor_names` 147.9 M, `precompute_member_owners` 121.5 M, `drop_doc_members_excluded_by_native` 86.1 M, `resolve_deferred_value_of` 69.1 M, `closure_scope` 103.8 M, `flatten_traits` 50.0 M (the finishing passes total 972 M over two runs) | those, 972 M in all, mostly parallel already | ≈0.9 G and ≈0.4 s serial; the estimate rests on the purity costs P9 removed, so it is stale | DEC-2 (member order); MEAS-2 |
+| 20G-5 | The merge in parallel: ids by prefix sum, sharded tables, posting lists, files by id | OPEN | `insert_numbered_file` 413.9 M serial (`drop` 267.8 M is item 3's; `register_references` 77.2 M over 28,502; `insert_built_decl` 34.8 M); the two path sorts 20.7 M and 20.6 M | ≈0.25 G | `20G-4` (ids), `20G-2` (placement) |
+| 20G-6 | The stub scope: deferred types on demand; guards on the stubs' availability; names once per cache file; records read with `read_at` and checked per record | OPEN. `OFF-E1`, `P1`, `P4` changed how the stub base is built but not what this item reads. The warm figures are those of `5fb858c9` (R5: 22,746 stub methods decoded for 178.3 M, plus 55.1 M in the pass); not in an off profile (MEAS-1) | stale | ≈0.35 G, then more of `warm`; ≈40 MB of heap | `20G-4` (step 1); DEC-2 (step 2); CRATE-1; MEAS-1 |
+| 20G-7 | One relation memo keyed by the registry's content generation, replacing `structural_memo` and `KEEP_DECISIONS` | OPEN. `OFF-E5` and `E6` put one-word shortcuts and a pointer test in front of `is_super_type_of` | `is_super_type_of` 422.5 M (1,447,876 calls), 109.0 M self | up to ≈0.3 G | `20G-4` (on-demand cycle guards), `20G-6`; DEC-2 (constants on a cycle) |
+| 20G-8 | Declarations carry only what every reader needs: the six case-reference fields move to the checker | OPEN | `collect_class_name_case_refs` 26.8 M; `declared_type` 456.3 M (240,689 calls, stub files included) | ≈0.1 G | `20G-4` (`FileDecls`); DEC-2 |
+| 20G-9 | Trees in an arena, nodes as handles; `peeled` a loop; source slices borrowed; nodes the size of their variant | OPEN. P8b means context bodies are no longer trees, so the arena's gain shifts to the analysed files and to declarations | `peeled` 61.2 M (2.54 M calls); `drop_glue` of `ExprKind` 486.9 M (1.87 M) and of `StmtKind` 700.7 M (538,692), the two overlapping; 267.8 M of the `Stmt` drop is on the main thread | ≈0.8-1.2 G; ≥53 MB of the analysed trees | MEAS-2 |
+| 20G-10 | Tokens in flat arrays instead of five functions per token | OPEN, **target grew**: skimming still pops a `Tok` for every skimmed token (`drop_glue::<Tok>` 2.16 M calls inside `parse_function_body`) | the six plumbing functions 2,868 M self (`next_token` 837.9, `next_tok` 582.3, `fill` 567.0, `next_raw` 490.5, `skip` 231.4, `take_token` 159.7) over 8.44 M tokens, 78% of it in the project's parse; `drop_glue::<Token>` 131 M | ≈1.7 G | `20G-9` (the file's names in its arena) |
+| 20G-11 | Line starts for every file, columns only where read, ignore marks and member spans as offsets | OPEN, unchanged | `LineIndex::new` 363.4 M (25,753 builds; ≈280 M the project's) | ≈0.2 G | — (11.5, the server's on-demand index, needs `20G-1`) |
+| 20G-12 | Lexer details: identifier lookup, keywords by word, blank runs, operators without a call, qualified names as one token, `RefKey::Constant`, `UseMap::get`, native type names, digit separators | OPEN, unchanged | `name_and_bits` 631.4 M (2.41 M calls), `lex_ident_span` 223.7 M, `lex_operator` 203.4 M (4.50 M), `Keyword::try_from_bytes` 165.9 M (2.23 M), `parse_qualified_name` 765.9 M incl. (499,347; recursive), `UseMap::get` 111.8 M (442,690), `NativeType::from_name` 29.7 M, `strip_digit_separators` 18.8 M | ≈0.35 G | `20G-10` (name table), `20G-11` (blank runs by bitmask) |
+| 20G-13 | A file's products: the parser lists declarations; one walk for summaries, flows and global facts; the old collector goes | OPEN, **premise mostly delivered by P8a, P8b1 and P8b**: context bodies are no longer summarized, flowed or walked at load (`BodySummary::of` 83.6 M over 10,863 bodies where 344 M over 59,926 was; `InitFlow::of` 50.8 M; `GlobalFacts` 74 M). Left: `file_declarations::collect` 1,685.6 M (reflection building is most of it: `from_decl` 1,019.1 M, `from_def`), `recorded_references` 265.6 M, `DocNames` 170.5 M, `add_uses` 148.3 M (289,484) | those | ≈0.45 G | `20G-9` (references into a finished tree), `20G-10` |
+| 20G-14 | PHPDoc finished: tag effects, eager lowering, two memos, nodes in one vector | OPEN. `OFF-P7` built the plan's lazy tag description (and the P11 step 1 / `TagEffect` rows remain). `OFF-P11` was measured and not kept | `parse_shared` 1,394.7 M (195,201 lookups, stub files included), `apply_tag_recording_errors` 702.0 M, `merge_from` 101.0 M, `parse_written_type` 151.5 M, `to_source_string` 96.8 M, `resolve_type_node` 94.3 M (34,821), `DocNames` 170.5 M | ≈0.35 G; ≈50 MB | `20G-15` (names in the tag tokens), `20G-9` (doc bytes) |
+| 20G-15 | Names held as names: `String` keys to `Name`; folded text lookups deleted; resolution by hashing parts | OPEN. The purity keys the plan assigned to item 4 are gone (P9) | `<str>::fold_hash` 275.7 M and `is_folded_eq` 358.2 M (4.67 M and 3.81 M calls); `Interner::name` 260.8 M (1.01 M) and `name_hashed` 354.8 M (1.44 M); `resolve_as` 202.2 M; `substitute_class_templates` 193.8 M; `class_template_bindings_rec` 102.1 M | ≈0.6 G | DEC-2 (step 2's key changes) |
+| 20G-16 | Interned values: a name in one allocation; the type interner without per-hash vectors | OPEN. `OFF-E7` keeps a class's plain object type | `types::intern::insert` 439.5 M (1.33 M calls), 151.3 M self; `Interner::str` 53.6 M | ≈0.1 G; ≈15 MB | `20G-15` (short name in the header), `20G-7` (memo generation); MEAS-2 |
+| 20G-17 | Warm runs: cache entries checked by `stat`; a resolved context base | OPEN. `OFF-E4` measured the nearest idea (analysed files in the per-file cache) and found no gain worth the cold cost. The `stat` index conflicts with an exclusion the earlier work recorded: an mtime shortcut is unsound when a same-size rewrite keeps its mtime (`rsync -t`, `tar`) | warm only; MEAS-1 | decoding and reads ≈0.85 core-s | `20G-1` (server), `20G-5` and `20G-6` (container, name table), CRATE-1; MEAS-1 |
+| 20G-18 | The check phase's remainder: observers and one inference per node (§12.10), slots, radix scopes, rule temporaries | OPEN. `OFF-E2`, `E3` and `E10` cut small parts | `check_program` 6,378.6 M; `infer_expr` 1,051.9 M (800 K calls), `check_args` 517.4 M, `method_call_return_type` 448.8 M, `apply_narrowing_unguarded` 467.4 M, `infer_binary` 246.6 M, `merge_scopes` 222.0 M, `call_bindings` 133.2 M, `find_var` 123.2 M, `OrdMap::get` 71.4 M, `Locals::clone` 33.5 M, `union_many` 263.9 M, `reduce_array_members` 146.8 M, `resolve_call_args` 63.4 M, `string_literal_ref` 91.3 M, `sqlparser` 88.0 M | ≈1.6-2.0 G | §12.10 (18.1): `20G-13` (the one walk); DEC-2; radix scopes: slots first, `20G-16` |
+| 20G-19 | Each tree kept until its last reader; the project-wide passes read facts, not trees | OPEN, memory only | none in instructions | analysed trees ≈173 MB freed during the check | `20G-3`, `20G-13`, `20G-18`, `20G-1`; MEAS-2 |
 
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 12.1 | The identifier lookup inlined; watch bits cached with each name in the cross-file cache | `Lexer::name_and_bits` 547.1 M (1,769,358) | — |
-| 12.2 | Keywords compared a word at a time | `Keyword::try_from_bytes` 127.2 M (1,741,165) | — |
-| 12.3 | Blank runs: one byte first, the `wide` mask for longer runs | inlined, not separable | 11.3 |
-| 12.4 | Operators without a call | `Lexer::lex_operator` 168.3 M (3,707,887) | — |
-| 12.5 | `RefKey::Constant` keeps namespace and name apart | `RefKey` equality 60.4 M (1,074,667); the key already stores its hash (`9f5d76d3`) | — |
-| 12.6 | `UseMap::get` stops re-validating UTF-8 (nearly moot) | 11.7 M (59,723): the cost fell about tenfold since the 20 G profile (imports filed under a hash that ignores case, `f8e1cfea`) | — |
-| 12.7 | Native type names matched without a lowercase copy | `NativeType::from_name` 22.1 M (135,859) | 12.2 |
-| 12.8 | A qualified name written without spaces is one token | `parse_qualified_name` 240.1 M (479,995) and its spanned form 96.6 M | — |
-| 12.9 | Numbers parsed skipping `_`; `strip_leading_backslash` returns a slice | `strip_digit_separators` 16.8 M (172,023) | — |
+**Ready now** (no open "needs", exact): `OFF-H1`, `20G-9`, `20G-11`, and `20G-15` apart from step 2's key changes (DEC-2). `20G-4` and `20G-1` have no technical need either, but `20G-1` is output-changing and `20G-4`'s estimate no longer holds. Everything else waits on an earlier item or on DEC-2, MEAS-1 or MEAS-2.
 
-**Item 13, a file's products** (plan estimate ≈0.45 G). The per-file products are now the larger half of the load: `derive_file` 8,494 M (14,251 files) against `parse_recording` 7,375 M. Of it `FileBodies::collect` 5,766 M (`BodySummary::summarize` 4,318 M over 59,926 function bodies and 1,049 M over 14,251 file top levels, the shared body-pass walk, `InitFlow::of` 299.5 M over 57,506), declarations 1,793 M (of which `ClassReflection::from_def` 1,488 M over 12,546 classes), `GlobalFacts::of` 568.8 M, `recorded_references` 242.6 M. The plan's ≈0.45 G is the walks around the builders (the declarations walk ≈140 M, summaries, flows, global facts). Most of what those walks now cost is the builders' own work, which fusing the walks does not remove.
-
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 13.1 | The parser lists declarations, with today's guards, docs and scope; the declarations walk, its facts-gated walks and the declared-classes collection go | the walk is 81.6 M; the 1,668 M under `Declarations::found` is reflection building, which this row does not remove | — |
-| 13.3 | `ImportScope`s published once | `NameContext::add_uses` 98.5 M (186,470) | 13.1 |
-| 13.4 | One walk for `BodySummary`, `InitFlow`, `FileSites` and the registered families, in today's order. The batch plan excludes fusing the `Summarizer` (its order is part of its meaning), which cuts this row | `FileBodies::collect` 5,766 M, `GlobalFacts::of` 569 M | 13.1 |
-| 13.5 | The old reference collector goes; the stub rules record their types' references | not in the warm-stub off profile | — |
-| 13.6 | A file's bodies as one sorted slice reached through the declaration id | memory | 13.4 |
-| 13.7 | Builders gather in scratch and emit exact-size slices | allocations | 13.4 |
-| 13.8 | References in one vector per file, sorted once; doc sites hold the interned scope; `Declaration::name` is a `Name` | `recorded_references` 242.6 M (`doc_site_references` 212.4 M, `DocNames` 170.5 M), `RefKey` set inserts 139.7 M (810,413) | 13.3 |
-
-**Item 14, PHPDoc** (plan estimate ≈0.35 G). `parse_shared` 875.2 M (145,004 lookups), `tag_block` 378.7 M, `apply_tag_recording_errors` 441.4 M.
-
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 14.1 | `syntax::memo::Memo` keyed by a fingerprint and bounded by weight (`siphasher`, `quick_cache`) | the tag memo's 57.8 MB at peak (`HEAD-O5`) | — |
-| 14.2 | `parse_tag` returns `Arc<TagEffect>`; `apply(block, written, effect)` | `apply_tag_recording_errors` 441.4 M (75,726), `merge_from` 58.9 M (76,610) | — |
-| 14.3 | The tag memo keyed by the pair's fingerprint | `tag_block` 378.7 M (76,622) | 14.1 |
-| 14.4 | Eager lowering in `parse_tag`; `impl WrittenType for TypeNode` goes | `DocType` lowering, lazy at first read, 107.5 M (21,147); `parse_written_type` 122.8 M (111,006) | 14.2 |
-| 14.5 | The text grammar's callers by kind (changes output) | | 14.4 |
-| 14.6 | The resolution memo keyed by (written `Type`, context id) | `resolve_type_node` 86.6 M (34,825) | 14.4 |
-| 14.7 | Tag tokens borrow byte ranges; the doc is lexed as bytes (changes output) | the tag lexer still builds `Vec<(PhpDocToken, Span)>` | — |
-| 14.8 | One parse per doc; one winner rule per tag (changes output) | | 14.2, 14.7 |
-| 14.9 | Docblock nodes in the owner's `la-arena`; `DocType` as (owner, `Idx`, `Type`) | allocations | 14.8 |
-
-**Item 15, names as names** (plan estimate ≈0.6 G). Folded-name hashing and comparison by text now cost 922 M (`<str>::fold_hash` 394.4 M over 7.06 M calls, `<str>::is_folded_eq` 527.9 M over 5.81 M); the `Name` forms cost another 747 M over 64 M calls and are the target form, not a cost to remove.
-
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 15.1 | The checker's method memo and `class_memo` deleted | not measured | — |
-| 15.2 | Every `String`-keyed map and identifier value takes PHP's identity (`FoldedName`, `Name`, `ConstName`, `ArrayKey`) (changes output: container-field keys become canonical array keys) | | 15.1 |
-| 15.3 | `TableKey for str` and `FoldKey for str` deleted; outside text interned where it enters | the 922 M above | 15.2 |
-| 15.10 | `NameData.last_segment`: a short name is a slice | not measured on this profile | 15.3 |
-| 15.11 | Name resolution hashes the parts without building text; a callee's folded name reused | `Interner::name` 682.1 M (2,771,491), `name_hashed` 627.3 M (2,878,449) | 15.3 |
-
-**Item 16, interned values** (plan estimate ≈0.1 G and ≈15 MB).
-
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 16.1 | `Name` as one allocation (`triomphe::ThinArc`), `last_segment` in the header | `Name::new_hashed` holds 21 MB at peak | 15.10 |
-| 16.2 | Strong tables with removal at a count of two; type nodes as `ThinArc`; the type interner loses its per-hash `Vec<Weak<Node>>` (still there, `types/src/intern.rs`) | `types::intern::insert` 605.6 M (2,082,142), 250.4 M self | 16.1 |
-| 16.3 | Literal types and shape keys interned as `ThinArc`; `Interner::str` and `WeakTable` go | `Interner::str` 38.5 M, `ShapeKey::from_bytes` 21.4 M | 16.2 |
-| 16.4 | Every holder holds the handle (`FRONT`, memos' kept arguments, the lexer's tables) | memory | 16.2 |
-| 16.5 | The type memos bounded by two segments | | — |
-| 16.6 | A `loom` model of drop, lookup and sweep; the leak test after the edit replay (infra) | | 16.2 |
-
-**Item 17, warm runs** (plan estimate ≈0.85 core-seconds). Costs read from the warm profile (`cl-97b8f3f0-warm`, 39.37 G).
-
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 17.1 | The stat index: a context file's content hash taken without reading the file when its stat fields match and it is not racily clean | `Reader::open_modified` 318.4 M (14,254 files); the reads are not separable | DEC-2 |
-| 17.2 | Every content hash BLAKE3 with full digests; `twox-hash` removed | `ContentHash::of` ≈30 M (the batch plan puts it at 0.07% of the profile) | — |
-| 17.3 | The server writes neither the index nor the base from overlays | server | 17.1 |
-| 17.5 | The context base: the registry after the finishing passes over the context declarations, stored in item 6's container, keyed by the build, the settings and the files' hashes; a cold run inserts the context files, finishes, writes, then finishes the analysed files incrementally | `CachedFile::into_parsed` 41.3 M; stub method decodes 509.5 M (104,496) and class decodes 170.9 M (5,037); the summaries' decode belongs to `HEAD-O2` step 7 | 17.2 |
-| 17.6 | Platform `stat` tests, each warm edit-replay case, the server loading from the base (infra) | | 17.5 |
-| 17.4 | The per-file key adds the configured versions and `short_open_tag` | | SEM-1 |
-
-**Item 18, the check phase's remainder** (plan estimate ≈1.6-2.0 G). The check phase is `check_program` 7,587 M (2,792 files). The API walker is already 50.7 M (it runs only on a file that names PHPStan, `f67cee0f`); SQL parsing is 10 M (88 M in this line's profile; `0f26c0e5`); regex groups ≈3 M (`3e83bff3`).
-
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 18.1 | §12.10: observers and one inference per node; the PHPStan-API walker and the literal types as families (changes output) | `infer_expr` 1,062.8 M (822,693 calls), `check_args` 531.4 M (145,061), `call_bindings` 133.2 M (50,078), `infer_binary` 246.6 M (53,049) | 13.4 |
-| 18.3 | C1 step 5's tail: effects carried in the statement result; `has_yield` and `collect_throws` go (changes output) | `expr_side_effects` walk 39.4 M (194,864) | 18.1 |
-| 18.4 | Variables as slots; the computed-name forms marked exactly; per-body key tables | `KeyTable::find_var` 123.9 M (1.27 M calls) | — |
-| 18.5 | Scopes as radix arrays; locals listed by name | `OrdMap::get` 77.2 M (1,102,847), `imbl` insert 104.4 M (322,826) and its leaf and branch work ≈61 M, `Locals::clone` 38.9 M, `merge_scopes` 152.1 M | 18.4, 16.2 |
-| 18.6 | Conditional subjects by parameter position | `resolve_conditional` 3.2 M | — |
-| 18.7 | §12.11's rest: `MemberIndex` and the normalized-operand fast path (changes output) | `union_many` 364.8 M (537,811), `reduce_array_members` 187.9 M (25,959) | — |
-| 18.8 | Type operations from borrowed parts; copy on first change; memos probed borrowed; `Display` into the formatter | `types::intern::insert` 605.6 M; `map_all` ≈66 M over three instances | 16.3 |
-| 18.9 | One argument binding per call | `resolve_call_args` 70.4 M (449,917), `check_parameters` 519.2 M (145,061) | 18.1 |
-| 18.10 | Per-function state reused | allocations | — |
-| 18.11 | Generic signatures substituted per type | `substitute_class_templates` 200.2 M (132,012) | — |
-| 18.12 | Messages formatted only when reported; built-in identifiers as `&'static str`. Part done: findings the level cuts are left unmade before formatting (`251353aa`, `c785b7a4`) | not measured | — |
-| 18.13 | Constant types built once; two-operand unions without a `Vec` | allocations | — |
-| 18.14 | Borrow, iterate or use scratch | allocations | — |
-| 18.15 | `Locals` behind one `Rc`; throw, catch and loop frames as scratch | `record_throw_state` 8.7 M, `Locals::clone` 38.9 M (155,554) | — |
-| 18.16 | Narrowing facts in the radix arrays; the separate walks' vectors go | `apply_narrowing_unguarded` 418.0 M (70,700) | 18.5, 18.1 |
-| 18.17 | Per-text analyses once per distinct text; SQL once; one reused regex `Captures` | mostly done: see the item header | 14.1 |
-| 18.18 | One checker per worker | `checker_for` 33.2 M, `Checker::new` 6.9 M (2,792) | — |
-
-**Item 19, each tree until its last reader.** The rows are about memory; the instruction cost is small (`check_class_shapes` 8.3 M). `keeps_tree` exists (`20G-3.1`).
-
-| row | task | target now | blocked by |
-|---|---|---|---|
-| 19.1 | The project-wide passes as families of the check traversal: architecture, banned constructs, class shapes, Composer hygiene, mock hygiene, unmatched ignores, the use-site index | | 13.4, 18.1 |
-| 19.2 | `keeps_tree(role, open, mode, checked)`: a batch frees each tree when its check ends | expression arena 78.5 MB at peak, 57.7 MB at exit | — |
-| 19.3 | Each worker takes the largest file left | wall time | — |
-| 19.4 | Outside files run only the property-write family | | 18.1 |
-| 19.5 | The tree cache: `quick_cache`, weighted by bytes, keyed by (`FileId`, content hash) | | 14.1, 17.2 |
-| 19.6 | `FileState::ast` goes; every reader asks `ast_of` | | 19.2 |
-
-**Gates.** `10.V`-`19.V` (workspace tests, item tests, one callgrind run, one heap run each), then `V.0` (the whole §11 validation: dumps, PHP-backed fixtures, platform cases, the `oracle` build) and `V.1`-`V.2` (the final profiles and the record). All OPEN, each blocked by the item before it (GATE-3).
-
-**Ready now** (perf and output-changing rows with no open `needs`): 10.3, 10.5, 10.9, 11.1, 11.5, 12.1, 12.2, 12.4, 12.5, 12.6, 12.8, 12.9, 13.1, 13.5, 14.1, 14.2, 14.7, 15.1, 16.5, 17.2, 18.4, 18.6, 18.7, 18.10, 18.11, 18.12, 18.13, 18.14, 18.15, 18.18, 19.2, 19.3; `HEAD-O3` and `O4`.
-
-**Longest chains** (the order a blocked row has to wait for): 15.1 → 15.2 → 15.3 → 15.10 → 16.1 → 16.2 → 16.3 → 18.8, and 16.2 → 18.5 → 18.16; 13.1 → 13.4 → 18.1 → {18.3, 18.9, 18.16, 19.1, 19.4}; 14.1 → {14.3, 18.17, 19.5}; 14.2 → 14.4 → {14.6, 14.8 → 14.9}; 11.1 → {11.3 → 12.3, 11.4, 11.6, 11.7}; 12.2 → 12.7; 17.2 → 17.5 → 17.6.
-
-### 3C. `callgrind-20g`: the off drill's rows against `master`
-
-The rows built here are in Appendix A with their evidence and §4B with their numbers. This table says what each one is on `master`. "Applying the commit" is `git merge-tree --write-tree --merge-base=<commit>^ master <commit>`: the number of files that conflict, and how many `master` commits touched the same files since `d520c9fd`. A clean result says nothing about whether the saving holds.
-
-The stub-build rows (`E1`, `P1`, `P2`, `P4`, `P5`) show only in a run that builds the stubs. `master`'s own off runs start with a warm stub cache, so its profiles do not show them; its cold run costs 55.33 G against 49.34 G warm (`HEAD-C2`, `C9`), about 6 G for the build, more than the 5.05 G the old code paid.
-
-| row | here | on `master` | applying the commit | blocked by |
-|---|---|---|---|---|
-| OFF-E1 `3d5434b3` | DONE (off −595.5 M, cold −445.1 M, warm −21.1 M) | the defect is present: `PLAIN_BASE` and `PHPSTAN_BASE` are statics, `resolved_stubs` builds them, `expect_files` takes no `Stubs` value | 13 files; 399 commits (`project.rs` alone 105) | INT-1 |
-| OFF-P1 (rode on E1) | DONE | absent for the same reason | with E1 | INT-1 |
-| OFF-P2, E13, D5 `c2cd1586` | DONE (off −530.8 M; cold with the per-file cache −24.6 M) | the premise is present: `Registry::store_cached` encodes the whole registry first, and `store_container` finds out afterwards whether it can write | 6 files; 183 commits (`registry.rs` 98) | INT-1 |
-| OFF-P3 `a13f4ed2` | DONE (−343.8 M) | DUPLICATE: `5ca07bd1` gives a built base the hash index | 1 file, `name_table.rs`; 14 commits | INT-2 |
-| OFF-P4 `0ce52479` | DONE (−288.3 M) | the premise is present: `build_closures` still searches from every file | clean; 9 commits on `stubs.rs` | INT-1 |
-| OFF-P5 (rode on E1) | DONE (wall time, within noise) | absent | with E1 | INT-1 |
-| OFF-E14 `6dd06124` | DONE (defect) | the defect is present: `instanceof` reads its class with `parse_unary`, so `$x instanceof static::$p` is refused | 2 files (the parser now builds arena ids); 14 commits | INT-1 |
-| OFF-E15 `efe621ad` | DONE (defect) | the defect is present: `build.rs` does not hash `vendor/phpstan-src/stubs` | 1 file; 8 commits | INT-1 |
-| OFF-E16 `480107e3` | DONE (defect) | absent: maps and sets of names write in table order. Not verified that `master` has a re-encode check that fails on it | 1 file, `name.rs`; 20 commits | INT-1 |
-| OFF-E2 `60b0cd33` | DONE (−54.7 M) | DUPLICATE: `stmt.rs` already gates both walks on `inline_var.is_empty()` | 1 file | INT-2 |
-| OFF-E3 `07a0f111` | DONE (−27.1 M) | absent; premise not measured | 1 file; 2 commits | INT-1 |
-| OFF-E5 `5ec70c1e`, E6 `f2f65cbb` | DONE (−59.9 M, −23.2 M) | absent. `is_super_type_of` is 397 M inclusive (928,594 calls) with 36.2 M self, against 422 M and 109 M self over 1.45 M calls on this line, which fits the generation memo answering earlier; the shortcuts' share is probably smaller there | 2 files and 1 file; 17 and 4 commits | INT-1 |
-| OFF-E7 `60e85393` | DONE (−29.9 M) | absent; overlaps `5ca07bd1` (bound types intern the class once) | 2 files; 51 commits | INT-1 |
-| OFF-E10 `e081dbe9` | DONE (−52.5 M) | absent; premise not measured | 2 files; 103 commits (`checker.rs` 52) | INT-1 |
-| OFF-P7 `a4035361` | DONE (−403.6 M) | the premise is present: the tag lexer's `tokenize` builds a `Vec` of every token eagerly. Overlaps `20G-14.2` and `14.7` | 1 file, `grammar.rs`; 27 commits (23 of them on `Cargo.lock`) | INT-1; `20G-14.2`, `14.7` |
-| OFF-P8a `7726dacf`, P8b1 `11837a04`, P8b `791d29cb` | DONE (−348.5 M, −238.6 M, −847.6 M) | the saving needs bodies unread; see INT-3 | 9, 8 and 11 files; 283, 227 and 341 commits | INT-3 |
-| OFF-P9 `c0dd2788` | DONE (−853.3 M) | the eager purity pass is replaced by effect resolution; see INT-3 | 13 files; 363 commits | INT-3 |
-| OFF-E8 | OPEN here | DUPLICATE: `3f2309b1` (a cache file holds each distinct type once, a type is read as an index) and `ffb3b177` (the same for calls). Its blocker here, `20G-5.8` (names by index, `read_at`, a decode context), is DONE there | | INT-1 |
-| OFF-E11 | OPEN here | SUPERSEDED: `20G-5.5` binds declaration provenance and duplicate sites to a `FileId`, so there is no `Arc<Path>` per origin to share | | INT-1 |
-| OFF-E4 | SKIP here | DUPLICATE: built as `30e0af82`; measured there only inside the batch | | INT-2 |
-| OFF-P6 | OPEN | stub data at compile time: not on `master` | | DEC-1, CRATE-1 |
-| OFF-H1 (`PROFILE_DRILL_PIWIGO_OFF_HEAP.md` §11; no row in the retired ledger) | OPEN, READY: write the cache file from one buffer instead of building the file in a second `Vec` beside the body. −15.3 MB at the cold run's peak and −31.4 MB allocated per cold run, measured on the old code with the PHPStan base; a memory row, no instruction saving is claimed | the premise is present: `Writer::finish` copies the body into a second `Vec` (`container.rs`, which now also holds the type and call tables) | not tried | — |
+**Longest chains:** `20G-1` → `2` → `3` → `19`; `20G-4` → `5`, `6`, `7`, `8`; `20G-9` → `10` → `12` and `13` → `14`; `20G-13` → `18` → `19`; `20G-15` → `16`; `20G-5` + `6` → `17`.
 
 ## 4. Done
 
-### 4A. `master`
-
-Statuses are `master`'s ledger's, spot-checked in its code (Appendix C). Items 0-9 were closed by tests-only gates (`N.V`); no per-item instruction or memory effect was recorded. What is recorded is below the table.
-
-| item | built | rows |
-|---|---|---|
-| 0, baselines and retired oracles | canonical type printer (`0fa1723c`), front-end dump (`64ddd7e3`…), full registry dump (`a4acabd2`), expression and PHPDoc records (`ba5cb5e1`), `cargo xtask corpus --full` (`f273b394`), server dumps (`9d30b919`…), heap profile by holder (`149a2256`), the `oracle` profile and the oracle code deleted (`693c5d58`), the dump store and the fast validation `0.11a`-`0.11j`; the effect fixes `0.1a`-`0.1f` | 0.1-0.10, 0.11a-j; `0.11` (the validation run itself) SKIPPED |
-| 1, one session | role by strongest root, `Session::resolve` for the server, load through a file source with an overlay, `finalize` by value, `built_once` split, one project per folder, load off the message loop (`1ea4c475`, `e9b30e39`, `17d4c5e6`, `37fb5289`, `8e44f36b`, `b7ae40db`, `4f61b224`, `a0690baf`) | 1.2-1.8; `1.1` (resolved-path identity) DEFERRED |
-| 2, the walk | one listing per directory, a task per directory, spellings built, parse per directory, order by construction, `FileTable` as a `HashTable`, typed manifests (`42b713d0`, `d64266dc`, `42140a68`, `61eb2aea`, `8d6a828d`, `553c1ddc`, `745401bb`) | 2.1-2.7 |
-| 3, trees dropped on the worker | `keeps_tree`, the drop on the worker that allocated, reads into the worker's buffer (`8e75ba79`, `725e4264`); 3.4 under item 9 | 3.1, 3.2, 3.4; `3.3` DEFERRED |
-| 4, the registry by ids | private fields, three id ranges, per-file declaration arenas, generations, one entry per member, results as tables by id, parallel passes, scope as a bitset (`e06503ad`, `1b8f79aa`, `210695c5`, `ac7ff5f9`, `9ae10e46`, `b4e4a4fc`…) | 4.1-4.8 |
-| 5, the merge in parallel | id ranges by prefix sum, stable ids on edits, sharded merge, path-rank merges, `FileId` provenance, posting lists, the cache format (names by index, `read_at`, per-record checks, `SOURCES_HASH`) and its tests (`7c1c5fba`…) | 5.1-5.9 |
-| 6, the stub scope | deferred types on demand; the debug-only scope count | 6.1, 6.6; `6.5`, `6.7`-`6.9` pulled forward into 5.8; `6.2`-`6.4` DEFERRED |
-| 7, one relation memo | content generation, one memo, final answers only, two segments, `PHPSTAN_RS_NO_RELATION_MEMO` | 7.1-7.5; `7.4b` DEFERRED |
-| 8, lean declarations | the six case-reference fields and both explicit-`mixed` flags leave the declarations (`451f0fa6`, `2d383a89`) | 8.1-8.4 |
-| 9, trees in typed vectors | `peeled` a loop (`3f9ad5b8`), `la-arena` stores, nodes by index, payloads as byte ranges, stub rules applied while parsing, lists in one commit, small nodes; 9.3-9.8 are marked unvalidated | 9.1-9.8, 9.V |
-| 10, tokens in flat arrays | `TokenStream` with three cursors, per-worker buffers, the name table to `NameId`s, escaped literals once into the file's bytes | 10.1, 10.2 |
-| E1, correctness | Piwigo went from 664 findings to 610-613 against the 581 reference; the residual gaps are deferred to the PHP catalog on `master3` | E1.0-E1.5, E1.V |
-| E2, cost of effect resolution | ids and memos for effects, per-class overlay maps, settle once per wave, isolated registries, the 9071 batch's items A-AE | E2.1, E2.2, E2.5, E2.7, E2.9, E2.10, E2.12.* except those in §3A |
-
-Recorded outcomes, as `master`'s ledgers state them (not re-measured here):
-
-- The run fell from 326 G (`631ad001`) to 42.2 G (`9071f48f`) as the cost of effect resolution was cut, output byte-identical.
-- The batch took the off run from 54.13 G to 49.36 G (−4.77 G, −8.8%), the warm run from 42.14 G to 39.37 G (−2.77 G), cold with store from 56.24 G to 53.13 G (`9071f48f` to `97b8f3f0`). The lexer and parser group fell 2.6 G (`TokenStream`), `memcpy` 1.4 G, `lowered_text` 0.8 G, the folded-name comparisons 0.9 G.
-- `HEAD-O1` (a destroyed object's holders memoised per class), paired, both stub caches warm: `19f78c3e` 46.62 G → 38.91 G (−7.71 G, −16.5%). `HEAD-O8` (`callees_of` once per classification): −0.70 G.
-- Wall time (`HEAD-Q3`): `9071f48f` to `97b8f3f0` is 11% to 16% faster at one to four threads (14.03 s → 12.48 s at one) and 3% at eight. The single timings of the off and warm modes between `97df097c` and `97b8f3f0` (4.22 s → 4.12 s, 3.56 s → 3.77 s) are inside the noise.
-- Heap rose (MEAS-1).
-
-### 4B. `callgrind-20g`
-
-Each row's output was byte-identical to the base's; the rows' own text (Appendix A) has the checks. Callgrind `Ir` in off mode (stub cache and file cache off), `dhat` profile with frame pointers.
+Each row's output was byte-identical to the base's; the rows' own text (Appendix A) has the checks. Callgrind `Ir`, off mode.
 
 | row | commit | Ir after | change |
 |---|---|---|---|
@@ -299,40 +107,75 @@ Each row's output was byte-identical to the base's; the rows' own text (Appendix
 | P8b1 | `11837a04` | 21,775,661,606 | −238.6 M |
 | P8b | `791d29cb` | 20,928,053,254 | −847.6 M |
 
-Defects fixed along the way: E14 `6dd06124` (`instanceof` with a static property as the class), E15 `efe621ad` (the stub cache key left out `vendor/phpstan-src/stubs`), E16 `480107e3` (maps and sets of names wrote in table order). D6 is decided (skim unchecked, 2026-10-15), D1, D2 and D5 are decided.
+Defects fixed along the way: E14 `6dd06124` (`instanceof` with a static property as the class), E15 `efe621ad` (the stub cache key left out `vendor/phpstan-src/stubs`), E16 `480107e3` (maps and sets of names wrote in table order). D6 is decided (skim unchecked, 2026-10-15); D1, D2 and D5 are decided.
 
-## 5. Skipped, superseded, withdrawn
+## 5. Skipped
 
 | row | why |
 |---|---|
 | OFF-P10 (`simdutf8`) | built, measured, reverted: −0.47 M against ≈ −22 M estimated; the checked bytes can't become a `String` without checking again under the workspace's no-`unsafe` rule |
 | OFF-P11 (messages formatted when displayed; class-constant keys when dynamic constants are set) | built, measured, reverted: −0.65 M against 29.1 M estimated |
-| OFF-E4 | built, measured, reverted: warm −2% to −5%, cold +9% to +14% on two of ten trees. `master` built the same idea (INT-2) |
-| OFF-E9 | folded into the plan's regex-scan row (`20G-18.17`) |
+| OFF-E4 | built, measured, reverted: warm −2% to −5%, cold +9% to +14% on two of ten trees |
+| OFF-E9 | folded into the plan's regex-scan row (`20G-18`) |
 | OFF-E12 | built, measured, reverted: the 420 M of method decoding moved to the workers, total −23 K |
-| `20G-6.5`, `6.7`, `6.8`, `6.9` | pulled forward into `5.8` and `5.9` |
-| `20G-9.3.d.b`, `9.3.d.d`, `9.3.e.e`, `9.3.f.c.b`, `9.7.b.e.b`, `9.7.c.b` | folded into other rows or not needed (reasons in the ledger) |
-| `20G-E2.12.15`, `E2.12.25` | not applicable; not built (a `Type` is a hash-consed `Arc`) |
-| the batch plan's exclusions | a `stat`/`mtime` shortcut for `ContentHash::of` (unsound; see DEC-2), fusing the `Summarizer` with other body passes (its order is part of its meaning), a recorded-transcript memo for calls (12% hit rate), per-thread off-thread drops, interned `Storage` ids and node-address keys (unsound) |
 
 ## 6. Not optimizations
 
-Kept for the record. None is built from this ledger.
-
-- **Deferred semantic and check rows on `master`** ("after O3, not optimization"): `0.11k2`-`0.11n2`, `0.11r`, `0.12a`-`0.15f` (the PHP catalog work), `1.1`, `3.3`, `6.2`-`6.4`, `7.4b`, `10.4`, `10.6`-`10.8`, `11.2`, `12.10`-`12.13`, `13.2`, `15.4`-`15.9`, `18.2`, `D.V`. `17.4` is a perf row held back by them (SEM-1). `9.4.d.b` and `9.4.d.c` are perf rows deferred into items 14 and 15.
-- **Effect-resolution correctness rows on `master`:** `E1.2.4` and `EG.2` (reachability refinement, route (a), after E2.V), `E1.2.20`, `EG.11`, `EG.15`, `EG.16`, `EG.18`-`EG.20`, `EG.23`, `EG.31`-`EG.33`, `EL.6`.
-- **Questions on `master`:** `HEAD-Q3` (MEAS-2), `HEAD-Q4` (GATE-1).
-- **Questions on this line** (Appendix A, rows U1-U9): the parser against the whole `vendor/` corpus (U1), known parser gaps `$s{0}`, `(real)`, `(unset)` (U2), compile-time errors the parser does not report (U3), E1's deterministic reproduction (U4), what an `extract()` body still needs (U5), which truncation holds the 33 `offsetAccess.mightNotExist` reports (U6), readers left out of `d` (U7), P6's build-script cost (U8), a third check of the report's claims (U9). None gates an open optimization row; U8 matters only if `OFF-P6` is revived.
+Kept for the record. None is built from this ledger: the questions in Appendix A, rows U1-U9 (the parser against the whole `vendor/` corpus, known parser gaps `$s{0}`, `(real)`, `(unset)`, compile-time errors the parser does not report, E1's deterministic reproduction, what an `extract()` body still needs, the truncation holding 33 `offsetAccess.mightNotExist` reports, readers left out of `d`, P6's build-script cost, a third check of the report's claims), and the plan's output-changing rows listed under DEC-2.
 
 ## 7. Where to resume
 
-- **This line has one row nothing blocks: `OFF-H1`**, a memory row for cold runs. Every other row of the off drill is done, skipped, or blocked: `OFF-P6` on DEC-1 and CRATE-1, `OFF-E8` and `E11` by being duplicate or superseded on `master`. INT-1 comes first. My recommendation is its option (c), starting with the rows that are small or clean there: `OFF-P4` (clean), `E3`, `E6`, `E15`, `E16` (one conflicting file each), `E14` (two), then `E5`, `E7`, `E10`, `P7` (one or two files each), then the stub-build rows `E1`, `P1`, `P2`, `P5` re-derived, and INT-3 decided before P8 or P9 is touched. Each is measured again in `master`'s protocol.
-- **`master`** continues in its own order (GATE-3): `HEAD-O2` (in progress), `O3`, `O4`, then the approvals for `O5`-`O7`, then `20G-10.3` onward. The READY rows are listed under §3B. `20G-E2.6` is the largest single target in either ledger (the warm profile's 21.5 G of classification and `resolve_effects`, 55% of 39.37 G) and waits for GATE-2, which waits for GATE-1.
-- **Where the 49.36 G sits** (off, `97b8f3f0`): `classify` 16.6 G; the load 16.0 G (parse 7.4 G, per-file products 8.5 G); the check 7.6 G; the finishing pass 6.4 G, of which `resolve_effects` 4.5 G. The plan's open items 10-19 reach the lexer's 3.6 G, the products, the check phase and the names, not the classification.
+- Nothing in the off drill is waiting for an optimization except `OFF-H1` (READY) and the three blocked rows of §3A.
+- The plan's items are mostly open and large. Measured by what they would replace, the biggest are the check phase (`20G-18`, ≈6.4 G of work, ≈1.6-2.0 G estimated), the token plumbing (`20G-10`, 2.9 G of functions, ≈1.7 G estimated), the per-file declarations and references (`20G-13`, 1.7 G of reflection building plus 0.27 G of references), the lexer's own work (`20G-12`) and name hashing (`20G-15`, ≈0.63 G of folding). `20G-4`'s estimate no longer holds. `20G-9`, `11` and `15` have no blocker.
+
+## Appendix B. The 20 G report, re-evaluated
+
+The report describes `5fb858c9`. This table says, for each finding and each item, what the code and the P8b profile show now.
+
+### B1. Part I's findings
+
+| finding | the report | now |
+|---|---|---|
+| R1, context trees dropped on the main thread (575.5 M) | item 3 | 267.8 M after P8b (skimmed bodies are not trees); still serial, 11,459 trees |
+| R2, five functions per token (1.77 G) | item 10 | 2,868 M in the six functions over 8.44 M tokens (the off profile also lexes the stub files; 78% is the project's); P8b's skim still pays it per skimmed token |
+| R3, results written into shared declarations; string keys; `Members::eq` 96.9 M | item 4 | gone with P9: `Members::eq` 4.8 M, no eager purity pass |
+| R4, a line index for every file (270 M) | item 11 | 363.4 M over 25,753 builds (stub files included) |
+| R5, stub members decoded to learn they have no deferred types (178 M) | item 6 | not in an off profile; unmeasured at this code (MEAS-1) |
+| R6, lookups by `&str` (701 M of folding) | item 15 | 634 M (`fold_hash` 275.7 M, `is_folded_eq` 358.2 M) |
+| R7, products for every body (`BodySummary` 344 M, `InitFlow` 218.5 M, `GlobalFacts` 218.5 M) | item 13 | cut by P8a and P8b1 to 83.6 M, 50.8 M and 74 M |
+| R8, stack guards in hot paths | item 9 | `peeled` 61.2 M (2.54 M calls) |
+| R12, identifier names | item 12 | `name_and_bits` 631.4 M, `Keyword::try_from_bytes` 165.9 M |
+| M1-M11, memory | items 3, 4, 9, 14, 16, 19 | not re-measured (MEAS-2) |
+
+### B2. The 25 G report's unbuilt designs (the report's §2 lists)
+
+| design | now |
+|---|---|
+| C3 steps 6-7: names as `Name` keys (≈0.6 G) | `20G-15` |
+| F4: purity and property-write keys as folded strings (≈0.5 G) | gone: P9 removed the eager passes |
+| F3: results inside shared declarations; a serial `changed_since` | the shared-declaration copies are gone with P9; `changed_since` is part of `20G-4` |
+| §14: trees dropped in the serial insert loop | `20G-3`, 267.8 M left |
+| P7 and P11 step 1: PHPDoc lowering and tag effects | `OFF-P7` built the lazy description; `20G-14` has the rest |
+| P6(d): the streaming lexer's plumbing | `20G-10` |
+| P4: column tables for every file | `20G-11` |
+| F1 and F2: the stubs' availability guards and their count | `20G-6` |
+| C1 step 5, C5, §12.10 | `20G-18` |
+| C2 steps 2-3, C4 step 5's keys | `20G-18`, `20G-15` |
+| F5: a `FileId` bitset, string frontier sets | `20G-5` |
+| P12 steps 3-4: declaration list, the collector goes | `20G-13` |
+| §12.11: `MemberIndex` | `20G-18` |
+| the sorted traversal's k-way merge | `20G-2` |
+
+## Appendix C. How this ledger was made
+
+- **Read:** the off ledger and the 20 G report in this checkout, whole.
+- **Profile:** `~/.cache/prs-profile/p8b/cg` (791d29cb, off mode, 20,928,053,254 Ir), indexed with `drill-scripts/parse.py` and read with `q.py` and `roots.py`. Figures are inclusive, summed over threads. Which share of a shared function belongs to the project's files was read from the call counts of `parse_file`'s callers (6,316.8 M the project's, 1,578.4 M the stubs', 163.0 M the autoload files').
+- **Not measured:** warm-mode costs (MEAS-1), memory (MEAS-2), wall time. The estimates in the "report's estimate" column are the report's, unchanged.
+- **Dependencies** ("needs") are read from the report's Part II text, not from code.
 
 ## Appendix A. The off drill's rows
 
-The rows of the retired `PROFILE_DRILL_PIWIGO_OFF_BUILD_LEDGER.md` (in git before this commit), kept whole because they hold the evidence behind §3C, §4B and §5. Their ids are unchanged; elsewhere in this file they appear as `OFF-<id>`. One status was corrected: D7 (the proposals it recommended are built). The report that holds each row's design is `PROFILE_DRILL_PIWIGO_OFF.md` (section numbers and the ids Dn, Bn, Cn, En, Nn are its); "item n" is an item of the 20 G plan. Rows P8a, P8b1, P8b and P9 were built on this line only and are not in `master`; see INT-3. Row H1 comes from `PROFILE_DRILL_PIWIGO_OFF_HEAP.md` and was never in the retired ledger; it is in §3C.
+The rows of the retired `PROFILE_DRILL_PIWIGO_OFF_BUILD_LEDGER.md` (in git before this commit), kept whole because they hold the evidence behind §3 and §4. Their ids are unchanged; elsewhere in this file they appear as `OFF-<id>`. One status was corrected: D7 (the proposals it recommended are built). The report that holds each row's design is `PROFILE_DRILL_PIWIGO_OFF.md` (section numbers and the ids Dn, Bn, Cn, En, Nn are its); "item n" is an item of the 20 G plan. Row H1 comes from `PROFILE_DRILL_PIWIGO_OFF_HEAP.md` and was never in the retired ledger; it is in §3A.
 
 ### A1. Decisions that gate the build
 
@@ -360,7 +203,7 @@ and E15 are independent of this order unless a row's "needs" says otherwise.
 |---|---|---|---|
 | E1 | DONE (3d5434b3; measured: Piwigo output byte-identical to the base in the off, cold and warm modes; Ir off 25,029,730,463 against 25,625,190,065 (−595.5 M), cold 25,238,288,982 against 25,683,423,164 (−445.1 M), warm 20,551,124,205 against 20,572,181,579 (−21.1 M); the cold run stored `stub-base-phpstan`, `stub-data` and `stub-index` and no plain base, and the warm run rewrote none of the three) | The stub state is a value owned by the entry point (`Stubs`, `registry/stub_set.rs`), built per layer on a thread of its own with the wait blocking in the OS (S2), on the pool the entry point hands in (S3), with the base chosen at `expect_files` (S4: `Project::loading`, then `expect_files(parsed, &Stubs)`; `finish_loading_with(&Stubs)` for a project that got none). Production code has no static for it; a `Registry` keeps an `Arc<Corpus>`. Not done: S4 is a runtime check (a registry with no corpus panics when asked), not a type; the regression test (U4) and `cargo test`/fixtures/clippy were not run, by instruction. | The regression test with `PHPSTAN_RS_NO_STUB_CACHE=1`, a one-thread pool and two nested `Project::new()` calls, with a watchdog (designed, not run); `cargo test --lib` cold; fixtures. Re-entry impossible by construction. |
 | E14 | DONE (6dd06124; unit test over `static::$p`, `self::$p`, `$this->p`, a parenthesized expression and a plain name; the syntax lib's 269 tests pass, clippy clean; the two vendor files are not added as fixtures, the test holds their two forms) | Read `instanceof`'s right side with `parse_new_class_reference`: a plain name stays `InstanceofTarget::Name`, anything else becomes `InstanceofTarget::Expr`. | A parser test per form; the two files (`AbstractConfigurationProvider.php:41`, `BigInteger.php:177`) as fixtures. |
-| E15 | DONE (efe621ad; the hash covers `vendor/phpstan-src/stubs`; the test reads the `rerun-if-changed` paths of `stub-sources/build.rs` and asserts each is in the key's inputs; master's `build.rs` is not changed, it takes the fix when this branch merges) | Add `vendor/phpstan-src/stubs` to the inputs `crates/phpstan-rs/build.rs` hashes (and master's `build.rs`). | A test that the hash's inputs cover every path `stub-sources`' build script reads. |
+| E15 | DONE (efe621ad; the hash covers `vendor/phpstan-src/stubs`; the test reads the `rerun-if-changed` paths of `stub-sources/build.rs` and asserts each is in the key's inputs) | Add `vendor/phpstan-src/stubs` to the inputs `crates/phpstan-rs/build.rs` hashes. | A test that the hash's inputs cover every path `stub-sources`' build script reads. |
 | E16 | DONE (480107e3; found by E4's debug oracle: `file_cache::store`'s debug check that a stored file re-encodes to its bytes fails on any class with several properties, because `NameMap`, `NameSet` and `FoldedMap` wrote their entries in table order, and a map rebuilt from them iterates in another; they write in name order now, the test fills one set in two orders and the mutation of removing the sort fails it; the syntax lib's 270 tests pass; the debug build then ran cold and warm over 215 files with no failure) | A map or set of names writes its entries in the order of the names. | The unit test; a debug run with the file cache on over a tree with classes. |
 
 ### A4. Proposals (§10.1-§10.11)
@@ -412,75 +255,3 @@ and E15 are independent of this order unless a row's "needs" says otherwise.
 | U8 | OPEN | B9's embed and edit timings were read off the console and not kept; the build script's cost under C8's form (every stub file parsed, no base) is not measured; nothing ran on aarch64 or macOS (B10's backstop is designed, not run). | Only if P6 is revived (D3). |
 | U9 | OPEN | A third pass on the report's claims the review workflow could not check (102 items). | Hand check against the code and the profiles, as the 104 confirmed and the 17 split findings were. |
 
-## Appendix B. The 20 G report, re-evaluated
-
-The report (`PROFILE_DRILL_PIWIGO_20G.md`) describes `5fb858c9` and plans twenty items. Its status is stale in three ways: `master` built items 0-9 and 10.1-10.2; the batch changed costs the report priced in the items still open; and the report's own §2 list of unbuilt 25 G designs (the earlier list of tasks) is now spread across those items. Here are all three.
-
-### B1. Part I's findings
-
-| finding | the report | now |
-|---|---|---|
-| R1, context trees dropped on the main thread (575.5 M serial) | item 3 | DONE on `master` (`20G-3.1`, `3.2`). On this line the drop is still serial: 267.8 M for 11,459 trees after P8b (was 575.5 M) |
-| R2, five functions per token (1.77 G) | item 10 | DONE on `master` (`20G-10.1`; −2.6 G with the rest of the lexer and parser group). On this line the six plumbing functions cost 2,868 M (`next_token` 838, `next_tok` 582, `fill` 567, `next_raw` 490, `skip` 231, `take_token` 160), about 78% of it in the project's parse; P8b's skim still pays the plumbing for every skimmed token |
-| R3, pass results written into shared declarations; string keys (≈0.5 G); `Members::eq` 96.9 M | item 4 | DONE on `master` (`20G-4.6`-`4.8`: results are tables by id). On this line P9 removed the eager purity pass: `Members::eq` 4.8 M |
-| R4, a line index for every file (270 M) | item 11 | on `master` lazy since `b188d671`; 252.7 M of builds remain (`20G-11.x`) |
-| R5, stub members decoded to learn they have no deferred types (178 M) | items 6 and 4 | the eager pass is gone (`20G-6.1`), but the warm profile still decodes 59,434 stub methods in `resolved_deferred_class` (303.4 M): `20G-E2.8` |
-| R6, lookups by `&str` (701 M of folding) | item 15 | 922 M by `str` now: `20G-15.3`, `E2.11` |
-| R7, products for every body (`BodySummary` 344 M, `InitFlow` 218.5 M, `GlobalFacts` 218.5 M) | item 13 | larger on `master` (§3B item 13: 8.5 G of per-file products, effect summaries included). On this line P8a/P8b made them lazy: `BodySummary::of` 83.6 M |
-| R8, stack guards in hot paths | item 9 | DONE on `master` (`peeled` a loop, `20G-9.1`); on this line `peeled` is 61 M (2.5 M calls) |
-| R12, identifier names (`name_and_bits`, keywords) | item 12 | open: 547 M and 127 M on `master` |
-| M1-M11, memory | items 3, 4, 9, 14, 16, 19 | the plan's end state was ≈365 MB at the start of the check; the measured peak is 1.41 GB (MEAS-1) |
-
-### B2. Part II's items
-
-| item | the plan | on `master` | on this line |
-|---|---|---|---|
-| 0, baselines | dumps and canonical printers; debug oracles retired | DONE (`0.11` skipped; the catalog rows deferred). Blocks nothing open | not built |
-| 1, one session | one identity, one configuration, one load, one analysis | DONE except `1.1` (resolved-path identity, deferred) | not built |
-| 2, the walk | parallel walk, path data from it | DONE (`2.1`-`2.7`) | not built; `collect_php_files` 75.3 M, `sort_paths` 112.3 M, `owner` 69.3 M, `absolute_path` 54.1 M, `id_for` 33.7 M remain |
-| 3, trees dropped on the worker | `keeps_tree`, worker drop | DONE | not built; 267.8 M serial |
-| 4, the registry by ids | ids, generations, tables by id, parallel passes | DONE (`4.1`-`4.8`); the eager purity pass was replaced by effect resolution | not built |
-| 5, the merge in parallel | prefix-sum ids, sharded merge, posting lists, the cache format | DONE (`5.1`-`5.9`) | not built; `insert_numbered_file` 414 M serial |
-| 6, the stub scope | deferred types on demand; availability guards; names once per file; `read_at` records | `6.1` and `6.6` DONE; the format work done under `5.8`; guards `6.2`-`6.4` deferred as semantic | not built |
-| 7, one relation memo | content generation, one memo | DONE | E5 and E6 are short-cuts in front of the old memo |
-| 8, lean declarations | case references move to the checker | DONE (`8.1`-`8.4`) | not built |
-| 9, trees in an arena | `bumpalo` arena, handles | DONE as `la-arena` stores and ids in the syntax crate (the copy of the report on this branch says `bumpalo` handles; `bumpalo` is used only for the checker's synthetic expressions); `9.3`-`9.8` unvalidated; memory not measured (the expression arena is 78.5 MB at peak) | not built |
-| 10, flat tokens | `TokenStream` | `10.1`, `10.2` DONE; `10.3`, `10.5`, `10.9` open | not built |
-| 11, line starts | `LineStarts` and `LineIndex` | open; premise changed (lazy index) | not built |
-| 12, lexer details | nine lexer cuts | open; `12.6`'s cost fell tenfold | not built |
-| 13, a file's products | declaration list, one walk | open; the cost is 8.5 G, not the ≈0.45 G of walks the plan priced; the batch excludes fusing the `Summarizer` | P8 made context bodies lazy (INT-3) |
-| 14, PHPDoc | `TagEffect`, eager lowering, two memos | open; the batch built the SQL and regex per-text analyses and the type-text buffer | P7 (tag descriptions lexed when read) |
-| 15, names as names | `String` keys to `Name`, `FoldedName`, `ArrayKey` | open; the batch moved class names, callee names and statement variable names to `Name` | not built |
-| 16, interned values | one allocation per name and type | open | E7 keeps a class's object type |
-| 17, warm runs | stat index, a resolved context base | open; a warm run is dominated by effect classification (21.5 G of 39.37 G), which `17.5` does not say whether its base would hold; `20G-E2.6` is the other route to the same saving; decide the two together | not built |
-| 18, the check phase | observers, slots, radix scopes, rule temporaries | open; the API walker, SQL and regex premises are mostly cut | E2, E3, E10 cut small parts |
-| 19, each tree until its last reader | per-check release, tree cache | open; `keeps_tree` exists | not built |
-| E, effect resolution | not in the copy of the report on this branch | in progress (§3A) | none |
-
-### B3. The 25 G report's unbuilt designs (the report's §2 lists)
-
-| design | now |
-|---|---|
-| C3 steps 6-7: names as `Name` keys (≈0.6 G) | `20G-15.1`-`15.3` |
-| F4: purity and property-write keys as folded strings (≈0.5 G) | gone: the keys are ids (`20G-4.6`, `4.7`) and the purity pass is replaced by effects |
-| F3: results inside shared declarations; a serial `changed_since` | DONE on `master` (`20G-4.6`-`4.8`) |
-| §14: trees dropped in the serial insert loop | DONE on `master` (`20G-3.x`) |
-| P7 and P11 step 1: PHPDoc lowering and tag effects | `20G-14.x`; this line's P7 is a different cut of the same work |
-| P6(d): the streaming lexer's plumbing | DONE on `master` (`20G-10.1`) |
-| P4: column tables for every file | `20G-11.x` |
-| F1 and F2: the stubs' availability guards and their count | `6.1` DONE; guards `6.2`-`6.4` deferred as semantic |
-| C1 step 5, C5, §12.10 | `20G-18.1`, `18.3` |
-| C2 steps 2-3, C4 step 5's keys | `20G-18.6`, `15.2` |
-| F5: a `FileId` bitset, string frontier sets | DONE on `master` (`20G-4.8`, `5.6`) |
-| P12 steps 3-4: declaration list, the collector goes | `20G-13.1`, `13.5` |
-| §12.11: `MemberIndex` | `20G-18.7` |
-| the sorted traversal's k-way merge | DONE on `master` (`20G-2.5`) |
-
-## Appendix C. How this ledger was made
-
-- **Read:** this branch's two files whole; from `master`, by `git show master:<file>`, the 20 G ledger (all 1,141 rows), the HEAD ledger, the 9071 batch plan's measured sections and exclusions, `WORK_STACK.md`. `master`'s copy of the 20 G report was compared by size and header only.
-- **Profiles:** `~/.cache/prs-profile/p8b/cg` (this line at `791d29cb`, off mode, 20,928,053,254 Ir), `cl-97b8f3f0-off` (49,358,114,819 Ir) and `cl-97b8f3f0-warm` (39,370,007,169 Ir), each indexed with `drill-scripts/parse.py` and read with `q.py` and `roots.py`. Figures are inclusive, summed over threads. An inclusive figure for a recursive function (the parser, the visitors) counts nested calls more than once; such figures are quoted only for entry points or marked.
-- **Code checks, `git grep` at `master`:** absent, so the row is not built: `LineStarts`, `enum Lines`, `TagEffect`, `quick_cache`, `siphasher`, `triomphe`, `ThinArc`, `blake3`, `VarSlot`, `IntMap`, a stat index, a context base, a declaration list, `ImportScope`. Present, so the premise stands: `class_memo` and `method_memo` in the checker, `TableKey for str`, `Vec<Weak<Node>>` in the type interner, `eq_ignore_ascii_case` in `Keyword::try_from_bytes`, `to_ascii_lowercase` in `NativeType::from_name`, the eager `tokenize` in the tag lexer. Present, so the row is built: `keeps_tree`, `ast_of`, `read_at`, `la-arena` `NodeArenas`, `DirTable`, a `HashTable` in `FileTable`, `FileDecls`, `PHPSTAN_RS_NO_RELATION_MEMO`, a `TokenStream`. Absent, so the row is built or moot: `KEEP_DECISIONS`, `structural_memo`, `collect_php_files_excluding`, and any `bumpalo` in the syntax crate.
-- **Merge facts:** `git merge-tree --write-tree --name-only master callgrind-20g` for the whole merge, and `--merge-base=<commit>^ master <commit>` for each row; the per-row count of `master` commits on the same files is `git log d520c9fd..master -- <file>`. Nothing was merged or checked out.
-- **Not verified:** the child rows of each `master` row marked DONE; the O2 plan beyond the commits named in `HEAD-O2`; `master2` and `master3` beyond the shared history and the catalog work; whether the premises of `OFF-E3`, `E5`-`E7` and `E10` hold on `master` in instructions (they are absent there, not measured); whether `master` has a check that fails on `OFF-E16`'s table-order writes.
-- **Stale on arrival:** `master` moves. The newest commits on `master` (2026-10-13) are `HEAD-O2`'s. Re-run the checks above before building a row.

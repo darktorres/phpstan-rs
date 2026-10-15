@@ -271,10 +271,9 @@ State: `PROFILE_DRILL_PIWIGO_LEDGER.md` holds every row of this drill and of the
 20 G plan, with what blocks each. On this branch E1, D5 (proposal 2), proposals 1-5,
 7, 8 and 9, and the cuts E2, E3, E5-E7, E10, E13-E16 are built; the off run went from
 25.63 G to 20.93 G Ir, output byte-identical at each row. Proposal 6 waits on D3 and
-the crate split. H1 is the one row nothing blocks. None of these rows is on `master`,
-whose own line built the 20 G plan's items 0-9 and 10.1-10.2 and effect resolution
-(level 7, `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` there); how the two lines meet is the
-ledger's INT-1. Each row's saving is a callgrind run against the previous row's
+the crate split. H1 is the one row nothing blocks. The 20 G plan's twenty items
+are all still open on this branch; the ledger re-evaluates each against the code
+and the profile and lists what blocks it. Each row's saving is a callgrind run against the previous row's
 commit; tests, clippy and fixtures were run only as each row's text says.
 
 The ledger's items were checked one by one on 2026-10-14 and the report corrected.
