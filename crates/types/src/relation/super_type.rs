@@ -68,6 +68,10 @@ impl Relation<'_> {
     /// unprovable is `Maybe`, including any comparison with a class the
     /// registry doesn't know.
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
+        // One node against itself: every value of a type is a value of it.
+        if std::sync::Arc::ptr_eq(&sup.0, &sub.0) {
+            return TrinaryLogic::Yes;
+        }
         // Each shortcut reads the node's kind, set when the node was made.
         let (sup_flags, sub_flags) = (sup.0.flags(), sub.0.flags());
         // A literal, `true`, `false`, `null` or an enum case is one value:
@@ -831,7 +835,9 @@ mod tests {
         let samples = samples();
         for sup in &samples {
             for sub in &samples {
-                let by_form = if is_scalar_value(sup) && is_scalar_value(sub) {
+                let by_form = if sup == sub {
+                    TrinaryLogic::Yes
+                } else if is_scalar_value(sup) && is_scalar_value(sub) {
                     TrinaryLogic::from_bool(sup == sub)
                 } else {
                     relation.is_super_type_of_by_form(sup, sub)
@@ -846,13 +852,35 @@ mod tests {
     }
 
     #[test]
+    fn a_type_is_a_super_type_of_itself() {
+        let mut types = samples();
+        types.extend([
+            Type::float_literal(f64::NAN),
+            Type::new(Repr::Mixed(true, Some(Type::string()))),
+            Type::union_of(vec![Type::int(), Type::null()]),
+        ]);
+        for relation in [Relation::structural()] {
+            for ty in &types {
+                assert_eq!(relation.is_super_type_of(ty, ty), TrinaryLogic::Yes, "{ty}");
+                assert_eq!(
+                    relation.is_super_type_of(ty, &ty.clone()),
+                    TrinaryLogic::Yes,
+                    "{ty}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_pair_asked_again_is_answered_as_it_was() {
         let relation = Relation::structural();
         let samples = samples();
         for _ in 0..3 {
             for sup in &samples {
                 for sub in &samples {
-                    let expected = if is_scalar_value(sup) && is_scalar_value(sub) {
+                    let expected = if sup == sub {
+                        TrinaryLogic::Yes
+                    } else if is_scalar_value(sup) && is_scalar_value(sub) {
                         TrinaryLogic::from_bool(sup == sub)
                     } else {
                         relation.is_super_type_of_by_form(sup, sub)
