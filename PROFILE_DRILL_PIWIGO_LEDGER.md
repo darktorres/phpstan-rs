@@ -1045,11 +1045,11 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 
 **STUB-4** (off P3): DONE `a13f4ed2`
 
-- *Status, as recorded:* DONE (a13f4ed2; measured: off run 24,155,076,222 Ir against 24,498,907,030 at D5's commit, −343.8 M, output byte-identical; the test of the lookups against the ordering is written and compiled, not run)
+- *Status, as recorded:* DONE (a13f4ed2; measured: off run 24,155,076,222 Ir against 24,498,907,030 at D5's commit, −343.8 M, output byte-identical; the test of the lookups against the ordering, `a_base_built_in_memory_finds_each_name_where_the_ordering_puts_it` (`registry/name_table.rs:1285`), was written and compiled then; run on 2026-10-15 at `f3ae5e86`, it passes)
 - *Task:* A hash index for stub bases built in memory: `freeze` builds the index `store_entries` already builds.
 - *Estimated saving:* ≈ −0.29 G
 - *Needs:* —
-- *Verify:* A built-then-frozen base answers every lookup as the bisection did (to be checked by a test).
+- *Verify:* A built-then-frozen base answers every lookup as the bisection did. Checked by that test: it builds through `Base::built_shared`, the path `NameTable::freeze` takes (`:927`), and compares `find` and `find_by` with a bisection of the sorted keys, for a folding base and a plain one, over 3,000 names that collide in the index, and five absent keys.
 
 **STUB-5** (off P4): DONE `0ce52479`
 
