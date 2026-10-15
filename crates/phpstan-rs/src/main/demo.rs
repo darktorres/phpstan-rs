@@ -1,10 +1,11 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use types::Name;
 
-use checker::Checker;
-use phpstan_rs::{checker, output, registry};
-use registry::{Registry, format_signature};
+use phpstan_rs::project::{Project, worker_pool};
+use phpstan_rs::registry::stub_set::{StubSource, Stubs};
+use phpstan_rs::{output, registry};
+use registry::format_signature;
 
 const SAMPLE: &str = r#"<?php
 
@@ -50,11 +51,13 @@ echo sum([1, 2, 3]) ?? 0;
 "#;
 
 pub(crate) fn run_demo(file: Option<&Path>) {
-    let source = if let Some(path) = file {
-        fs::read(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+    let (path, source) = if let Some(path) = file {
+        let source =
+            fs::read(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        (path.to_path_buf(), source)
     } else {
         println!("(no file given, parsing built-in sample)\n");
-        SAMPLE.as_bytes().to_vec()
+        (PathBuf::from("sample.php"), SAMPLE.as_bytes().to_vec())
     };
 
     let parsed = syntax::parse(&source).unwrap();
@@ -66,24 +69,15 @@ pub(crate) fn run_demo(file: Option<&Path>) {
         println!("{:#?}", stmt);
     }
 
-    let stubs = phpstan_rs::registry::stub_set::Stubs::new(
-        phpstan_rs::registry::stub_set::StubSource::from_environment(),
-        phpstan_rs::project::worker_pool(),
-    );
-    let corpus = stubs.corpus();
-    let mut registry = Registry::build(&program);
-    // Generated (real php-src source) takes priority over the hand-curated
-    // approximations - merge_stubs only fills in names not already present.
-    registry.merge_stubs(corpus.generated_stubs());
-    registry.merge_stub_classes(corpus.generated_stub_classes());
-    registry.merge_stub_constants(corpus.generated_stub_constants());
-    // `merge_stub_classes` can add extends/implements edges after
-    // `Registry::build`'s own internal precompute already ran - rebuild
-    // `ancestor_names`/member-owner maps once more now that the registry
-    // is settled, so the "class hierarchy" section below (`is_subclass_
-    // of`) sees every merged-in stub class too.
-    registry.precompute_ancestor_names();
-    registry.precompute_member_owners();
+    // The file is an analysed file of a project on the built-in stubs,
+    // loaded and checked as the project loads and checks any other.
+    let stubs = Stubs::new(StubSource::from_environment(), worker_pool());
+    let mut project = Project::from_stubs(&stubs);
+    project
+        .load_analyzed_file(path.clone(), &String::from_utf8_lossy(&source))
+        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
+    project.finish_loading_with(&stubs);
+    let registry = project.registry();
 
     println!("\n-- resolved signatures (from source) --");
     let mut fn_names: Vec<&Name> = registry.functions.keys().collect();
@@ -127,9 +121,7 @@ pub(crate) fn run_demo(file: Option<&Path>) {
         println!("{}", format_signature("strlen", sig));
     }
 
-    let mut checker = Checker::new(&registry);
-    checker.check_program(&program);
-    let diagnostics = checker.into_diagnostics();
+    let diagnostics = project.check_file(&path);
 
     println!("\n-- diagnostics --");
     if diagnostics.is_empty() {
