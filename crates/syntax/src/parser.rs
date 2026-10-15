@@ -65,6 +65,10 @@ pub struct Parser<'a> {
     // a declaration a walk of the statements does not reach.
     pub(crate) nested_depth: std::cell::Cell<u32>,
     pub(crate) saw_nested_declaration: std::cell::Cell<bool>,
+    // How many function and method bodies the parse is inside, and whether
+    // a declaration was a statement of one.
+    pub(crate) body_depth: std::cell::Cell<u32>,
+    pub(crate) saw_declaration_in_body: std::cell::Cell<bool>,
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
@@ -203,6 +207,8 @@ impl<'a> Parser<'a> {
             saw_anonymous_class: false,
             nested_depth: std::cell::Cell::new(0),
             saw_nested_declaration: std::cell::Cell::new(false),
+            body_depth: std::cell::Cell::new(0),
+            saw_declaration_in_body: std::cell::Cell::new(false),
             goto_scopes: vec![GotoScope::default()],
         };
         parser.fill(LOOKAHEAD);
@@ -313,6 +319,12 @@ impl Parser<'_> {
     /// declared in the body of a closure or an anonymous class.
     pub fn saw_nested_declaration(&self) -> bool {
         self.saw_nested_declaration.get()
+    }
+
+    /// Whether the tree built so far has a class, function or constant
+    /// declared as a statement of a function or method body.
+    pub fn saw_declaration_in_body(&self) -> bool {
+        self.saw_declaration_in_body.get()
     }
 
     /// The span of the token about to be read: the last one's when none
@@ -580,6 +592,14 @@ impl Parser<'_> {
             )
         {
             self.saw_nested_declaration.set(true);
+        }
+        if self.body_depth.get() > 0
+            && matches!(
+                kind,
+                StmtKind::ClassDecl(_) | StmtKind::FunctionDecl(_) | StmtKind::GlobalConst(_)
+            )
+        {
+            self.saw_declaration_in_body.set(true);
         }
         Stmt {
             id: self.node_id(),

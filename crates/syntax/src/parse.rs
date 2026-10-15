@@ -3,10 +3,11 @@
 
 use std::sync::Arc;
 
-use crate::ast::{GotoLabel, Stmt};
+use crate::ast::{FunctionBody, GotoLabel, Stmt};
 pub use crate::lexer::FileFacts;
 use crate::lexer::{IgnoreMark, LexEnd, LexWarning, Lexer, WatchList};
 use crate::name::NameCache;
+use crate::name_resolution::NameContext;
 use crate::parser::{ParseError, Parser};
 use crate::references::FileReferences;
 use crate::span::LineIndex;
@@ -111,6 +112,7 @@ pub fn parse_watching<'a>(
     let parsed = parser.parse_program();
     let has_anonymous_class = parser.saw_anonymous_class();
     let has_nested_declaration = parser.saw_nested_declaration();
+    let has_declaration_in_body = parser.saw_declaration_in_body();
     let goto_labels = parser.file_goto_labels();
     let references = parser.take_references();
     // The rest of the file is lexed even when the parse failed: a lexer
@@ -133,6 +135,7 @@ pub fn parse_watching<'a>(
     let stmts = parsed?;
     facts.has_anonymous_class = has_anonymous_class;
     facts.has_nested_declaration = has_nested_declaration;
+    facts.has_declaration_in_body = has_declaration_in_body;
     Ok(ParsedFile {
         stmts,
         ignore_marks,
@@ -142,6 +145,20 @@ pub fn parse_watching<'a>(
         goto_labels,
         references,
     })
+}
+
+/// The body `bytes` holds, a `{ ... }` found in a file at the byte offset
+/// `base`, parsed as it was in that file when `ctx` was the context in
+/// effect at its declaration: its spans are where they are in the file. The
+/// file's references and warnings are not read again.
+pub fn parse_function_body(
+    bytes: &[u8],
+    base: u32,
+    ctx: &NameContext,
+) -> Result<FunctionBody, ParseError> {
+    let mut parser = Parser::from_lexer(Lexer::fragment_bytes(bytes, base));
+    *parser.ctx.get_mut() = ctx.clone();
+    parser.parse_function_body()
 }
 
 #[cfg(test)]

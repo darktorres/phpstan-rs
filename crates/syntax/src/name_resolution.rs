@@ -206,6 +206,30 @@ pub fn context_at(stmts: &[Stmt], pos: u32) -> NameContext {
     at
 }
 
+/// What a `NameContext` is stored as: its namespace and each import as
+/// the name it is read from, where in it the imported name starts, and the
+/// path imported, in the order of the names.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct StoredContext {
+    namespace: String,
+    classes: Vec<(Name, usize, Name)>,
+    functions: Vec<(Name, usize, Name)>,
+    constants: Vec<(Name, usize, Name)>,
+}
+
+impl UseMap {
+    fn stored<const FOLDED: bool>(
+        imports: &rustc_hash::FxHashMap<ImportKey<FOLDED>, Name>,
+    ) -> Vec<(Name, usize, Name)> {
+        let mut entries: Vec<(Name, usize, Name)> = imports
+            .iter()
+            .map(|(key, path)| (key.name.clone(), key.from, path.clone()))
+            .collect();
+        entries.sort_unstable_by(|a, b| (a.0.as_str(), a.1).cmp(&(b.0.as_str(), b.1)));
+        entries
+    }
+}
+
 /// A version number not given before.
 fn next_version() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -228,6 +252,40 @@ impl NameContext {
     /// Which namespace and imports this context holds, see the field.
     pub fn version(&self) -> u64 {
         self.version
+    }
+
+    /// This context as it is stored.
+    pub fn to_stored(&self) -> StoredContext {
+        StoredContext {
+            namespace: self.namespace.clone(),
+            classes: UseMap::stored(&self.use_map.classes),
+            functions: UseMap::stored(&self.use_map.functions),
+            constants: UseMap::stored(&self.use_map.constants),
+        }
+    }
+
+    /// The context `stored` was made from, with a version of its own.
+    pub fn from_stored(stored: StoredContext) -> NameContext {
+        let mut context = NameContext::default();
+        if stored.namespace.is_empty()
+            && stored.classes.is_empty()
+            && stored.functions.is_empty()
+            && stored.constants.is_empty()
+        {
+            return context;
+        }
+        context.namespace = stored.namespace;
+        for (name, from, path) in stored.classes {
+            context.use_map.insert(UseKind::Class, &name, from, path);
+        }
+        for (name, from, path) in stored.functions {
+            context.use_map.insert(UseKind::Function, &name, from, path);
+        }
+        for (name, from, path) in stored.constants {
+            context.use_map.insert(UseKind::Const, &name, from, path);
+        }
+        context.version = next_version();
+        context
     }
 
     /// The current file's own namespace, empty for the global

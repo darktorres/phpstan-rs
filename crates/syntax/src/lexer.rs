@@ -223,6 +223,10 @@ pub struct FileFacts {
     /// closure or an anonymous class, which a walk of its statements alone
     /// does not reach.
     pub has_nested_declaration: bool,
+    /// The file declares a class, function or constant in the body of a
+    /// function or method, as a statement of it: a walk of the statements
+    /// reaches it, but only by walking the bodies.
+    pub has_declaration_in_body: bool,
     /// The bits of the `WatchList` the lexer was given for the spellings
     /// the file names: an identifier, a whole name or one segment of a
     /// qualified one, in any case.
@@ -464,6 +468,15 @@ impl<'a> Lexer<'a> {
         Lexer {
             base,
             ..Lexer::new_in_php(src)
+        }
+    }
+
+    /// `fragment` for source that need not be UTF-8, as `from_bytes` is
+    /// to `new`.
+    pub fn fragment_bytes(bytes: &'a [u8], base: u32) -> Self {
+        Lexer {
+            base,
+            ..Lexer::build(bytes, std::str::from_utf8(bytes).ok(), true)
         }
     }
 

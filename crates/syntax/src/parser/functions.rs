@@ -136,6 +136,24 @@ impl Parser<'_> {
         Ok(params)
     }
 
+    /// A function's `{ ... }` body, at its `{`.
+    pub(crate) fn parse_function_body(&mut self) -> Result<FunctionBody, ParseError> {
+        let open = self.current_span();
+        let depth = self.enter_goto_scope();
+        self.recorder.borrow_mut().enter_body();
+        self.body_depth.set(self.body_depth.get() + 1);
+        let stmts = self.parse_stmt_list_block();
+        self.body_depth.set(self.body_depth.get() - 1);
+        self.recorder.borrow_mut().leave_body();
+        let end = self.leave_goto_scope(depth);
+        Ok(FunctionBody {
+            open,
+            stmts: std::sync::Arc::new(stmts?),
+            goto_labels: end.goto_labels,
+            is_generator: end.is_generator,
+        })
+    }
+
     pub(crate) fn parse_function_decl(&mut self) -> Result<FunctionDecl, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Keyword(Keyword::Function))?;
@@ -155,18 +173,7 @@ impl Parser<'_> {
         let body = if self.eat(&Token::Semicolon) {
             None
         } else {
-            let open = self.current_span();
-            let depth = self.enter_goto_scope();
-            self.recorder.borrow_mut().enter_body();
-            let stmts = self.parse_stmt_list_block();
-            self.recorder.borrow_mut().leave_body();
-            let end = self.leave_goto_scope(depth);
-            Some(FunctionBody {
-                open,
-                stmts: std::sync::Arc::new(stmts?),
-                goto_labels: end.goto_labels,
-                is_generator: end.is_generator,
-            })
+            Some(self.parse_function_body()?)
         };
         Ok(FunctionDecl {
             namespaced_name: None,

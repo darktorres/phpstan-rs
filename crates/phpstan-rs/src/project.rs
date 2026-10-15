@@ -3019,17 +3019,21 @@ pub fn parse_file<'a>(
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
 ) -> Result<ParsedFile, ParseError> {
-    parse_file_with_names(path, source, is_stub, None)
+    parse_file_with_names(path, source, is_stub, false, None)
 }
 
 /// `parse_file`, with the names the files of a load share: the cache is
-/// asked for a name before the interner is.
+/// asked for a name before the interner is. `skim_bodies` is whether the
+/// file's function bodies are kept as text and read when a pass asks, which
+/// a context file's may be.
 pub fn parse_file_with_names<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
+    skim_bodies: bool,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<ParsedFile, ParseError> {
+    let source: syntax::Source<'a> = source.into();
     let Parsed {
         ast,
         references,
@@ -3066,7 +3070,7 @@ pub fn parse_file_with_names<'a>(
             _ => None,
         })
         .collect();
-    let bodies = FileBodies::of_file(&ast, &facts);
+    let bodies = FileBodies::of_file(&ast, &facts, skim_bodies.then_some(source));
     let global_facts = Arc::new(GlobalFacts::of(&ast));
     let pest_facts = PestFacts::of(path, &ast);
     Ok(ParsedFile {

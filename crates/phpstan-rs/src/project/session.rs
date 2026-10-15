@@ -647,7 +647,7 @@ impl Session {
             return Read::Loaded(Box::new(ReadFile {
                 len: cached.len,
                 source: String::new(),
-                parsed: cached.into_parsed(path),
+                parsed: cached.into_parsed(path, &bytes),
                 cache_key: None,
             }));
         }
@@ -664,8 +664,10 @@ impl Session {
             }
         };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
-            Ok(text) => super::parse_file_with_names(path, text, is_stub, Some(names)),
-            Err(bytes) => super::parse_file_with_names(path, bytes, is_stub, Some(names)),
+            Ok(text) => super::parse_file_with_names(path, text, is_stub, cacheable, Some(names)),
+            Err(bytes) => {
+                super::parse_file_with_names(path, bytes, is_stub, cacheable, Some(names))
+            }
         })) else {
             return Read::Unread;
         };
