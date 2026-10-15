@@ -1053,11 +1053,11 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 
 **STUB-5** (off P4): DONE `0ce52479`
 
-- *Status, as recorded:* DONE (0ce52479; measured: off run 23,866,820,730 Ir against 24,155,076,222 at P3's commit, −288.3 M, output byte-identical; the stub index a cold run stores is byte-identical to the one stored before, so the closures are equal file by file)
+- *Status, as recorded:* DONE (0ce52479; measured: off run 23,866,820,730 Ir against 24,155,076,222 at P3's commit, −288.3 M, output byte-identical; the stub index a cold run stores is byte-identical to the one stored before, so the closures are equal file by file; the test it asked for is `4a8b7f05`)
 - *Task:* Look each stub file's dependents up once in `build_closures`: per-file dependent lists, closures in strongly-connected-component order.
 - *Estimated saving:* ≥ −0.2 G serial
 - *Needs:* —
-- *Verify:* The closures equal today's, file by file (to be checked by a test).
+- *Verify:* The closures equal today's, file by file. Checked by `registry/stubs/tests/closures.rs` (`4a8b7f05`): every file of the corpus, where the test before it took every 37th, compared word for word with the key-by-key walk that `build_closures` made before `0ce52479`; hand-made files with the shapes the corpus need not have (a self-reference, a chain into a cycle, linked cycles, a diamond, files reaching a finished component from a later start or branch, a key two files declare, closures over several words, a 3,000-file chain); and random files under `proptest`. Breaking the merge of the components a component leads to, or merging only one member's edges, fails all three tests.
 
 **STUB-6** (off D7): DONE
 
