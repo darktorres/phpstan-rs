@@ -1,6 +1,6 @@
 # Piwigo performance ledger
 
-Every optimization task for the Piwigo profile on this branch (`callgrind-20g`), with its state and what blocks it. State as of 2026-10-15, at `36815464`.
+Every optimization task for the Piwigo profile on this branch (`callgrind-20g`), with its state and what blocks it. State as of 2026-10-15, at `0f32829b`.
 
 It replaces `PROFILE_DRILL_PIWIGO_OFF_BUILD_LEDGER.md` (folded in, Appendix A) and the status text of `PROFILE_DRILL_PIWIGO_20G.md`. The 20 G report stays as the plan's design text. Its status claims were written at `5fb858c9`, before the off drill's rows changed the code under them, so each of its twenty items is re-evaluated here against the code and the latest profile.
 
@@ -29,16 +29,127 @@ None of the 20 G plan's twenty items is built. Four of the off drill's rows chan
 
 ## 2. Blocking tasks
 
-These are not optimizations. Each gates optimization rows.
+These are not optimizations. Each gates optimization rows. Each is split into sub-tasks below, with its own state and the commit or result that closed it; the state of a task is the state of its sub-tasks, so progress is written on a sub-task row and not in this table.
 
 | id | task | blocks | state |
 |---|---|---|---|
-| DEC-1 | `OFF-D3`: how a binary carries the stub data (compile time or not). Decided again once the crate split's C5 sets its version key, on ≈0.2-1.5 G per cold run (C8) against 5.05 G in the old code. | `OFF-P6` | OPEN |
-| CRATE-1 | Level 2, the crate split from Stage C on (C4 lazy resolution, C5 stub layer, C10 reflection crate), paused behind levels 3 and 6 (`WORK_STACK.md`). C4 and C5 reshape the stub layer, so they decide the form of `OFF-P6`, `OFF-E8`, `OFF-E11`, `20G-6` and `20G-17`, and they remove the eager stub build that `OFF-P1`-`P4` speed. | `OFF-P6`; the form of `20G-6`, `20G-17`, `OFF-E8`, `OFF-E11` | STARTED 2026-10-15 at C4: `cargo xtask gatetime` built (`58cfc5d2`); the phase start is recorded for that commit, medians of three runs: lib tests 9.2 s (16.7, 8.9, 9.2), fixtures 1.3 s (1.6, 1.2, 1.3), loadavg 2.71 at the start, `nice -n 19`. C4's keys and data model, audited against this branch's code: folded keys, lookups that allocate nothing and `FunctionTable` on the class table's type are already built, so those bullets are done. Built since: a property's finality as a flag on the property (`8d35c99d`; a final property taken from a trait is the class's own, as PHP says, a delta the plan did not list) and a property's native type as an `Option` (`7a61603e`). Also built, each judged on whether it is true of the program and not on any other tool's output: a class's templates as one list of parameters with bound, variance, default and scope (`5401afc9`), and the explicit-`mixed` flags removed in favour of the types (`e7b2521f`, then corrected). What a written `mixed` excuses is now each value type it is the value type of, so a bare `array` beside `array<string, mixed>` is reported; a union keeps a `mixed` that was written out when it drops an equal member; a conditional return type is read at its two branches and not at the type its condition tests. Left as they were, after a first version took them from PHPStan: an erased receiver's template with no default and no bound stays unbound (nothing is known of it and its author wrote no `mixed`), a native `iterable` still admits an array whatever its PHPDoc type narrows it to, and a method overriding a built-in one without a return type is reported (the type is absent). Piwigo's output is byte-identical in the default configuration and with every opt-in rule on; the vendored trees' reports changed only on the missing-type rules, by the position-wide excuse above. Still open in that item: provenance as the only location record (63 `is_stub`, 29 `Origin::Unknown` sites), query accessors (about 280 sites), builders reading parse-time names, `canonicalize_class_name_case` and the declared-names side map. Then the memoized resolution, `apply` snapshots and the staleness fixes |
-| DEC-2 | The output-changing rows. DECIDED 2026-10-15, one by one in the session: items 1, 2, 4, 6 (both parts of step 2), 7, 8 and 15 approved as the plan lists them; item 18 (§12.10) approved in principle, each rule family's output diff read at VAL-1 and anything that is not an improvement fixed or reverted per family. The plan's §11 is the list of what may differ: item 1 (links, roles, server), item 2 (link cycles), item 4 (member order), item 6 step 2 (guards on stub availability, a new polyfill-signature check), item 7 (constants on a cycle read `never`, PHPDoc-only cycles `mixed`), item 8 (one `@property` case), item 15 (container-field keys canonical), item 18 (§12.10's rule families). | nothing now | DONE |
-| VAL-1 | The plan validates once, after item 19 (§11): dumps of the front end, the registry, the types and the diagnostics taken from the starting commit and compared at the end, an `oracle` profile that runs the debug oracles over everything, an edit replay, the server session. On this branch the rows were validated one at a time (output byte-identical, a debug oracle per row, the touched module's tests). So item 0 is not a precondition for a row; it is what the plan's own end validation needs. `20G-0` | the plan's final validation | OPEN |
-| MEAS-1 | Warm-mode costs at this branch's code. DONE 2026-10-15: callgrind of `p8b-phpstan-rs` (`791d29cb`'s code), both caches warm (a second run did not rewrite them), `check-project --config phpstan-rs.toml --format json` on Piwigo, `nice -n 19`, loadavg 1.41 at the start, output byte-identical to the warm-up run; profile `~/.cache/prs-profile/meas1/cg`, 13,176,579,399 Ir (the off run is 20,928,053,254; the last warm profile, `cl-20g` at `5fb858c9`, was 20.57 G). Results in §2a. | targets of `20G-6`, `20G-17`, `OFF-E8`, `OFF-E11` (now read) | DONE |
-| MEAS-2 | Memory at this branch's code. DONE 2026-10-15: dhat with the patched dhat-rs and frame pointers (`dhat` profile, `--features dhat-heap`, built at `29b50ae8`, whose code is `791d29cb`'s), whole backtraces, Piwigo `check-project --config phpstan-rs.toml --format json`, `nice -n 19`, the default 8 workers, output byte-identical to MEAS-1's. Two runs: off (both caches off) and warm (stub cache and per-file cache warm). Profiles `~/.cache/prs-profile/meas2/{off,warm}`; results in §2b. | the memory claims of `20G-3`, `4`, `9`, `14`, `16`, `19` (now read) | DONE |
+| DEC-1 | `OFF-D3`: how a binary carries the stub data (compile time or not). §2.1 | `OFF-P6` | BLOCKED (CRATE-1.C5) |
+| CRATE-1 | The crate split from Stage C on: C4 (snapshots and lazy resolution), C5 (locator chain and stub layer) and C10 (the `reflection` crate). It reshapes the stub layer, so it decides the form of `OFF-P6`, `OFF-E8`, `OFF-E11`, `20G-6` and `20G-17`, and it removes the eager stub build that `OFF-P1`-`P4` speed. §2.2 | `OFF-P6`; the form of `20G-6`, `20G-17`, `OFF-E8`, `OFF-E11` | PART (C4 started 2026-10-15) |
+| DEC-2 | The output-changing rows. §2.3 | nothing now | DONE |
+| VAL-1 | The plan's end validation: dumps, an `oracle` profile, an edit replay, the server session. §2.4 | the plan's final validation | OPEN |
+| MEAS-1 | Warm-mode costs at this branch's code. §2a | targets of `20G-6`, `20G-17`, `OFF-E8`, `OFF-E11` | DONE |
+| MEAS-2 | Memory at this branch's code. §2b | the memory claims of `20G-3`, `4`, `9`, `14`, `16`, `19` | DONE |
+
+### 2.1 DEC-1: how a binary carries the stub data
+
+| id | sub-task | state | blocked by |
+|---|---|---|---|
+| DEC-1.1 | The stub layer's version key over a `PhpVersions` range, chosen and written in the crate-split plan's Appendix F (`CRATE-1.C5.1`). Its form should keep the gates as data, one parse per file, or the data stops being a function of the source | BLOCKED | `CRATE-1.C5.1` |
+| DEC-1.2 | What the stub layer leaves to carry at compile time, measured on a cold run: after C4 and C5 only each stub file's declarations are left, and a run reaches 6-43% of the stub bytes. Estimate ≈0.2-1.5 G per cold run (C8) against 5.05 G in the old code; measured at the layer, not estimated | BLOCKED | `CRATE-1.C4`, `CRATE-1.C5` |
+| DEC-1.3 | The decision: embed the data at compile time or not. Needs `DEC-1.1` and `DEC-1.2`. If yes: the build script must run the code the runtime runs (the `reflection` crate, `CRATE-1.C10`), `.rodata` grows from 18.2 to ≈50 MB per binary, and checked-in binary data is out | BLOCKED, yours to decide | `DEC-1.1`, `DEC-1.2` |
+
+### 2.2 CRATE-1: the crate split from Stage C
+
+The plan is `CRATE_SPLIT_PLAN.md`, stage C. Its states on this branch were audited against the code on 2026-10-15: the module graph's `finished` line is `A0 A1 A2 B1-B9 C1 C2 C3`. Each commit of a sub-task below is made with check, clippy and the touched module's tests; the fixture suite and the corpus run at the stage's checkpoints. A sub-task whose output changes says so on its row.
+
+**C4. Snapshots and lazy resolution**
+
+| id | sub-task | state | result |
+|---|---|---|---|
+| CRATE-1.C4.1 | The gates G's extraction relies on, each with its first inventory: gate 2's `impl` placement and each module's path in its crate, gate 3's names qualified by package and target | OPEN | `xtask modgraph --inventory` lists the crossing edges; the `impl` and name inventories are not made |
+| CRATE-1.C4.2 | `xtask gatetime`: `--record` and `--since <hash>`, medians of three runs on prebuilt binaries | DONE `58cfc5d2` | phase start for `58cfc5d2`: lib tests 9.2 s, fixtures 1.3 s (`nice -n 19`, loadavg 2.71) |
+| CRATE-1.C4.3 | Keys and data model, in the sub-tasks below | PART | |
+| CRATE-1.C4.3a | Class and function tables keyed by the folded name, a lookup that allocates nothing, `FunctionTable` on the class table's type | DONE (already on this branch) | `NameTable`, `with_function_key` |
+| CRATE-1.C4.3b | The exact-spelling accessors, then deleting `canonicalize_class_name_case` and the declared-names side map; method keys fold (`method_access` included) | OPEN | |
+| CRATE-1.C4.3c | A class's templates as one list of parameters with bound, variance, default and scope, where five parallel maps and sets were rebuilt into parameters in four places that disagreed | DONE `5401afc9` | the type relations read slot variance from the same list; an erased receiver's template with no default and no bound stays unbound (`0f32829b`) |
+| CRATE-1.C4.3d | Per-member flags: a property's finality on the property | DONE `8d35c99d` | a final property taken from a trait is the class's own (PHP's rule, a delta the plan did not list); one reached through a mixin is not |
+| CRATE-1.C4.3e | Per-member flags for the method sets (`abstract_methods`, `final_methods`, `static_methods`) | OPEN | the plan names only the property case |
+| CRATE-1.C4.3f | A property's native type as an `Option` | DONE `7a61603e` | `has_native_type` gone |
+| CRATE-1.C4.3g | A parameter's and a return's native type as an `Option`, one no-native-type encoding | OPEN | |
+| CRATE-1.C4.3h | The explicit-`mixed` flags (`explicit_mixed_hint`, `return_explicit_mixed_hint`) read from the types | DONE `e7b2521f`, corrected `0f32829b` | a written `mixed` excuses its own value type only; a union keeps a written `mixed` when it drops an equal member; a conditional return is read at its branches, not at its condition's type. Output changes on the missing-type rules only; Piwigo identical |
+| CRATE-1.C4.3i | Provenance as the only location record: `is_stub` (63 sites), `function_decl_sites` (11), `Origin::Unknown` (29), the comments citing `project/decl_locations.rs` | OPEN | needs a rule for the location of a merged declaration |
+| CRATE-1.C4.3j | Query accessors replacing the storage-returning ones and the `pub` maps (about 280 sites outside `registry/`, 23 in tests) | OPEN | |
+| CRATE-1.C4.3k | The builders read the AST's parse-time `QualifiedName::resolved` instead of re-resolving through a `NameContext` (the anonymous-class builder excepted) | OPEN | |
+| CRATE-1.C4.3l | No result depends on the class map's iteration order: `classes_using_trait` sorted, `doctrine_entity_for_table` by name order | OPEN | a delta, fixtured |
+| CRATE-1.C4.4 | Written results leave the signatures: purity results to a registry table keyed by function and by `(class, method)`; `names_with_assert_tags` seeded from the assertion entries and checked by folded name | OPEN | a delta: a call spelled in another case than its method reaches the assert lookup |
+| CRATE-1.C4.5 | The checker test harness builds like a project (merges the stubs before resolving) | OPEN | a test-expectation delta |
+| CRATE-1.C4.6 | Per-class memoized resolution replacing the passes, five `OnceLock` levels | OPEN | |
+| CRATE-1.C4.6a | Ancestors level: the `extends`/`implements` closure, the `use` closure, `@mixin` targets, unresolved edges, constant declarations | OPEN | needs `C4.3b` |
+| CRATE-1.C4.6b | Own level: own members composed with the `use` closure's, `@method` tags, every type resolved in the class's context, the interim assertion step | OPEN | `C4.6a` |
+| CRATE-1.C4.6c | Inherited level: PHPDoc inheritance and property hooks from the ancestors' inherited level | OPEN | `C4.6b` |
+| CRATE-1.C4.6d | Members level: each `@mixin` target's public members, then the member owners | OPEN | `C4.6c` |
+| CRATE-1.C4.6e | Final level: PHPDoc members the native type excludes dropped; the native and PHPDoc combination, whole | OPEN | `C4.6d` |
+| CRATE-1.C4.6f | Class constants through the `ConstantResolver`, reference cycles detected on the ancestor level; a reentrant resolution panics and leaves the cell retryable | OPEN | `C4.6a`; a delta (a constant on a cycle types as `mixed`) |
+| CRATE-1.C4.7 | `ReflectionBuilder::apply` snapshots | OPEN | |
+| CRATE-1.C4.7a | `FileDelta` (role, new declarations or removal) and the collision policy in canonical order, not arrival order | OPEN | `C4.6`; a delta the server shows |
+| CRATE-1.C4.7b | Read sets: each memo records every folded name it looked up, a delta invalidates the transitive readers | OPEN | `C4.6`, `C4.7a` |
+| CRATE-1.C4.7c | The per-file declaration sets answer what `DuplicateClassSites` and `DuplicateFunctionSites` index; `FileState.functions`/`classes` become the file's set | OPEN | `C4.7a` |
+| CRATE-1.C4.7d | `Registry` splits into `ReflectionBuilder` and `ReflectionProvider`; its 22 fields go | OPEN | `C4.7a`-`C4.7c` |
+| CRATE-1.C4.8 | Staleness fixes, each with a closure gate: anonymous classes removed with their file version; a file's global constants removed with it; removing a declaration merged onto a built-in keeps the built-in; removing one of two same-named declarations keeps the other; the sets that follow their files | OPEN | `C4.7`; deltas |
+| CRATE-1.C4.9 | The 188 registry tests and the other `Registry::build` callers move onto `apply` and the accessors; `Registry::build` and `Origin::Unknown` deleted | OPEN | `C4.7` |
+| CRATE-1.C4.10 | Behaviour fixes, one commit each, after the structural ones (list below) | OPEN | `C4.6`-`C4.9` |
+| CRATE-1.C4.gate | The gated steps' medians are lower than the phase start's (`xtask gatetime --since 58cfc5d2`); no stub class resolves unless something reaches it; peak RSS at or below the phase start | OPEN | |
+
+The behaviour fixes of `CRATE-1.C4.10`, one commit each: declarations below the top level indexed (`.10a`); class names resolve case-insensitively and a type takes the declared spelling (`.10b`); a conditional or duplicate class-like declaration checked against its own hierarchy (`.10c`); duplicate declarations compare names case-insensitively (`.10d`); member names fold case everywhere (`.10e`); member resolution follows PHP: class chain first, then interfaces, enum natives, `@property` over a private property (`.10f`); trait composition: `insteadof`, visibility-changing `as`, `final`, abstract by another trait, `@use` bindings, aliases in the trait's scope, a shadowed trait method (`.10g`); each `@extends`/`@implements` tag binds only the parent it names (`.10h`); PHPDoc inheritance carries asserts, `@param-out`, `@throws`, purity and method templates, a property redeclared without `@var` keeps its parent's, inheritance searches every parent interface (`.10i`); `@phpstan-type` aliases in `@property`/`@method`/assert tags and on enums (`.10j`); enums read `@deprecated`, `@var` and `@phpstan-require-*` (`.10k`); promoted properties carry asymmetric visibility and their own `@deprecated`/`@internal` (`.10l`); anonymous classes resolve names per namespace block and are named `class@anonymous` (`.10m`); `merge` splits into one operation per case (`.10n`); LSP navigation uses the folded keys (`.10o`); a table two entities map resolves to no entity (`.10p`).
+
+**C5. Locator chain and stub layer** (all BLOCKED on `CRATE-1.C4`)
+
+| id | sub-task | state |
+|---|---|---|
+| CRATE-1.C5.1 | The stub layer's version key over a `PhpVersions` range, decided first and recorded in Appendix F; `php_version` takes the range and patch forms in the same commit; a function removed before the analysed range is unknown | OPEN |
+| CRATE-1.C5.2 | phpstorm-stubs' `PS_UNRESERVE_PREFIX_` names are the reserved words they spell; the prefixed functions and the `___PHPSTORM_HELPERS` classes leave the index | OPEN |
+| CRATE-1.C5.3 | `stub_attributes` fixes: a property's or constant's `LanguageLevelTypeAware` type becomes `@var`; `newest_type` reads every entry; a function deprecated in one version-split overload isn't deprecated in the others | OPEN |
+| CRATE-1.C5.4 | Locator order | OPEN |
+| CRATE-1.C5.5 | The lazy composer locator: classes load on demand; functions, constants and `files` entries stay eager (a delta) | OPEN |
+| CRATE-1.C5.6 | The version-keyed stub layer holding C4's memo levels for stub classes, copy-on-merge, a per-file parse memo; `rayon` in the index build decided | OPEN |
+| CRATE-1.C5.7 | Provenance queries replacing `built_in_stub_classes` and `stub_provided_functions`, each consumer naming its question | OPEN |
+| CRATE-1.C5.8 | The enumeration APIs: every whole-registry iteration moved onto a scoped query; the index records `parent`/`interfaces` per declaration | OPEN |
+| CRATE-1.C5.9 | Version-based skip-polyfill (a delta) | OPEN |
+| CRATE-1.C5.10 | Version-dependent signature selection (a delta) | OPEN |
+| CRATE-1.C5.11 | A panic-injection test | OPEN |
+| CRATE-1.C5.gate | The wall times lower than the phase start's; the stub layer replaces the per-project stub clone and the per-process stub parse; the union of all lazily resolved symbols equals `generated_stub_data()` for the unset version key, checked before the two delta commits | OPEN |
+
+**C10. Extract `reflection`**
+
+| id | sub-task | state | blocked by |
+|---|---|---|---|
+| CRATE-1.C10.1 | No module-graph edge left to the extracted modules (the graph's last two `registry` edges, to `registry::global_vars` and `registry::purity`, are C9's, and the plan's C6-C9 remove the others) | BLOCKED | `CRATE-1.C4`, `CRATE-1.C5`, the plan's C6-C9 |
+| CRATE-1.C10.2 | The extraction: `cargo machete` checks Appendix E's rows; gate 10's engine-I/O rule covers `crates/reflection` | BLOCKED | `CRATE-1.C10.1` |
+
+### 2.3 DEC-2: the output-changing rows
+
+Decided 2026-10-15, one at a time in the session. Each difference is listed with its file and read at `VAL-1`.
+
+| id | plan item | change | decision |
+|---|---|---|---|
+| DEC-2.1 | `20G-1` | a file's identity is its resolved path; links, roles and the server read as the CLI does | approved |
+| DEC-2.2 | `20G-2` | a tree with a link cycle is listed once | approved |
+| DEC-2.3 | `20G-4` | the order in which code iterating a class's methods meets them (declaration order) | approved |
+| DEC-2.4 | `20G-6` step 2 | guards decided by the stubs' availability on run-time evidence; a new polyfill-signature check | approved, both parts |
+| DEC-2.5 | `20G-7` | constants on a cycle read `never` and are reported; PHPDoc-only cycles keep every possibility | approved |
+| DEC-2.6 | `20G-8` | a `@property` tag shadowed by a declared property is checked against the tag's own names | approved |
+| DEC-2.7 | `20G-15` | container-field keys canonical as PHP's array keys | approved |
+| DEC-2.8 | `20G-18` | the rule families of §12.10 (observers, one inference per node) | approved in principle; each family's output diff read at `VAL-1`, and anything that is not an improvement fixed or reverted per family |
+
+### 2.4 VAL-1: the plan's end validation (`20G-0`)
+
+On this branch the rows were validated one at a time (output byte-identical, a debug oracle per row, the touched module's tests), so item 0 is not a precondition for a row; it is what the plan's own end validation needs.
+
+| id | sub-task | state | note |
+|---|---|---|---|
+| VAL-1.1 | The starting state read: the vendor-tree, all-on and unscoped reports at HEAD compared with the last validated state, each difference read | OPEN | |
+| VAL-1.2 | An `oracle` profile (`gate` with `debug-assertions` and `overflow-checks`), run once over the gate's three configurations, each vendor project with every rule set and the edit replay; a temporary counter shows every oracle site ran; failures fixed in their own commits | OPEN | |
+| VAL-1.3 | The debug oracles and the code only they use deleted (`FileBodies` stops storing statements, the debug-only re-exports, the test oracles with a second implementation) | OPEN | `VAL-1.2` |
+| VAL-1.4 | One canonical type printer in `types` over all of `Repr`, printers that cannot lose a field unseen | OPEN | |
+| VAL-1.5 | O1: `--dump-front-end`, per file and role, through the project's own `parse_file` | OPEN | `xtask front-end-dump` exists and hashes only |
+| VAL-1.6 | `registry-dump` after the finishing passes | OPEN | `VAL-1.4` |
+| VAL-1.7 | The checker's records: every PHPDoc resolution, and every expression's inferred and native type (`--dump-expr-types`) | OPEN | `VAL-1.4`; `--dump-types` exists |
+| VAL-1.8 | O2: the gate's full artifact set with a view of every field of every diagnostic, over Piwigo, each vendor project and the fixtures, with the stub cache cold and warm and the per-file cache off, written and read | OPEN | `cargo xtask corpus --full` exists |
+| VAL-1.9 | The server: an in-process session over Piwigo and two vendor projects (files and roles, `registry-dump`, diagnostics with UTF-16 ranges, code actions, definition, hover, references) | OPEN | |
+| VAL-1.10 | The edit replay for Piwigo and each vendor project, and a fresh load of the edited tree compared | OPEN | |
+| VAL-1.11 | The dhat profile by holder, once more with untrimmed backtraces | OPEN | `MEAS-2` has the whole-stack profile at this code |
+| VAL-1.12 | The baseline taken from the commit that adds the printers and makes the deletions, with the `gate` build at one thread and the default count (byte-identical) and with the `oracle` build | OPEN | `VAL-1.3`-`VAL-1.11` |
+| VAL-1.13 | After item 19: the dumps taken again and every difference from the baseline named as one of `DEC-2`'s | OPEN | the last item of the 20 G plan |
 
 ### 2a. MEAS-1: the warm run, 13.18 G Ir
 

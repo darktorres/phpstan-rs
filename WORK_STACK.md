@@ -267,6 +267,8 @@ version key. These and the investigations are in `PROFILE_DRILL_PIWIGO_OFF.md` (
 §13 lists each item's method and data); the ledger that tracked them was
 retired, and is in git at `72cac936`.
 
+The crate split's Stage C is worked on this branch from C4 on; its sub-tasks, with their states, are in the ledger's §2.2.
+
 State: `PROFILE_DRILL_PIWIGO_LEDGER.md` holds every row of this drill and of the
 20 G plan, with what blocks each. On this branch E1, D5 (proposal 2), proposals 1-5,
 7, 8 and 9, and the cuts E2, E3, E5-E7, E10, E13-E16 are built; the off run went from
