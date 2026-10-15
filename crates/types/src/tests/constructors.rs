@@ -35,3 +35,17 @@ fn benevolent_union_of_stays_benevolent_when_members_remain() {
     assert!(key.is_benevolent_union());
     assert_eq!(Type::benevolent_union_of(vec![Type::int()]), Type::int());
 }
+
+#[test]
+fn an_integer_literal_is_the_same_type_inside_the_small_table_and_outside_it() {
+    for value in [-3, -2, -1, 0, 1, 7, 254, 255, 256, 257, i64::MAX, i64::MIN] {
+        let literal = Type::int_literal(value);
+        assert_eq!(
+            literal,
+            Type::new(crate::Repr::IntLiteral(value)),
+            "{value}"
+        );
+        assert_eq!(literal.int_literal_value(), Some(value), "{value}");
+        assert_eq!(Type::int_literal(value), literal, "{value}");
+    }
+}

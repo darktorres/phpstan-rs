@@ -58,6 +58,18 @@ impl Type {
     }
 
     pub fn int_literal(value: i64) -> Type {
+        // The small values code is full of, from one node each.
+        const SMALLEST: i64 = -1;
+        const LARGEST: i64 = 255;
+        static SMALL: std::sync::OnceLock<Vec<Type>> = std::sync::OnceLock::new();
+        if (SMALLEST..=LARGEST).contains(&value) {
+            let small = SMALL.get_or_init(|| {
+                (SMALLEST..=LARGEST)
+                    .map(|v| Type::new(Repr::IntLiteral(v)))
+                    .collect()
+            });
+            return small[(value - SMALLEST) as usize].clone();
+        }
         Type::new(Repr::IntLiteral(value))
     }
 

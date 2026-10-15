@@ -80,7 +80,7 @@ impl<'a> Checker<'a> {
     /// Whether `ty` is (or, inside a `Union`, could be) a real
     /// instance of `class` - `is_subclass_of`'s own reflexive "a class is
     /// always its own subclass" covers the exact-name case too.
-    fn type_is_instance_of(&self, ty: &Type, class: &str) -> bool {
+    fn type_is_instance_of(&self, ty: &Type, class: &'static str) -> bool {
         ty.union_members()
             .iter()
             .any(|m| self.instance_of_any(m, &[class]))
@@ -113,7 +113,7 @@ impl<'a> Checker<'a> {
     /// accepted cases either). Same "any Union member legal" leniency as
     /// `is_number_operand` above, for the same reason (this project's own
     /// unions are coarser than real PHPStan's).
-    fn is_valid_overload_operand(&self, ty: &Type, class: &str) -> bool {
+    fn is_valid_overload_operand(&self, ty: &Type, class: &'static str) -> bool {
         ty.union_members().iter().any(|m| {
             m.is_int().yes() || m.is_numeric_string().yes() || self.instance_of_any(m, &[class])
         })
@@ -698,15 +698,27 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether every value of `ty` is an instance of one of `classes`.
-    fn instance_of_any(&self, ty: &Type, classes: &[&str]) -> bool {
-        let of = self.relation().union_of(
-            classes
-                .iter()
-                .map(|c| Type::object((*c).into(), Vec::new()))
-                .collect(),
-        );
+    fn instance_of_any(&self, ty: &Type, classes: &[&'static str]) -> bool {
+        let of = self
+            .relation()
+            .union_of(classes.iter().map(|c| plain_object(c)).collect());
         self.relation().is_super_type_of(&of, ty).yes()
     }
+}
+
+/// The plain object type of the class a literal names, kept by the
+/// thread after the first time.
+fn plain_object(class: &'static str) -> Type {
+    thread_local! {
+        static KEPT: std::cell::RefCell<rustc_hash::FxHashMap<&'static str, Type>> =
+            std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+    }
+    KEPT.with(|kept| {
+        kept.borrow_mut()
+            .entry(class)
+            .or_insert_with(|| Type::object(class.into(), Vec::new()))
+            .clone()
+    })
 }
 
 /// The arithmetic, bitwise or shift operator, or `<=>`, `op` is.

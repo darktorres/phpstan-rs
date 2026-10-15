@@ -103,7 +103,10 @@ impl<'a> Checker<'a> {
 /// user code (a callback, a reflected method, an autoloader, `__toString`)
 /// whatever it documents. `None` for `@throws void`.
 fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionReflection>) -> Option<Type> {
-    let anything = Type::object("Throwable".into(), Vec::new());
+    static THROWABLE: std::sync::OnceLock<Type> = std::sync::OnceLock::new();
+    let anything = THROWABLE
+        .get_or_init(|| Type::object("Throwable".into(), Vec::new()))
+        .clone();
     let Some(sig) = sig else {
         return Some(anything);
     };

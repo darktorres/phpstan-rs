@@ -4,6 +4,7 @@ mod stub_cache_round_trip;
 mod anonymous_class;
 mod assignability;
 mod class_hierarchy;
+mod class_object_type;
 mod declaration_guards;
 mod doctrine_entities;
 mod enums;

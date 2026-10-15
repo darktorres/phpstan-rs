@@ -580,6 +580,52 @@ pub struct ClassReflection {
     // A `new class { ... }` expression's class.
     pub(in crate::registry) is_anonymous: bool,
     pub(in crate::registry) provenance: Provenance,
+    /// The plain object type of this class, made on first use.
+    #[serde(skip)]
+    object_type: ObjectTypeCell,
+}
+
+/// A class's plain object type, kept with it. It is derived from the class's
+/// declared name, so it is no part of the class's value: it is left out of
+/// the comparison, the copy and the stored form.
+#[derive(Default)]
+struct ObjectTypeCell(std::sync::OnceLock<Type>);
+
+impl Clone for ObjectTypeCell {
+    fn clone(&self) -> Self {
+        ObjectTypeCell::default()
+    }
+}
+
+impl PartialEq for ObjectTypeCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for ObjectTypeCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ObjectTypeCell")
+    }
+}
+
+impl ClassReflection {
+    /// The type of an instance of this class, which `declared` names: the
+    /// one the class keeps, or a new one when the kept one is of another
+    /// name (a copy of the class stored under another).
+    pub(crate) fn object_type(&self, declared: &str) -> Type {
+        let kept = self
+            .object_type
+            .0
+            .get_or_init(|| Type::object(declared.into(), Vec::new()));
+        if kept
+            .as_object()
+            .is_some_and(|(name, _)| name.as_str() == declared)
+        {
+            return kept.clone();
+        }
+        Type::object(declared.into(), Vec::new())
+    }
 }
 
 impl ClassReflection {
@@ -1604,6 +1650,7 @@ impl ClassReflection {
         let doctrine_entity = compute_doctrine_entity(c, &properties);
 
         let mut info = ClassReflection {
+            object_type: ObjectTypeCell::default(),
             is_anonymous: false,
             provenance: Provenance::default(),
             kind: c.kind,

@@ -19,11 +19,25 @@ impl<'a> Checker<'a> {
         } else if keyword("static") {
             Type::static_ref(Vec::new())
         } else {
-            return Type::object(self.resolve_class_name(name).into(), Vec::new());
+            return self.written_class_type(name);
         };
         match &self.current_class {
             Some(c) => self.resolve_pseudo(&raw, c),
             None => raw,
+        }
+    }
+
+    /// The plain object type of the class `name` names, in the class's
+    /// declared spelling when it is known (`resolve_class_name`), from the
+    /// type the class keeps.
+    fn written_class_type(&self, name: &QualifiedName) -> Type {
+        let Some(resolved) = name.resolved_class() else {
+            return Type::object(name.written.to_string().into(), Vec::new());
+        };
+        let resolved = resolved.trim_start_matches('\\');
+        match self.registry.lookup_class(resolved) {
+            Some((declared, class)) => class.object_type(declared),
+            None => Type::object(resolved.into(), Vec::new()),
         }
     }
 
