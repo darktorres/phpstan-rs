@@ -91,6 +91,7 @@ Inside a record, ids and section numbers are those of the record's source, as wr
 - A row that changes behaviour or layout keeps the Piwigo output byte-identical to the base's (`LC_ALL=C sort` both before diffing), unless the row says why it cannot.
 - A saving is claimed only from a measurement:
   - callgrind `Ir` summed over threads, against the previous row's commit, in off mode, on the `dhat` profile with frame pointers;
+  - a run's total also holds work that follows the threads' schedule and not the code: mimalloc's cross-thread reclaim and the per-thread caches moved by −6.4 M and then +22.4 M across the runs of P7, LOAD-6 and CHECK-4, none of which touches them (CHECK-4's record). So a change of that size is judged by the inclusive `Ir` of the functions it changes, in its own profile against the base's, with the total beside it. MEAS-3 measures the spread;
   - wall time by `hyperfine -N`, alternating A B A B, under `nice -n 19`, with `/proc/loadavg` noted.
 - Builds, profiling runs and `check-project` probes need the user's go-ahead. Heavy jobs run one at a time.
 
@@ -203,7 +204,7 @@ These rows are open with every need met:
   - the crate split's C4, in its order: REG-2; the open parts of REG-4 (4.2, 4.5, 4.7, 4.9, 4.10 and 4.12 to 4.14; 4.11 waits on a rule, and 4.15 on 4.2 and 4.12); what is left of REG-5; REG-6; then REG-7 from REG-7.1, once REG-4.2 and the engine (REG-16.3) are in;
   - REG-16.1, the engine's measurement (decision 3);
   - REG-14.4 and 14.5.
-- **CHECK:** CHECK-6.1 (approved in principle), 6.2, 6.4, 6.5, 6.6, 6.8 to 6.12, and 6.16 to 6.18.
+- **CHECK:** CHECK-4.2; CHECK-6.1 (approved in principle), 6.2, 6.4, 6.5, 6.6, 6.8 to 6.12, and 6.16 to 6.18.
 
 ### 2.2 Chains
 
@@ -1193,7 +1194,9 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | CHECK-1 | A statement's assigned and defined names walked only when it has `@var` tags | off E2 | DONE `60b0cd33` | — |
 | CHECK-2 | A method or static call probed for a PHPUnit assertion only when its written name starts with `assert` | off E3 | DONE `07a0f111` | — |
 | CHECK-3 | Nothing reported while an enclosing body has called `extract()` or `eval()` | off E10 | DONE `e081dbe9` | — |
-| CHECK-4 | (a) Messages formatted when displayed; (b) class-constant keys built only when dynamic constants are set | off P11 | SKIP: built, measured and reverted: −0.65 M against 29.1 M estimated | — |
+| CHECK-4 | (a) Messages formatted when displayed; (b) class-constant keys built only when dynamic constants are set | off P11 | OPEN: re-opened 2026-10-15. It was built once and reverted on the run's total (−0.65 M); the build's own profile shows the saving, 22.5 M for (a) and 5.1 M for (b), hidden by the schedule's share of the total (its record) | — |
+| CHECK-4.1 | **(a) A reported message formatted when it is displayed.** The message is CHECK-6.10's value that displays itself, kept past the report, so a report that is dropped is never formatted: on Piwigo, the 55 `offsetAccess.mightNotExist` messages (`checker/assignment.rs:809`, ≈409 K `Ir` each), of which the level filter drops 22, `rewind_to` 30 and E10's check 3 | off P11 | OPEN | CHECK-6.10 (one message type for both) |
+| CHECK-4.2 | **(b) Class-constant keys built only when dynamic constants are set.** `class_constant_type` returns the declared type at once while no dynamic constant is configured; a configured one is keyed by the folded class name and the constant's name, as `ConstantResolver::new` folds them, with no `String` per read | off P11 | READY | — |
 | CHECK-5 | The regex scanner's concatenation | off E9 | SKIP: folded into CHECK-6.16 (item 18's F6f, `PROFILE_DRILL_PIWIGO_20G.md:1705`) | — |
 | CHECK-6 | The check phase's remainder | 20 G 18 | OPEN | — |
 | CHECK-6.1 | **§12.10 of the 25 G report, as designed: observers, and one inference per node.** It deletes the 25 G report's C5's interim `statement_method_call` record, because the statement rules become the first observer family. The PHPStan-API walker becomes its family. A literal's type is computed once per node per pass | 20 G 18.1; 25 G §12.10, 25 G C5 | READY; approved in principle (VAL-2.8) | — |
@@ -1220,12 +1223,14 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 
 | task | target now | report's estimate |
 |---|---|---|
+| CHECK-4.1 | 22.5 M: `report_missing_offset`'s 55 formats, gone in the build's profile | 22.5 M |
+| CHECK-4.2 | 5.1 M: `class_constant_key`'s 6,857 formats, gone in the build's profile | 6.6 M |
 | CHECK-6 | `check_program` 6,378.6 M; `infer_expr` 1,051.9 M (800 K calls), `check_args` 517.4 M, `method_call_return_type` 448.8 M, `apply_narrowing_unguarded` 467.4 M, `infer_binary` 246.6 M, `merge_scopes` 222.0 M, `call_bindings` 133.2 M, `find_var` 123.2 M, `OrdMap::get` 71.4 M, `Locals::clone` 33.5 M, `union_many` 263.9 M, `reduce_array_members` 146.8 M, `resolve_call_args` 63.4 M, `string_literal_ref` 91.3 M, `sqlparser` 88.0 M | ≈1.6-2.0 G (§12.10 alone ≈1.0-1.3 G, slots and radix scopes ≈0.15-0.25 G) |
 
 ### Notes
 
 - **CHECK-1, CHECK-2 and CHECK-3 (off E2, E3, E10) cut small parts** of the check phase.
-- **CHECK-6.10 and CHECK-4 are different changes.** CHECK-6.10 formats only what is reported. CHECK-4's part (a) deferred the formatting of what is reported until it is displayed; with part (b) it saved −0.65 M, and its record has the likely cause.
+- **CHECK-6.10 and CHECK-4.1 are one message type.** CHECK-6.10 formats only what is reported; CHECK-4.1 keeps the same value unformatted past the report, until it is displayed. The build of CHECK-4 used a closure of its own (`report_lazy`); built with CHECK-6.10, the two are one change.
 - **CHECK-6.1 is approved in principle (VAL-2.8).** Each family's output diff is read at VAL-1.
 - **CHECK-7 is semantic,** not an optimization: decision 1's throws, at each place PHP evaluates a constant. Its output changes are VAL-2.5's.
 - **Memory (MEAS-2):** the check phase allocates 232 MB in 2.16 M blocks in `checker`, and holds 0.6 MB of it at the end: the temporaries of item 18.
@@ -1253,13 +1258,20 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 - *Estimated saving:* ≈ −35 M on Piwigo
 - *Needs:* — (debug assertion that the truncation drops exactly what the count skipped)
 
-**CHECK-4** (off P11): SKIP
+**CHECK-4** (off P11): OPEN, re-opened 2026-10-15
 
 - *Status, as recorded:* SKIP (not kept: built, measured and reverted, nothing committed. Both parts built: (a) `Diagnostic.message` became a `Message` that dereferences to `str` and can be made by a closure on first read, with `report_lazy` used by the `offsetAccess.mightNotExist` report, and (b) `class_constant_type` returning the declared type while `dynamic` is empty. Off run 23,215,388,146 Ir against 23,216,039,715 at P7's commit, −0.65 M against the estimated 22.5 M + 6.6 M, Piwigo output byte-identical. The 22.5 M was 55 messages at ≈ 409 K Ir; the cause is not traced; the likely one is that E10 now drops, before formatting, the reports made inside bodies that call `extract()`, where B3 found most of the 55 were discarded. The one annotated `report_missing_offset` call line in the P7 profile costs ≈ 12 K Ir. What is left of (a) formats a message only for a rare setting (`reportPossiblyNonexistentGeneralArrayOffset`), at the price of a new message type touching 76 readers, so it is not kept without a measurement that shows it)
 - *Task:* (a) A reported message formatted when displayed (a template and its operands in `Diagnostic.message`); (b) class-constant keys built only when a dynamic constant is configured.
 - *Estimated saving:* 22.5 M (a), 6.6 M (b)
 - *Needs:* —
 - *Verify:* A message's text must not depend on state that changes after the report; the baseline and `ignore_errors` compare the displayed text; (b) folds the class name as `ConstantResolver::new` does.
+- *Traced, 2026-10-15, from the saved profiles, with no new run* (`~/.cache/prs-profile/p7`, `p10`, `p11`; the scripts are in `~/.cache/prs-ledger/check4/`):
+  - *The saving was made.* In the build's own profile, `report_missing_offset` falls from 56.2 M to 33.8 M inclusive over the same 7,957 calls: its 55 calls of `format_inner` (22.5 M) are gone. `class_constant_key`'s 6,857 formats (5.1 M) are gone too. Nothing before the build had removed them: at B3's base, at E10's commit and at P7's, `report_missing_offset` costs 56.9, 55.7 and 56.2 M over those 7,957 calls.
+  - *What hid it.* Against P7's run, the program's own functions fall by 25.3 M and rise by 9.8 M, and the allocator's rise by 14.6 M. The rises are work that follows the threads' schedule: mimalloc's cross-thread reclaim (`mi_free_try_collect_mt` +5.8 M, `mi_abandoned_page_try_reclaim` +5.4 M, `_mi_page_free_collect_partly` +4.7 M) and the per-thread caches (`Interner::name_hashed`, `NameCache::insert`, the doc-block parse). The same three allocator functions moved −6.4 M from P7's run to LOAD-6's and +22.4 M from LOAD-6's to this one, and the name interner ±4 M; none of these changes touches them. The total of one off run doesn't resolve a change of this size.
+  - *E10 doesn't cover these reports.* `report` checks `reports_are_dropped()` after the caller has formatted the message (`checker.rs:1500`). In the build, 3 of the 55 lazy messages are dropped by that check, inside `report_missing_offset`.
+  - *The record's "a rare setting" is wrong.* The 55 are `MayBeAbsent` or `Absent` presences (`checker/assignment.rs:795-803`), formatted under the default settings; Piwigo's configuration doesn't set `reportPossiblyNonexistentGeneralArrayOffset`.
+  - *Where the 55 go (Q-6).* The build's closures are dropped 33 times: 3 by E10's check, and 30 as diagnostics, all by `rewind_to`. It is the only path that drops a level-7 diagnostic before `finalize`, since the level filter runs before the ignore filters, and `finalize` filters a clone of the results, whose originals live until the process exits. The other 22 reach `finalize` and are dropped by the level filter, as B3 counted. So the 33 that B3 found discarded are 30 in a convergence pass's `rewind_to` and 3 in bodies that call `extract()`, and P11a's truncation saving is ≈12.3 M, not "well under 1 M".
+  - *State.* The SKIP rested on the total, so the row is re-opened: CHECK-4.1 with CHECK-6.10, CHECK-4.2 ready.
 
 **CHECK-5** (off E9), as recorded: SKIP (folded into the plan's F6f, `PROFILE_DRILL_PIWIGO_20G.md:1705`). The regex scanner's concatenation.
 
@@ -1306,12 +1318,13 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 
 ## 14. MEAS: the measurements that set targets
 
-Both measured `791d29cb`'s code.
+MEAS-1 and MEAS-2 measured `791d29cb`'s code.
 
 | id | measurement | state | used by |
 |---|---|---|---|
 | MEAS-1 | Warm-mode costs at this branch's code | DONE | the targets of item 6 (REG-7.2, STUB-8, STUB-9, CACHE-9, CACHE-10), CACHE-11, CACHE-12, CACHE-13 |
 | MEAS-2 | Memory at this branch's code | DONE | the memory claims of LOAD-3, REG-13, SYN-1, DOC-2, NAME-2, LOAD-5 |
+| MEAS-3 | **The spread of one off run's total:** two callgrind runs of one binary, and two at one thread (`PHPSTAN_RS_THREADS=1`), each split by function as CHECK-4's record splits P7's run from the build's | OPEN; profiling runs, which need the user's go-ahead | the rule on what a total can resolve (Conventions); the changes of §1's table that are tens of M: CHECK-1 (−54.7 M), CHECK-2 (−27.1 M), TYPE-1 (−59.9 M), TYPE-2 (−23.2 M), TYPE-3 (−29.9 M), CHECK-3 (−52.5 M) |
 
 ### MEAS-1: the warm run, 13.18 G Ir
 
@@ -1392,7 +1405,7 @@ Kept for the record. None is built from this ledger.
 | Q-3 | Which of C7's 238 compile-time errors the parser does not report the checker already reports. | off U3 | OPEN | Count by running each of the 299 trigger files (`~/.cache/prs-probe/c7/cases/`) through `check`; the verdicts are in `c7/verdicts.tsv`. |
 | Q-4 | E1's deterministic reproduction. | off U4 | OPEN | Designed in §10.14, not run; becomes E1's regression test. |
 | Q-5 | E10: which facts that outlive an `extract()` body (property assignments, class-level sites) a dropped body still needs. | off U5 | OPEN | Trace in `function_decl.rs` and `checker.rs` before widening E10 past the report calls. |
-| Q-6 | Which truncation holds the 33 `offsetAccess.mightNotExist` reports that `finalize` does not drop (B3 counts them among the discarded reports but not by site). Decides whether P11a's truncation saving is "well under 1 M" or ≈13 M. | off U6 | OPEN | Record the truncation site in the B3 probe (`~/.cache/prs-profile/off-ledger-b/probe.patch`); needs a probe build. |
+| Q-6 | Which truncation holds the 33 `offsetAccess.mightNotExist` reports that `finalize` does not drop (B3 counts them among the discarded reports but not by site). Decides whether P11a's truncation saving is "well under 1 M" or ≈13 M. | off U6 | DONE (2026-10-15): 30 in a convergence pass's `rewind_to`, 3 in bodies that call `extract()`, so ≈12.3 M. Settled from the counts in the CHECK-4 build's profile, with no probe build (CHECK-4's record) | — |
 | Q-7 | Readers left out of d: the uninitialized-property rules on, or a tree with test classes whose built-in parent-call hook rules fire, add the ancestors' bodies to d. | off U7 | OPEN | Re-run B1's probe on such a tree; needs a probe build. |
 | Q-8 | B9's embed and edit timings were read off the console and not kept; the build script's cost under C8's form (every stub file parsed, no base) is not measured; nothing ran on aarch64 or macOS (B10's backstop is designed, not run). | off U8 | OPEN | Decision 7 revives P6 in C8's form. The build script's cost is measured at STUB-10.1. B10's backstop is STUB-11's equality test, run on each target the binaries are built for. |
 | Q-9 | A third pass on the report's claims the review workflow could not check (102 items). | off U9 | OPEN | Hand check against the code and the profiles, as the 104 confirmed and the 17 split findings were. |
