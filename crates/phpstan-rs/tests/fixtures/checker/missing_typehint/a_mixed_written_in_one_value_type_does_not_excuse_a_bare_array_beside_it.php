@@ -17,7 +17,7 @@ class Cases {
     /** @return iterable|mixed[] */
     public function native_iterable_narrowed_to_written(): iterable { return []; }
     /** @return \Traversable<list<mixed>> */
-    public function native_iterable_narrowed_to_traversable(): iterable { yield []; }
+    public function native_iterable_still_admits_an_array_of_unknown_values(): iterable { yield []; }
 }
 class Counter implements Countable {
     public function count() { return 0; }

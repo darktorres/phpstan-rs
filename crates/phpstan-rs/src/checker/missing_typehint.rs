@@ -456,17 +456,6 @@ impl<'a> Checker<'a> {
         }
         let return_ty = declared_return.cloned().unwrap_or(Type::mixed());
         if return_ty.is_implicit_mixed() {
-            // A built-in method's return type is tentative (PHP 8.1): an
-            // override may omit it, and then has it still.
-            let overrides_built_in = class_name
-                .and_then(|class| {
-                    self.registry
-                        .lookup_ancestor_method_with_owner(class, &f.name)
-                })
-                .is_some_and(|(owner, _)| self.registry.built_in_stub_classes.contains_key(&owner));
-            if overrides_built_in && f.return_type.is_none() {
-                return;
-            }
             self.report(
                 format!("{kind_word} {label}() has no return type specified."),
                 f.span,

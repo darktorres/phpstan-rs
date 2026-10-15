@@ -7,6 +7,8 @@
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 16:21-16:36 missingType.iterableValue L6 | Property Cases::$callbacks type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+20:12-20:102 missingType.iterableValue L6 | Method Cases::native_iterable_still_admits_an_array_of_unknown_values() return type has no value type specified in iterable type iterable.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 23:5-23:42 method.tentativeReturnType L0 | Return type mixed of method Counter::count() is not covariant with tentative return type int of method Countable::count().
     tip: Make it covariant, or use the #[\\ReturnTypeWillChange] attribute to temporarily suppress the error.
     non-ignorable

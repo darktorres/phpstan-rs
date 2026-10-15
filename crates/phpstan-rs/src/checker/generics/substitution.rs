@@ -79,15 +79,20 @@ impl<'a> Checker<'a> {
             // An erased receiver's template is its declared default
             // (`@template T = 'array'`, so a conditional on `T` resolves),
             // or else its bound: what a value of it is surely known to be.
+            // With neither, nothing is known of it and it stays unbound:
+            // the receiver's author wrote no `mixed` there.
             if let Some(info) = self.registry.classes.get(owner) {
                 for template in info.templates() {
                     if !bindings.contains_key(template.name.as_str()) {
-                        let erased = template
+                        let known = template
                             .default
                             .as_deref()
-                            .unwrap_or(&template.bound)
-                            .substitute_templates_of(&bindings, owner, &self.relation());
-                        bindings.insert(template.name.clone(), erased);
+                            .or_else(|| (!template.bound.is_mixed()).then_some(&*template.bound));
+                        if let Some(known) = known {
+                            let erased =
+                                known.substitute_templates_of(&bindings, owner, &self.relation());
+                            bindings.insert(template.name.clone(), erased);
+                        }
                     }
                 }
             }

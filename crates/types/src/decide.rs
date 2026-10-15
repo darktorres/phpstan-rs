@@ -3,17 +3,6 @@
 
 use crate::{Relation, Repr, Type};
 
-/// Whether `members` are the two a native `iterable` is: PHPStan's
-/// `IterableType` is one type, which a PHPDoc type narrows whole.
-fn is_iterable_pair(members: &[Type]) -> bool {
-    members.len() == 2
-        && members.iter().any(|m| matches!(m.repr(), Repr::Array(..)))
-        && members.iter().any(|m| {
-            matches!(m.repr(), Repr::Object(name, args)
-                if args.is_empty() && name.trim_start_matches('\\').eq_ignore_ascii_case("Traversable"))
-        })
-}
-
 impl Type {
     /// Filters this PHPDoc type's members down to whichever `native_ty`
     /// could hold (PHPStan's `TypehintHelper::decideType`). Falls back to `native_ty` itself when *no* doc member survives (rather
@@ -75,7 +64,6 @@ impl Type {
         // is the alternative the native member stands for, so `TKey|null`
         // over a native `string|int|null` stays `TKey|null`.
         if let Repr::Union(native_members) = native_ty.repr()
-            && !is_iterable_pair(native_members)
             && !kept.is_empty()
             && !kept.iter().any(Type::contains_deferred)
             && !kept

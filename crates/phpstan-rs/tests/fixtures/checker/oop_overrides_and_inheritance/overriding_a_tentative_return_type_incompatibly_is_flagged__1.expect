@@ -1,3 +1,5 @@
 2:9-4:10 missingType.generics L6 | Class TentIt implements generic interface IteratorAggregate but does not specify its types: TKey, TValue
+3:20-3:76 missingType.return L6 | Method TentIt::getIterator() has no return type specified.
 6:13-6:59 method.childReturnType L0 | TentCount::count() return type string is not compatible with the inherited return type int<0, max>
 15:9-20:10 missingType.generics L6 | Class TentMixed implements generic interface ArrayAccess but does not specify its types: TKey, TValue
+17:20-17:56 missingType.return L6 | Method TentMixed::offsetGet() has no return type specified.
