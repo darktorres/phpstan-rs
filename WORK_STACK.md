@@ -192,9 +192,9 @@ docblock is inherited across case-different names; union member order).
   versions not being indexed, and UTF-16/UTF-8 columns in the language server.
 - Two tests of `syntax::span` were wrong and are fixed; expect a few more.
 
-### 8. The off-run drill — `PROFILE_DRILL_PIWIGO_OFF.md` (drilled and validated, nothing implemented)
+### 8. The off-run drill — `PROFILE_DRILL_PIWIGO_OFF.md` (rows built through P8b and P9; every row and what blocks it is in `PROFILE_DRILL_PIWIGO_LEDGER.md`)
 
-On branch `callgrind-20g` (at `d520c9fd`, the code of `5fb858c9`). Three
+On branch `callgrind-20g` (cut from `d520c9fd`, the code of `5fb858c9`). Three
 callgrind runs of one binary on Piwigo:
 
 - off (stub cache and per-file cache off): 25.63 G;
@@ -227,11 +227,10 @@ Proposals (§10), numbered as in the report:
   - 7: a PHPDoc tag's description tokenized only when read, measured
     ≈0.08 G warm, ≈0.04 G after item 14;
   - 8: skim context files' function bodies (≈48% of the parse job's
-    tokens) and parse one on demand. Every skimmed body is still checked,
-    by a pass that builds only what its checks read, and each file's
-    verdict is cached by its bytes and the `syntax` crate. After the plan
-    it saves ≈2.0-2.3 G with the verdict cached and ≈0.55-0.85 G without
-    it, at the measured d ≈ 0.005-0.006 (≈0.02 by tokens);
+    tokens) and parse one on demand. Built as P8a and P8b; D6 decided
+    (2026-10-15) that a skimmed body is not checked, so there is no check
+    pass and no verdict cache. Measured: −0.35 G, −0.24 G and −0.85 G
+    in three rows;
   - 9: purity and property writes on demand, exact (a least fixed point),
     ≈0.3-0.4 G beyond item 4, on the finishing thread;
   - 10: `simdutf8`, ≈50 M;
@@ -247,21 +246,15 @@ without; without 6, the off run ends at ≈12.9-13.3 G. With both caches
 warm today's floor is 14.34 G and 1.60 s (B5, B4).
 
 Decided on 2026-10-13 (the off report's D1-D5): the stub data is built at compile
-time (reopened by C8, below); skimmed bodies are checked and their
-verdicts cached; a skimmed body's text is copied from the bytes the load
-reads; each cache checks once, at its first store, whether it can write.
+time (reopened by C8, below); a skimmed body's text is copied from the bytes the load
+reads; each cache checks once, at its first store, whether it can write. D1
+(every skimmed body checked, verdicts cached) was replaced by D6 on 2026-10-15.
 
-Recommended on 2026-10-13, not yet decided:
-
-- **D6.** A context file that fails to parse keeps what it declares: what
-  parses is recovered, and what failed is unknown. Validity follows the
-  configured PHP version, and the batch run and the language server use one
-  rule. The parser refuses `$s{0}`, which PHP 7 accepts, and a real file
-  has it. It also refuses `$x instanceof static::$name`, valid in PHP 8.5
-  (the off report's E14).
-- **D7.** Proposals 1-5 are built now, since proposal 6 waits on level 2's
-  stage C10. Level 2's C4 and C5 remove the eager stub build they speed, so
-  they pay only until then.
+Decided on 2026-10-15: **D6**, a context file that fails to parse keeps what
+it declares (what parses is recovered, what failed is unknown), and a skimmed
+body is not checked: a syntax error inside one is not found at load, and a
+body that does not parse when read is unknown. **D7** is moot: proposals 1-5
+are built.
 
 C7 is settled: of PHP 8.5's 268 compile-time errors the parser rejects 30.
 C8 is settled: D3's form does not survive level 2. After C4 and C5 no
@@ -274,20 +267,20 @@ version key. These and the investigations are in `PROFILE_DRILL_PIWIGO_OFF.md` (
 §13 lists each item's method and data); the ledger that tracked them was
 retired, and is in git at `72cac936`.
 
-The order, from D7 (rows and state: `PROFILE_DRILL_PIWIGO_OFF_BUILD_LEDGER.md`):
-
-1. ~~the deadlock fix (the off report's E1)~~ done at `3d5434b3` (callgrind-validated only: tests, clippy and fixtures not run); its proposals 1 and 5 ride on it and are measured in the ledger;
-2. ~~D5's write check, which carries proposal 2~~ done at `c2cd1586` (callgrind-validated only);
-3. ~~proposal 3~~ done at `a13f4ed2` (callgrind-validated only);
-4. ~~proposal 4~~ done at `0ce52479` (callgrind-validated only). The build order is complete.
-
-Each is measured with paired cold runs. Proposal 6 is not built in its
-current form; it is decided again with level 2's C5. Proposal 8 waits on
-9; B1 measured d ≈ 0.005-0.006. No proposal is implemented.
+State: `PROFILE_DRILL_PIWIGO_LEDGER.md` holds every row of this drill and of the
+20 G plan, with what blocks each. On this branch E1, D5 (proposal 2), proposals 1-5,
+7, 8 and 9, and the cuts E2, E3, E5-E7, E10, E13-E16 are built; the off run went from
+25.63 G to 20.93 G Ir, output byte-identical at each row. Proposal 6 waits on D3 and
+the crate split. H1 is the one row nothing blocks. None of these rows is on `master`,
+whose own line built the 20 G plan's items 0-9 and 10.1-10.2 and effect resolution
+(level 7, `PROFILE_DRILL_PIWIGO_20G_LEDGER.md` there); how the two lines meet is the
+ledger's INT-1. Each row's saving is a callgrind run against the previous row's
+commit; tests, clippy and fixtures were run only as each row's text says.
 
 The ledger's items were checked one by one on 2026-10-14 and the report corrected.
 The check found two bugs, both fixed: E14 (`instanceof` with a static property as the
-class, `6dd06124`) and E15 (the source hash left out `vendor/phpstan-src/stubs`, `efe621ad`).
+class, `6dd06124`) and E15 (the source hash left out `vendor/phpstan-src/stubs`, `efe621ad`);
+a third, E16 (maps of names written in table order), came from a debug oracle, `480107e3`.
 Running the parser over all of `vendor/` against `php -l` (U1) would find any other such
 gap; that run has not been made.
 
