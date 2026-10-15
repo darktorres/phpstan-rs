@@ -936,10 +936,10 @@ impl Registry {
     /// `find_final_ancestor_method`'s property-side
     /// mirror - PHP 8.4's own `final` property modifier. Walks only
     /// `extends`, same reasoning as the method version (properties have
-    /// no `implements`/interface side at all, and this project doesn't
-    /// propagate a trait's own `final_properties` the way it does
-    /// `abstract_methods` either). See that function's own doc comment
-    /// for the `@final`/keyword priority the returned `bool` encodes.
+    /// no `implements`/interface side at all). A final property a class takes
+    /// from a trait is the class's own, as in PHP. See that function's own
+    /// doc comment for the `@final`/keyword priority the returned `bool`
+    /// encodes.
     pub fn find_final_ancestor_property(
         &self,
         class: &str,
@@ -955,11 +955,13 @@ impl Registry {
             let Some(current_info) = self.classes.get(&current) else {
                 continue;
             };
-            if current_info.final_properties.contains(property) {
-                return Some((current, false));
-            }
-            if current_info.final_properties_by_phpdoc.contains(property) {
-                return Some((current, true));
+            if let Some(declared) = current_info.properties.get(property) {
+                if declared.is_final {
+                    return Some((current, false));
+                }
+                if declared.is_final_by_phpdoc {
+                    return Some((current, true));
+                }
             }
             stack.extend(current_info.extends.iter().cloned());
         }

@@ -141,7 +141,12 @@ impl<'a> Checker<'a> {
         let Some(info) = self.class_info(class) else {
             return true;
         };
-        if info.is_final() || info.final_properties().contains(property) {
+        if info.is_final()
+            || info
+                .properties()
+                .get(property)
+                .is_some_and(|p| p.is_final())
+        {
             return true;
         }
         self.settings

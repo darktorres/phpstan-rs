@@ -947,7 +947,16 @@ impl Registry {
                 }
                 for (name, sig) in &mixin_info.properties {
                     if sig.visibility == Visibility::Public && !info.properties.contains_key(name) {
-                        property_additions.push((class_name.clone(), name.clone(), sig.clone()));
+                        // A mixin's members are reachable through the class,
+                        // not declared by it, so a `final` one is not the
+                        // class's to forbid overriding.
+                        let mut sig = sig.clone();
+                        if sig.is_final || sig.is_final_by_phpdoc {
+                            let reachable = Arc::make_mut(&mut sig);
+                            reachable.is_final = false;
+                            reachable.is_final_by_phpdoc = false;
+                        }
+                        property_additions.push((class_name.clone(), name.clone(), sig));
                     }
                 }
             }

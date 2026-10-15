@@ -131,6 +131,13 @@ pub struct PropertyReflection {
     // like `is_readonly` above - the parser/engine enforce the legality
     // half). `false` for every synthetic property.
     pub(in crate::registry) is_abstract: bool,
+    // `final`, native or on a promoted constructor parameter. A private
+    // property is never final: it is not part of a subclass's overridable
+    // surface.
+    pub(in crate::registry) is_final: bool,
+    // `@final` on the property's docblock only, which real PHP never
+    // enforces; the same private exemption.
+    pub(in crate::registry) is_final_by_phpdoc: bool,
     // Whether a `get`/`set` hook is declared at all (real PHP's
     // `hasHook()`), independent of whether it has a real body -
     // `PropertyHookBody::Abstract` is what makes this question
@@ -196,6 +203,14 @@ impl PropertyReflection {
 
     pub fn is_readonly(&self) -> bool {
         self.is_readonly
+    }
+
+    pub fn is_final(&self) -> bool {
+        self.is_final
+    }
+
+    pub fn is_final_by_phpdoc(&self) -> bool {
+        self.is_final_by_phpdoc
     }
 
     pub fn allows_private_mutation(&self) -> bool {
@@ -392,21 +407,12 @@ pub struct ClassReflection {
     // `OverridingMethodRule`: an override must match its ancestor's
     // static-ness exactly, either direction.
     pub(in crate::registry) static_methods: NameSet,
-    // Property names declared `final` in this class's own body (PHP 8.4) -
-    // same "not walked up the hierarchy" shape as `final_methods` above;
-    // `Registry::find_final_ancestor_property` does that walk. Real PHP
-    // fatals overriding a `final` property in a subclass exactly like a
-    // `final` method.
-    pub(in crate::registry) final_properties: NameSet,
-    // `@final`'s docblock-only siblings to `final_methods`/
-    // `final_properties` above - real PHP never enforces this convention
-    // (no engine-level guarantee backs it, unlike the native keyword), so
-    // it needs its own explicit ancestor-walk consultation
-    // (`Registry::find_final_ancestor_method`/
-    // `find_final_ancestor_property`, real keyword taking priority when
-    // both somehow apply on the same ancestor).
+    // `@final`'s docblock-only sibling to `final_methods` - real PHP never
+    // enforces this convention (no engine-level guarantee backs it, unlike
+    // the native keyword), so it needs its own explicit ancestor-walk
+    // consultation (`Registry::find_final_ancestor_method`, real keyword
+    // taking priority when both somehow apply on the same ancestor).
     pub(in crate::registry) final_methods_by_phpdoc: NameSet,
-    pub(in crate::registry) final_properties_by_phpdoc: NameSet,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
@@ -697,16 +703,8 @@ impl ClassReflection {
         &self.static_methods
     }
 
-    pub fn final_properties(&self) -> &NameSet {
-        &self.final_properties
-    }
-
     pub fn final_methods_by_phpdoc(&self) -> &NameSet {
         &self.final_methods_by_phpdoc
-    }
-
-    pub fn final_properties_by_phpdoc(&self) -> &NameSet {
-        &self.final_properties_by_phpdoc
     }
 
     pub fn trait_aliases(&self) -> &Vec<TraitAlias> {
@@ -1091,66 +1089,6 @@ impl ClassReflection {
             methods_vec.push((name.clone(), name_site(&m.function), sig));
         }
         let (methods, redeclared_methods) = collect_merged_methods(methods_vec);
-        // Same private-is-not-overridable exemption `final_methods`
-        // above applies, one member kind over - a private property
-        // (final or not) is never part of a subclass's overridable
-        // surface either.
-        let mut final_properties: NameSet = c
-            .properties
-            .iter()
-            .filter(|p| p.is_final && p.visibility != Visibility::Private)
-            .map(|p| Name::from(&p.name))
-            .collect();
-        // `public final int $x` is real, valid PHP on a promoted
-        // constructor property too, and real PHP does enforce "Cannot
-        // override final property" for it - unlike `abstract`, which
-        // really is impossible there (an abstract constructor can't
-        // declare any promoted property, a real fatal error).
-        if let Some(ctor) = c.constructor() {
-            final_properties.extend(
-                ctor.function
-                    .params
-                    .iter()
-                    .filter(|p| {
-                        p.promotion.is_some_and(|promotion| promotion.is_final)
-                            && p.promotion.map(|promotion| promotion.visibility).as_ref()
-                                != Some(&Visibility::Private)
-                    })
-                    .map(|p| Name::from(&p.name)),
-            );
-        }
-
-        // `@final`'s docblock-only sibling to `final_properties` above -
-        // same private-is-not-overridable exemption.
-        let mut final_properties_by_phpdoc: NameSet = c
-            .properties
-            .iter()
-            .filter(|p| {
-                p.visibility != Visibility::Private
-                    && p.doc_comment
-                        .as_deref()
-                        .map(docblock::parse_shared)
-                        .is_some_and(|d| d.is_final)
-            })
-            .map(|p| Name::from(&p.name))
-            .collect();
-        if let Some(ctor) = c.constructor() {
-            final_properties_by_phpdoc.extend(
-                ctor.function
-                    .params
-                    .iter()
-                    .filter(|p| {
-                        p.promotion.map(|promotion| promotion.visibility).as_ref()
-                            != Some(&Visibility::Private)
-                            && p.doc_comment
-                                .as_deref()
-                                .map(docblock::parse_shared)
-                                .is_some_and(|d| d.is_final)
-                    })
-                    .map(|p| Name::from(&p.name)),
-            );
-        }
-
         let mut properties: NameMap<PropertyReflection> = c
             .properties
             .iter()
@@ -1214,6 +1152,9 @@ impl ClassReflection {
                         deprecated: doc_ty.as_ref().and_then(|d| d.deprecated.clone()),
                         has_default: p.default.is_some(),
                         is_abstract: p.is_abstract,
+                        is_final: p.is_final && p.visibility != Visibility::Private,
+                        is_final_by_phpdoc: p.visibility != Visibility::Private
+                            && doc_ty.as_ref().is_some_and(|d| d.is_final),
                         has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
                         case_refs,
@@ -1328,6 +1269,13 @@ impl ClassReflection {
                         deprecated: None,
                         has_default: p.default.is_some(),
                         is_abstract: false,
+                        is_final: p.promotion.is_some_and(|promotion| {
+                            promotion.is_final && promotion.visibility != Visibility::Private
+                        }),
+                        is_final_by_phpdoc: p.promotion.is_some_and(|promotion| {
+                            promotion.visibility != Visibility::Private
+                                && param_doc.as_ref().is_some_and(|d| d.is_final)
+                        }),
                         // Unlike `is_abstract` above (impossible on a
                         // promoted property - an abstract constructor
                         // can't declare one at all), promoted properties
@@ -1387,6 +1335,8 @@ impl ClassReflection {
                         // choice) rather than a guess.
                         has_default: false,
                         is_abstract: false,
+                        is_final: false,
+                        is_final_by_phpdoc: false,
                         has_get_hook: false,
                         has_set_hook: false,
                         case_refs,
@@ -1674,9 +1624,7 @@ impl ClassReflection {
             abstract_methods,
             static_methods,
             final_methods,
-            final_properties,
             final_methods_by_phpdoc,
-            final_properties_by_phpdoc,
             trait_aliases,
             resolved_trait_conflicts: c.resolved_trait_conflicts().map(Name::from).collect(),
             templates,
@@ -1967,6 +1915,8 @@ impl ClassReflection {
                 // recognized as redundant.
                 has_default: true,
                 is_abstract: false,
+                is_final: false,
+                is_final_by_phpdoc: false,
                 has_get_hook: false,
                 has_set_hook: false,
                 // A language built-in, not textual - nothing to check
@@ -2030,6 +1980,8 @@ impl ClassReflection {
                     // case's `->value` is language-guaranteed too.
                     has_default: true,
                     is_abstract: false,
+                    is_final: false,
+                    is_final_by_phpdoc: false,
                     has_get_hook: false,
                     has_set_hook: false,
                     case_refs: Vec::new(),
@@ -2097,7 +2049,19 @@ impl ClassReflection {
             }
         }
         self.redeclared_methods.extend(other.redeclared_methods);
-        self.properties.extend(other.properties);
+        // A property both sides declare stays final if either side made it
+        // so, as the sets of final names this replaced were unioned.
+        for (name, mut prop) in other.properties {
+            if let Some(own) = self.properties.get(&name)
+                && ((own.is_final && !prop.is_final)
+                    || (own.is_final_by_phpdoc && !prop.is_final_by_phpdoc))
+            {
+                let merged = Arc::make_mut(&mut prop);
+                merged.is_final |= own.is_final;
+                merged.is_final_by_phpdoc |= own.is_final_by_phpdoc;
+            }
+            self.properties.insert(name, prop);
+        }
         self.consts.extend(other.consts);
         self.enum_case_values.extend(other.enum_case_values);
         self.type_aliases.extend(other.type_aliases);
@@ -2106,11 +2070,8 @@ impl ClassReflection {
         self.abstract_methods.extend(other.abstract_methods);
         self.final_methods.extend(other.final_methods);
         self.static_methods.extend(other.static_methods);
-        self.final_properties.extend(other.final_properties);
         self.final_methods_by_phpdoc
             .extend(other.final_methods_by_phpdoc);
-        self.final_properties_by_phpdoc
-            .extend(other.final_properties_by_phpdoc);
         self.resolved_trait_conflicts
             .extend(other.resolved_trait_conflicts);
         self.covariant_templates.extend(other.covariant_templates);

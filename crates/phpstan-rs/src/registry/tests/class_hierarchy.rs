@@ -426,3 +426,85 @@ fn an_unregistered_class_is_never_treated_as_impossible() {
     let r = build_registry(r#"<?php class Foo {}"#);
     assert!(r.is_intersection_possible(&["Foo".to_string(), "SomeUnregisteredClass".to_string()]));
 }
+
+#[test]
+fn a_property_records_whether_it_is_final() {
+    let r = build_registry(
+        r#"<?php
+            class Base {
+                public function __construct(final public int $promoted, final private int $hidden) {}
+                final public int $declared = 1;
+                final private int $private = 2;
+                /** @final */
+                public int $by_tag = 3;
+                public int $plain = 4;
+            }
+            "#,
+    );
+    let props = &r.classes.get("Base").unwrap().properties;
+    assert!(props.get("promoted").unwrap().is_final());
+    assert!(props.get("declared").unwrap().is_final());
+    assert!(!props.get("hidden").unwrap().is_final());
+    assert!(!props.get("private").unwrap().is_final());
+    assert!(!props.get("plain").unwrap().is_final());
+    assert!(!props.get("by_tag").unwrap().is_final());
+    assert!(props.get("by_tag").unwrap().is_final_by_phpdoc());
+    assert!(!props.get("declared").unwrap().is_final_by_phpdoc());
+}
+
+#[test]
+fn the_nearest_ancestor_declaring_a_final_property_is_the_one_found() {
+    let r = build_registry(
+        r#"<?php
+            class A { final public int $x = 1; /** @final */ public int $y = 2; }
+            class B extends A {}
+            class C extends B { public int $z = 3; }
+            "#,
+    );
+    assert_eq!(
+        r.find_final_ancestor_property("C", "x"),
+        Some((Name::from("A"), false))
+    );
+    assert_eq!(
+        r.find_final_ancestor_property("C", "y"),
+        Some((Name::from("A"), true))
+    );
+    assert_eq!(r.find_final_ancestor_property("C", "z"), None);
+}
+
+#[test]
+fn a_final_property_a_class_takes_from_a_trait_is_the_classs_own() {
+    // PHP names the using class: "Cannot override final property A::$x".
+    let r = build_registry(
+        r#"<?php
+            trait T { final public int $x = 1; }
+            class A { use T; }
+            class B extends A { public int $x = 2; }
+            "#,
+    );
+    assert_eq!(
+        r.find_final_ancestor_property("B", "x"),
+        Some((Name::from("A"), false))
+    );
+}
+
+#[test]
+fn a_final_property_of_a_mixin_target_is_not_final_on_the_class() {
+    let r = build_registry(
+        r#"<?php
+            class Target { final public int $x = 1; }
+            /** @mixin Target */
+            class A {}
+            class B extends A { public int $x = 2; }
+            "#,
+    );
+    assert!(
+        r.classes
+            .get("A")
+            .unwrap()
+            .properties
+            .get("x")
+            .is_some_and(|p| !p.is_final())
+    );
+    assert_eq!(r.find_final_ancestor_property("B", "x"), None);
+}
