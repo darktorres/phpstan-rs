@@ -663,10 +663,18 @@ impl Session {
                 (len, Err(bytes))
             }
         };
+        // A context file's bodies are kept as text. They are not parsed
+        // when the load of the file reads nothing in them, unless the use
+        // sites of the file are indexed from its tree.
+        let body_text = match (cacheable, index_use_sites) {
+            (false, _) => super::BodyText::Parsed,
+            (true, true) => super::BodyText::AsText,
+            (true, false) => super::BodyText::Skipped,
+        };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
-            Ok(text) => super::parse_file_with_names(path, text, is_stub, cacheable, Some(names)),
+            Ok(text) => super::parse_file_with_names(path, text, is_stub, body_text, Some(names)),
             Err(bytes) => {
-                super::parse_file_with_names(path, bytes, is_stub, cacheable, Some(names))
+                super::parse_file_with_names(path, bytes, is_stub, body_text, Some(names))
             }
         })) else {
             return Read::Unread;

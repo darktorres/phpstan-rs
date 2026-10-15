@@ -181,6 +181,49 @@ impl CachedFile {
     }
 }
 
+/// Asserts that `skipped`, the parse of a file that skipped bodies, and
+/// `full`, the parse of the whole of it, are stored alike but for what the
+/// bodies give: the file's bodies, and its references, which `skipped`
+/// has the bodies' of in what `FileBodies::text_references` finds.
+#[cfg(debug_assertions)]
+pub(super) fn assert_same_but_bodies(skipped: &ParsedFile, full: &ParsedFile) {
+    let stored = |parsed: &ParsedFile| {
+        let mut stored = CachedFile::of(parsed, 0);
+        stored.references.clear();
+        stored.declaration_references.clear();
+        stored.bodies = FileBodies::default();
+        stored.facts.has_skimmed_bodies = false;
+        postcard::to_allocvec(&stored).expect("a parse is stored")
+    };
+    assert!(
+        stored(skipped) == stored(full),
+        "a file whose parse skipped its bodies is stored as the whole parse is, but for its bodies"
+    );
+    let mut references = skipped.references.clone();
+    references.extend(skipped.bodies.text_references());
+    assert!(
+        references == full.references,
+        "the references of a file's skipped bodies and of the rest are those of the whole parse"
+    );
+    assert!(
+        skipped.declaration_references == full.declaration_references,
+        "a skipped body refers to nothing a declaration is read from"
+    );
+    assert_eq!(skipped.bodies.spans(), full.bodies.spans());
+    for span in full.bodies.spans() {
+        assert_eq!(
+            format!("{:?}", skipped.bodies.summary(span)),
+            format!("{:?}", full.bodies.summary(span)),
+            "a skipped body is read as the whole parse has it"
+        );
+        assert_eq!(
+            format!("{:?}", skipped.bodies.init_flow(span)),
+            format!("{:?}", full.bodies.init_flow(span)),
+            "a skipped body's flow is as the whole parse has it"
+        );
+    }
+}
+
 /// Where a file's entry is.
 #[derive(Clone)]
 pub(super) struct Key {

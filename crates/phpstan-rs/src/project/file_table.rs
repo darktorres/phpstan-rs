@@ -126,6 +126,10 @@ impl<V> FileTable<V> {
         self.slots.get(id.index())?.value.as_ref()
     }
 
+    pub(crate) fn get_by_id_mut(&mut self, id: FileId) -> Option<&mut V> {
+        self.slots.get_mut(id.index())?.value.as_mut()
+    }
+
     /// Holds `value` for `path`, returning what it held for it.
     pub(crate) fn insert(&mut self, path: PathBuf, value: V) -> Option<V> {
         let id = self.id_for(&path);

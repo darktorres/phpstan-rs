@@ -264,6 +264,25 @@ impl NameContext {
         }
     }
 
+    /// Whether a name read here can resolve to one in `PHPStan\`: the
+    /// namespace is that one or an import is from it.
+    pub fn could_name_phpstan(&self) -> bool {
+        fn phpstan(text: &str) -> bool {
+            let bytes = text.as_bytes();
+            bytes.len() >= 7
+                && bytes[..7].eq_ignore_ascii_case(b"phpstan")
+                && (bytes.len() == 7 || bytes[7] == b'\\')
+        }
+        phpstan(&self.namespace)
+            || self
+                .use_map
+                .classes
+                .values()
+                .chain(self.use_map.functions.values())
+                .chain(self.use_map.constants.values())
+                .any(|path| phpstan(path.trim_start_matches('\\')))
+    }
+
     /// The context `stored` was made from, with a version of its own.
     pub fn from_stored(stored: StoredContext) -> NameContext {
         let mut context = NameContext::default();

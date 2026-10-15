@@ -362,6 +362,7 @@ fn build_probe_scope(
                 stmts: std::sync::Arc::new(Vec::new()),
                 goto_labels: Box::default(),
                 is_generator: false,
+                skimmed: false,
             });
             let body = std::sync::Arc::make_mut(&mut body.stmts);
             body.retain(|s| index.line(s.span.end) < cut_line);

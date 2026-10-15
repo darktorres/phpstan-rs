@@ -71,6 +71,15 @@ pub struct Parser<'a> {
     pub(crate) saw_declaration_in_body: std::cell::Cell<bool>,
     // Whether a `global` statement or an `include` or `require` was parsed.
     pub(crate) saw_global_or_include: std::cell::Cell<bool>,
+    // Whether function and method bodies are skipped where nothing in
+    // them is read at the load (`skim_body`), whether one was, the tokens
+    // of the body being skipped (kept to be parsed after all when
+    // something in it must be), and whether the names in effect at the
+    // last body can name `PHPStan` (by the version of the context).
+    pub(crate) skim_bodies: bool,
+    pub(crate) skimmed_any: bool,
+    pub(crate) skim_tape: Vec<Tok>,
+    pub(crate) skim_phpstan_context: std::cell::Cell<(u64, bool)>,
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
@@ -212,6 +221,10 @@ impl<'a> Parser<'a> {
             body_depth: std::cell::Cell::new(0),
             saw_declaration_in_body: std::cell::Cell::new(false),
             saw_global_or_include: std::cell::Cell::new(false),
+            skim_bodies: false,
+            skimmed_any: false,
+            skim_tape: Vec::new(),
+            skim_phpstan_context: std::cell::Cell::new((0, false)),
             goto_scopes: vec![GotoScope::default()],
         };
         parser.fill(LOOKAHEAD);
@@ -334,6 +347,18 @@ impl Parser<'_> {
     /// `include` or `require` expression.
     pub fn saw_global_or_include(&self) -> bool {
         self.saw_global_or_include.get()
+    }
+
+    /// Skips the statements of the function and method bodies that
+    /// nothing at the load reads, which `parse_function_body` reads from
+    /// their text when something asks. A syntax error in one is not found.
+    pub fn skip_bodies(&mut self, skip: bool) {
+        self.skim_bodies = skip;
+    }
+
+    /// Whether a body was skipped.
+    pub fn skipped_a_body(&self) -> bool {
+        self.skimmed_any
     }
 
     /// The span of the token about to be read: the last one's when none

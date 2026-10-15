@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::parser::{ParseError, Parser};
+use crate::parser::{ParseError, Parser, Supply};
 use crate::span::Span;
 use crate::token::{Keyword, Token};
 
@@ -138,6 +138,9 @@ impl Parser<'_> {
 
     /// A function's `{ ... }` body, at its `{`.
     pub(crate) fn parse_function_body(&mut self) -> Result<FunctionBody, ParseError> {
+        if let Some(skimmed) = self.skim_body() {
+            return Ok(skimmed);
+        }
         let open = self.current_span();
         let depth = self.enter_goto_scope();
         self.recorder.borrow_mut().enter_body();
@@ -151,7 +154,86 @@ impl Parser<'_> {
             stmts: std::sync::Arc::new(stmts?),
             goto_labels: end.goto_labels,
             is_generator: end.is_generator,
+            skimmed: false,
         })
+    }
+
+    /// The body at the `{` the parser is at, skipped to its `}` without
+    /// parsing it, when nothing in it is read by the load that reads the
+    /// file: no declaration (a function, a class, an anonymous class or a
+    /// `define`), nothing that adds to the global scope (`global`,
+    /// `include`, `require`), no doc comment, no `yield` or `goto`, no
+    /// name in `PHPStan\` and no inline HTML or `{$...}` in a string. The
+    /// tokens are lexed as they are for a parse, so what the lexer notes is
+    /// noted; a body that must be parsed is parsed from the tokens read.
+    fn skim_body(&mut self) -> Option<FunctionBody> {
+        if !self.skim_bodies
+            || self.body_depth.get() > 0
+            || self.nested_depth.get() > 0
+            || !self.check(&Token::LBrace)
+            || self.names_in_effect_could_be_phpstan()
+            || !matches!(self.supply.get_mut(), Supply::Lexer(_))
+        {
+            return None;
+        }
+        let open = self.current_span();
+        let (pos, last_end, last_span) = (self.pos, self.last_end, self.last_span);
+        let mut tape = std::mem::take(&mut self.skim_tape);
+        let mut depth = 0u32;
+        let mut state = SkimState::default();
+        let skimmed = loop {
+            let Some(tok) = self.pop() else { break false };
+            let reads = tok.docs.is_some() || state.reads_at_load(&tok.token);
+            if !reads {
+                match tok.token {
+                    Token::LBrace | Token::DollarBrace => depth += 1,
+                    Token::RBrace => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                if depth == 0 {
+                    break true;
+                }
+            }
+            tape.push(tok);
+            if reads {
+                break false;
+            }
+        };
+        if skimmed {
+            tape.clear();
+            self.skim_tape = tape;
+            self.skimmed_any = true;
+            return Some(FunctionBody {
+                open,
+                stmts: std::sync::Arc::new(Vec::new()),
+                goto_labels: Box::default(),
+                is_generator: false,
+                skimmed: true,
+            });
+        }
+        // The tokens go back where they were: the `{` first, the one that
+        // ended the skim last.
+        for tok in tape.drain(..).rev() {
+            self.ahead.push_front(tok);
+        }
+        self.pos = pos;
+        self.last_end = last_end;
+        self.last_span = last_span;
+        self.skim_tape = tape;
+        None
+    }
+
+    /// Whether the names in effect where a body is can be names in
+    /// `PHPStan\`, which the load notes where a file mentions one.
+    fn names_in_effect_could_be_phpstan(&self) -> bool {
+        let ctx = self.ctx.borrow();
+        let (version, answer) = self.skim_phpstan_context.get();
+        if version == ctx.version() && version != 0 {
+            return answer;
+        }
+        let answer = ctx.could_name_phpstan();
+        self.skim_phpstan_context.set((ctx.version(), answer));
+        answer
     }
 
     pub(crate) fn parse_function_decl(&mut self) -> Result<FunctionDecl, ParseError> {
@@ -202,5 +284,78 @@ impl Parser<'_> {
                 end: self.previous_end(),
             },
         })
+    }
+}
+
+/// What a skim has seen of the tokens before the one it is at.
+#[derive(Default)]
+struct SkimState {
+    /// The last was `::`, `->` or `?->`, which a keyword then is the name of
+    /// a member after.
+    after_member_operator: bool,
+    /// The last was `function`, which a name or a `(` then follows.
+    after_function: bool,
+    /// The last was a segment of a name spelled `PHPStan`.
+    after_phpstan: bool,
+}
+
+impl SkimState {
+    /// Whether `token` is something the load of a file reads in a function
+    /// body, or something that is not skipped as text: the body is parsed.
+    /// Notes the token as the last one seen.
+    fn reads_at_load(&mut self, token: &Token) -> bool {
+        let after_member_operator = std::mem::replace(&mut self.after_member_operator, false);
+        let after_phpstan = std::mem::take(&mut self.after_phpstan);
+        if std::mem::take(&mut self.after_function) {
+            match token {
+                // `function &name` and `function &(`.
+                Token::Amp => {
+                    self.after_function = true;
+                    return false;
+                }
+                Token::LParen => return false,
+                // `function name`: a function declared in the body.
+                _ => return true,
+            }
+        }
+        match token {
+            Token::DoubleColon | Token::Arrow | Token::NullsafeArrow => {
+                self.after_member_operator = true;
+                false
+            }
+            Token::Eof | Token::InlineHtml(_) => true,
+            Token::InterpString(parts) | Token::ShellExec(parts) => parts
+                .iter()
+                .any(|part| matches!(part, crate::token::StringPart::ComplexExpr(..))),
+            Token::Keyword(_) if after_member_operator => false,
+            Token::Keyword(Keyword::Function) => {
+                self.after_function = true;
+                false
+            }
+            Token::Keyword(
+                Keyword::Class
+                | Keyword::Interface
+                | Keyword::Trait
+                | Keyword::Enum
+                | Keyword::Global
+                | Keyword::Include
+                | Keyword::IncludeOnce
+                | Keyword::Require
+                | Keyword::RequireOnce
+                | Keyword::Yield
+                | Keyword::Goto,
+            ) => true,
+            // A name in `PHPStan\`, which the load notes, has `PHPStan` for a
+            // segment followed by a `\`: as written, after `namespace\` or
+            // after an import, which the names in effect settle.
+            Token::Backslash => after_phpstan,
+            Token::Identifier(_) if after_member_operator => false,
+            Token::Identifier(name) => {
+                let lower = name.lower();
+                self.after_phpstan = lower == "phpstan";
+                lower == "define"
+            }
+            _ => false,
+        }
     }
 }

@@ -22,6 +22,7 @@ pub mod visit;
 
 pub use lexer::WatchList;
 pub use parse::{
-    FileFacts, ParsedFile, Source, parse, parse_function_body, parse_watching, parse_with_names,
+    FileFacts, ParsedBody, ParsedFile, Source, parse, parse_function_body, parse_skimming,
+    parse_watching, parse_with_names,
 };
 pub use span::LineIndex;

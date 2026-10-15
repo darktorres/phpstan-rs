@@ -293,6 +293,9 @@ pub struct Project {
     // The files loaded or edited since the finishing passes last walked
     // them for global variables.
     globals_stale: FxHashSet<FileId>,
+    // Whether a file's parse skipped function bodies, whose references
+    // `dependents` has not, until `complete_skipped_references`.
+    skipped_bodies: bool,
     // The files a cancelled recheck never reached, whose last diagnostics
     // are therefore stale (`take_unchecked`).
     unchecked: Vec<PathBuf>,
@@ -620,6 +623,7 @@ impl Project {
             phpstan_pinned: false,
             next_load_order: 0,
             globals_stale: FxHashSet::default(),
+            skipped_bodies: false,
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
@@ -896,8 +900,8 @@ impl Project {
         };
         let bytes = std::fs::read(full).ok()?;
         let parsed = match String::from_utf8(bytes) {
-            Ok(text) => parse_with_ignores(path, &text, None),
-            Err(error) => parse_with_ignores(path, &error.into_bytes(), None),
+            Ok(text) => parse_with_ignores(path, &text, None, false),
+            Err(error) => parse_with_ignores(path, &error.into_bytes(), None, false),
         }
         .ok()?;
         let ast = Arc::new(parsed.ast);
@@ -1050,6 +1054,7 @@ impl Project {
         self.files.bind_origin(id, &origin_path);
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
+        self.skipped_bodies |= facts.has_skimmed_bodies;
         let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(path)));
         self.globals_stale.insert(id);
         let load_order = self.next_load_order;
@@ -1293,6 +1298,56 @@ impl Project {
         self.registry.begin_declaration_changes();
     }
 
+    /// Registers what the function bodies a file's parse skipped refer to,
+    /// which are read for it: a load that skipped them is never asked what
+    /// depends on a name, and a project asked it first completes what
+    /// `dependents` holds.
+    fn complete_skipped_references(&mut self) {
+        if !std::mem::take(&mut self.skipped_bodies) {
+            return;
+        }
+        let ids: Vec<FileId> = self
+            .files
+            .iter_with_ids()
+            .filter(|(_, _, file)| file.facts.has_skimmed_bodies)
+            .map(|(id, _, _)| id)
+            .collect();
+        let found: Vec<(FileId, FxHashSet<deps::RefKey>)> = worker_pool().install(|| {
+            ids.par_iter()
+                .filter_map(|&id| {
+                    let file = self.files.get_by_id(id)?;
+                    Some((id, file.bodies.text_references()))
+                })
+                .collect()
+        });
+        for (id, names) in found {
+            register_references(&mut self.dependents, id, &names);
+            if let Some(file) = self.files.get_by_id_mut(id) {
+                file.references.extend(names);
+            }
+        }
+    }
+
+    /// Debug check that completing `dependents` with what the skipped
+    /// bodies refer to leaves both scopes as they are.
+    #[cfg(debug_assertions)]
+    fn assert_skipped_references_add_nothing(
+        &mut self,
+        changed: &crate::registry::ChangedNames,
+        scope: &Scope,
+        body_scope: &Scope,
+    ) {
+        if !self.skipped_bodies {
+            return;
+        }
+        self.complete_skipped_references();
+        let (full, full_body) = self.finishing_scopes(changed);
+        assert_eq!(scope.class_keys(), full.class_keys());
+        assert_eq!(scope.function_keys(), full.function_keys());
+        assert_eq!(body_scope.class_keys(), full_body.class_keys());
+        assert_eq!(body_scope.function_keys(), full_body.function_keys());
+    }
+
     /// The classes and functions the finishing passes must run over after
     /// `changed`, as two scopes: what resolution reads from a
     /// declaration (its signature, hierarchy, PHPDoc and constant values)
@@ -1428,9 +1483,21 @@ impl Project {
     /// changed (none the first time, when everything is new).
     fn run_finishing_passes(&mut self) -> FxHashSet<PathBuf> {
         self.begin_declaration_changes();
+        // What changed is looked up in `dependents`, which holds what every
+        // body refers to from here on. A project built once is looked up
+        // in only here, and every name its files declare is among those
+        // that changed, so what a skipped body refers to adds no declared
+        // name to the scopes.
+        if self.registry.has_resolved_declarations() && !self.built_once {
+            self.complete_skipped_references();
+        }
         let (scope, body_scope, changed) = if self.registry.has_resolved_declarations() {
             let changed = self.registry.take_changed();
             let (scope, body_scope) = self.finishing_scopes(&changed);
+            #[cfg(debug_assertions)]
+            if self.built_once {
+                self.assert_skipped_references_add_nothing(&changed, &scope, &body_scope);
+            }
             (scope, body_scope, Some(changed))
         } else {
             (Scope::all(), Scope::all(), None)
@@ -1522,6 +1589,7 @@ impl Project {
     /// loaded (a no-op - both callers treat that as "nothing to undo").
     fn unindex_file(&mut self, path: &Path) -> Option<UnindexedFile> {
         self.begin_declaration_changes();
+        self.complete_skipped_references();
         let id = self.files.id_of(path)?;
         let old = self.files.remove(path)?;
         let classes: Vec<Name> = old
@@ -1843,7 +1911,7 @@ impl Project {
             facts,
             line_index,
             ..
-        } = parse_with_ignores(path, new_source, None)?;
+        } = parse_with_ignores(path, new_source, None, false)?;
         let previous = self.unindex_file(path);
         let (functions, classes) = declared_names(&ast);
         let constants = declared_constants(&ast);
@@ -2912,8 +2980,13 @@ fn parse_with_ignores<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
+    skim_bodies: bool,
 ) -> Result<Parsed, ParseError> {
-    let parsed = syntax::parse_watching(source, names, Some(&WATCHED))?;
+    let parsed = if skim_bodies {
+        syntax::parse_skimming(source, names, Some(&WATCHED))?
+    } else {
+        syntax::parse_watching(source, names, Some(&WATCHED))?
+    };
     let ignores = ignore_comments::scan_parsed(&parsed);
     let mut ast = parsed.stmts;
     // What the file does not name, or hold, there is nothing to find of by
@@ -3019,18 +3092,32 @@ pub fn parse_file<'a>(
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
 ) -> Result<ParsedFile, ParseError> {
-    parse_file_with_names(path, source, is_stub, false, None)
+    parse_file_with_names(path, source, is_stub, BodyText::Parsed, None)
+}
+
+/// What a parse keeps of the function and method bodies of a file.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BodyText {
+    /// Every body is parsed with the file.
+    Parsed,
+    /// Every body is parsed with the file, and kept as text where the
+    /// file's facts allow, to be parsed again when a pass reads it.
+    AsText,
+    /// A body is not parsed with the file when nothing in it is read by
+    /// the load (`syntax::parse_skimming`), and kept as text, to be parsed
+    /// when a pass reads it. A syntax error in one is not found.
+    Skipped,
 }
 
 /// `parse_file`, with the names the files of a load share: the cache is
-/// asked for a name before the interner is. `skim_bodies` is whether the
-/// file's function bodies are kept as text and read when a pass asks, which
-/// a context file's may be.
+/// asked for a name before the interner is. `body_text` is what is kept of
+/// the file's function bodies, which a context file's may be text read when
+/// a pass asks.
 pub fn parse_file_with_names<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
-    skim_bodies: bool,
+    body_text: BodyText,
     names: Option<&mut syntax::name::NameCache>,
 ) -> Result<ParsedFile, ParseError> {
     let source: syntax::Source<'a> = source.into();
@@ -3041,7 +3128,7 @@ pub fn parse_file_with_names<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_with_ignores(path, source, names)?;
+    } = parse_with_ignores(path, source, names, body_text == BodyText::Skipped)?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
@@ -3070,10 +3157,14 @@ pub fn parse_file_with_names<'a>(
             _ => None,
         })
         .collect();
-    let bodies = FileBodies::of_file(&ast, &facts, skim_bodies.then_some(source));
+    let bodies = FileBodies::of_file(
+        &ast,
+        &facts,
+        (body_text != BodyText::Parsed).then_some(source),
+    );
     let global_facts = Arc::new(GlobalFacts::of_file(&ast, &facts));
     let pest_facts = PestFacts::of(path, &ast);
-    Ok(ParsedFile {
+    let parsed = ParsedFile {
         ast: Some(ast),
         lex_warnings,
         functions,
@@ -3095,7 +3186,17 @@ pub fn parse_file_with_names<'a>(
         line_index,
         class_fn_refs: None,
         owner: None,
-    })
+    };
+    // A file that skipped bodies gives what the whole of it gives, but for
+    // the bodies, when it parses whole; a body with a syntax error is not
+    // found by the skip.
+    #[cfg(debug_assertions)]
+    if parsed.facts.has_skimmed_bodies
+        && let Ok(full) = parse_file_with_names(path, source, is_stub, BodyText::AsText, None)
+    {
+        file_cache::assert_same_but_bodies(&parsed, &full);
+    }
+    Ok(parsed)
 }
 
 /// The registry names of the anonymous classes in `ast`.

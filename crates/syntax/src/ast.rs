@@ -254,6 +254,11 @@ pub struct FunctionBody {
     // Whether it has a `yield` or `yield from` of its own, outside nested
     // functions and classes: the function is a generator.
     pub is_generator: bool,
+    // Whether the parse skipped the body: its statements are not here,
+    // and it is read from its text (`parse_function_body`) when
+    // something asks. A body that can add to what the file declares,
+    // names `PHPStan`, has a doc comment or `yield`s is never skipped.
+    pub skimmed: bool,
 }
 
 #[derive(Debug, Clone)]

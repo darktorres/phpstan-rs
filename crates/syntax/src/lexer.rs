@@ -231,6 +231,9 @@ pub struct FileFacts {
     /// expression, which is all that makes a function body add to what
     /// the file does to the global scope.
     pub has_global_or_include: bool,
+    /// The parse skipped the statements of at least one function or method
+    /// body, which are read from their text when something asks.
+    pub has_skimmed_bodies: bool,
     /// The bits of the `WatchList` the lexer was given for the spellings
     /// the file names: an identifier, a whole name or one segment of a
     /// qualified one, in any case.

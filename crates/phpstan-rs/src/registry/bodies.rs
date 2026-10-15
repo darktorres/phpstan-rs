@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::Source;
 use syntax::ast::{FunctionDecl, MethodDecl, Stmt};
 use syntax::name_resolution::{NameContext, StoredContext, for_each_in_context};
@@ -108,7 +108,7 @@ pub struct FileBodies {
 
 impl FileBodies {
     pub fn of(stmts: &[Stmt]) -> FileBodies {
-        FileBodies::collect(stmts, true, None)
+        FileBodies::collect(stmts, true, None, false)
     }
 
     /// The bodies of a file whose facts are known: its expressions are
@@ -123,27 +123,27 @@ impl FileBodies {
         let nothing_declared_in_bodies = !facts.has_anonymous_class
             && !facts.has_nested_declaration
             && !facts.has_declaration_in_body;
-        let skim = source
-            .filter(|_| nothing_declared_in_bodies)
-            .map(|source| match source {
-                Source::Text(text) => text.as_bytes(),
-                Source::Bytes(bytes) => bytes,
-            });
+        let skim = source.map(|source| match source {
+            Source::Text(text) => text.as_bytes(),
+            Source::Bytes(bytes) => bytes,
+        });
         let bodies = FileBodies::collect(
             stmts,
             facts.has_anonymous_class || facts.has_nested_declaration,
             skim,
+            skim.is_some() && nothing_declared_in_bodies,
         );
-        // What a walk of the expressions too finds.
+        // What a walk of the expressions too finds, and what the statements
+        // of a body kept as text give: a file whose parse skipped bodies is
+        // checked against a parse of all of it where it is parsed.
         #[cfg(debug_assertions)]
-        {
-            let eager = FileBodies::collect(stmts, true, None);
+        if !facts.has_skimmed_bodies {
+            let eager = FileBodies::collect(stmts, true, None, false);
             assert_eq!(
                 bodies.bodies.len(),
                 eager.bodies.len(),
                 "a file whose facts say it has no body in an expression has"
             );
-            // What the text of each skimmed body is read as.
             for (span, body) in &bodies.bodies {
                 let Body::Skimmed(_) = body else { continue };
                 let expected = eager.summary(*span).expect("a body of the eager walk");
@@ -192,7 +192,12 @@ impl FileBodies {
         self
     }
 
-    fn collect(stmts: &[Stmt], in_expressions: bool, skim: Option<&[u8]>) -> FileBodies {
+    fn collect(
+        stmts: &[Stmt],
+        in_expressions: bool,
+        skim: Option<&[u8]>,
+        keep_parsed_as_text: bool,
+    ) -> FileBodies {
         struct Collect<'s> {
             bodies: FxHashMap<Span, Body>,
             // Whether the next function declaration visited is a method.
@@ -200,6 +205,8 @@ impl FileBodies {
             in_expressions: bool,
             // The file's bytes, when its bodies are skimmed.
             skim: Option<&'s [u8]>,
+            // Whether a body that has statements is kept as text too.
+            keep_parsed_as_text: bool,
             contexts: Vec<NameContext>,
             // The context in effect where the declaration being visited is.
             context: u32,
@@ -231,7 +238,22 @@ impl FileBodies {
                 is_method: bool,
             ) -> Option<Body> {
                 let (start, end) = (body.open.start, function.span.end);
-                let bytes = self.skim?.get(start as usize..end as usize)?;
+                let bytes = self.skim?.get(start as usize..end as usize);
+                // A body the parse skipped is only its text: with none, it
+                // is a body that is not known.
+                let Some(bytes) = bytes else {
+                    debug_assert!(!body.skimmed, "a body the parse skipped has its text");
+                    return body.skimmed.then(|| {
+                        Body::Skimmed(Skimmed {
+                            start,
+                            end: start,
+                            at: self.text.len() as u32,
+                            context: self.context,
+                            is_method,
+                            read: OnceLock::new(),
+                        })
+                    });
+                };
                 debug_assert!(bytes.first() == Some(&b'{') && bytes.last() == Some(&b'}'));
                 let at = self.text.len() as u32;
                 self.text.extend_from_slice(bytes);
@@ -260,8 +282,10 @@ impl FileBodies {
             fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
                 let is_method = std::mem::take(&mut self.method);
                 if let Some(body) = &function.body {
-                    let body_kept = self
-                        .skimmed(function, body, is_method)
+                    let as_text = body.skimmed || self.keep_parsed_as_text;
+                    let body_kept = as_text
+                        .then(|| self.skimmed(function, body, is_method))
+                        .flatten()
                         .unwrap_or_else(|| Body::Read(Read::of(body, is_method)));
                     let skimmed = matches!(body_kept, Body::Skimmed(_));
                     self.bodies.insert(function.name.span, body_kept);
@@ -278,6 +302,7 @@ impl FileBodies {
             method: false,
             in_expressions,
             skim,
+            keep_parsed_as_text,
             contexts: Vec::new(),
             context: 0,
             text: Vec::new(),
@@ -307,15 +332,41 @@ impl FileBodies {
 
     /// The body `skimmed` is the text of, read.
     fn parse(&self, skimmed: &Skimmed) -> Option<Read> {
+        let body = self.parse_text(skimmed)?;
+        Some(Read::of(&body.body, skimmed.is_method))
+    }
+
+    fn parse_text(&self, skimmed: &Skimmed) -> Option<syntax::ParsedBody> {
         let length = (skimmed.end - skimmed.start) as usize;
         let bytes = self.text.get(skimmed.at as usize..)?.get(..length)?;
         let context = self.contexts.get(skimmed.context as usize)?;
-        let body = syntax::parse_function_body(bytes, skimmed.start, context).ok()?;
-        Some(Read::of(&body, skimmed.is_method))
+        syntax::parse_function_body(bytes, skimmed.start, context).ok()
+    }
+
+    /// Whether some body is kept as text.
+    pub fn has_text_bodies(&self) -> bool {
+        self.bodies
+            .values()
+            .any(|body| matches!(body, Body::Skimmed(_)))
+    }
+
+    /// What the bodies kept as text refer to, which are read for it: the
+    /// references of a file whose parse skipped them are not in the file's.
+    pub fn text_references(&self) -> FxHashSet<syntax::references::RefKey> {
+        let mut names = FxHashSet::default();
+        for body in self.bodies.values() {
+            let Body::Skimmed(skimmed) = body else {
+                continue;
+            };
+            if let Some(parsed) = self.parse_text(skimmed) {
+                names.extend(parsed.references.names);
+            }
+        }
+        names
     }
 
     /// The span of the name of every declaration with a body, in order.
-    #[cfg(test)]
+    #[cfg(any(test, debug_assertions))]
     pub(crate) fn spans(&self) -> Vec<Span> {
         let mut spans: Vec<Span> = self.bodies.keys().copied().collect();
         spans.sort_by_key(|span| (span.start, span.end));

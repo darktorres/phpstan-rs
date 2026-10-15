@@ -99,7 +99,29 @@ pub fn parse_watching<'a>(
     names: Option<&mut NameCache>,
     watch: Option<&'static WatchList>,
 ) -> Result<ParsedFile, ParseError> {
-    let lexer = Lexer::from_source(source.into());
+    parse_file(source.into(), names, watch, false)
+}
+
+/// `parse_watching`, leaving the statements of the function and method
+/// bodies that nothing at the load of a file reads unparsed: a body is
+/// `skimmed` in the tree, and is read from its text with
+/// `parse_function_body` when something asks. A syntax error in a body
+/// skipped is not found, and its references are not in the file's.
+pub fn parse_skimming<'a>(
+    source: impl Into<Source<'a>>,
+    names: Option<&mut NameCache>,
+    watch: Option<&'static WatchList>,
+) -> Result<ParsedFile, ParseError> {
+    parse_file(source.into(), names, watch, true)
+}
+
+fn parse_file(
+    source: Source<'_>,
+    names: Option<&mut NameCache>,
+    watch: Option<&'static WatchList>,
+    skim_bodies: bool,
+) -> Result<ParsedFile, ParseError> {
+    let lexer = Lexer::from_source(source);
     let lexer = match watch {
         Some(watch) => lexer.watching(watch),
         None => lexer,
@@ -109,11 +131,13 @@ pub fn parse_watching<'a>(
         None => lexer,
     };
     let mut parser = Parser::from_lexer(lexer);
+    parser.skip_bodies(skim_bodies);
     let parsed = parser.parse_program();
     let has_anonymous_class = parser.saw_anonymous_class();
     let has_nested_declaration = parser.saw_nested_declaration();
     let has_declaration_in_body = parser.saw_declaration_in_body();
     let has_global_or_include = parser.saw_global_or_include();
+    let has_skimmed_bodies = parser.skipped_a_body();
     let goto_labels = parser.file_goto_labels();
     let references = parser.take_references();
     // The rest of the file is lexed even when the parse failed: a lexer
@@ -138,6 +162,7 @@ pub fn parse_watching<'a>(
     facts.has_nested_declaration = has_nested_declaration;
     facts.has_declaration_in_body = has_declaration_in_body;
     facts.has_global_or_include = has_global_or_include;
+    facts.has_skimmed_bodies = has_skimmed_bodies;
     Ok(ParsedFile {
         stmts,
         ignore_marks,
@@ -152,15 +177,26 @@ pub fn parse_watching<'a>(
 /// The body `bytes` holds, a `{ ... }` found in a file at the byte offset
 /// `base`, parsed as it was in that file when `ctx` was the context in
 /// effect at its declaration: its spans are where they are in the file. The
-/// file's references and warnings are not read again.
+/// file's warnings are not read again.
 pub fn parse_function_body(
     bytes: &[u8],
     base: u32,
     ctx: &NameContext,
-) -> Result<FunctionBody, ParseError> {
+) -> Result<ParsedBody, ParseError> {
     let mut parser = Parser::from_lexer(Lexer::fragment_bytes(bytes, base));
     *parser.ctx.get_mut() = ctx.clone();
-    parser.parse_function_body()
+    let body = parser.parse_function_body()?;
+    Ok(ParsedBody {
+        body,
+        references: parser.take_references(),
+    })
+}
+
+/// A function body parsed from its text, and what it refers to.
+#[derive(Debug)]
+pub struct ParsedBody {
+    pub body: FunctionBody,
+    pub references: FileReferences,
 }
 
 #[cfg(test)]
@@ -197,6 +233,226 @@ mod tests {
         ] {
             assert!(facts_of(src).has_declaration_in_body, "{src}");
         }
+    }
+
+    /// `text` with the numbers of the nodes taken out, which differ when
+    /// a body is parsed on its own.
+    fn without_ids(text: String) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("NodeId(") {
+            let (head, tail) = rest.split_at(at + "NodeId(".len());
+            out.push_str(head);
+            let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+            rest = &tail[digits..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    fn bodies_of(stmts: &[Stmt]) -> Vec<&FunctionBody> {
+        use crate::visit::{Visitor, walk_function_decl};
+        struct Bodies<'a>(Vec<&'a FunctionBody>);
+        impl<'a> Visitor<'a> for Bodies<'a> {
+            fn visit_function_decl(&mut self, function: &'a crate::ast::FunctionDecl) {
+                self.0.extend(function.body.as_ref());
+                walk_function_decl(self, function);
+            }
+        }
+        let mut bodies = Bodies(Vec::new());
+        crate::visit::walk_stmts(&mut bodies, stmts);
+        bodies.0
+    }
+
+    fn skimmed_and_full(src: &str) -> (ParsedFile, ParsedFile) {
+        (
+            parse_skimming(src.as_bytes(), None, None).expect("parses"),
+            parse(src.as_bytes()).expect("parses"),
+        )
+    }
+
+    const PLAIN: &str = "<?php
+namespace App;
+use Lib\\Tool;
+function free(int $n): int { if ($n > 1) { return strlen('a') + helper($n); } return 0; }
+class Box {
+    public function make(): Tool { $t = new Tool(); return $t->run(Other::class, fn($x) => $x + 1); }
+    public function name(): string { return \"v{$this->v}\" . \"$this->w\"; }
+    abstract protected function nothing(): void;
+}
+";
+
+    #[test]
+    fn a_body_with_nothing_the_load_reads_is_skipped_and_parses_to_what_the_file_gives() {
+        let (skimmed, full) = skimmed_and_full(PLAIN);
+        assert!(skimmed.facts.has_skimmed_bodies && !full.facts.has_skimmed_bodies);
+        let skipped = bodies_of(&skimmed.stmts);
+        let eager = bodies_of(&full.stmts);
+        assert_eq!(skipped.len(), 3);
+        assert!(
+            skipped
+                .iter()
+                .all(|body| body.skimmed && body.stmts.is_empty())
+        );
+        // What of the file is read at the load is what the full parse has.
+        for (skipped, eager) in skipped.iter().zip(&eager) {
+            let ctx = crate::name_resolution::context_at(&skimmed.stmts, skipped.open.start);
+            let text = PLAIN.as_bytes();
+            let start = skipped.open.start as usize;
+            let end = (start..text.len())
+                .find(|&end| {
+                    parse_function_body(&text[start..=end], skipped.open.start, &ctx).is_ok()
+                })
+                .expect("a body");
+            let parsed =
+                parse_function_body(&text[start..=end], skipped.open.start, &ctx).expect("a body");
+            assert_eq!(
+                without_ids(format!("{:?}", parsed.body.stmts)),
+                without_ids(format!("{:?}", eager.stmts))
+            );
+        }
+        let mut declared_skimmed = Vec::new();
+        let mut declared_full = Vec::new();
+        crate::declarations::for_each_declaration(&skimmed.stmts, |d, _, _| {
+            declared_skimmed.push(d.name().to_string())
+        });
+        crate::declarations::for_each_declaration(&full.stmts, |d, _, _| {
+            declared_full.push(d.name().to_string())
+        });
+        assert_eq!(declared_skimmed, declared_full);
+        assert!(!declared_full.is_empty());
+        // Where the statements after a body are is where they are.
+        let spans = |file: &ParsedFile| {
+            file.stmts
+                .iter()
+                .map(|stmt| (stmt.span.start, stmt.span.end))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(spans(&skimmed), spans(&full));
+    }
+
+    #[test]
+    fn a_body_that_declares_adds_to_the_global_scope_or_has_a_doc_comment_is_parsed() {
+        for body in [
+            "function g() {}",
+            "class B {}",
+            "interface I {}",
+            "trait T {}",
+            "enum E {}",
+            "return new class {};",
+            "define('X', 1);",
+            "\\define('X', 1);",
+            "global $x;",
+            "return include 'a.php';",
+            "require_once 'a.php';",
+            "yield 1;",
+            "goto end; end:",
+            "/** @var int $x */ $x = 1;",
+            "return 1; /** tail */",
+            "$x = new \\PHPStan\\Type\\Type();",
+            "$x = new namespace\\PHPStan\\Type();",
+            "?> html <?php",
+            "return \"{$a->m()}\";",
+            "$f = function &() { return 1; }; function h() {}",
+        ] {
+            let src = format!("<?php function f() {{ {body} }} function after() {{ return 1; }}");
+            let (skimmed, full) = skimmed_and_full(&src);
+            let bodies = bodies_of(&skimmed.stmts);
+            assert!(!bodies[0].skimmed, "{body}");
+            assert!(bodies.last().is_some_and(|body| body.skimmed), "{body}");
+            // The first body is parsed as it is by a parse of the whole,
+            // from the tokens that were read.
+            assert_eq!(
+                format!("{:?}", bodies[0].stmts),
+                format!("{:?}", bodies_of(&full.stmts)[0].stmts),
+                "{body}"
+            );
+            assert_eq!(
+                skimmed.facts.has_anonymous_class,
+                full.facts.has_anonymous_class
+            );
+            assert_eq!(
+                skimmed.facts.has_declaration_in_body,
+                full.facts.has_declaration_in_body
+            );
+            assert_eq!(
+                skimmed.facts.has_global_or_include,
+                full.facts.has_global_or_include
+            );
+        }
+    }
+
+    #[test]
+    fn a_keyword_after_an_arrow_or_a_scope_operator_is_a_member_and_a_closure_is_not_a_declaration()
+    {
+        for body in [
+            "return Foo::class;",
+            "return $this->class . $this->function . $this->global;",
+            "return Foo::include($a);",
+            "$f = function () { return 1; }; $g = function &($x) use ($f) { return $x; };",
+            "return static function () { return 2; };",
+        ] {
+            let src = format!("<?php function f() {{ {body} }}");
+            let (skimmed, _) = skimmed_and_full(&src);
+            assert!(bodies_of(&skimmed.stmts)[0].skimmed, "{body}");
+        }
+    }
+
+    #[test]
+    fn names_that_can_be_phpstan_keep_the_body_parsed() {
+        for src in [
+            "<?php namespace PHPStan\\Foo; function f() { return 1; }",
+            "<?php use PHPStan\\Type\\Type as T; function f() { return new T(); }",
+            "<?php use PHPStan; function f() { return 1; }",
+        ] {
+            let (skimmed, _) = skimmed_and_full(src);
+            assert!(!bodies_of(&skimmed.stmts)[0].skimmed, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_syntax_error_in_a_skipped_body_is_not_found_but_a_lexer_error_is() {
+        let src = "<?php function f() { $a = ; } function g() { return 1; }";
+        assert!(parse(src.as_bytes()).is_err());
+        let skimmed = parse_skimming(src.as_bytes(), None, None).expect("a body is not parsed");
+        assert!(bodies_of(&skimmed.stmts).iter().all(|body| body.skimmed));
+        assert!(parse_function_body(b"{ $a = ; }", 20, &NameContext::default()).is_err());
+        let unbalanced = "<?php function f() { if (1) { return 1; } ";
+        assert!(parse(unbalanced.as_bytes()).is_err());
+        assert!(parse_skimming(unbalanced.as_bytes(), None, None).is_err());
+        let lexer_error = "<?php function f() { return 08; }";
+        assert!(parse(lexer_error.as_bytes()).is_err());
+        assert!(parse_skimming(lexer_error.as_bytes(), None, None).is_err());
+    }
+
+    #[test]
+    fn a_files_references_are_those_outside_its_skipped_bodies_and_those_of_the_bodies() {
+        let (skimmed, full) = skimmed_and_full(PLAIN);
+        let mut names = skimmed.references.names.clone();
+        let text = PLAIN.as_bytes();
+        for body in bodies_of(&skimmed.stmts) {
+            let start = body.open.start as usize;
+            let ctx = crate::name_resolution::context_at(&skimmed.stmts, body.open.start);
+            let end = (start..text.len())
+                .find(|&end| parse_function_body(&text[start..=end], body.open.start, &ctx).is_ok())
+                .expect("a body");
+            let ctx = crate::name_resolution::context_at(&skimmed.stmts, body.open.start);
+            names.extend(
+                parse_function_body(&text[start..=end], body.open.start, &ctx)
+                    .expect("a body")
+                    .references
+                    .names,
+            );
+        }
+        assert!(skimmed.references.names.len() < full.references.names.len());
+        assert_eq!(skimmed.references.outside, full.references.outside);
+        assert_eq!(names.len(), full.references.names.len());
+        assert!(
+            full.references
+                .names
+                .iter()
+                .all(|name| names.contains(name))
+        );
     }
 
     #[test]
