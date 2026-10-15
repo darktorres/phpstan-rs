@@ -340,6 +340,9 @@ impl<'a> Checker<'a> {
     /// needs exactly one candidate. `locals` is the scope before `stmt`.
     /// Whether every tag's variable name checked out.
     fn check_statement_var_tag_names(&mut self, stmt: &Stmt, locals: &Locals, label: &str) -> bool {
+        if self.reports_are_dropped() && !cfg!(debug_assertions) {
+            return true;
+        }
         let Some(doc) = stmt.doc_comment.as_deref() else {
             return true;
         };

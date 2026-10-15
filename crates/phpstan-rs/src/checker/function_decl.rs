@@ -884,6 +884,7 @@ impl<'a> Checker<'a> {
         let diagnostics_before = self.diagnostics.len();
         let previous_dynamic_flag = self.saw_dynamic_var_construct;
         self.saw_dynamic_var_construct = false;
+        self.enclosing_dynamic_bodies += u32::from(previous_dynamic_flag);
         let previous_generator_flag = self.current_function_is_generator;
         self.current_function_is_generator = f.is_generator();
         let previous_declared_return_type = self.current_declared_return_type.take();
@@ -1207,8 +1208,11 @@ impl<'a> Checker<'a> {
 
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
+            #[cfg(debug_assertions)]
+            self.forget_dropped_reports_from(diagnostics_before);
         }
         self.saw_dynamic_var_construct = previous_dynamic_flag;
+        self.enclosing_dynamic_bodies -= u32::from(previous_dynamic_flag);
         self.current_function_is_generator = previous_generator_flag;
         self.current_declared_return_type = previous_declared_return_type;
         self.current_declared_throws_type = previous_declared_throws_type;

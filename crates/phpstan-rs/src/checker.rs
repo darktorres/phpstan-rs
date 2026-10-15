@@ -363,6 +363,14 @@ pub struct Checker<'a> {
     // which diagnostics came from that check, the whole body's diagnostics
     // are discarded if this ends up true (see check_function).
     pub(crate) saw_dynamic_var_construct: bool,
+    // How many bodies enclosing the one being checked have
+    // `saw_dynamic_var_construct` set, each of which drops every
+    // diagnostic made since it began, the nested body's included.
+    enclosing_dynamic_bodies: u32,
+    // Where in `diagnostics` each report made while one was dropping them
+    // went, in a debug build (which makes it, to prove it is dropped).
+    #[cfg(debug_assertions)]
+    reports_made_while_dropping: Vec<usize>,
     // Set for the duration of one function/method/closure body that
     // contains a yield/yield from anywhere - a real generator, whose
     // implicit `return null` at the end (or an explicit bare `return;`)
@@ -1125,6 +1133,9 @@ impl<'a> Checker<'a> {
             current_trait: None,
             current_scope_deprecated: false,
             saw_dynamic_var_construct: false,
+            enclosing_dynamic_bodies: 0,
+            #[cfg(debug_assertions)]
+            reports_made_while_dropping: Vec::new(),
             current_function_is_generator: false,
             current_declared_return_type: None,
             current_declared_throws_type: None,
@@ -1276,6 +1287,8 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn rewind_to(&mut self, mark: PassMark) {
         self.diagnostics.truncate(mark.diagnostics);
+        #[cfg(debug_assertions)]
+        self.forget_dropped_reports_from(mark.diagnostics);
         self.semantic_tokens.truncate(mark.semantic_tokens);
         self.current_function_throw_points
             .truncate(mark.throw_points);
@@ -1491,8 +1504,32 @@ impl<'a> Checker<'a> {
         level: u8,
         identifier: impl Into<diagnostics::Identifier>,
     ) {
+        if self.reports_are_dropped() {
+            #[cfg(debug_assertions)]
+            self.reports_made_while_dropping
+                .push(self.diagnostics.len());
+            #[cfg(not(debug_assertions))]
+            return;
+        }
         self.diagnostics
             .push(DiagnosticBuilder::new(message, span, level, identifier).build(&self.line_index));
+    }
+
+    /// Whether what the checker reports now is discarded: a body that
+    /// has called `extract()` or `eval()` drops every diagnostic made
+    /// since it began (`saw_dynamic_var_construct`), and so does one
+    /// enclosing the body being checked. `report` and `report_builder`
+    /// are the pushes it skips; the others stay, and are dropped as
+    /// before.
+    pub(crate) fn reports_are_dropped(&self) -> bool {
+        self.saw_dynamic_var_construct || self.enclosing_dynamic_bodies > 0
+    }
+
+    /// A body that drops what it reports ends at the length `before`:
+    /// what was made while one did is gone from there on.
+    #[cfg(debug_assertions)]
+    fn forget_dropped_reports_from(&mut self, before: usize) {
+        self.reports_made_while_dropping.retain(|&at| at < before);
     }
 
     /// The builder path - for a call site that also wants a `tip`, a
@@ -1500,6 +1537,13 @@ impl<'a> Checker<'a> {
     /// positional signature has room for without every plain call site
     /// paying for arguments it never uses.
     pub(crate) fn report_builder(&mut self, builder: DiagnosticBuilder) {
+        if self.reports_are_dropped() {
+            #[cfg(debug_assertions)]
+            self.reports_made_while_dropping
+                .push(self.diagnostics.len());
+            #[cfg(not(debug_assertions))]
+            return;
+        }
         self.diagnostics.push(builder.build(&self.line_index));
     }
 
@@ -1525,6 +1569,11 @@ impl<'a> Checker<'a> {
     }
 
     pub fn into_diagnostics(mut self) -> Vec<Diagnostic> {
+        #[cfg(debug_assertions)]
+        assert!(
+            self.reports_made_while_dropping.is_empty(),
+            "a report made while a body dropped them is still in the diagnostics"
+        );
         // Internal checks run in traversal order (properties/bounds
         // before method bodies, methods in AST declaration order, an
         // assignment's right-hand side before its left, ...) - not
@@ -1805,6 +1854,8 @@ impl<'a> Checker<'a> {
         }
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
+            #[cfg(debug_assertions)]
+            self.forget_dropped_reports_from(diagnostics_before);
             self.property_type_sites.clear();
             self.saw_dynamic_var_construct = false;
         }
