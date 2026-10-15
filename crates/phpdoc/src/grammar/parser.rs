@@ -1,6 +1,6 @@
 use super::ast::{
-    ArgVariance, ArrayShapeField, CallableParam, CallableTemplate, MethodTagParam, PhpDocNode,
-    PhpDocParseError, PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
+    ArgVariance, ArrayShapeField, CallableParam, CallableTemplate, Description, MethodTagParam,
+    PhpDocNode, PhpDocParseError, PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
 };
 use super::lexer::{Lexer, PhpDocToken};
 use syntax::span::Span;
@@ -39,9 +39,8 @@ pub(crate) fn parse(raw: &str) -> PhpDocNode {
         if name.is_empty() {
             continue;
         }
-        let tokens = Lexer::new(rest).tokenize();
-        let span = tokens.first().map(|(_, s)| *s).unwrap_or_default();
-        let mut parser = TagParser::new(tokens);
+        let mut parser = TagParser::new(rest);
+        let span = parser.peek_span();
         let value = parser.parse_tag_value(&name);
         let errors = std::mem::take(&mut parser.errors);
         node.errors.extend(errors.iter().cloned());
@@ -55,7 +54,12 @@ pub(crate) fn parse(raw: &str) -> PhpDocNode {
     node
 }
 
-struct TagParser {
+/// Pulls its tokens from the lexer as they are asked for, and keeps them,
+/// so a rewind to an earlier position finds them again. A tag's description
+/// is never lexed unless someone reads it (`Description`).
+struct TagParser<'a> {
+    lexer: Lexer<'a>,
+    /// The tokens lexed so far; the last is `Eof` once the text is used up.
     tokens: Vec<(PhpDocToken, Span)>,
     pos: usize,
     errors: Vec<PhpDocParseError>,
@@ -77,32 +81,51 @@ const TYPED_VAR_TAGS: &[&str] = &[
 ];
 const TYPE_ONLY_TAGS: &[&str] = &["return", "throws"];
 
-impl TagParser {
-    fn new(tokens: Vec<(PhpDocToken, Span)>) -> Self {
+impl<'a> TagParser<'a> {
+    fn new(text: &'a str) -> Self {
         TagParser {
-            tokens,
+            lexer: Lexer::new(text),
+            tokens: Vec::new(),
             pos: 0,
             errors: Vec::new(),
         }
     }
 
-    fn peek(&self) -> &PhpDocToken {
+    /// Lexes until token `idx` is held, or the text is used up.
+    fn fill(&mut self, idx: usize) {
+        while self.tokens.len() <= idx && !matches!(self.tokens.last(), Some((PhpDocToken::Eof, _)))
+        {
+            let token = self.lexer.next_token();
+            self.tokens.push(token);
+        }
+    }
+
+    /// Token `idx`, `None` past the end of the text.
+    fn token_at(&mut self, idx: usize) -> Option<&PhpDocToken> {
+        self.fill(idx);
+        self.tokens.get(idx).map(|(t, _)| t)
+    }
+
+    fn peek(&mut self) -> &PhpDocToken {
+        self.fill(self.pos);
         &self.tokens[self.pos.min(self.tokens.len() - 1)].0
     }
 
-    fn peek_span(&self) -> Span {
+    fn peek_span(&mut self) -> Span {
+        self.fill(self.pos);
         self.tokens[self.pos.min(self.tokens.len() - 1)].1
     }
 
     fn advance(&mut self) -> (PhpDocToken, Span) {
+        self.fill(self.pos);
         let t = self.tokens[self.pos.min(self.tokens.len() - 1)].clone();
-        if self.pos < self.tokens.len() - 1 {
+        if !matches!(t.0, PhpDocToken::Eof) {
             self.pos += 1;
         }
         t
     }
 
-    fn at_eof(&self) -> bool {
+    fn at_eof(&mut self) -> bool {
         matches!(self.peek(), PhpDocToken::Eof)
     }
 
@@ -133,10 +156,7 @@ impl TagParser {
     /// identifier. `false` once an error has been recorded.
     fn parse_doctrine_argument(&mut self) -> bool {
         if matches!(self.peek(), PhpDocToken::Identifier(_))
-            && matches!(
-                self.tokens.get(self.pos + 1).map(|(t, _)| t),
-                Some(PhpDocToken::Equals)
-            )
+            && matches!(self.token_at(self.pos + 1), Some(PhpDocToken::Equals))
         {
             self.advance();
             self.advance();
@@ -246,9 +266,10 @@ impl TagParser {
     }
 
     fn error(&mut self, message: impl Into<String>) {
+        let span = self.peek_span();
         self.errors.push(PhpDocParseError {
             message: message.into(),
-            span: self.peek_span(),
+            span,
         });
     }
 
@@ -297,18 +318,32 @@ impl TagParser {
         }
     }
 
-    /// Whatever raw text remains once type/structural parsing has
-    /// consumed everything it recognizes - the free-text description
-    /// half of `@param`/`@return`/etc. Reconstructed from the remaining
-    /// tokens' own literal text rather than a byte-offset slice, since
-    /// the lexer doesn't keep the original source around once tokenized.
-    fn remaining_description(&mut self) -> String {
+    /// The free-text description half of `@param`/`@return`/etc.: whatever
+    /// the type and structural parsing left. It is the source from the
+    /// current token's first byte, not tokens, so none are lexed for it.
+    fn remaining_description(&mut self) -> Description {
+        self.fill(self.pos);
+        let (token, span) = &self.tokens[self.pos.min(self.tokens.len() - 1)];
+        let description = if matches!(token, PhpDocToken::Eof) {
+            Description::default()
+        } else {
+            Description::from_source(&self.lexer.source()[span.start as usize..])
+        };
+        #[cfg(debug_assertions)]
+        self.assert_description_is_the_remaining_tokens(&description);
+        description
+    }
+
+    /// Debug builds: the description's text, lexed afresh, equals the text
+    /// of the tokens this parser goes on to read from where it is.
+    #[cfg(debug_assertions)]
+    fn assert_description_is_the_remaining_tokens(&mut self, description: &Description) {
         let mut parts = Vec::new();
         while !self.at_eof() {
             let (tok, _) = self.advance();
             parts.push(token_text(&tok));
         }
-        parts.join(" ")
+        assert_eq!(description.text(), parts.join(" "));
     }
 
     fn parse_tag_value(&mut self, name: &str) -> PhpDocTagValue {
@@ -513,18 +548,12 @@ impl TagParser {
         }
     }
 
-    fn peek_ahead_is_langle(&self) -> bool {
-        self.tokens
-            .get(self.pos + 1)
-            .map(|(t, _)| matches!(t, PhpDocToken::LAngle))
-            .unwrap_or(false)
+    fn peek_ahead_is_langle(&mut self) -> bool {
+        matches!(self.token_at(self.pos + 1), Some(PhpDocToken::LAngle))
     }
 
-    fn peek_ahead_is_lparen(&self) -> bool {
-        self.tokens
-            .get(self.pos + 1)
-            .map(|(t, _)| matches!(t, PhpDocToken::LParen))
-            .unwrap_or(false)
+    fn peek_ahead_is_lparen(&mut self) -> bool {
+        matches!(self.token_at(self.pos + 1), Some(PhpDocToken::LParen))
     }
 
     fn take_identifier_or_error(&mut self) -> String {
@@ -575,12 +604,12 @@ impl TagParser {
     /// `@param int &$x`) - real PHPStan's own grammar resolves it the
     /// same way, by lookahead: only a genuine type-shaped token
     /// following `&` makes it an intersection continuation.
-    fn amp_starts_another_type(&self) -> bool {
+    fn amp_starts_another_type(&mut self) -> bool {
         if !matches!(self.peek(), PhpDocToken::Amp) {
             return false;
         }
         !matches!(
-            self.tokens.get(self.pos + 1).map(|(t, _)| t),
+            self.token_at(self.pos + 1),
             Some(PhpDocToken::Variable(_) | PhpDocToken::Ellipsis | PhpDocToken::Eof)
         )
     }
@@ -604,10 +633,7 @@ impl TagParser {
             if !matches!(self.peek(), PhpDocToken::LBracket) {
                 break;
             }
-            if matches!(
-                self.tokens.get(self.pos + 1).map(|(t, _)| t),
-                Some(PhpDocToken::RBracket)
-            ) {
+            if matches!(self.token_at(self.pos + 1), Some(PhpDocToken::RBracket)) {
                 self.advance();
                 self.advance();
                 ty = TypeNode::ArrayOf(Box::new(ty));
@@ -633,7 +659,8 @@ impl TagParser {
 
     /// Whether the current token is separated from the previous one by
     /// whitespace - phpdoc-parser's `isPrecededByHorizontalWhitespace`.
-    fn preceded_by_whitespace(&self) -> bool {
+    fn preceded_by_whitespace(&mut self) -> bool {
+        self.fill(self.pos);
         self.pos == 0
             || self
                 .tokens
@@ -723,7 +750,7 @@ impl TagParser {
     fn parse_generic_arg(&mut self) -> TypeNode {
         if matches!(self.peek(), PhpDocToken::Star)
             && matches!(
-                self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                self.token_at(self.pos + 1),
                 Some(PhpDocToken::Comma | PhpDocToken::RAngle)
             )
         {
@@ -737,7 +764,7 @@ impl TagParser {
             if let PhpDocToken::Identifier(s) = self.peek()
                 && s == keyword
                 && !matches!(
-                    self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                    self.token_at(self.pos + 1),
                     Some(PhpDocToken::Comma | PhpDocToken::RAngle | PhpDocToken::Eof)
                 )
             {
@@ -847,12 +874,9 @@ impl TagParser {
     /// Whether the current token immediately follows the previous one
     /// with no whitespace between them - see `parse_identifier_led`'s
     /// own wildcard-suffix check, its only caller.
-    fn is_adjacent_to_previous(&self) -> bool {
+    fn is_adjacent_to_previous(&mut self) -> bool {
+        self.fill(self.pos);
         self.pos > 0 && self.tokens[self.pos].1.start == self.tokens[self.pos - 1].1.end
-    }
-
-    fn token_at(&self, idx: usize) -> Option<&PhpDocToken> {
-        self.tokens.get(idx).map(|(t, _)| t)
     }
 
     /// `phpstorm-stubs`' own docblocks routinely trail a type with a
@@ -865,10 +889,11 @@ impl TagParser {
     /// generic-argument list at all - real PHPStan hits the identical
     /// ambiguity (its lexer also tokenizes `<` as a bare angle-bracket
     /// token unconditionally) and resolves it the same way.
-    fn looks_like_html(&self) -> bool {
+    fn looks_like_html(&mut self) -> bool {
         let Some(PhpDocToken::Identifier(tag_name)) = self.token_at(self.pos + 1) else {
             return false;
         };
+        let tag_name = tag_name.clone();
         if !matches!(self.token_at(self.pos + 2), Some(PhpDocToken::RAngle)) {
             return false;
         }
@@ -876,15 +901,19 @@ impl TagParser {
         loop {
             match self.token_at(i) {
                 None | Some(PhpDocToken::Eof) => return false,
-                Some(PhpDocToken::LAngle)
-                    if matches!(self.token_at(i + 1), Some(PhpDocToken::Unknown('/')))
-                        && matches!(self.token_at(i + 2), Some(PhpDocToken::Identifier(s)) if s == tag_name)
-                        && matches!(self.token_at(i + 3), Some(PhpDocToken::RAngle)) =>
-                {
-                    return true;
+                Some(PhpDocToken::LAngle) => {}
+                _ => {
+                    i += 1;
+                    continue;
                 }
-                _ => i += 1,
             }
+            if matches!(self.token_at(i + 1), Some(PhpDocToken::Unknown('/')))
+                && matches!(self.token_at(i + 2), Some(PhpDocToken::Identifier(s)) if *s == tag_name)
+                && matches!(self.token_at(i + 3), Some(PhpDocToken::RAngle))
+            {
+                return true;
+            }
+            i += 1;
         }
     }
 
@@ -1057,7 +1086,8 @@ impl TagParser {
                 return None;
             };
             self.advance();
-            let word = |p: &Self, w: &str| matches!(p.peek(), PhpDocToken::Identifier(s) if s == w);
+            let word =
+                |p: &mut Self, w: &str| matches!(p.peek(), PhpDocToken::Identifier(s) if s == w);
             let bound = if word(self, "of") || word(self, "as") {
                 self.advance();
                 Some(self.parse_type())
@@ -1196,8 +1226,7 @@ impl TagParser {
 /// a time, alongside its own byte-exact `rest` text (rather than
 /// re-deriving the whole comment's own `tag_lines` join a second time).
 pub(crate) fn parse_tag_rest(name: &str, rest: &str) -> (PhpDocTagValue, Vec<PhpDocParseError>) {
-    let tokens = Lexer::new(rest).tokenize();
-    let mut parser = TagParser::new(tokens);
+    let mut parser = TagParser::new(rest);
     let value = parser.parse_tag_value(name);
     (value, parser.errors)
 }
@@ -1210,8 +1239,7 @@ pub(crate) fn parse_tag_rest(name: &str, rest: &str) -> (PhpDocTagValue, Vec<Php
 /// when the arguments parse, including when `rest` doesn't start with
 /// `(` at all.
 pub(crate) fn doctrine_argument_errors(rest: &str) -> Vec<PhpDocParseError> {
-    let tokens = Lexer::new(rest).tokenize();
-    let mut parser = TagParser::new(tokens);
+    let mut parser = TagParser::new(rest);
     parser.parse_doctrine_arguments();
     parser.errors
 }
@@ -1225,14 +1253,13 @@ pub(crate) fn doctrine_argument_errors(rest: &str) -> Vec<PhpDocParseError> {
 /// `@sealed`, `@phpstan-type`, ...) that are nonetheless, in practice, one
 /// leading type expression followed by trailing free text.
 pub fn parse_type_prefix(rest: &str) -> (Option<TypeNode>, &str, Vec<PhpDocParseError>) {
-    let tokens = Lexer::new(rest).tokenize();
-    let mut parser = TagParser::new(tokens);
+    let mut parser = TagParser::new(rest);
     let ty = parser.try_parse_type();
     let byte_idx = parser.peek_span().start as usize;
     (ty, &rest[byte_idx.min(rest.len())..], parser.errors)
 }
 
-fn token_text(t: &PhpDocToken) -> String {
+pub(super) fn token_text(t: &PhpDocToken) -> String {
     match t {
         PhpDocToken::At => "@".to_string(),
         PhpDocToken::Identifier(s) => s.clone(),

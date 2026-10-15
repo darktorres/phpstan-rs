@@ -171,17 +171,21 @@ impl<'a> Lexer<'a> {
         PhpDocToken::StringLiteral(s)
     }
 
-    /// The whole input, tokenized up front (a docblock's content is
-    /// small - never worth a lazy/streaming lexer the way a real source
-    /// file is).
-    pub(crate) fn tokenize(mut self) -> Vec<(PhpDocToken, Span)> {
-        let mut out = Vec::new();
-        loop {
+    /// The text this lexer reads.
+    pub(crate) fn source(&self) -> &'a str {
+        self.src
+    }
+
+    /// The next token and where it is, `Eof` once the text is used up
+    /// (and on every call after). The lexer holds only the text and a
+    /// position, so one started at a token's first byte gives that token
+    /// and every later one unchanged.
+    pub(crate) fn next_token(&mut self) -> (PhpDocToken, Span) {
+        {
             self.skip_whitespace();
             let start = self.position();
             let Some(c) = self.peek() else {
-                out.push((PhpDocToken::Eof, Span { start, end: start }));
-                break;
+                return (PhpDocToken::Eof, Span { start, end: start });
             };
             let token = match c {
                 '@' => {
@@ -283,8 +287,7 @@ impl<'a> Lexer<'a> {
                 }
             };
             let end = self.position();
-            out.push((token, Span { start, end }));
+            (token, Span { start, end })
         }
-        out
     }
 }

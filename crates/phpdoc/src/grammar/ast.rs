@@ -48,13 +48,13 @@ pub enum PhpDocTagValue {
         variable: Option<String>,
         by_ref: bool,
         variadic: bool,
-        description: String,
+        description: Description,
     },
     /// `@return`/`@throws`/`@param-out`'s bodyless sibling shape - just a
     /// type, no variable.
     Type {
         ty: Option<TypeNode>,
-        description: String,
+        description: Description,
     },
     /// `@template[-covariant|-contravariant] Name [of Bound] [= Default]`
     Template {
@@ -82,7 +82,7 @@ pub enum PhpDocTagValue {
     /// remaining text after the tag name, entirely unparsed. Real PHPStan
     /// itself only defines a type-value grammar for the tags this file
     /// already covers; everything else is genuinely just free text.
-    Generic(String),
+    Generic(Description),
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -477,4 +477,98 @@ pub struct CallableParam {
     pub variadic: bool,
     pub by_ref: bool,
     pub optional: bool,
+}
+
+/// The free text after a tag's type and variable. It keeps the source
+/// from its first token on and makes the words when asked: no reader of
+/// most tags looks at it, and lexing it is most of what the tag lexer did.
+///
+/// The words are the tokens' own text joined by single spaces, not the
+/// source: a `//` comment is dropped, a string literal loses its quotes
+/// and escapes, a number is written the way the lexer read it. So
+/// `text` lexes the source again.
+#[derive(Debug, Clone, Default)]
+pub struct Description {
+    /// The tag's text from the description's first token; `None` when the
+    /// tag has no description.
+    source: Option<std::sync::Arc<str>>,
+}
+
+impl Description {
+    /// The description that starts at `source`'s first byte.
+    pub(super) fn from_source(source: &str) -> Description {
+        Description {
+            source: (!source.is_empty()).then(|| source.into()),
+        }
+    }
+
+    /// The tokens' text joined by single spaces.
+    pub fn text(&self) -> String {
+        let mut words = Vec::new();
+        let mut lexer = super::lexer::Lexer::new(self.source());
+        loop {
+            let (token, _) = lexer.next_token();
+            if matches!(token, super::lexer::PhpDocToken::Eof) {
+                break;
+            }
+            words.push(super::parser::token_text(&token));
+        }
+        words.join(" ")
+    }
+
+    /// Whether `text()` with its spaces removed starts with `[optional]`,
+    /// answered from the first tokens only.
+    pub fn starts_with_optional_marker(&self) -> bool {
+        const MARKER: &[u8] = b"[optional]";
+        let mut lexer = super::lexer::Lexer::new(self.source());
+        let mut seen = 0;
+        loop {
+            let (token, _) = lexer.next_token();
+            if matches!(token, super::lexer::PhpDocToken::Eof) {
+                return false;
+            }
+            for c in super::parser::token_text(&token)
+                .chars()
+                .filter(|c| *c != ' ')
+            {
+                if c != char::from(MARKER[seen]) {
+                    return false;
+                }
+                seen += 1;
+                if seen == MARKER.len() {
+                    return true;
+                }
+            }
+        }
+    }
+
+    fn source(&self) -> &str {
+        self.source.as_deref().unwrap_or("")
+    }
+}
+
+impl PartialEq for Description {
+    fn eq(&self, other: &Description) -> bool {
+        self.source() == other.source()
+    }
+}
+
+impl From<&str> for Description {
+    /// The description a tag with this text after its type and variable has.
+    fn from(text: &str) -> Description {
+        Description::from_source(text)
+    }
+}
+
+impl serde::Serialize for Description {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.source())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Description {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Description, D::Error> {
+        let source = String::deserialize(deserializer)?;
+        Ok(Description::from_source(&source))
+    }
 }

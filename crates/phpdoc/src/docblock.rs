@@ -906,13 +906,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     if let Some(ty) = ty {
                         block.params.insert(name.clone(), ty.into());
                     }
-                    // Tokens reconstruct with a space between every one
-                    // of them (`remaining_description`'s own doc
-                    // comment) - `"[optional]"` re-lexes as three
-                    // separate tokens (`[`, `optional`, `]`), so
-                    // stripping spaces before comparing is what makes
-                    // this survive that reconstruction.
-                    if description.replace(' ', "").starts_with("[optional]") {
+                    if description.starts_with_optional_marker() {
                         block.optional_params.insert(name);
                     }
                 }

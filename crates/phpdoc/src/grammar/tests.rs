@@ -477,10 +477,7 @@ fn a_method_tag_with_no_return_type_defaults_correctly() {
 #[test]
 fn an_unmodeled_tag_falls_back_to_generic_text() {
     let tag = only_tag("/** @deprecated use Foo instead */");
-    assert_eq!(
-        tag.value,
-        PhpDocTagValue::Generic("use Foo instead".to_string())
-    );
+    assert_eq!(tag.value, PhpDocTagValue::Generic("use Foo instead".into()));
 }
 
 #[test]
@@ -722,4 +719,121 @@ fn a_tag_or_type_prefix_found_in_the_memo_is_the_one_parsed_afresh() {
         assert_eq!(shared, (ty, remainder, errors), "{rest:?}");
         assert_eq!(parse_type_prefix_shared(rest), shared, "{rest:?} again");
     }
+}
+
+fn description_of(tag: &str, rest: &str) -> Description {
+    match parser::parse_tag_rest(tag, rest).0 {
+        PhpDocTagValue::TypedVar { description, .. } | PhpDocTagValue::Type { description, .. } => {
+            description
+        }
+        PhpDocTagValue::Generic(description) => description,
+        other => panic!("got: {other:?}"),
+    }
+}
+
+#[test]
+fn a_description_is_the_tokens_text_joined_by_single_spaces() {
+    for (tag, rest, text) in [
+        ("param", "int $x the   count", "the count"),
+        (
+            "param",
+            "int $x see http://example.com/a for more",
+            "see http :",
+        ),
+        ("param", "int $x says 'it\\'s' and \"x\"", "says it's and x"),
+        ("param", "int $x scale 1.50 or 007", "scale 1.5 or 7"),
+        ("param", "int $x huge 99999999999999999999", "huge 0"),
+        (
+            "param",
+            "int $x ($y) <b>bold</b>",
+            "( $y ) < b > bold < / b >",
+        ),
+        ("param", "int $x", ""),
+        ("return", "int the count", "the count"),
+        ("deprecated", "use Foo instead", "use Foo instead"),
+        ("deprecated", "", ""),
+    ] {
+        assert_eq!(description_of(tag, rest).text(), text, "{tag} {rest}");
+    }
+}
+
+#[test]
+fn a_description_is_read_from_where_the_parser_stopped_after_a_rewind() {
+    for (rest, text) in [
+        ("int $x [optional] text", "[ optional ] text"),
+        ("Foo<int> $x [optional] text", "[ optional ] text"),
+        ("(Foo is Bar ? A : B) $x tail words", "tail words"),
+        ("int $x [ optional ]", "[ optional ]"),
+    ] {
+        assert_eq!(description_of("param", rest).text(), text, "{rest}");
+    }
+    // The array offset `[K]`, an int range and a callable are tried and
+    // rolled back in places; the parser compares the description with the
+    // tokens it reads on from where it stopped in each of these (debug
+    // builds).
+    for rest in [
+        "int[ $x [optional] text",
+        "int<0, max $x tail words",
+        "callable(int $a) $x [optional]",
+        "array{a: int $x [optional]",
+        "Foo<int $x [optional]",
+    ] {
+        description_of("param", rest).text();
+        description_of("return", rest).text();
+    }
+    assert!(description_of("param", "int $x [optional] text").starts_with_optional_marker());
+}
+
+#[test]
+fn the_optional_marker_is_answered_as_the_joined_text_without_spaces_would_be() {
+    for (text, expected) in [
+        ("[optional]", true),
+        ("[optional] and more", true),
+        ("[ optional ]", true),
+        ("[optional]x", true),
+        ("[opt ional]", true),
+        ("[\"optional\"]", true),
+        ("[optional", false),
+        ("optional]", false),
+        ("[optionaL]", false),
+        ("[option]", false),
+        ("text [optional]", false),
+        ("", false),
+        ("[", false),
+        ("[é]", false),
+    ] {
+        let description = description_of("param", &format!("int $x {text}"));
+        assert_eq!(
+            description.starts_with_optional_marker(),
+            expected,
+            "{text:?}"
+        );
+        assert_eq!(
+            description
+                .text()
+                .replace(' ', "")
+                .starts_with("[optional]"),
+            expected,
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn a_description_keeps_its_source_through_a_round_trip() {
+    let description = description_of("param", "int $x see http://x 'a b' 1.50");
+    let json = serde_json::to_string(&description).unwrap();
+    let back: Description = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, description);
+    assert_eq!(back.text(), description.text());
+}
+
+#[test]
+fn a_tag_with_no_description_allocates_none() {
+    assert_eq!(description_of("param", "int $x"), Description::default());
+    assert_eq!(description_of("deprecated", ""), Description::default());
+    assert_ne!(
+        description_of("param", "int $x text"),
+        Description::default()
+    );
 }
