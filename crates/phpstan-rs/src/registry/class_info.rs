@@ -148,18 +148,14 @@ pub struct PropertyReflection {
     // the exact `ty`-vs-`ty_native` split `ParameterReflection` has, needed here for
     // `OverridingPropertyRule`'s `property.nativeType`/
     // `.missingNativeType`/`.extraNativeType` family, which real PHPStan
-    // checks purely at the native level. `resolve_type(None, native_hint)`
-    // collapses "no native hint" and an explicit `mixed` hint into the
-    // same `mixed` value, which is why `has_native_type` below must
-    // be a separate boolean rather than testing this field against
-    // `mixed`.
-    pub(in crate::registry) ty_native: Type,
+    // checks purely at the native level. `None` without a native hint, which
+    // an explicit `mixed` hint is not.
+    pub(in crate::registry) ty_native: Option<Type>,
     // This declaration's own PHPDoc type (`@var`, or for a promoted
     // property its constructor `@param`/inline `@var`), resolved but not
     // reconciled with the native hint - `ParameterReflection::doc_ty`'s property
     // equivalent. `None` without one.
     pub(in crate::registry) doc_ty: Option<Type>,
-    pub(in crate::registry) has_native_type: bool,
     // `ParameterReflection::case_refs`'s property-position equivalent. Populated
     // identically at all three real construction sites (plain declared
     // property, promoted constructor property, `@property`/`-read`/
@@ -261,16 +257,12 @@ impl PropertyReflection {
         self.has_set_hook
     }
 
-    pub fn ty_native(&self) -> &Type {
-        &self.ty_native
+    pub fn native_ty(&self) -> Option<&Type> {
+        self.ty_native.as_ref()
     }
 
     pub fn doc_ty(&self) -> &Option<Type> {
         &self.doc_ty
-    }
-
-    pub fn has_native_type(&self) -> bool {
-        self.has_native_type
     }
 
     pub fn case_refs(&self) -> &Vec<(Name, Name)> {
@@ -1124,9 +1116,8 @@ impl ClassReflection {
                         attributes: ReflectionAttribute::all(&p.attrs),
                         provenance: Provenance::default(),
                         ty,
-                        ty_native,
+                        ty_native: p.type_hint.is_some().then_some(ty_native),
                         doc_ty: own_doc_ty,
-                        has_native_type: p.type_hint.is_some(),
                         is_static: p.is_static,
                         // `@readonly` (`DocBlock::readonly`'s doc
                         // comment) folds into the exact same flag native
@@ -1231,9 +1222,8 @@ impl ClassReflection {
                         attributes: ReflectionAttribute::all(&p.attrs),
                         provenance: Provenance::default(),
                         ty,
-                        ty_native,
+                        ty_native: p.type_hint.is_some().then_some(ty_native),
                         doc_ty: own_doc_ty,
-                        has_native_type: p.type_hint.is_some(),
                         is_static: false,
                         is_readonly: p.promotion.is_some_and(|promotion| promotion.readonly)
                             || doc_readonly,
@@ -1313,8 +1303,7 @@ impl ClassReflection {
                         // declaration to check against - `false`,
                         // matching every other synthetic-property field
                         // here.
-                        ty_native: Type::mixed(),
-                        has_native_type: false,
+                        ty_native: None,
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,
                         allows_private_mutation: false,
@@ -1893,8 +1882,7 @@ impl ClassReflection {
                 // guess" reasoning. Enums can't be extended, so no
                 // override check ever actually reads this, but a
                 // correct value costs nothing to provide.
-                ty_native: Type::string(),
-                has_native_type: true,
+                ty_native: Some(Type::string()),
                 is_static: false,
                 is_readonly: false,
                 allows_private_mutation: false,
@@ -1961,8 +1949,7 @@ impl ClassReflection {
                     // PHP's native reflection only ever sees the backing
                     // type (`string`/`int`), never a per-case refinement
                     // PHPStan derives from analysis alone.
-                    ty_native: types::native_type(backing),
-                    has_native_type: true,
+                    ty_native: Some(types::native_type(backing)),
                     is_static: false,
                     is_readonly: false,
                     allows_private_mutation: false,

@@ -235,7 +235,10 @@ pub(crate) fn compute_doctrine_entity(
         let Some(sig) = properties.get(*name) else {
             continue;
         };
-        fields.insert(Name::from(*name), sig.ty_native.clone());
+        fields.insert(
+            Name::from(*name),
+            sig.native_ty().cloned().unwrap_or_else(Type::mixed),
+        );
         if let Some(column_attr) = find_orm_attribute(attrs, "Column") {
             let column_name = string_arg(column_attr, "name").unwrap_or(name);
             column_names.insert(Name::from(*name), Name::from(column_name));
@@ -248,7 +251,10 @@ pub(crate) fn compute_doctrine_entity(
         let to_many = find_orm_attribute(attrs, "OneToMany")
             .or_else(|| find_orm_attribute(attrs, "ManyToMany"));
         if let Some(assoc_attr) = to_one {
-            if let Some(target) = association_target_from_native_type(&sig.ty_native) {
+            if let Some(target) = sig
+                .native_ty()
+                .and_then(association_target_from_native_type)
+            {
                 associations.insert(
                     Name::from(*name),
                     DoctrineAssociation {

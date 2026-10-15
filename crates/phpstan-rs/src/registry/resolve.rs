@@ -1788,15 +1788,9 @@ impl Registry {
             .with_min_len(crate::registry::PASS_CHUNK)
             .flat_map_iter(|(class, info)| {
                 info.properties.iter().filter_map(|(name, prop)| {
-                    if !prop.has_native_type {
-                        return None;
-                    }
-                    let ty = registry.excluding_native(
-                        &prop.ty,
-                        &prop.ty_native,
-                        Some(class),
-                        Some(pass),
-                    )?;
+                    let native = prop.ty_native.as_ref()?;
+                    let ty =
+                        registry.excluding_native(&prop.ty, native, Some(class), Some(pass))?;
                     Some(((*class).clone(), name.clone(), ty))
                 })
             })

@@ -271,11 +271,9 @@ impl<'a> Checker<'a> {
     /// `@property` tag).
     fn native_property_type(&self, class: &str, prop: &str, want_static: bool) -> Type {
         match self.registry.lookup_property_with_owner(class, prop) {
-            Some((owner, sig))
-                if sig.has_native_type() && !sig.is_virtual() && sig.is_static() == want_static =>
-            {
-                self.resolve_pseudo(sig.ty_native(), &owner)
-            }
+            Some((owner, sig)) if !sig.is_virtual() && sig.is_static() == want_static => sig
+                .native_ty()
+                .map_or_else(Type::mixed, |native| self.resolve_pseudo(native, &owner)),
             _ => Type::mixed(),
         }
     }

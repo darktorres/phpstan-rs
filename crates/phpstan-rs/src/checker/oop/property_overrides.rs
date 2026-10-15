@@ -16,8 +16,8 @@ impl<'a> Checker<'a> {
     /// (`property.nativeType`/`.missingNativeType`/`.extraNativeType` -
     /// real PHP requires a property's type to match its ancestor's
     /// exactly, invariantly, unlike a method's covariant return type),
-    /// checked at the native level via `PropertyReflection::ty_native`/
-    /// `has_native_type` (mirroring `ParameterReflection`'s identical split - see
+    /// checked at the native level via `PropertyReflection::native_ty`
+    /// (mirroring `ParameterReflection`'s identical split - see
     /// `check_property_native_type_override`'s doc comment for why a
     /// plain, already-docblock-merged `ty` comparison would risk the
     /// identical false-positive class `method.childReturnType`'s doc
@@ -233,7 +233,7 @@ impl<'a> Checker<'a> {
 
     /// `OverridingPropertyRule`'s native-type-variance half
     /// (`property.nativeType`/`.missingNativeType`/`.extraNativeType`),
-    /// via `PropertyReflection::ty_native`/`has_native_type` (mirroring
+    /// via `PropertyReflection::native_ty` (mirroring
     /// `ParameterReflection`'s identical split). Checked purely at the native
     /// level, exactly like every other override-compatibility check in
     /// this file and `method_overrides.rs`, since real PHP itself only
@@ -259,9 +259,9 @@ impl<'a> Checker<'a> {
         ancestor_sig: &PropertyReflection,
         span: Span,
     ) {
-        if !ancestor_sig.has_native_type() {
-            if own_sig.has_native_type() {
-                let own_ty = self.resolve_pseudo(own_sig.ty_native(), fqn);
+        let Some(ancestor_native) = ancestor_sig.native_ty() else {
+            if let Some(own_native) = own_sig.native_ty() {
+                let own_ty = self.resolve_pseudo(own_native, fqn);
                 self.report_builder(
                     DiagnosticBuilder::new(format!(
                             "Property {fqn}::${name} ({own_ty}) overriding property {ancestor_owner}::${name} should not have a native type."
@@ -274,9 +274,9 @@ impl<'a> Checker<'a> {
                 );
             }
             return;
-        }
-        let ancestor_ty = self.resolve_pseudo(ancestor_sig.ty_native(), ancestor_owner);
-        if !own_sig.has_native_type() {
+        };
+        let ancestor_ty = self.resolve_pseudo(ancestor_native, ancestor_owner);
+        let Some(own_native) = own_sig.native_ty() else {
             self.report_builder(
                 DiagnosticBuilder::new(format!(
                         "Property {fqn}::${name} overriding property {ancestor_owner}::${name} ({ancestor_ty}) should also have native type {ancestor_ty}."
@@ -288,8 +288,8 @@ impl<'a> Checker<'a> {
                 .non_ignorable(),
             );
             return;
-        }
-        let own_ty = self.resolve_pseudo(own_sig.ty_native(), fqn);
+        };
+        let own_ty = self.resolve_pseudo(own_native, fqn);
         if self.accepts(&ancestor_ty, &own_ty).yes() && self.accepts(&own_ty, &ancestor_ty).yes() {
             return;
         }

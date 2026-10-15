@@ -397,13 +397,13 @@ impl<'a> Checker<'a> {
             {
                 callables.push((doc.clone(), span));
             }
-            if !prop.has_native_type() {
+            let Some(native) = prop.native_ty() else {
                 continue;
-            }
+            };
             let Some(doc) = prop.doc_ty().clone() else {
                 continue;
             };
-            checks.push((doc, prop.ty_native().clone(), subject, span));
+            checks.push((doc, native.clone(), subject, span));
         }
         for (doc, span) in callables {
             self.check_generic_callables(&doc, "@var", None, Some(fqn), span);

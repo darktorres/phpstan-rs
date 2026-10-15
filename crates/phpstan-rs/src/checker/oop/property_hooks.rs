@@ -267,7 +267,7 @@ impl<'a> Checker<'a> {
                     && !self.current_function_is_generator
                     && let Some(level) = crate::checker::function_decl::missing_return_level(
                         prop_sig.ty(),
-                        prop_sig.has_native_type(),
+                        prop_sig.native_ty().is_some(),
                         false,
                     )
                 {
@@ -280,7 +280,7 @@ impl<'a> Checker<'a> {
                         level,
                         "return.missing",
                     );
-                    if prop_sig.has_native_type() {
+                    if prop_sig.native_ty().is_some() {
                         builder = builder.non_ignorable();
                     }
                     self.report_builder(builder);

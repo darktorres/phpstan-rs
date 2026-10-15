@@ -274,13 +274,12 @@ impl<'a> Checker<'a> {
         if sig.has_get_hook() || sig.has_set_hook() {
             return sig.ty().clone();
         }
-        if !sig.has_native_type()
-            || self
-                .registry
+        if sig.native_ty().is_none_or(|native| {
+            self.registry
                 .relation()
-                .is_super_type_of(sig.ty_native(), value)
+                .is_super_type_of(native, value)
                 .yes()
-        {
+        }) {
             return value.clone();
         }
         sig.ty().clone()
