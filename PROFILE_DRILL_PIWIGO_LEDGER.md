@@ -26,7 +26,7 @@ This is the one list of the branch's tasks. The documents the tasks come from st
 | DOC | PHPDoc | §6 |
 | NAME | names and interned values | §7 |
 | TYPE | type nodes and the type relation | §8 |
-| REG | the registry: declarations, resolution, snapshots | §9 |
+| REG | the registry: declarations, resolution, snapshots, and the query engine | §9 |
 | STUB | the stub build, the stub layer and the stub data | §10 |
 | CACHE | the contents and formats of the stub cache and the per-file cache | §11 |
 | CHECK | the check phase | §12 |
@@ -54,6 +54,7 @@ Each area has:
 - `off X` is row X of the off drill, and `heap H1` is the heap drill's row.
 - `25 G X` is a design of the 25 G report.
 - `split C4 <part>` is a part of the crate split's C4, named by the plan's own heading for it: gates, gatetime, data model, written results, harness, memo, snapshots, staleness, tests, behaviour, gate. `split C5` and `split C10` work the same way.
+- `decision n` is decision n of §2.4: a row that decision made, or rewrote.
 
 **Ids from the sources are always cited with their document's name**, because the documents reuse ids:
 
@@ -72,7 +73,7 @@ Inside a record, ids and section numbers are those of the record's source, as wr
 | OPEN | not started, with a need not yet met |
 | BLOCKED | waiting on a decision or a rule, named on the row |
 | PART | partly done; the row says what is left |
-| SUPERSEDED | another row did the work |
+| SUPERSEDED | another row did the work, or a decision gave the work to another row; the row names it |
 | SKIP | not done; the row says why |
 
 **Needs** are read from the source's text: Part II of the 20 G plan, and the crate split's plan. Some sources fix a build order: the 20 G plan numbers its items in the order it builds them, each closed by a tests-only gate, and the crate split orders C4's commits. Such an order is a process rule, not a need.
@@ -148,9 +149,9 @@ Defects fixed along the way:
 - CACHE-4 (off E15), `efe621ad`: the stub cache key left out `vendor/phpstan-src/stubs`.
 - CACHE-5 (off E16), `480107e3`: maps and sets of names wrote in table order.
 
-The off drill's decisions: D6 is decided (skim unchecked, 2026-10-15; PROD-4.3), and so are D1, D2 and D5 (PROD-4.1, PROD-4.2, CACHE-2). D3 waits (STUB-10).
+The off drill's decisions: D6 is decided (skim unchecked, 2026-10-15; PROD-4.3), and so are D1, D2 and D5 (PROD-4.1, PROD-4.2, CACHE-2). D3 was decided again on 2026-10-15 as §2.4's decision 7 (STUB-10): the analyser's builtin knowledge is built at compile time, and PHPStan's own classes are read from the PHPStan the project installs.
 
-Four of the off drill's rows are open: CACHE-8 (READY); STUB-11 (BLOCKED); CACHE-11 and CACHE-12, which wait on CACHE-9 and CACHE-10. The rest are done or skipped.
+Four of the off drill's rows are open: CACHE-8 (READY); STUB-11 (OPEN: decided, it waits on STUB-10.1's measurements and on the reflection crate); CACHE-11 and CACHE-12, which wait on CACHE-9 and CACHE-10. The rest are done or skipped.
 
 None of the 20 G items is built whole. Four of the off drill's rows changed what some of them would save:
 
@@ -162,6 +163,21 @@ None of the 20 G items is built whole. Four of the off drill's rows changed what
 | TYPE-1 to TYPE-3 (off E5-E7) | items 7 and 16 | TYPE-4, NAME-2 |
 
 One part of an item is built, by the crate split: item 8's explicit-mixed flags (REG-14.2, delivered by REG-4.8).
+
+On 2026-10-15 the seven decisions of §2.4 were taken. They:
+
+- retire item 4 (REG-13), whose wanted parts move to REG-4.15, REG-7.4 and REG-8.3;
+- retire SYN-1.6's `unsafe impl Sync`;
+- add:
+  - one incremental query engine (REG-16), whose persistence is CACHE-13.2;
+  - the record of the names a file writes (PROD-5.8);
+  - parsed doc blocks as a per-file product (DOC-2.9);
+  - the places a constant's throws land (CHECK-7);
+  - the sources of the builtin knowledge (STUB-12);
+  - PHPStan's own classes read from the installed PHPStan (STUB-13);
+  - two parts of the flat tree (SYN-1.9, SYN-1.10);
+  - the output changes they bring (VAL-2.10);
+- unblock SYN-1, PROD-5.1, TYPE-4, REG-7.6, REG-7.7, REG-11.1, REG-14.1, REG-14.3, STUB-7.1, STUB-10 and STUB-11.
 
 ## 2. At a glance
 
@@ -177,14 +193,15 @@ These rows are open with every need met:
   - LOAD-4.3, 4.5 and 4.7;
   - LOAD-5.4.
 - **SYN:**
-  - SYN-1.1 (`peeled` becomes a loop); the rest of SYN-1 waits on decision 4;
+  - SYN-1.1 (`peeled` becomes a loop) and SYN-1.2 (the flat tree, decision 4);
   - SYN-3.1 and 3.2;
   - SYN-4.2, 4.4, 4.5, 4.6, 4.8, 4.9 and 4.10.
-- **PROD:** PROD-5.2 to 5.6.
+- **PROD:** PROD-5.2, 5.3, 5.5 and 5.6; PROD-5.8 (the record of written names, decision 2).
 - **DOC:** DOC-2.1, 2.3, 2.4, 2.7 and 2.8.
 - **NAME:** NAME-1.1, 1.2, 1.5 and 1.6; NAME-2.1, 2.2 and 2.3.
 - **REG:**
-  - the crate split's C4, in its order: REG-2; the open parts of REG-4 (4.2, 4.5, 4.7, 4.9, 4.10 and 4.12 to 4.14; 4.11 waits on a rule); what is left of REG-5; REG-6; then REG-7 from REG-7.1, once REG-4.2 is in;
+  - the crate split's C4, in its order: REG-2; the open parts of REG-4 (4.2, 4.5, 4.7, 4.9, 4.10 and 4.12 to 4.14; 4.11 waits on a rule, and 4.15 on 4.2 and 4.12); what is left of REG-5; REG-6; then REG-7 from REG-7.1, once REG-4.2 and the engine (REG-16.3) are in;
+  - REG-16.1, the engine's measurement (decision 3);
   - REG-14.4 and 14.5.
 - **CHECK:** CHECK-6.1 (approved in principle), 6.2, 6.4, 6.5, 6.6, 6.8 to 6.12, and 6.16 to 6.18.
 
@@ -192,21 +209,27 @@ These rows are open with every need met:
 
 - **The load (the 20 G plan's items 1, 2, 3 and 19):** LOAD-1 → LOAD-2 → LOAD-3 → LOAD-5. Roles become final before the parse, then trees are dropped by role, then each is freed after its last reader.
 - **The crate split:**
-  - REG-4.2 → REG-7 → REG-8 → REG-9 and REG-10 → REG-11 → REG-12;
-  - then STUB-7 (C5) → STUB-10 → STUB-11;
+  - REG-4.2 and the engine (REG-16.3) → REG-7 → REG-8 → REG-9 and REG-10 → REG-11 → REG-12;
+  - REG-4.2 and REG-4.12 → REG-4.15;
+  - then STUB-7 (C5) → STUB-10.1 → STUB-11;
   - REG-15 (C10) → STUB-11.
 - **What follows REG-7 and STUB-7:**
-  - REG-7 → TYPE-4 → NAME-2.4;
+  - REG-16.3 → TYPE-4 → NAME-2.4;
+  - REG-7.6 → CHECK-7;
   - REG-7 → STUB-9;
-  - STUB-7.6 → CACHE-9 and CACHE-10 → CACHE-11 → CACHE-12;
-  - STUB-7 → STUB-8.
-- **The arena:** decision 4 → SYN-1.2 → the rest of SYN-1 → SYN-2 → SYN-4.1. SYN-1 also leads to PROD-5.1, to LOAD-3.5, and to CHECK-6.3 → CHECK-6.13 and 6.14.
-- **Ids:** decision 3 → REG-13.1 → LOAD-4.1, 4.2 and 4.6, and CACHE-13.2.
+  - STUB-7.6 and REG-16.1 → CACHE-9 and CACHE-10 → CACHE-11 → CACHE-12;
+  - STUB-7 → STUB-8;
+  - STUB-7.1 → STUB-12; STUB-7.4 → STUB-13;
+  - STUB-7.3 → PROD-5.4.
+- **The engine:** REG-16.1 (the measurement) → REG-16.2 → REG-16.3 → REG-16.4 → CACHE-13.2 (the persistence). REG-16.4 also needs SYN-1.2 and LOAD-1.4; it replaces LOAD-1.6 and LOAD-5.3, and LOAD-3.1 follows it.
+- **The tree:** SYN-1.2 → the rest of SYN-1 → SYN-2 → SYN-4.1. SYN-1 also leads to PROD-5.1 → REG-11.1, to LOAD-3.5, to REG-16.4, and to CHECK-6.3 → CHECK-6.13 and 6.14. PROD-5.1 and STUB-7.3 → SYN-1.10.
 - **Trees freed:** PROD-5 and CHECK-6.1 → LOAD-5.1 → LOAD-5.2.
 - **Names and PHPDoc:**
   - NAME-2.1 → NAME-1.4;
   - NAME-1 → DOC-2.5;
-  - PROD-5.2 → DOC-2.2 and PROD-5.7.
+  - PROD-5.2 → DOC-2.2 and PROD-5.7;
+  - PROD-5.8 → PROD-5.7 and REG-14.1;
+  - REG-4.10 → DOC-2.9.
 
 ### 2.3 The biggest targets
 
@@ -220,38 +243,187 @@ Measured by what they would replace, the biggest are:
 | the lexer's own work (SYN-4) | identifiers, keywords and operators (§4's targets) | ≈0.35 G |
 | name hashing (NAME-1) | ≈0.63 G of folding | ≈0.6 G |
 
-The estimates are the 20 G report's. REG-13's estimate no longer holds.
+The estimates are the 20 G report's. REG-13's estimate no longer held, and REG-13 is superseded (decision 3).
 
-### 2.4 Decisions waiting
+### 2.4 Decisions
 
-Merging the sources into one list shows six places where two of them disagree, or where a design cannot be built as written. Rows refer to them as "decision n".
+Merging the sources into one list found six places where two of them disagree, or where a design cannot be built as written. A seventh decision waited from before the merge. All seven were decided on 2026-10-15, on what PHP does at run time and on what is most proper; churn and PHPStan's output were given no weight. Rows cite them as "decision n".
 
-1. **A constant on a reference cycle.**
-   - REG-7.6 (the crate split's memo) types it as `mixed`, an approved delta of that plan.
-   - TYPE-4.2 (the 20 G plan's memo) reads each member as `never` and reports it, approved here as VAL-2.5.
-   - PHP throws "Cannot declare self-referencing constant" whichever member is read first.
-   - One rule has to give way.
-2. **Where case references live.**
-   - REG-14.1 moves the six `*case_refs` fields to the checker, computed from what is written at each position.
-   - REG-7.7 keeps them as build scratch beside the merged declaration, and the rules query it.
-3. **What of 20 G item 4 is still wanted after REG-7.**
-   - Item 4's passes as parallel maps (REG-13.5) are what REG-7's per-class memo replaces.
-   - What is left: the ids (REG-13.1), `FileDecls` (REG-13.2, beside REG-8.3's per-file sets), the member list (REG-13.3), and the rows that read them (LOAD-4.1, 4.2, 4.6, CACHE-13.2).
-   - `redeclared_methods` is part of this: item 4 makes it a flag on the member's entry (REG-4.5), while C4 makes it build scratch (REG-7.7).
-4. **SYN-1.6's `unsafe impl Sync`.**
-   - The plan's arena, a `bumpalo::Bump`, is not `Sync`.
-   - Step 6 makes a finished arena readable from other threads with one `unsafe impl Sync`, which the workspace denies (`unsafe_code = "deny"`, `Cargo.toml:42`).
-   - Steps 2-5, 7 and 8 build that arena, so they wait on a safe form of step 6 or on another design. Step 1 does not.
-5. **Who lists a file's declarations.**
-   - PROD-5.1 has the parser list them as it builds them.
-   - REG-11.1 (the crate split's `.10a`) indexes declarations below the top level through one Visitor walk, which also replaces `declared_names`, `collect_anonymous_classes` and the stub-index generator's walk.
-6. **STUB-7.1's version key.**
-   - The crate split's text has the layer parse once per version, because member and parameter gates are inside the files.
-   - The off report recommends keeping the gates as data, with one parse per file; otherwise the data stops being a function of the source (this was DEC-1.1).
-
-Waiting from before the merge:
-
-7. **STUB-10.2**: embed the stub data at compile time or not, once STUB-7.1 and STUB-10.1 are in. Yours to decide.
+1. **What evaluating a constant yields.**
+   - *The question was* how a constant on a reference cycle types. REG-7.6 typed it as `mixed`, an approved delta of the crate split; TYPE-4.2 read each member as `never` and reported it, approved as VAL-2.5.
+   - *The outcome.* The resolver's result for a constant is its value type plus the throws its evaluation can raise, each definite or possible.
+     - Definite: a cycle over value edges ("Cannot declare self-referencing constant"), or arithmetic that fails on literal operands (`1 % 0`, a `DivisionByZeroError`). Every read is `never`, and the throw is its throw point.
+     - Possible: a constant or a class that no known declaration names. The value stays unknown and the throw possible, because code the analysis has not seen may declare it.
+   - *Where it lands (CHECK-7).* Every place PHP evaluates the constant inherits the outcome:
+     - a read, and `defined()`;
+     - a parameter's default, where the argument is omitted;
+     - a static variable's initializer, and a global `const`;
+     - an attribute's arguments, where they are read;
+     - every operation that initializes the class's constants:
+       - `new` of the class, of a subclass, of an implementer of an interface that holds the cause, or of a user of a trait that does;
+       - `newInstanceWithoutConstructor`, and a static property read;
+       - `getConstants`, and `getConstant` of any name;
+       - a backed enum's case access, `from()` and `tryFrom()`, which evaluate every constant of the enum, and its `cases()`, which evaluates the case values.
+     - The full list is read from php-src when CHECK-7 is built.
+   - *Reporting.* Each cause is reported once, at the constant that has it.
+   - *PHPDoc.* PHP never evaluates a PHPDoc edge (`@var`, a type alias, a `self::X_*` pattern). A constant whose PHPDoc reaches a cycle keeps the type it has without that PHPDoc, and the PHPDoc is reported as unresolvable. So REG-7.6 finds cycles over value edges only, with no `*` pattern expanded.
+   - *Cycles* are found by the query engine (decision 3).
+   - *Evidence:* PHP 8.5.4, one process per case (`~/.cache/prs-ledger/`: `cyc.php`, `cyc2.php`, `cyc3.php`, `thr.php`, `tryfrom.php`, `tryfrom2.php`).
+     - These throw:
+       - every operation listed above, including `getConstant('Z')` of a constant off the cycle;
+       - `const U = NOPE`, with `Error: Undefined constant "NOPE"`;
+       - `const D = 1 % 0`, with `DivisionByZeroError: Modulo by zero`;
+       - `const C = Missing::X`, with `Error: Class "Missing" not found`;
+       - `new A`, for its first failing constant.
+     - These do not:
+       - a direct read of a constant off the cycle, and `defined()` of one;
+       - a static method call, `A::class`, `instanceof` and `class_exists`;
+       - a call that passes the argument;
+       - a pure enum's case access and `cases()`;
+       - a backed enum's `cases()` when its case values are off the cycle;
+       - `ReflectionEnum::getCases()`.
+   - *Rows:*
+     - the crate split's `mixed` delta is withdrawn, and REG-7.6 carries the rule;
+     - TYPE-4.2 keeps only its memo;
+     - VAL-2.5 stands, extended;
+     - CHECK-7 is new.
+2. **No case references: one record per file of the names it writes.**
+   - *The question was* where case references live. REG-14.1 moved the `*case_refs` fields to the checker, computed from what is written at each position; REG-7.7 kept them as build scratch beside the merged declaration.
+   - *The record (PROD-5.8).* Each file has one record of every name it writes that resolves without types: class-likes, functions and constants, in code and in PHPDoc. An entry holds:
+     - its span, from which the source gives its spelling;
+     - its resolved key, or its candidates where a fallback to the global name is possible;
+     - where it appears.
+   - *Who makes it.* The parser and the PHPDoc parser record it, extending today's `Recorder` (`syntax/src/references.rs:184`). PROD-5.7's dependency keys are derived from it.
+   - *Who reads it.*
+     - The case rule, the `@internal` rule (`checker/internal_usage.rs:337`) and every other rule that judges a written name.
+     - A member name (`$x->foo()`) needs types to resolve, so its check stays in the checker.
+   - *Doc blocks (DOC-2.9).* Parsed doc blocks are a per-file product, found by the comment's offset.
+     - Each is parsed once, and the declaration builder and the checker share the parse.
+     - It is dropped with the file's other products.
+     - The ≈25 checker sites that parse a doc comment again read the analysed file's doc blocks.
+   - *Rows:*
+     - The `*case_refs` fields leave the declarations, with a format bump (REG-14.1, rewritten; it delivers VAL-2.6). These are the six item 8 names (a property's `case_refs` and `set_case_refs`, a class's `type_alias_case_refs` and `mixin_case_refs`, a parameter's `case_refs`, a function's `return_case_refs`) and an assertion's (`registry/function_sig/asserts.rs:60`).
+     - REG-7.7 keeps neither the case references nor the doc blocks.
+     - PROD-5.7 derives its keys from the record.
+     - PROD-5.8 and DOC-2.9 are new.
+3. **Item 4 is retired; REG-7 and REG-8 become one incremental query engine over the whole pipeline, with persistence.**
+   - *The question was* what of the 20 G plan's item 4 is still wanted after REG-7.
+   - *REG-13 is superseded.* What of it is still wanted moves:
+     - `FileDecls` (REG-13.2) is the layout of REG-8.3's per-file declaration sets, and a stub file's record decodes into it.
+     - The member list (REG-13.3: one entry per member, its traits' and their aliases included, in declaration order, with no copies) is the layout of REG-7.4's result. VAL-2.3 stands.
+     - Building a declaration straight into its final form (REG-13.9: one member list, one folded index) is REG-4.15.
+   - *Identity.*
+     - A declaration's id is interned from (file, kind, folded name, occurrence in the file) and is never reused.
+     - A member is (class id, kind, folded name).
+     - A slot is a position within one revision, never an identity: a `(FileId, slot)` pair shifts when its file changes, and a stale one names another declaration.
+   - *The engine (REG-16).*
+     - Queries are keyed by interned ids.
+     - The accessors record what each query reads, absent names included.
+     - Every result has early cutoff: a query whose new value equals its old one stops the change there.
+     - The builtin knowledge (decision 7) is a durable input.
+     - Cycles are the engine's to find (REG-7.1's hierarchy cycles, REG-7.6's constant cycles).
+     - Stale work is cancelled when an edit arrives.
+   - *Its scope is the whole pipeline.*
+     - The file texts are the inputs. The parse, a file's products, its declarations, resolution (REG-7's levels) and the check are queries.
+     - The batch run and the server run the same queries.
+     - It replaces:
+       - the keeping and re-parsing of LOAD-1.6 and LOAD-5.3;
+       - the dependents indexes (`dependents` and `signature_dependents`, `project.rs:250`, `:253`), and the walks over them (`walk_affected`, `closure_scope`);
+       - the hand-made cancellation.
+   - *Persistence (CACHE-13.2).*
+     - Results are saved with the dependencies they recorded, as rustc's incremental compilation saves its query results and its dependency graph.
+     - A warm run parses and checks again only the files whose recorded reads changed.
+     - The resolved context base and a check-results cache are this persistence, not stores of their own. Today an analysed file is always parsed and checked (`project/file_cache.rs:1-8`).
+   - *salsa* (0.28.5) is the default engine. rust-analyzer and Astral's `ty` are built on it, and it has a `persistence` feature. A measurement comes first (REG-16.1): coarse queries must keep the hot lookups plain table reads.
+   - *`redeclared_methods` goes* (`registry/class_info.rs:382`, read at `checker/function_decl.rs:65` and `:245`). The checker checks each body against its own declaration's entry, REG-8.5's principle.
+   - *Retired with item 4:*
+     - the generational ids in three ranges;
+     - the result tables, and the parallel passes (the global-variable pass moves with the crate split's C9);
+     - the bitset scope;
+     - change detection by id.
+   - *Rows:*
+     - REG-13 and its sub-tasks are SUPERSEDED. REG-4.5 loses its flag; REG-4.15 is new; REG-14.3 needs REG-8.3.
+     - LOAD-1.6, LOAD-4.1, LOAD-4.2, LOAD-4.6 and LOAD-5.3 are SUPERSEDED.
+     - REG-7's levels, REG-7.9's cycles, REG-8's snapshots and REG-8.2's read sets are the engine's.
+     - TYPE-4.1's generation is the engine's revision.
+     - CACHE-13.2 is the persistence.
+     - REG-16 is new.
+4. **A flat, index-based, immutable tree.**
+   - *The question was* SYN-1.6's `unsafe impl Sync`. The 20 G plan's arena, a `bumpalo::Bump`, is not `Sync`, and step 6 made a finished arena readable from other threads with one `unsafe impl Sync`, which the workspace denies (`unsafe_code = "deny"`, `Cargo.toml:42`).
+   - *The layout.*
+     - A file's `Ast` owns its source, its names and one typed vector per node kind.
+     - A child is a `u32` id; a list is a range.
+     - A string is a span, plus a side buffer where it needs decoding. Large variants go in side tables.
+   - *Sharing.* A tree is `Send + Sync` without `unsafe`, and an `Arc<Ast>` serves the batch run and the server alike.
+   - *Immutable after the parse (SYN-1.10).* `resolve_names` and the stub-attribute rewrite go with decision 6, and `name_anonymous_classes` with decision 5.
+   - *Every parse yields a tree (SYN-1.9).* A part that fails to parse is an error node with its span, which Q-10's recovery fills.
+   - *Ids.* An id lives only in products owned with its tree; a debug build tags ids with their tree, as the backstop.
+   - *SYN-2's token arrays* are designed together with the tree. Whether nodes keep spans or token indices is settled by a measurement.
+   - *The cost:* the 2,612 `ExprKind::`/`StmtKind::` match sites in 135 files read through the tree, and each access has a bounds check.
+   - *Prior art:* the Zig and Carbon compilers keep their trees this way; rust-analyzer's `la-arena` is the same kind of index arena.
+   - *Rows:*
+     - SYN-1.6 is SUPERSEDED;
+     - SYN-1.2 to 1.8 are rewritten, SYN-1.1 is unchanged, and SYN-1.9 and 1.10 are new;
+     - LOAD-3.5's and CHECK-6.3's wording follows.
+5. **Declarations are the tree's own vectors.**
+   - *The question was* who lists a file's declarations. PROD-5.1 had the parser list them; REG-11.1 (the crate split's `.10a`) indexed declarations below the top level through one Visitor walk, which also replaced `declared_names`, `collect_anonymous_classes` and the stub-index generator's walk.
+   - *The vectors.*
+     - The parser fills the tree's vectors of class-likes and functions in source order, nested ones included.
+     - Beside them, as columns, are each one's guard (the condition node and its polarity, or an early-return guard) and the names in effect.
+     - `const` statements and `define()` calls get index lists.
+     - An anonymous class is a class node there too, named from its position.
+   - *Guards.* `registry/guard.rs` still interprets them.
+   - *Readers.* REG-11.1's behaviour, and the readers its walk would have served (`declared_names`, the anonymous-class walks, the stub-index generator in `xtask/src/stub_index.rs`), read these vectors. A walk that compares them with the tree lives only in the tests.
+   - *Rows:* PROD-5.1 and REG-11.1 are rewritten, and no longer conflict.
+6. **Gates as data, one parse per file.**
+   - *The question was* STUB-7.1's version key. The crate split's text had the stub layer parse once per version, because member and parameter gates are inside the files; the off report recommended the gates as data, with one parse per file (this was DEC-1.1).
+   - *What the parse records,* for each declaration and parameter:
+     - its availability, as version ranges;
+     - its type readings, by version range;
+     - the extension it belongs to.
+   - *Queries take a version range:*
+     - availability is always, never or in part, and in part is reported unless a guard covers it;
+     - a return type is the union of the readings in the range;
+     - an argument is checked against each reading;
+     - a `PHP_VERSION_ID` branch narrows the range. Today `checker/predefined_constants.rs` reads `PHP_VERSION_ID` as a range, and `registry/guard.rs` reads its guards.
+   - *The range* comes from the configuration, else Composer's `config.platform.php` or `require.php` (`crates/composer/src/lib.rs:114`), else every version known. No cache key holds a version.
+   - *Sources (STUB-12):*
+     - for PHP 8.0 and later, php-src's own stub files, as PHPStan's `phpstan/php-8-stubs` packages them (`Php8SignatureMapProvider` reads them by version id);
+     - for earlier versions, reflection dumps of real PHP binaries, made by a generator;
+     - for the rest (the PECL extensions), phpstorm-stubs;
+     - a check that reports where the sources disagree.
+   - *What goes:*
+     - The functionMap deltas become readings; today they are read at the newest revision (`registry/stubs.rs:253`).
+     - STUB-7.9, STUB-7.10 and STUB-8 become range queries.
+     - The stub-attribute rewrite (`stub_attributes.rs`, which applies the newest version and then removes the attributes) goes, and with it `resolve_names` (`syntax/src/name_resolution.rs:515`), which only it calls.
+   - *Rows:*
+     - STUB-7.1 is decided, and STUB-7.3 is re-specified;
+     - STUB-7.6, STUB-7.9, STUB-7.10 and STUB-8 read the ranges;
+     - PROD-5.4 waits on STUB-7.3;
+     - STUB-12 is new.
+7. **Embed the builtin knowledge; read PHPStan's classes from the project.**
+   - *The question was* STUB-10.2: whether to embed the stub data at compile time. It waited for the user from before the merge.
+   - *Embedded:*
+     - per-file records of PHP's declarations, PHPStan's function map and PHPStan's `.stub` files;
+     - built at compile time by the code the runtime runs;
+     - a read-only layer: no run builds them, and the stub disk cache goes.
+   - *`**` is folded deterministically,* by a pure-Rust `pow` (`types/src/arithmetic.rs:715-717` calls `powf` today), so that the host's build and the target's run agree. A test asserts that the embedded records equal a runtime build.
+   - *The data crate* is linked only into the final binaries.
+   - *Measured, not assumed (STUB-10.1):* the records' size, whether the stub sources can leave the binary, and the build time. The off report's §10.6 has the figures for today's form:
+     - four files of 31.35 MB;
+     - `.rodata` growing from 18.2 to ≈50 MB;
+     - ≈2.7-3.6 min for the release legs to compile reflection's dependencies a second time;
+     - up to ≈20 s of lost pipelining, unless only the final binaries take the data crate.
+   - *PHPStan's own classes are not embedded (STUB-13).*
+     - They are read from the PHPStan the project installs, its phar or its source, as a context package cached per file.
+     - An embedded copy is right only for the pinned 2.2.16. Today they are 15.33 of the 31.35 MB (`stub-base-phpstan`).
+     - The installed `phpstan.phar` holds 7,127 entries, 1,959 of them under `src/`, none compressed, with their namespaces intact. `crates/stub-sources/build.rs` says the phar ships no loose source, which is wrong.
+   - *Rows:*
+     - STUB-10.2 is decided (yes), and STUB-10.1 is the measurements;
+     - STUB-11 is re-specified;
+     - STUB-13 is new, its phar locator in STUB-7.4's chain;
+     - Q-8 follows;
+     - the off drill's D3 is decided again (§1).
 
 ## 3. LOAD: the session, the walk, the load's merge, how long a tree lives
 
@@ -265,7 +437,7 @@ Waiting from before the merge:
 | LOAD-1.3 | **One configuration.** `Session::resolve` is the server's resolution too, with one error policy as a parameter (fail, or degrade and report). `workspace_config::resolve` is deleted. A reload applies the difference in file sets | 20 G 1 | READY; a delta, approved (VAL-2.1) | — |
 | LOAD-1.4 | **One load.** `Session::load` reads through a file source with an in-memory overlay: the server's open documents, the tests' files. `load_file`, `load_analyzed_file`, `Project::load_files` and the server's walk are deleted. `update_file` builds through the load's `parse_file`. The read hashes every file's bytes, and `FileState` keeps the hash | 20 G 1 | READY | — |
 | LOAD-1.5 | **One analysis.** `finalize` takes the results by value. The server's first publish is `Session::analyse` plus `finalize`. An edit rechecks through the same per-file check. The whole-program passes run again on save, debounced. `defer_inline_ignores` goes | 20 G 1 | READY; a delta, approved (VAL-2.1) | — |
-| LOAD-1.6 | **What the server keeps.** `built_once` splits: `keeps_as_built` decides only the snapshot, and the file's role decides whether a tree is kept. A context file's tree comes from `ast_of`'s re-parse cache, its text read on demand and checked against the kept hash. Only open documents' text is kept. The use-site index becomes a per-file product, stored in the per-file cache | 20 G 1 | OPEN | LOAD-1.4 |
+| LOAD-1.6 | **What the server keeps.** `built_once` splits: `keeps_as_built` decides only the snapshot, and the file's role decides whether a tree is kept. A context file's tree comes from `ast_of`'s re-parse cache, its text read on demand and checked against the kept hash. Only open documents' text is kept. The use-site index becomes a per-file product, stored in the per-file cache | 20 G 1 | SUPERSEDED by REG-16.4 (decision 3). The engine keeps and evicts trees as parse results and reads a file's text on demand. The use-site index is a per-file product query, which CACHE-13.2 persists | — |
 | LOAD-1.7 | **Folders.** Each workspace folder has its own session and project, and a document belongs to the deepest folder that contains it | 20 G 1 | OPEN | LOAD-1.3, LOAD-1.4 |
 | LOAD-1.8 | **Off the message loop.** The load runs on the pool and reports through `$/progress`; edits that arrive meanwhile are queued as overlays | 20 G 1 | OPEN | LOAD-1.4 |
 | LOAD-2 | A parallel walk: one listing per directory, path data from the walk, each path stored once | 20 G 2 | OPEN | — |
@@ -278,24 +450,24 @@ Waiting from before the merge:
 | LOAD-2.7 | **A path stored once.** `FileTable`'s map becomes a `hashbrown::HashTable<FileId>` that hashes the slot's path with the walk's hash | 20 G 2 | OPEN | LOAD-2.3 |
 | LOAD-2.8 | **The walk's other allocations.** `installed.json` and the Composer manifests are deserialized straight into their typed form, `eval_concat` builds into one buffer, and `ignore_errors::filter` matches the text the walk built | 20 G 2 | READY, except the third part | LOAD-2.3 (the third part only) |
 | LOAD-3 | Context trees dropped on the worker that parsed them | 20 G 3 | OPEN; its premise was halved by PROD-3 | — |
-| LOAD-3.1 | Whether a tree is kept is one function of (role, open), in the load and in `update_file` alike; today `update_file` keeps every tree. The insert's assertion that an analysed file has its tree stays | 20 G 3 | OPEN | LOAD-2.2 (roles final before the parse), LOAD-1.6 (`built_once` split) |
+| LOAD-3.1 | Whether a tree is kept is one function of (role, open), in the load and in `update_file` alike; today `update_file` keeps every tree. The insert's assertion that an analysed file has its tree stays | 20 G 3 | OPEN | LOAD-2.2 (roles final before the parse), REG-16.4 (the parse as a query whose eviction this is; it took LOAD-1.6's `built_once` split) |
 | LOAD-3.2 | A context file's state has the cached shape: the worker builds it, so a parsed and a cached context file give the same state. It keeps no ignore comments | 20 G 3 | READY | — |
 | LOAD-3.3 | The drop runs in parallel, on the thread that allocated the tree | 20 G 3 | OPEN | LOAD-3.1 |
 | LOAD-3.4 | A context file is read into the worker's reusable read buffer; only a file whose tree is kept gets a source of its own | 20 G 3 | OPEN | LOAD-3.2 |
-| LOAD-3.5 | A file whose tree is not kept is parsed into the worker's scratch arena, which is reset once its products are copied out | 20 G 3 | OPEN | SYN-1 (1.2) |
+| LOAD-3.5 | A file whose tree is not kept is parsed into the worker's scratch `Ast`, whose vectors are cleared, not freed, once its products are copied out | 20 G 3; decision 4 | OPEN | SYN-1 (1.2) |
 | LOAD-3.6 | `ast_of` reads the overlay before the disk, so an open file with unsaved edits is parsed from its editor text | 20 G 3 | OPEN | LOAD-1.4 |
 | LOAD-4 | The load's merge in parallel; files by id | 20 G 5 | OPEN | — |
-| LOAD-4.1 | **Ids before the merge, deterministic.** Each file's declarations take a contiguous range, given by a prefix sum of the per-file counts in load order | 20 G 5 | OPEN | REG-13.1 (ids), LOAD-2.5 (placement) |
-| LOAD-4.2 | **Stable ids on the edit path.** A file parsed again keeps its declarations' ids, matched by kind, folded name and position. `changed_since` compares a kept id's old and new values | 20 G 5 | OPEN | REG-13.1 |
+| LOAD-4.1 | **Ids before the merge, deterministic.** Each file's declarations take a contiguous range, given by a prefix sum of the per-file counts in load order | 20 G 5 | SUPERSEDED by REG-16.2 (decision 3): an id is interned from (file, kind, folded name, occurrence in the file), so no file takes a range and no load order is needed for it | — |
+| LOAD-4.2 | **Stable ids on the edit path.** A file parsed again keeps its declarations' ids, matched by kind, folded name and position. `changed_since` compares a kept id's old and new values | 20 G 5 | SUPERSEDED by REG-16.2 and 16.3 (decision 3): an interned id survives the parse that finds the same declaration, and the engine's early cutoff replaces `changed_since` | — |
 | LOAD-4.3 | **The merge sharded** over every table the insert writes, by each key's own hash (`RefKey::hash`). Shards merge in parallel, each over the files in load order, so context files come first and an analysed file's declaration wins a collision. Tables with another key are filled in a second parallel step | 20 G 5 | READY; overlaps REG-8.1 | — |
 | LOAD-4.4 | **Whole-program merges by path rank.** `judge_property_types` and the named-argument merge sort integers. Named-argument facts are recorded and merged only when `check_renamed_named_arguments` is on | 20 G 5 | OPEN | LOAD-2.5 |
-| LOAD-4.5 | **Keys stay keys, and files stay `FileId`s,** in `walk_affected` and the scope bookkeeping, in the duplicate sites (a `PathBuf` per site today) and in the declarations' origins (an `Arc<Path>` per file today) | 20 G 5 | READY | — |
-| LOAD-4.6 | **The frontier starts from ids.** `closure_scope`'s frontier starts from REG-13's changed ids, the stub dependency index holds `RefKey`s and stub base ids, and the scope is REG-13.6's bitset | 20 G 5 | OPEN | REG-13.1, REG-13.6 |
-| LOAD-4.7 | **The indexes hold posting lists, not sets.** A reverse index maps a key to a sorted `FileId` list, with one id held inline. A file's own references are slices, built once at parse, in content order (kind, `RefKey::hash`, folded bytes), deduplicated, and stored that way in the per-file cache | 20 G 5 | READY; one change with PROD-5.7 | — |
+| LOAD-4.5 | **Keys stay keys, and files stay `FileId`s,** in `walk_affected` and the scope bookkeeping, in the duplicate sites (a `PathBuf` per site today) and in the declarations' origins (an `Arc<Path>` per file today) | 20 G 5 | READY. Its part on `walk_affected` and the scope bookkeeping goes with REG-16.4 (decision 3) | — |
+| LOAD-4.6 | **The frontier starts from ids.** `closure_scope`'s frontier starts from REG-13's changed ids, the stub dependency index holds `RefKey`s and stub base ids, and the scope is REG-13.6's bitset | 20 G 5 | SUPERSEDED by REG-7 and REG-16.4 (decision 3). `closure_scope` computes the finishing passes' scopes (`finishing_scopes`, `project.rs:1359`), which REG-7 replaces. The engine runs again only the queries whose recorded reads changed, so no frontier or scope is left | — |
+| LOAD-4.7 | **The indexes hold posting lists, not sets.** A reverse index maps a key to a sorted `FileId` list, with one id held inline. A file's own references are slices, built once at parse, in content order (kind, `RefKey::hash`, folded bytes), deduplicated, and stored that way in the per-file cache | 20 G 5 | READY; one change with PROD-5.7. Its reverse indexes are `dependents` and `signature_dependents` (`project.rs:250`, `:253`), which go with REG-16.4 (decision 3) | — |
 | LOAD-5 | Each tree kept until its last reader; the project-wide passes read facts, not trees. Memory only | 20 G 19 | OPEN | — |
-| LOAD-5.1 | The project-wide passes read per-file facts: architecture, banned constructs, class shapes, Composer hygiene, mock hygiene, unmatched ignores and the use-site index. Each pass's per-file part becomes a family of CHECK-6.1's traversal, or of PROD-5.3's walk when it needs no types | 20 G 19 | OPEN | CHECK-6.1 or PROD-5.3 (per pass); PROD-5.1 (class shapes and unmatched ignores read the declaration list); LOAD-1.6 (the use-site index as a per-file product) |
+| LOAD-5.1 | The project-wide passes read per-file facts: architecture, banned constructs, class shapes, Composer hygiene, mock hygiene, unmatched ignores and the use-site index. Each pass's per-file part becomes a family of CHECK-6.1's traversal, or of PROD-5.3's walk when it needs no types | 20 G 19 | OPEN | CHECK-6.1 or PROD-5.3 (per pass); PROD-5.1 (class shapes and unmatched ignores read the declaration list); REG-16.4 (the use-site index as a per-file product, which it took from LOAD-1.6) |
 | LOAD-5.2 | A batch run frees each analysed tree when its file's check ends: the check owns the tree for its job, and files are checked largest first. `judge_property_types` reads the recorded writes, and parses again only the files outside the batch | 20 G 19 | OPEN | LOAD-5.1, LOAD-3.1 |
-| LOAD-5.3 | The server keeps the trees of open documents plus an LRU of recently checked files. Any other tree is parsed again on demand through `ast_of`, from text checked against the kept hash | 20 G 19 | OPEN | LOAD-1.4, LOAD-1.6 |
+| LOAD-5.3 | The server keeps the trees of open documents plus an LRU of recently checked files. Any other tree is parsed again on demand through `ast_of`, from text checked against the kept hash | 20 G 19 | SUPERSEDED by REG-16.4 (decision 3): the server and the batch run keep trees alike, as parse results the engine evicts and parses again on demand | — |
 | LOAD-5.4 | No reader gets an empty file: `FileState::ast` goes, and every reader asks `ast_of` | 20 G 19 | READY | — |
 | LOAD-6 | Check UTF-8 with SIMD (`simdutf8`) | off P10 | SKIP: built, measured and reverted: −0.47 M against ≈ −22 M estimated. Under the workspace's no-`unsafe` rule, the checked bytes can't become a `String` without being checked again | — |
 
@@ -306,20 +478,24 @@ Waiting from before the merge:
 | LOAD-1 | server memory | the server's ≈420 MB of context trees |
 | LOAD-2 | `collect_php_files` 75.3 M serial, `sort_paths` 112.3 M (4 calls, on the main and vendor threads), `strip_prefix` 38.1 M (29,756), `PackageIndex::owner` 69.3 M, `absolute_path` 54.1 M, `FileTable::id_for` 33.7 M, `Components::next` 139.4 M across the run; vendor discovery 321.3 M on its own thread | ≈0.3 G and ≈0.15 s of serial start |
 | LOAD-3 | 267.8 M serial | ≈0.3 G, and 0.58 G off the serial path; peak −≤209 MB |
-| LOAD-4 | `insert_numbered_file` 413.9 M serial (its `drop`, 267.8 M, is LOAD-3's; `register_references` 77.2 M over 28,502; `insert_built_decl` 34.8 M); the two path sorts, 20.7 M and 20.6 M | ≈0.25 G |
+| LOAD-4 | `insert_numbered_file` 413.9 M serial (its `drop`, 267.8 M, is LOAD-3's; `register_references` 77.2 M over 28,502, which fills the dependents indexes REG-16.4 replaces; `insert_built_decl` 34.8 M); the two path sorts, 20.7 M and 20.6 M | ≈0.25 G |
 | LOAD-5 | none in instructions | the analysed trees, ≈173 MB, freed during the check |
 
 ### Notes
 
-- **LOAD-1 is mostly semantic.** Its output changes are approved (VAL-2.1) and are read at VAL-1. Its performance part: the server stops keeping context trees and the sources of unopened files.
-  - P8b (PROD-3) added a third use of `built_once`: it decides whether skipped bodies' references are completed. LOAD-1.6's split must keep that.
+- **LOAD-1 is mostly semantic.** Its output changes are approved (VAL-2.1) and are read at VAL-1. Its performance part: the server stops keeping context trees and the sources of unopened files. Since decision 3 that part is the engine's (REG-16.4), and LOAD-1.6 is superseded.
+  - P8b (PROD-3) added a third use of `built_once`: it decides whether skipped bodies' references are completed. REG-16.4, which took LOAD-1.6's split, must keep that.
   - LOAD-1.3 is also the crate split's C1 follow-up ("one settings assembly").
   - The crate split's Stage F (the `Session` and the language server; not tracked here) covers LOAD-1.3 to 1.5 too. Until its F1, `Project::finish_loading` stays the batch entry point (REG-7.8).
 - **The off drill did not change LOAD-2.**
 - **LOAD-3's premise was halved by P8b:** skimmed bodies are not trees, so the drop fell from 575.5 M to 267.8 M. The 11,459 context trees are still dropped on the main thread, inside `insert_numbered_file`.
-- **LOAD-4.3 overlaps REG-8.1:** the crate split's `apply` builds each file's declarations in parallel and recomputes a name's entry by the collision policy, in canonical order.
+  - Decision 4's flat tree frees a tree as a few vectors, not node by node, so LOAD-3's drop is measured again after SYN-1.2, before LOAD-3.3 is built.
+- **Decision 3's engine takes over LOAD-4's bookkeeping.**
+  - LOAD-4.1, 4.2 and 4.6 are superseded.
+  - The engine replaces the dependents indexes, `walk_affected` and the finishing passes' scopes (REG-16.4), so the parts of LOAD-4.5 and 4.7 that work on them go when it lands. Their other parts stand.
+- **LOAD-4.3 overlaps REG-8.1:** the crate split's `apply` builds each file's declarations in parallel and recomputes a name's entry by the collision policy, in canonical order. On the engine that entry is a query over the declaring files.
 - **LOAD-4.7 and PROD-5.7 are one change,** seen from the index and from the recording.
-- **LOAD-5.4 makes the frees of LOAD-5.2 and 5.3 safe** for any reader left.
+- **LOAD-5.4 makes LOAD-5.2's frees safe** for any reader left. LOAD-5.3's are the engine's since decision 3.
 - **Memory (MEAS-2):** the analysed trees are 151.1 MB at exit, and at the peak of the warm run.
 
 ### Records
@@ -338,16 +514,18 @@ Waiting from before the merge:
 
 | id | task | from | state | needs |
 |---|---|---|---|---|
-| SYN-1 | Trees in an arena, nodes as handles | 20 G 9 | OPEN | — |
+| SYN-1 | A flat tree: one vector per node kind, nodes as ids, immutable after the parse | 20 G 9; decision 4 | OPEN | — |
 | SYN-1.1 | `peeled` becomes a loop, with no guard. The plan builds this first, on its own | 20 G 9.1 | READY | — |
-| SYN-1.2 | **The arena.** `ParsedFile` owns the source, a `bumpalo::Bump` and the root, held together by `self_cell`. The file's names live in an append-only arena of their own. A tree that is not kept is built in the worker's scratch arena | 20 G 9.2 | BLOCKED: other threads read a finished arena only through SYN-1.6 (decision 4) | — |
-| SYN-1.3 | **Nodes as handles.** `Expr<'a>` and `Stmt<'a>` become two-word enums of arena references, and `ParseError` is boxed | 20 G 9.3 | OPEN | SYN-1.2 |
-| SYN-1.4 | **Payloads borrow the source:** doc comments, unescaped literals, inline HTML, names, bodies and scope aliases. Heredoc indentation and `\u{..}` escapes are decoded in place | 20 G 9.4 | OPEN | SYN-1.2 |
-| SYN-1.5 | **Nothing in the bump arena needs dropping:** no `Arc` lives in it, names live in the name arena, and lists are slices | 20 G 9.5 | OPEN | SYN-1.2 |
-| SYN-1.6 | **Reads from any thread.** The finished arena moves into a `FrozenArena` with one `unsafe impl Sync` | 20 G 9.6 | BLOCKED: the workspace denies `unsafe_code` (`Cargo.toml:42`); it needs a safe form (decision 4) | SYN-1.2 |
-| SYN-1.7 | **No growth inside the arena.** Children are gathered in the parser's reusable scratch stacks and moved in once, at their exact size. The same goes for `parse_type_hint`'s `Vec<Vec<TypeHint>>`, interpolation's fragments and parts, and `use` imports' boxes | 20 G 9.7 | OPEN | SYN-1.2 |
-| SYN-1.8 | **Nodes the size of their variant.** A statement carries no doc fields, and neither does a parameter: the doc is found in the file's doc sites, by the start offset | 20 G 9.8 | OPEN | SYN-1.3 |
-| SYN-2 | **Tokens in flat arrays.** The lexer lexes the whole file into a `TokenStream` (kinds, spans, payloads, docs), and the parser keeps three cursors over it. The buffers are per worker thread, and fragments come from a small stack of scratch streams. `Token`, `Tok`, `Supply`, `next_raw`/`next_tok`, the `VecDeque`, `fill`/`pop`, `raw_keyword` and `LexEnd`'s second pass go | 20 G 10 | OPEN; the target grew | SYN-1 (the file's names live in its arena) |
+| SYN-1.2 | **The tree.** A file's `Ast` owns its source, its names and one typed vector per node kind. A child is a `u32` id into its kind's vector, and a list is a range of one. The tree is `Send + Sync` without `unsafe`, and an `Arc<Ast>` serves the batch run and the server alike. A tree that is not kept is built in the worker's scratch `Ast`, whose vectors are cleared, not freed. Whether nodes keep spans or token indices is settled first, by a measurement made with SYN-2's design | 20 G 9.2; decision 4 | READY | — |
+| SYN-1.3 | **Nodes as ids.** `Expr` and `Stmt` become ids, and the 2,612 `ExprKind::`/`StmtKind::` match sites in 135 files read through the tree. An id lives only in products owned with its tree; a debug build tags each id with its tree, as the backstop | 20 G 9.3; decision 4 | OPEN | SYN-1.2 |
+| SYN-1.4 | **Payloads are spans:** doc comments, unescaped literals, inline HTML, names, bodies and scope aliases. A string that needs decoding (heredoc indentation, `\u{..}` escapes) is a span plus a range of a side buffer, and a large variant's payload goes in a side table | 20 G 9.4; decision 4 | OPEN | SYN-1.2 |
+| SYN-1.5 | **Nothing in a tree needs a drop of its own:** no `Arc` lives in a node, names live in the file's name table, and lists are ranges. Dropping a tree frees its vectors | 20 G 9.5; decision 4 | OPEN | SYN-1.2 |
+| SYN-1.6 | **Reads from any thread.** The finished arena moves into a `FrozenArena` with one `unsafe impl Sync` | 20 G 9.6 | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies `unsafe_code` (`Cargo.toml:42`) | — |
+| SYN-1.7 | **No growth inside the tree.** Children are gathered in the parser's reusable scratch stacks and appended once, at their exact size, as a range. The same goes for `parse_type_hint`'s `Vec<Vec<TypeHint>>`, interpolation's fragments and parts, and `use` imports | 20 G 9.7; decision 4 | OPEN | SYN-1.2 |
+| SYN-1.8 | **Nodes the size of their variant.** A node is as large as the small variants of its kind; a large variant's payload goes in a side table. A statement carries no doc fields, and neither does a parameter: the doc is found in the file's doc sites, by the start offset (DOC-2.9) | 20 G 9.8; decision 4 | OPEN | SYN-1.3 |
+| SYN-1.9 | **Every parse yields a tree.** `parse` (`syntax/src/parse.rs:82`) returns a tree and its errors, where it returns a `Result` today. A part that fails to parse is an error node with its span. Q-10's recovery fills the error nodes, so a file that fails to parse keeps what parses; today it is skipped (`project.rs:1141`) | decision 4 | OPEN | SYN-1.2 |
+| SYN-1.10 | **Nothing rewrites a tree.** `name_anonymous_classes` (`registry/anonymous_class.rs:45`) gives way to names taken from the class nodes' positions (PROD-5.1). The stub-attribute rewrite gives way to the attributes read as data (STUB-7.3), and with it goes `resolve_names` (`syntax/src/name_resolution.rs:515`), which only it calls. Then `Ast` has no `&mut` access | decision 4 | OPEN | PROD-5.1, STUB-7.3 |
+| SYN-2 | **Tokens in flat arrays.** The lexer lexes the whole file into a `TokenStream` (kinds, spans, payloads, docs), and the parser keeps three cursors over it. The buffers are per worker thread, and fragments come from a small stack of scratch streams. `Token`, `Tok`, `Supply`, `next_raw`/`next_tok`, the `VecDeque`, `fill`/`pop`, `raw_keyword` and `LexEnd`'s second pass go. Its arrays are designed with SYN-1.2's tree (decision 4) | 20 G 10 | OPEN; the target grew | SYN-1 (the file's names live in its tree) |
 | SYN-3 | Line starts for every file, columns only where read, ignore marks and member spans as offsets | 20 G 11 | OPEN | — |
 | SYN-3.1 | **Two types.** `LineStarts` serves every file, built by one pass over newline bitmasks that also says whether the file is ASCII. `LineIndex` adds the column tables, for analysed files only. `FileState` holds `enum Lines { Starts(LineStarts), Full(LineIndex) }` | 20 G 11.1 | READY | — |
 | SYN-3.2 | **Blocks.** SSE2's 16-byte blocks, with AVX2's 32-byte blocks behind one `is_x86_feature_detected!` dispatch per process; eight-byte words on other targets | 20 G 11.2 | READY, with SYN-3.1 | — |
@@ -377,7 +555,10 @@ Waiting from before the merge:
 
 ### Notes
 
-- **SYN-1:** since P8b, context bodies are no longer trees, so the arena's gain shifts to the analysed files and to declarations. SYN-1.2's thread question is decision 4.
+- **SYN-1:** since P8b, context bodies are no longer trees, so the tree's gain shifts to the analysed files and to declarations.
+  - Decision 4 replaced the plan's bump arena with a flat tree of vectors, shared across threads without `unsafe`, so SYN-1.6 went.
+  - Its cost is the match sites rewritten to read through the tree, and a bounds check per access.
+  - SYN-1.1 stands alone, as the plan has it.
 - **SYN-2's target grew:** skimming still pops a `Tok` for every skimmed token (`drop_glue::<Tok>`, 2.16 M calls inside `parse_function_body`).
 - **SYN-4.5:** a `RefKey::Constant` splits its text on every hash and comparison today.
 
@@ -402,14 +583,15 @@ Waiting from before the merge:
 | PROD-4.1 | D1: every skimmed body is checked, and each file's verdict cached | off D1 | SUPERSEDED by PROD-4.3 (D6), 2026-10-15 | — |
 | PROD-4.2 | D2: a skimmed body's text is copied at load, from the bytes the load reads | off D2 | DONE (decided 2026-10-13; built in PROD-1, `7726dacf`) | — |
 | PROD-4.3 | D6: a context file that fails to parse keeps what it declares, and a skimmed body is not checked | off D6 | DONE (decided 2026-10-15); what it leaves unbuilt is Q-10 | — |
-| PROD-5 | A file's products: the parser lists the declarations, one walk makes the summaries, flows and global facts, and the old collector goes | 20 G 13 | OPEN; its premise was mostly delivered by PROD-1 to PROD-3 | — |
-| PROD-5.1 | **The parser lists the declarations** as it builds them: class-likes, functions, constants and `define()` calls. Each entry holds its name, kind, guard, `ImportScope` and `&'a` node. Declaration building, the duplicate sites, the incremental path and the opt-in rules iterate the list; the declarations walk and the declared-classes collection go | 20 G 13.1 | OPEN; conflicts with REG-11.1 (decision 5) | SYN-1 (references into a finished tree) |
+| PROD-5 | A file's products: the parser fills the declarations, one walk makes the summaries, flows and global facts, one record holds the names the file writes, and the old collector goes | 20 G 13; decision 2 | OPEN; its premise was mostly delivered by PROD-1 to PROD-3 | — |
+| PROD-5.1 | **Declarations are the tree's own vectors.** The parser fills the tree's vectors of class-likes and functions in source order, nested ones included. Beside them, as columns, are each one's guard (the condition node and its polarity, or an early-return guard) and the names in effect (its `ImportScope`). `const` statements and `define()` calls get index lists. An anonymous class is a class node there too, named from its position. `registry/guard.rs` still interprets the guards. These read the vectors: declaration building, the duplicate sites, the incremental path, the opt-in rules, `declared_names`, the anonymous-class walks and the stub-index generator (`xtask/src/stub_index.rs`). The declarations walk, the declared-classes collection and `name_anonymous_classes` go; a walk that compares the vectors with the tree lives only in the tests | 20 G 13.1; decision 5 | OPEN | SYN-1.2 |
 | PROD-5.2 | `ImportScope`s are published once, at each `namespace` and `use`, and readers start from them | 20 G 13.2 | READY | — |
 | PROD-5.3 | **One walk for the rest,** with every builder at each node: `BodySummary`, `InitFlow` and `FileSites` (`GlobalFacts`) | 20 G 13.3 | READY | — |
-| PROD-5.4 | **The old collector (`deps::Collector`) goes.** The stub-attribute pass records the references of the types it adds, and the stub build reads the parser's record | 20 G 13.4 | READY | — |
+| PROD-5.4 | **The old collector (`deps::Collector`) goes.** It runs today only where the stub-attribute pass rewrote a tree: a project file that mentions the attributes (`parse_with_ignores`, then `file_references`, `project.rs:2924`), and every stub file (`index_stub_file`, `registry/stubs.rs:1486`). The plan had that pass record the references of the types it adds. Since decision 6 the parse reads the attributes as data (STUB-7.3) and no pass rewrites a tree, so the parser's record is every tree's | 20 G 13.4; decision 6 | OPEN | STUB-7.3 |
 | PROD-5.5 | **A file's bodies are one sorted slice** of `(span, summary, flow)`, and a body's lists are ranges into vectors of the file | 20 G 13.5 | READY | — |
 | PROD-5.6 | Builders gather in scratch and emit exact-size slices | 20 G 13.6 | READY | — |
-| PROD-5.7 | **References are recorded into one vector per file, sorted once.** A doc site holds the interned `ImportScope`, `recorded_references` reads the sites in their recorded order, and a declaration's name is its `Name` | 20 G 13.7 | OPEN; one change with LOAD-4.7 | PROD-5.2 |
+| PROD-5.7 | **References are one vector per file, sorted once,** derived from the record of written names (PROD-5.8). A doc site holds the interned `ImportScope`, `recorded_references` reads the sites in their recorded order, and a declaration's name is its `Name` | 20 G 13.7; decision 2 | OPEN; one change with LOAD-4.7 | PROD-5.2, PROD-5.8 |
+| PROD-5.8 | **One record of the names a file writes.** It holds every name that resolves without types (class-likes, functions, constants), in code and in PHPDoc. Each entry has its span, from which the source gives its spelling; its resolved key, or its candidates where a fallback to the global name is possible; and where it appears. The parser and the PHPDoc parser record it, extending `Recorder` (`syntax/src/references.rs:184`). The case rule, the `@internal` rule and the other rules that judge a written name read it (REG-14.1). A member name needs types, so its check stays in the checker | decision 2 | READY | — |
 
 ### Targets
 
@@ -423,10 +605,10 @@ Waiting from before the merge:
   - `BodySummary::of` costs 83.6 M over 10,863 bodies, where it cost 344 M over 59,926;
   - `InitFlow::of` costs 50.8 M;
   - `GlobalFacts` costs 74 M.
-- **PROD-5.1 against REG-11.1 (decision 5).** Both remove `declared_names`' walk; they differ in where the list is made.
-  - The crate split's `.10a` indexes declarations below the top level through one Visitor walk.
-  - PROD-5.1 has the parser make the list, and deletes the declarations walk.
-- **PROD-5.4 and the stub build.** The old collector still runs in release builds: for any tree a pass changed after the parse (`file_references`, `project.rs:2923`), and for the stub base, whose tree the stub-attribute pass changes (`index_stub_file`, `registry/stubs.rs:1493`). STUB-7's stub layer changes how the stub base is built.
+- **PROD-5.1 and REG-11.1 (decision 5).** The parser fills the tree's declaration vectors (PROD-5.1). REG-11.1's indexing of the declarations below the top level reads them, where the crate split's `.10a` had one Visitor walk.
+- **PROD-5.4 and the stub build.** The old collector still runs in release builds, for a tree the stub-attribute pass changed: a project file's (`file_references`, `project.rs:2924`) and every stub file's (`index_stub_file`, `registry/stubs.rs:1486`).
+  - Since decision 6 that pass goes (STUB-7.3), and since decision 7 no run builds the stub records (STUB-11). So PROD-5.4 deletes what is left, and the plan's way of feeding the pass's references to the parser's record is not built.
+- **PROD-5.8 and PROD-5.7 (decision 2).** The record holds what is written where, for the rules. PROD-5.7's sorted keys are the dependency view of the same record.
 - **Memory (MEAS-2):** a file's products are up 25 MB, because P8a keeps the skimmed bodies' text.
 
 ### Records
@@ -472,7 +654,7 @@ Waiting from before the merge:
 | id | task | from | state | needs |
 |---|---|---|---|---|
 | DOC-1 | Tokenize a PHPDoc tag's description only when it is read | off P7 | DONE `a4035361` | — |
-| DOC-2 | PHPDoc finished: tag effects, eager lowering, two memos, nodes in one vector | 20 G 14 | OPEN | — |
+| DOC-2 | PHPDoc finished: tag effects, eager lowering, two memos, nodes in one vector, doc blocks as a per-file product | 20 G 14; decision 2 | OPEN | — |
 | DOC-2.1 | **Lowering replaces the lazy round trip.** `DocType`'s type comes from `phpdoc::lower(&TypeNode)`, eagerly in `docblock::parse`. The text grammar's other callers move to `phpdoc::parse_type`, and the text grammar is deleted. The statement `@var` memo goes in | 20 G 14.1; 25 G P7 | READY | — |
 | DOC-2.2 | **Resolution memoized per file,** keyed by the type node and an interned resolution context (PROD-5.2's `ImportScope`, the template names, the type aliases, the class `self` names). The memo holds the whole resolved type | 20 G 14.2 | OPEN | PROD-5.2 |
 | DOC-2.3 | **Tag effects.** `parse_tag -> Arc<TagEffect>` and `apply(&mut DocBlock, &TagEffect)`, with no scratch block and no `merge_from` | 20 G 14.3; 25 G P11 step 1 | READY | — |
@@ -481,6 +663,7 @@ Waiting from before the merge:
 | DOC-2.6 | **One product per doc text, one per tag line.** The docblock memo holds the grammar node, the block, its referenced names as `Name`s and its `@var` winners; `DocNames` and its memo go. The tag memo holds `TagEffect`s. The written-type memo goes with the text grammar | 20 G 14.6 | OPEN; overlaps REG-4.10 | DOC-2.1, DOC-2.3 |
 | DOC-2.7 | **A docblock's nodes are one vector.** A `TypeNode`'s children are indices into it. The grammar node, the tag effects and the per-tag maps are vectors of the docblock too | 20 G 14.7 | READY | — |
 | DOC-2.8 | **Keys by fingerprint, bounds by weight.** A memo is keyed by a 128-bit fingerprint, bounded by a byte budget that counts keys and values, and evicts by CLOCK | 20 G 14.8 | READY | — |
+| DOC-2.9 | **Parsed doc blocks are a per-file product,** found by the comment's offset. Each doc comment is parsed once, the declaration builder and the checker share the parse, and it is dropped with the file's other products. The ≈25 checker sites that parse a doc comment again read the analysed file's doc blocks, where REG-7.7 had the declaration keep them | decision 2 | OPEN; overlaps DOC-2.6 | REG-4.10 |
 
 ### Targets
 
@@ -492,7 +675,10 @@ Waiting from before the merge:
 
 - **DOC-1 (off P7) built the plan's lazy tag description,** and with it the `[optional]` prefix test that read from the first tokens. That covers the allocation item 14 lists for `apply_tag`'s copy of every description. The rest of item 14 is DOC-2.
 - **The earlier ledger said here that "P11 was measured and not kept".** That was the off report's P11 (messages, CHECK-4). The 25 G report's P11 step 1 (`TagEffect`, DOC-2.3) has never been built or measured.
-- **DOC-2.6 overlaps REG-4.10 and REG-7.7.** In the crate split, the builder parses each doc comment once, and the declaration keeps its parsed doc blocks for the checker sites that parse a doc comment again.
+- **DOC-2.6 overlaps REG-4.10 and DOC-2.9.**
+  - In the crate split, the builder parses each doc comment once (REG-4.10), and the declaration kept its parsed doc blocks for the checker sites that parse a doc comment again.
+  - Since decision 2 the parsed blocks are the file's product (DOC-2.9), which those sites read; no declaration keeps them.
+  - DOC-2.6's memo is keyed by the doc text, across files. DOC-2.9's product is owned by its file.
 - **Memory (MEAS-2):** PHPDoc holds 94.9 MB at exit in the off run and 38.3 MB in the warm run, against item 14's ≈50 MB claim. P7 saves allocations, not retained bytes.
 
 ### Records
@@ -552,9 +738,9 @@ Waiting from before the merge:
 | TYPE-1 | A kind code in the type node's free flag bits | off E5 | DONE `5ec70c1e` | — |
 | TYPE-2 | One node against itself is answered first in `is_super_type_of` | off E6 | DONE `f2f65cbb` | — |
 | TYPE-3 | Plain object types kept with their class, two statics, a table of small integers | off E7 | DONE `60e85393` | — |
-| TYPE-4 | One relation memo, keyed by the registry's content generation, replaces `structural_memo` and `KEEP_DECISIONS` | 20 G 7 | BLOCKED: its generation is defined over item 4's pass levels, which REG-7 replaces; its form after REG-7 and REG-8 is not designed | REG-7 |
-| TYPE-4.1 | **`ClassHierarchy::generation() -> Option<u64>`, the registry's content generation.** It is `Some` whenever the registry cannot change until its next bump, and `None` while declarations are being inserted or a level's results written. Every finishing run bumps it, and so does a switch of base | 20 G 7 | OPEN | REG-7 |
-| TYPE-4.2 | **One memo, keyed `(sup node, sub node)` under its generation, storing only final answers.** An answer is provisional while an on-demand evaluation's cycle guard is open. A cycle is resolved by its strongly connected component, by what PHP does: constants on a cycle each read `never` and are each reported ("Cannot declare self-referencing constant"), and PHPDoc-only cycles keep every possibility. The relation's code is first read for any input beyond the key | 20 G 7 | BLOCKED: a delta, approved (VAL-2.5), that conflicts with REG-7.6 (decision 1) | TYPE-4.1 |
+| TYPE-4 | One relation memo, keyed by the engine's revision, replaces `structural_memo` and `KEEP_DECISIONS` | 20 G 7; decision 3 | OPEN | REG-16.3 |
+| TYPE-4.1 | **The memo's generation is the engine's revision.** No input changes within a revision, so an answer found in it holds until the next. Any change of an input makes a new revision and clears the memo: an edit, the configuration, or the PHPStan the project installs (STUB-13). The plan's `ClassHierarchy::generation() -> Option<u64>`, with its `None` while declarations are inserted, is not needed | 20 G 7; decision 3 | OPEN | REG-16.3 |
+| TYPE-4.2 | **One memo, keyed `(sup node, sub node)` under the revision, storing only final answers.** An answer found while the engine is resolving a cycle is provisional and is not stored. The relation's code is first read for any input beyond the key. The plan's rule for constants on a cycle is REG-7.6's since decision 1 | 20 G 7; decision 1 | OPEN | TYPE-4.1 |
 | TYPE-4.3 | **Bounded within a generation:** at most 2^17 entries per thread, in two segments; the older is dropped when the current one fills | 20 G 7 | OPEN | TYPE-4.2 |
 | TYPE-4.4 | **A runtime switch,** `PHPSTAN_RS_NO_RELATION_MEMO`, turns the memo off in any build, for the oracle | 20 G 7 | OPEN | TYPE-4.2 |
 
@@ -567,7 +753,9 @@ Waiting from before the merge:
 ### Notes
 
 - **TYPE-1 and TYPE-2 put one-word shortcuts and a pointer test in front of `is_super_type_of`.**
-- **TYPE-4's needs.** The earlier ledger had TYPE-4 needing item 4 (its on-demand cycle guards) and item 6 (its cycle rule). In the crate split's design both are REG-7's: REG-7.9's reentrancy guard, and REG-7.6's constant cycles.
+- **TYPE-4's needs.** The earlier ledger had TYPE-4 needing item 4 (its on-demand cycle guards) and item 6 (its cycle rule). In the crate split's design both were REG-7's: REG-7.9's reentrancy guard, and REG-7.6's constant cycles.
+  - Since decision 3 the generation and the cycle guards are the engine's (REG-16.3).
+  - Since decision 1 the constant rule is REG-7.6's alone; TYPE-4.2 keeps the memo.
 - **Memory:** `KEEP_DECISIONS` holds 1.3 MB at exit.
 
 ### Records
@@ -595,11 +783,11 @@ Waiting from before the merge:
 
 ## 9. REG: the registry
 
-The crate split's Stage C is worked on this branch from C4 on.
+The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts its memo and snapshots (REG-7, REG-8) on one incremental query engine (REG-16).
 
 - Each commit of a sub-task is made with check, clippy and the touched module's tests; the fixture suite and the corpus run at the stage's checkpoints.
 - A sub-task whose output changes says so on its row.
-- The keys, memo and snapshot commits (REG-4.2, REG-7, REG-8) each run the full gate tier, because they change every lookup's hashing, the resolution path, and the LSP's per-edit invalidation.
+- The keys, engine, memo and snapshot commits (REG-4.2, REG-16, REG-7, REG-8) each run the full gate tier, because they change every lookup's hashing, the resolution path, and the LSP's per-edit invalidation.
 
 ### Tasks
 
@@ -613,7 +801,7 @@ The crate split's Stage C is worked on this branch from C4 on.
 | REG-4.2 | The exact-spelling accessors, then deleting `canonicalize_class_name_case` and the declared-names side map; method keys fold (`method_access` included). Two class-like declarations, or two methods of one class, whose names differ only in case become one name | split C4 data model | READY; a delta, approved in the plan, fixtured | — |
 | REG-4.3 | A class's templates as one list of parameters, each with bound, variance, default and scope, where five parallel maps and sets were rebuilt into parameters in four places that disagreed | split C4 data model | DONE `5401afc9` | — |
 | REG-4.4 | Per-member flags: a property's finality on the property | split C4 data model | DONE `8d35c99d` | — |
-| REG-4.5 | Per-member flags for the method sets (`abstract_methods`, `final_methods`, `static_methods` and the `_by_phpdoc` forms), as flag bits on the member's entry | split C4 data model; 20 G 4 | READY. The plan names only the property case; item 4 also makes `redeclared_methods` a flag (decision 3) | — |
+| REG-4.5 | Per-member flags for the method sets (`abstract_methods`, `final_methods`, `static_methods` and the `_by_phpdoc` forms), as flag bits on the member's entry | split C4 data model; 20 G 4 | READY. The plan names only the property case. Item 4 also made `redeclared_methods` a flag; since decision 3 it goes instead (REG-8.5) | — |
 | REG-4.6 | A property's native type as an `Option` | split C4 data model | DONE `7a61603e` | — |
 | REG-4.7 | A parameter's and a return's native type as an `Option`, with one encoding for no native type | split C4 data model | READY | — |
 | REG-4.8 | The explicit-`mixed` flags (`explicit_mixed_hint`, `return_explicit_mixed_hint`) read from the types | split C4 data model | DONE `e7b2521f`, corrected `0f32829b` | — |
@@ -623,33 +811,34 @@ The crate split's Stage C is worked on this branch from C4 on.
 | REG-4.12 | **Query accessors** replace the storage-returning ones and the `pub` maps: about 280 sites outside `registry/`, 23 of them in tests. Item 4's first step is the same change; it counted 149 sites | split C4 data model; 20 G 4 | READY | — |
 | REG-4.13 | The builders read the AST's parse-time `QualifiedName::resolved` instead of resolving again through a `NameContext`; the anonymous-class builder is the exception | split C4 data model | READY | — |
 | REG-4.14 | **No result depends on the class map's iteration order:** `classes_using_trait` is sorted, and `doctrine_entity_for_table` picks by name order | split C4 data model | READY; a delta, fixtured | — |
+| REG-4.15 | **A declaration is built straight into its final form:** the ordered member list is filled once, with one folded index, where `from_def` builds three hash tables per class; a member's span is a field of its entry | 20 G 4 (its REG-13.9); decision 3 | OPEN | REG-4.2 (folded method keys), REG-4.12 (no reader holds the maps) |
 | REG-5 | **Written results leave the signatures.** Purity results go to a registry table keyed by function and by `(class, method)`. `names_with_assert_tags` is seeded from the assertion entries, and checked by folded name | split C4 written results | PART: the purity part was done by REG-1; what is left is a delta (a call spelled in another case than its method reaches the assert lookup) | — |
 | REG-6 | The checker test harness builds like a project: it merges the stubs before resolving | split C4 harness | READY; a test-expectation delta | — |
-| REG-7 | Per-class memoized resolution replacing the passes, in five `OnceLock` levels | split C4 memo | OPEN | — |
+| REG-7 | Per-class resolution replacing the passes, in five levels, each a query of the engine | split C4 memo; decision 3 | OPEN | REG-16.3 |
 | REG-7.1 | **Ancestors level:** the `extends`/`implements` closure in resolution order, the `use` closure in composition order, the `@mixin` targets, the unresolved edges, and the constant declarations composed with the traits'. A cycle through `extends`, `implements` or `use` is detected here and broken: every edge between two classes of the same cycle is dropped, whichever class resolves first | split C4 memo | OPEN | REG-4.2 |
 | REG-7.2 | **Own level:** own members composed with the `use` closure's declared members, `@method` tags, every type resolved in the class's context (imported aliases, `value-of` and class-constant types, constant-named types), and the interim assertion step. It includes item 6's step 1, deferred types on demand: `class_has_deferred_type`, `function_has_deferred_type` and the eager pass go, and the stub cache asserts that no stub record holds a deferred type | split C4 memo; 20 G 6.1 | OPEN | REG-7.1 |
 | REG-7.3 | **Inherited level:** PHPDoc inheritance and property hooks, from the ancestors' inherited level | split C4 memo | OPEN | REG-7.2 |
 | REG-7.4 | **Members level:** each `@mixin` target's public methods and properties, then the member owners | split C4 memo | OPEN | REG-7.3 |
 | REG-7.5 | **Final level:** the PHPDoc members the native type excludes are dropped, and the native and PHPDoc combination is PHPStan's `TypehintHelper::decideType` whole (the plan's Appendix H causes for C4) | split C4 memo | OPEN | REG-7.4 |
-| REG-7.6 | **Class constants through the `ConstantResolver`** (the crate split's C2 follow-up lands first), reading the ancestor level's declarations with the imported aliases substituted. An enum's case values are constants to the resolver too. A reference cycle, found from the declarations with `*` patterns expanded, types as `mixed` | split C4 memo | BLOCKED: a delta, approved in the plan, that conflicts with TYPE-4.2 (decision 1) | REG-7.1 |
-| REG-7.7 | **Build scratch leaves `ClassReflection`** for the merged declaration kept beside each memo: `method_tags`, `trait_aliases`, `redeclared_methods`, `resolved_trait_conflicts`, the `*case_refs` and `type_imports`. The rules reading that scratch query the declaration. The declaration keeps its parsed doc blocks, which about 25 checker sites read instead of parsing the doc comment again | split C4 memo | BLOCKED: conflicts with REG-14.1 (decision 2) | REG-7.1 |
+| REG-7.6 | **Class constants through the `ConstantResolver`** (the crate split's C2 follow-up lands first), reading the ancestor level's declarations with the imported aliases substituted. An enum's case values are constants to the resolver too. A constant's result is its value type plus the throws its evaluation can raise, each definite or possible. A cycle over value edges, or arithmetic that fails on literal operands, is definite: every read is `never`. An unknown constant or class is possible: the value stays unknown. Each cause is reported at the constant that has it. A PHPDoc edge is not evaluated: a constant whose PHPDoc reaches a cycle keeps its type without that PHPDoc, which is reported as unresolvable. The engine finds the cycles, over value edges only; no `*` pattern is expanded. The plan's `mixed` for a cycle is withdrawn | split C4 memo; decision 1 | OPEN; a delta, approved (VAL-2.5) | REG-7.1 |
+| REG-7.7 | **Build scratch leaves `ClassReflection`** for the merged declaration kept beside each level: `method_tags`, `trait_aliases`, `resolved_trait_conflicts` and `type_imports`. The rules reading that scratch query the declaration. Since decisions 2 and 3, `redeclared_methods` goes (REG-8.5), the `*case_refs` leave for the record of written names (REG-14.1), and the parsed doc blocks are the file's product (DOC-2.9), not the declaration's | split C4 memo; decisions 2, 3 | OPEN | REG-7.1 |
 | REG-7.8 | **`Project::finish_loading` keeps only the whole-program passes,** and stays the batch entry point (69 call sites) until the crate split's F1. About 100 comments naming a deleted pass are rewritten. `index_and_flatten` is deleted. `Registry::build` indexes and runs the whole-program passes until its callers move onto `apply` (REG-10). The stub pass resolves each stub file's classes within that file, until STUB-7.6 | split C4 memo | OPEN | REG-7.1 to REG-7.5 |
-| REG-7.9 | **No `OnceLock` initialization waits on itself.** A reentrant resolution panics; the panic leaves the cell retryable and pops the reentrancy guard's frame, so `check-project`'s per-file `catch_unwind` resumes cleanly. A panic-injection test and a parallel-resolution test run over cyclic fixtures | split C4 memo | OPEN | REG-7.1 |
+| REG-7.9 | **No query waits on itself.** A query that reaches itself is a cycle, which the engine finds. A hierarchy cycle and a constant cycle are resolved by their rules (REG-7.1, REG-7.6); any other is a bug, reported as one. A panic inside a query leaves it retryable, so `check-project`'s per-file `catch_unwind` resumes cleanly. A panic-injection test and a parallel-resolution test run over cyclic fixtures | split C4 memo; decision 3 | OPEN | REG-7.1 |
 | REG-7.10 | **A whole-registry iteration decides before resolving a class,** from the declarations, provenance and the ancestor level, until STUB-7.8 replaces it. This covers the two `native_type_hints.rs` scans, the concrete-implementor scan in `checker.rs`, the whole-program passes (dead abstract classes, dead enum cases, dead members, namespace cycles), `class_shape`, `classes_using_trait`, `doctrine_entity_for_table`, `repository_entity`, `Project::run_reflection_rules`, LSP workspace symbols and completion. `demo` resolves everything it prints | split C4 memo | OPEN | REG-7.1 |
 | REG-7.11 | **Trait and mixin members no longer outlive a change to their source.** `removing_a_files_trait_does_not_retroactively_unbake_its_members_from_existing_users` inverts, renamed through `gates/test-renames`, and `remove_files`' known-limitation comment goes | split C4 memo | OPEN; it lands with the snapshots | REG-8 |
 | REG-7.12 | **A function resolves lazily the same way:** value types, constant-named types, native-excluded members, the interim assertion step. `finalize_standalone_sig` (`registry/resolve.rs:2119`) is that resolver | split C4 memo | OPEN | REG-7.2 |
-| REG-8 | `ReflectionBuilder::apply` snapshots | split C4 snapshots | OPEN | REG-7 |
-| REG-8.1 | **`FileDelta`** carries a file's role and its new declarations, or its removal; the initial load is one apply, built per file in parallel. A name's entry is recomputed from its declaring files by the collision policy, in canonical order (the embedded stubs, then context files, then analysed files, each by path), not in arrival order. Declarations are shared between snapshots by `Arc`; memo cells are fresh, seeded with every value computed and not invalidated | split C4 snapshots | OPEN; a delta the server shows: a file created later no longer wins a collision by arriving last | — |
-| REG-8.2 | **Read sets.** Each memo records every folded class and constant name it looked up, absent ones included. A delta invalidates the transitive readers; a change to any other reflection input invalidates everything. Purity and global-variable inference run again per snapshot, until the crate split's C9 | split C4 snapshots | OPEN | REG-8.1 |
-| REG-8.3 | **The per-file declaration sets** answer what `DuplicateClassSites` and `DuplicateFunctionSites` index; those two, with their own declaration walks, are deleted for a query that groups by exact spelling. `FileState.functions`/`classes` become the file's set | split C4 snapshots | OPEN; overlaps REG-13.2 | REG-8.1 |
+| REG-8 | `ReflectionBuilder::apply` snapshots, as the engine's revisions | split C4 snapshots; decision 3 | OPEN | REG-7 |
+| REG-8.1 | **`FileDelta`** carries a file's role and its new declarations, or its removal; the initial load is one apply, built per file in parallel. On the engine a delta is an input change, and a revision what follows it. A name's entry is a query over its declaring files, which applies the collision policy in canonical order (the embedded stubs, then context files, then analysed files, each by path), not in arrival order. Declarations are shared between revisions by `Arc`, and what a change does not reach keeps its value | split C4 snapshots; decision 3 | OPEN; a delta the server shows: a file created later no longer wins a collision by arriving last | — |
+| REG-8.2 | **Read sets.** Each memo records every folded class and constant name it looked up, absent ones included. A delta invalidates the transitive readers; a change to any other reflection input invalidates everything. Purity and global-variable inference run again per snapshot, until the crate split's C9 | split C4 snapshots | SUPERSEDED by REG-16.3 (decision 3): the read sets are the dependencies the engine records, absent names included | — |
+| REG-8.3 | **The per-file declaration sets** answer what `DuplicateClassSites` and `DuplicateFunctionSites` index; those two, with their own declaration walks, are deleted for a query that groups by exact spelling. `FileState.functions`/`classes` become the file's set. Its layout is item 4's `FileDecls`: one vector per kind, a class's members and a function's parameters as ranges, and one folded index per file. A stub file's record decodes into the same layout | split C4 snapshots; 20 G 4 (its REG-13.2); decision 3 | OPEN | REG-8.1 |
 | REG-8.4 | **`Registry` splits** into `ReflectionBuilder` (the per-file declaration sets, `apply`) and `ReflectionProvider` (the snapshot, with the query methods); its 22 fields go | split C4 snapshots | OPEN | REG-8.1 to REG-8.3 |
-| REG-8.5 | **The checker stops rebuilding reflection from the AST.** The rebuild-and-compare sites (`ClassReflection::from_decl` and `from_enum_decl` in `oop.rs`, `from_decl` for a trait in `function_decl.rs`) and a losing duplicate function's rebuilt signature read the file's own declaration. Property-hook signatures are built with their property. A set hook's parameter takes the property's PHPDoc type where it narrows the native one | split C4 snapshots | OPEN; a delta (nsrt `property-hooks.php`) | REG-8.1 |
+| REG-8.5 | **The checker stops rebuilding reflection from the AST.** The rebuild-and-compare sites (`ClassReflection::from_decl` and `from_enum_decl` in `oop.rs`, `from_decl` for a trait in `function_decl.rs`) and a losing duplicate function's rebuilt signature read the file's own declaration. Property-hook signatures are built with their property. A set hook's parameter takes the property's PHPDoc type where it narrows the native one. A redeclared method's body is checked against its own declaration's entry, so `redeclared_methods` goes (`registry/class_info.rs:382`, read at `checker/function_decl.rs:65` and `:245`) | split C4 snapshots; decision 3 | OPEN; a delta (nsrt `property-hooks.php`) | REG-8.1 |
 | REG-8.6 | **Snapshots own their names.** The registry's and the checker's `syntax::intern::intern` calls (about 100) go through the project's interner; the stub layer's names stay global; `apply` sweeps the session interner's entries that nothing else holds | split C4 snapshots | OPEN; overlaps NAME-1 and NAME-2 | REG-8.1 |
 | REG-8.7 | **Closure gates.** A test applies a sequence of deltas and compares every query with a fresh build of the final file set: a property test over the fixture files, and one test per staleness case (REG-9) | split C4 snapshots | OPEN | REG-8.1 |
 | REG-9 | **Staleness fixes,** each with a closure gate: anonymous classes are removed with their file version; a file's global constants are removed with it; removing a declaration merged onto, or replacing, a built-in keeps the built-in; removing one of two same-named declarations keeps the other; `stub_provided_functions`, `names_with_assert_tags` and the dead-code escape sets follow their files | split C4 staleness | OPEN; deltas, approved in the plan | REG-8 |
 | REG-10 | **The 188 registry tests** and the other `Registry::build` callers move onto `apply` and the accessors; `Registry::build` and `Origin::Unknown` are deleted | split C4 tests | OPEN | REG-8 |
 | REG-11 | Behaviour fixes, one commit each, after the structural ones | split C4 behaviour | OPEN; each a delta, approved in the plan | REG-7 to REG-10 |
-| REG-11.1 | Declarations below the top level are indexed (inside function bodies, `try`, `switch`), conditional, through one Visitor walk that also replaces `declared_names`, `collect_anonymous_classes` and the stub-index generator's walk | split C4 behaviour (`.10a`) | BLOCKED: conflicts with PROD-5.1 (decision 5) | — |
+| REG-11.1 | Declarations below the top level are indexed (inside function bodies, `try`, `switch`), conditional, from the tree's declaration vectors (PROD-5.1). The plan's one Visitor walk is not built: `declared_names`, the anonymous-class walks and the stub-index generator read the same vectors | split C4 behaviour (`.10a`); decision 5 | OPEN | PROD-5.1 |
 | REG-11.2 | Class names resolve case-insensitively where a type's or a literal's name is looked up, and a type takes the declared spelling; a written union collapses members that name one class; the exact class accessors are deleted | split C4 behaviour (`.10b`) | OPEN | — |
 | REG-11.3 | A conditional or duplicate class-like declaration is checked against its own hierarchy | split C4 behaviour (`.10c`) | OPEN | — |
 | REG-11.4 | Duplicate class-like and function declarations compare names case-insensitively | split C4 behaviour (`.10d`) | OPEN | — |
@@ -666,57 +855,67 @@ The crate split's Stage C is worked on this branch from C4 on.
 | REG-11.15 | LSP navigation uses the folded keys | split C4 behaviour (`.10o`) | OPEN | — |
 | REG-11.16 | A table that two entities map resolves to no entity | split C4 behaviour (`.10p`) | OPEN | — |
 | REG-12 | **C4's gate.** The gated steps' medians are lower than the phase start's (`xtask gatetime --since 58cfc5d2`); no stub class resolves unless something reaches it; peak RSS is at or below the phase start | split C4 gate | OPEN | REG-2 to REG-11 |
-| REG-13 | The remaining parts of item 4, the registry by declaration ids | 20 G 4 | BLOCKED on decision 3 | — |
-| REG-13.1 | **Generational ids.** `ClassId`/`FnId` carry a generation, in three ranges: a stub base record's index, a context base record's index, then project ids. The registry's id space has a generation of its own, which a switch to the PHPStan base bumps | 20 G 4 | BLOCKED (decision 3) | — |
-| REG-13.2 | **`FileDecls`.** A file's declarations are stored together, one vector per kind, with a class's members and a function's parameters as ranges, and one folded index per file. A stub base record decodes into the same layout | 20 G 4 | BLOCKED (decision 3); overlaps REG-8.3 | — |
-| REG-13.3 | **The member list.** A class has one entry for every member it has, its traits' and their aliases included, in declaration order, each pointing at the declaring `FunctionReflection` without a copy; `MethodRef` is (class, slot) | 20 G 4 | BLOCKED (decision 3); a delta, approved (VAL-2.3) | — |
-| REG-13.4 | **Results as tables by id:** purity and property-write verdicts by `MethodRef`, ancestors and owners, the PHPStan-ancestry fact, inherited doc types, trait members, constant values. `raw`, `reset_scoped` and the per-member copies go | 20 G 4 | BLOCKED (decision 3); REG-1 and REG-7 hold most of it in another form | REG-13.1 |
-| REG-13.5 | **Passes as parallel maps,** level by level over the hierarchy; references between classes on demand, with a memo per id; the global-variable pass over the include graph; fixed points as worklists | 20 G 4 | BLOCKED (decision 3). REG-1 and REG-7 replace all of it but the global-variable pass | REG-13.1 |
-| REG-13.6 | **The scope is a bitset over ids,** which `closure_scope` yields | 20 G 4 | BLOCKED (decision 3) | REG-13.1 |
-| REG-13.7 | **Snapshots and change detection by id:** `changed_since` becomes a parallel filter | 20 G 4 | BLOCKED (decision 3); overlaps REG-8 | REG-13.1 |
-| REG-13.8 | **Queries read the tables** (F6b, 149,360 allocations). The hierarchy walks iterate the ancestor slice; `visible_class_consts` reads the owner table; the PHPDoc-inheritance backfill runs level by level; attributes are returned as a slice | 20 G 4 | BLOCKED (decision 3); with REG-7, the ancestor slice and the owners are REG-7.1's and REG-7.4's levels | — |
-| REG-13.9 | **A declaration is built straight into its final form:** the ordered member list is filled once, with one folded index, where `from_def` builds three hash tables per class; a member's span is a field of its entry | 20 G 4 | BLOCKED (decision 3) | REG-13.3 |
+| REG-13 | The remaining parts of item 4, the registry by declaration ids | 20 G 4 | SUPERSEDED (decision 3): what is still wanted moved to REG-4.15, REG-7.4, REG-8.3 and REG-16; each sub-task names where | — |
+| REG-13.1 | **Generational ids.** `ClassId`/`FnId` carry a generation, in three ranges: a stub base record's index, a context base record's index, then project ids. The registry's id space has a generation of its own, which a switch to the PHPStan base bumps | 20 G 4 | SUPERSEDED by REG-16.2: interned ids, never reused, in no ranges and with no generation | — |
+| REG-13.2 | **`FileDecls`.** A file's declarations are stored together, one vector per kind, with a class's members and a function's parameters as ranges, and one folded index per file. A stub base record decodes into the same layout | 20 G 4 | SUPERSEDED by REG-8.3, whose per-file sets take this layout | — |
+| REG-13.3 | **The member list.** A class has one entry for every member it has, its traits' and their aliases included, in declaration order, each pointing at the declaring `FunctionReflection` without a copy; `MethodRef` is (class, slot) | 20 G 4 | SUPERSEDED by REG-7.4, whose result takes this layout; a member's identity is (class id, kind, folded name) (REG-16.2), and its slot is only a position. VAL-2.3 stands | — |
+| REG-13.4 | **Results as tables by id:** purity and property-write verdicts by `MethodRef`, ancestors and owners, the PHPStan-ancestry fact, inherited doc types, trait members, constant values. `raw`, `reset_scoped` and the per-member copies go | 20 G 4 | SUPERSEDED by REG-1 and REG-7: the results are query results of the engine, keyed by interned ids (REG-16.3) | — |
+| REG-13.5 | **Passes as parallel maps,** level by level over the hierarchy; references between classes on demand, with a memo per id; the global-variable pass over the include graph; fixed points as worklists | 20 G 4 | SUPERSEDED by REG-1 and REG-7, which replace the passes; the global-variable pass moves with the crate split's C9 | — |
+| REG-13.6 | **The scope is a bitset over ids,** which `closure_scope` yields | 20 G 4 | SUPERSEDED by REG-16.4: the engine runs again only the queries whose recorded reads changed, so no scope is left | — |
+| REG-13.7 | **Snapshots and change detection by id:** `changed_since` becomes a parallel filter | 20 G 4 | SUPERSEDED by REG-8 and REG-16.3: snapshots are the engine's revisions, and early cutoff replaces `changed_since` | — |
+| REG-13.8 | **Queries read the tables** (F6b, 149,360 allocations). The hierarchy walks iterate the ancestor slice; `visible_class_consts` reads the owner table; the PHPDoc-inheritance backfill runs level by level; attributes are returned as a slice | 20 G 4 | SUPERSEDED: the ancestor slice and the owners are REG-7.1's and REG-7.4's levels, the backfill is REG-7.3's level, and slices are REG-4.9's | — |
+| REG-13.9 | **A declaration is built straight into its final form:** the ordered member list is filled once, with one folded index, where `from_def` builds three hash tables per class; a member's span is a field of its entry | 20 G 4 | SUPERSEDED by REG-4.15 | — |
 | REG-14 | Declarations carry only what every reader needs | 20 G 8 | PART | — |
-| REG-14.1 | **Case references move to the checker.** It computes them from the AST and docblocks of the declaration it checks, at every position; all six fields leave the declarations, with a format bump | 20 G 8 | BLOCKED: conflicts with REG-7.7 (decision 2); a delta, approved (VAL-2.6) | — |
+| REG-14.1 | **Case references leave the declarations.** The case rule, the `@internal` rule (`checker/internal_usage.rs:337`) and the other rules that judge a written name read the file's record of written names (PROD-5.8). The six fields item 8 names leave, with a format bump: a property's `case_refs` and `set_case_refs` (`registry/class_info.rs:163`, `:166`), a class's `type_alias_case_refs` (`:518`) and `mixin_case_refs` (`:565`), a parameter's `case_refs` (`registry/function_sig.rs:65`) and a function's `return_case_refs` (`:260`). So do an assertion's (`registry/function_sig/asserts.rs:60`) and `collect_class_name_case_refs` (`registry/name_context.rs:55`). A member name's check needs types and stays in the checker | 20 G 8; decision 2 | OPEN; a delta, approved (VAL-2.6) | PROD-5.8 |
 | REG-14.2 | Fields read only while their own declaration is checked leave it: `explicit_mixed_hint`, `return_explicit_mixed_hint` | 20 G 8 | DONE by REG-4.8 (`e7b2521f`, `0f32829b`); no such field is left | — |
-| REG-14.3 | **Duplicate parameters** are resolved as a function's parameters are pushed into its file's parameter vector (the last occurrence, at the first one's place); `dedup_versioned_params`' map and order vector go | 20 G 8 | BLOCKED (decision 3) | REG-13.2 |
+| REG-14.3 | **Duplicate parameters** are resolved as a function's parameters are pushed into its file's parameter vector (the last occurrence, at the first one's place); `dedup_versioned_params`' map and order vector go | 20 G 8; decision 3 | OPEN | REG-8.3 (the parameter vector, item 4's `FileDecls`) |
 | REG-14.4 | `from_decl` passes the parameters on, not a `Vec<&str>` of their names | 20 G 8 | READY | — |
 | REG-14.5 | `reconcile_with_native` refines a lone member and returns it, with no `Vec` | 20 G 8 | READY | — |
 | REG-15 | Extract `reflection` | split C10 | OPEN | — |
 | REG-15.1 | No module-graph edge is left to the extracted modules. The graph's last two `registry` edges, to `registry::global_vars` and `registry::purity`, are the crate split's C9's, and its C6-C9 remove the others | split C10 | OPEN | REG-12, STUB-7, the crate split's C6-C9 (not tracked here) |
 | REG-15.2 | **The extraction.** `cargo machete` checks the plan's Appendix E rows, and gate 10's engine-I/O rule covers `crates/reflection` | split C10 | OPEN | REG-15.1 |
+| REG-16 | **One incremental query engine over the whole pipeline,** with its results persisted (CACHE-13.2) | decision 3 | OPEN | — |
+| REG-16.1 | **The measurement first.** salsa (0.28.5) is the default engine: rust-analyzer and Astral's `ty` are built on it, and it has a `persistence` feature. On a prototype, coarse queries (a class's members, a name's declarations) must keep the check's hot lookups plain table reads; the check's lookups are timed through the engine against today's tables. The result decides between salsa and an engine of our own with the same contract | decision 3 | READY | — |
+| REG-16.2 | **Interned identity.** A declaration's id is interned from (file, kind, folded name, occurrence in the file) and is never reused; a member is (class id, kind, folded name). A slot is a position within one revision, never an identity: a `(FileId, slot)` pair shifts when its file changes, and a stale one names another declaration | decision 3 | OPEN | REG-16.1 |
+| REG-16.3 | **The engine.** Queries are keyed by interned ids. The accessors record what each query reads, absent names included, so a declaration added later reaches the queries that looked for its name (REG-8.2's read sets). Every result has early cutoff. The builtin knowledge (decision 7) is a durable input. Cycles are the engine's to find (REG-7.1's, REG-7.6's). Stale work is cancelled when an edit arrives. REG-7's levels are its queries and REG-8's snapshots its revisions. Purity (REG-1) and global-variable inference run again per revision, until the crate split's C9 | decision 3 | OPEN | REG-16.2 |
+| REG-16.4 | **The whole pipeline as queries.** The file texts are the inputs, read through LOAD-1.4's file source and its overlay. The parse, a file's products, its declarations, resolution and the check are queries, and the batch run and the server run the same ones. It replaces: the keeping and re-parsing of LOAD-1.6 and LOAD-5.3, since a tree is a parse result the engine evicts and parses again on demand; the dependents indexes (`dependents`, `signature_dependents`, `project.rs:250`, `:253`), `walk_affected` and `closure_scope`; and the hand-made cancellation | decision 3 | OPEN | REG-16.3, SYN-1.2 (a tree shared as `Arc<Ast>`), LOAD-1.4 (the file source) |
 
 ### Targets
 
 | task | target now | report's estimate |
 |---|---|---|
-| REG-7 | the passes it replaces, which REG-13 counts too: `flatten_phpdoc_inheritance` 162.1 M, `precompute_ancestor_names` 147.9 M, `precompute_member_owners` 121.5 M, `drop_doc_members_excluded_by_native` 86.1 M, `resolve_deferred_value_of` 69.1 M, `flatten_traits` 50.0 M (the finishing passes total 972 M over two runs, mostly parallel already). REG-7.2's part of item 6 is the warm run's 682.5 M of stub decodes (MEAS-1) | none in instructions: the crate split's gate is the test steps' wall time (REG-12); item 6's ≈0.35 G covers REG-7.2 with the stub scope |
-| REG-13 | `Members::eq` 4.8 M, `reset_scoped` 43.8 M, `closure_scope` 103.8 M, and the passes above | ≈0.9 G and ≈0.4 s serial; the estimate rests on the purity costs P9 removed, so it is stale |
+| REG-7 | the passes it replaces: `flatten_phpdoc_inheritance` 162.1 M, `precompute_ancestor_names` 147.9 M, `precompute_member_owners` 121.5 M, `drop_doc_members_excluded_by_native` 86.1 M, `resolve_deferred_value_of` 69.1 M, `flatten_traits` 50.0 M (the finishing passes total 972 M over two runs, mostly parallel already). REG-7.2's part of item 6 is the warm run's 682.5 M of stub decodes (MEAS-1) | none in instructions: the crate split's gate is the test steps' wall time (REG-12); item 6's ≈0.35 G covers REG-7.2 with the stub scope |
 | REG-14 | `collect_class_name_case_refs` 26.8 M; `declared_type` 456.3 M (240,689 calls, stub files included) | ≈0.1 G |
+| REG-16 | the scope and change detection it replaces, which REG-13 counted: `closure_scope` 103.8 M, `reset_scoped` 43.8 M, `Members::eq` 4.8 M; the dependents indexes' `register_references` (77.2 M, in LOAD-4's target) | none: REG-16.1 measures what the engine costs first. Item 4's ≈0.9 G rested on the purity costs P9 removed |
 
 ### Notes
 
 - **Item 4's premise is mostly gone.** P9 (REG-1) deleted the eager purity and property-write passes, which held its largest costs: string keys ≈0.5 G, `Members::eq` 96.9 M, 59,637 member copies. Now `Members::eq` costs 4.8 M and `reset_scoped` 43.8 M.
-  - What is left is the other passes, which REG-7's memo replaces in the crate split's design.
-  - Of what item 4 would add beyond REG-7 (REG-13), what is still wanted is decision 3.
-- **Two of item 4's parts are merged into C4's rows:** its per-member flags into REG-4.5, and its private fields into REG-4.12.
+  - What was left is the other passes, which REG-7 replaces in the crate split's design.
+  - Decision 3 superseded the rest of item 4 (REG-13). Its generational ids, result tables, bitset scope and change detection by id are retired, because the engine (REG-16) keys its queries by interned ids, records what each reads, and stops a change at an equal result.
+- **Item 4's parts that are still wanted sit in C4's rows:**
+  - its per-member flags in REG-4.5, and its private fields in REG-4.12;
+  - since decision 3:
+    - its `FileDecls` in REG-8.3;
+    - its member list in REG-7.4;
+    - its final-form build in REG-4.15.
 - **REG-5:**
   - REG-1 (P9) did its purity part: `Registry::demand` answers purity and property writes, and `purity_dependencies` and `is_transitively_pure` left the build.
   - `names_with_assert_tags` is still filled by the insert (`registry/index.rs:453-481`) and by the assertion table (`registry/assertion_table.rs:142`).
   - Two comments still name the deleted `resolve_transitive_purity`: `checker/noop.rs:226` and `registry/function_sig.rs:1008`.
 - **REG-7:**
   - A level stores what it changes and shares the rest with the level below (member maps behind `Arc`).
-  - Within its commit, a change to any reflection input resets every memo, `doctrine_entity_table_index` included. The collision policy reads declarations only.
+  - The plan has a change to any reflection input reset every memo within REG-7's commit (`doctrine_entity_table_index` included), until REG-8's read sets. On the engine (decision 3) a change reaches only the queries that read it, so that interim reset is not built. The collision policy reads declarations only.
   - The plan's approved deltas, each fixtured:
     - a method that two nested traits both supply resolves by `use` order, depth-first (REG-7.2);
-    - a constant on a reference cycle types as `mixed` (REG-7.6).
+    - a constant on a reference cycle types as `mixed` (REG-7.6). Decision 1 withdrew this one: REG-7.6 has the rule that replaced it, approved as VAL-2.5.
   - The final level's combination of native and PHPDoc types changes reports too, each with its fixture in the plan: for example, a PHPDoc `never` return over a native `void` applies (REG-7.5).
   - Purity moving after resolution changes nothing; a fixture pins `@return null` on `: void`.
   - The commit runs the full gate tier. Peak RSS stays at or below the phase start, and a test pins that loading a project and checking one file resolves no class the file doesn't reach.
   - `has_unresolvable_ancestor` reads the unresolved edges. The boolean `is_subclass_of` keeps counting an unresolved name as an ancestor until the crate split's C8.
   - The whole-program passes the plan keeps until its C9 are `resolve_transitive_purity` and `infer_global_variables`. On this branch the first is gone with REG-1, so only `infer_global_variables` (`registry/global_vars.rs:315`) is left.
 - **REG-8.4:** the plan counts `phpstan_class_files` as already gone (the crate split's C3 follow-up), but it is still a field (`registry.rs:276`). See Q-11.
-- **REG-14.1 against REG-7.7 is decision 2.**
+- **REG-14.1 and REG-7.7 (decision 2).** No declaration holds case references. The rules read the file's record of written names (PROD-5.8), and REG-7.7's scratch is what is left.
 - **REG-14:** item 8's one approved output change is a `@property` tag shadowed by a declared property, checked against the tag's own names (VAL-2.6).
 - **Memory (MEAS-2):** item 4 holds 87.7 MB at exit in the off run (was 149.6 MB) and 46.7 MB in the warm run. Its ≈90 MB claim is stale by about half.
 
@@ -767,31 +966,40 @@ The crate split's Stage C is worked on this branch from C4 on.
 | STUB-5 | Look each stub file's dependents up once in `build_closures` | off P4 | DONE `0ce52479` | — |
 | STUB-6 | D7: build proposals 1-5 now, in the order of the build order | off D7 | DONE (moot: proposals 1-5 are all built) | — |
 | STUB-7 | The crate split's C5: locator chain and stub layer | split C5 | OPEN | REG-12 (C4 done) |
-| STUB-7.1 | **The stub layer's version key** over a `PhpVersions` range, decided first and recorded in the plan's Appendix F. `php_version` takes the range and patch forms in the same commit. A function removed before the analysed range is unknown | split C5 | BLOCKED: the key's form is decision 6 | — |
+| STUB-7.1 | **Gates as data, one parse per file,** over a `PhpVersions` range. The parse records, for each declaration and parameter, its availability as version ranges, its type readings by version range, and the extension it belongs to. Queries take the range: availability is always, never or in part, and in part is reported unless a guard covers it; a return type is the union of the readings in the range; an argument is checked against each reading; a `PHP_VERSION_ID` branch narrows the range. The range comes from the configuration, else Composer's `config.platform.php` or `require.php` (`crates/composer/src/lib.rs:114`), else every version known. No cache key holds a version. `php_version` takes the range and patch forms in the same commit. A function removed before the analysed range is unknown | split C5; decision 6 | OPEN; a delta | — |
 | STUB-7.2 | phpstorm-stubs' `PS_UNRESERVE_PREFIX_` names are the reserved words they spell; the prefixed functions and the `___PHPSTORM_HELPERS` classes leave the index | split C5 | OPEN | — |
-| STUB-7.3 | **`stub_attributes` fixes:** a property's or class constant's `LanguageLevelTypeAware` type becomes `@var`; `newest_type` reads every entry; a function deprecated in one version-split overload isn't deprecated in the others | split C5 | OPEN | — |
-| STUB-7.4 | Locator order | split C5 | OPEN | — |
+| STUB-7.3 | **The stub attributes read as data.** `LanguageLevelTypeAware` (or `PhpVersionAware`) gives the type readings by version range of a declaration, a parameter, a property or a class constant. `PhpStormStubsElementAvailable` gives an availability range, and a deprecation holds only in the range of the overload that has it. The rewrite that applies the newest version and then removes the attributes (`stub_attributes.rs`) goes. With it goes `resolve_names` (`syntax/src/name_resolution.rs:515`), which only it calls (`stub_attributes.rs:185`). The plan's three fixes are what reading every attribute as data gives: a property's or class constant's type, `newest_type` reading every entry, and a deprecation in one overload | split C5; decision 6 | OPEN | STUB-7.1 |
+| STUB-7.4 | Locator order. The project's PHPStan, phar or source, is a locator in the chain (STUB-13.1) | split C5; decision 7 | OPEN | — |
 | STUB-7.5 | **The lazy composer locator:** classes load on demand; functions, constants and `files` entries stay eager | split C5 | OPEN; a delta | — |
-| STUB-7.6 | **The version-keyed stub layer,** holding C4's memo levels for stub classes, with copy-on-merge and a per-file parse memo. Whether the index build uses `rayon` is decided here | split C5 | OPEN | STUB-7.1 |
+| STUB-7.6 | **The stub layer,** holding C4's memo levels for stub classes, with copy-on-merge and a per-file parse memo. STUB-11's embedded records replace the memo. One layer serves every version range, since no key holds a version (decision 6). Whether the index build uses `rayon` is decided here | split C5; decisions 6, 7 | OPEN | STUB-7.1 |
 | STUB-7.7 | **Provenance queries** replace `built_in_stub_classes` and `stub_provided_functions`, each consumer naming its question | split C5 | OPEN | — |
 | STUB-7.8 | **The enumeration APIs.** Every whole-registry iteration (REG-7.10's included) moves onto a scoped query, and `repository_entity` onto ext-doctrine's data (the crate split's E4). The index records `parent`/`interfaces` per declaration | split C5 | OPEN | — |
-| STUB-7.9 | Version-based skip-polyfill | split C5 | OPEN; a delta | — |
-| STUB-7.10 | Version-dependent signature selection | split C5 | OPEN; a delta | — |
+| STUB-7.9 | Version-based skip-polyfill: a polyfill is skipped where its built-in is available in the whole range, decision 6's availability query | split C5; decision 6 | OPEN; a delta | STUB-7.1 |
+| STUB-7.10 | Version-dependent signature selection, as decision 6's range query: a return type is the union of the readings in the range, and an argument is checked against each | split C5; decision 6 | OPEN; a delta | STUB-7.1 |
 | STUB-7.11 | A panic-injection test | split C5 | OPEN | — |
 | STUB-7.12 | **C5's gate:** the wall times of the fixture suite, the lib tests and the cli tests are lower than at the phase start; the stub layer replaces the per-project stub clone and the per-process stub parse; the union of all lazily resolved symbols equals `generated_stub_data()`, extension maps included, for the unset version key, checked before the two delta commits | split C5 | OPEN | STUB-7.1 to STUB-7.11 |
-| STUB-8 | **Guards decided by the stubs' availability,** on run-time evidence only: built into PHP, tested by Composer's platform check, or named by the configuration. A guard is `Never` or `Always` only on that evidence; otherwise both declarations stay. New: a check that a polyfill matches the declaration it replaces | 20 G 6.2; 25 G F2 | OPEN; a delta, approved, both parts (VAL-2.4) | STUB-7 (the stub index's version ranges); overlaps STUB-7.9 and 7.10 |
-| STUB-9 | **F2's count as a diagnostic:** a debug-only report of the stub keys in the passes' scope, by the changed name that pulled each in | 20 G 6.4; 25 G F2 step 4 | BLOCKED: what it counts is the passes' scope, which REG-7 replaces; its form, if any, follows REG-7 | REG-7 |
-| STUB-10 | How a binary carries the stub data: at compile time or not | off D3 | BLOCKED | STUB-7.1 |
-| STUB-10.1 | **What the stub layer leaves to carry at compile time,** measured on a cold run. After C4 and C5 only each stub file's declarations are left, and a run reaches 6-43% of the stub bytes. The off report's C8 estimates ≈0.2-1.5 G per cold run, against 5.05 G in the old code; the figure is to be measured at the layer, not estimated | off D3 | OPEN | REG-12, STUB-7 |
-| STUB-10.2 | **The decision:** embed the data at compile time or not. If yes, the build script must run the code the runtime runs (the `reflection` crate, REG-15), `.rodata` grows from 18.2 to ≈50 MB per binary, and checked-in binary data is out | off D3 | BLOCKED, yours to decide (§2.4, 7) | STUB-7.1, STUB-10.1 |
-| STUB-11 | **Stub data built at compile time** into every binary; not built in today's form | off P6 | BLOCKED | STUB-10.2, REG-15 |
+| STUB-8 | **Guards decided by the stubs' availability,** on run-time evidence only: built into PHP, tested by Composer's platform check, or named by the configuration. A guard is `Never` or `Always` only on that evidence; otherwise both declarations stay. Availability is decision 6's range query, and whether an extension is loaded is read from the extension each declaration records. New: a check that a polyfill matches the declaration it replaces | 20 G 6.2; 25 G F2; decision 6 | OPEN; a delta, approved, both parts (VAL-2.4) | STUB-7 (STUB-7.1's ranges and extensions); overlaps STUB-7.9 and 7.10 |
+| STUB-9 | **F2's count as a diagnostic:** a debug-only report of the stub keys in the passes' scope, by the changed name that pulled each in | 20 G 6.4; 25 G F2 step 4 | BLOCKED: what it counts is the passes' scope, which REG-7 replaces; its form, if any, follows REG-7 and the engine (REG-16) | REG-7 |
+| STUB-10 | How a binary carries the stub data: at compile time or not | off D3 | PART: decided (STUB-10.2); STUB-10.1's measurements are left | — |
+| STUB-10.1 | **The measurements the embedding is built on,** at the layer, not estimated: the records' size; whether the stub sources can leave the binary; the build time; and what a cold run still pays. After C4 and C5 only each stub file's declarations are left, and a run reaches 6-43% of the stub bytes. The off report's C8 estimates ≈0.2-1.5 G per cold run, against 5.05 G in the old code | off D3; decision 7 | OPEN | REG-12, STUB-7 |
+| STUB-10.2 | **The decision:** embed the data at compile time or not. If yes, the build script must run the code the runtime runs (the `reflection` crate, REG-15), `.rodata` grows from 18.2 to ≈50 MB per binary, and checked-in binary data is out | off D3 | DONE (decided 2026-10-15, §2.4 decision 7): yes, for PHP's declarations and PHPStan's function map and `.stub` files; PHPStan's own classes are read from the project (STUB-13) | — |
+| STUB-11 | **The builtin knowledge built at compile time.** Per-file records of PHP's declarations, PHPStan's function map and PHPStan's `.stub` files are made by the build script with the code the runtime runs (the `reflection` crate, REG-15). They are a read-only layer: no run builds them, and the stub disk cache goes. `**` is folded deterministically, by a pure-Rust `pow` (`types/src/arithmetic.rs:715-717` calls `powf` today), and a test asserts that the embedded records equal a runtime build. The data crate is linked only into the final binaries | off P6; decision 7 | OPEN | STUB-10.1, REG-15 |
+| STUB-12 | **The sources of the builtin knowledge,** read as decision 6's data | decision 6 | OPEN | STUB-7.1 |
+| STUB-12.1 | **PHP 8.0 and later:** php-src's own stub files, as PHPStan's `phpstan/php-8-stubs` packages them (`Php8SignatureMapProvider` reads them by version id) | decision 6 | OPEN | — |
+| STUB-12.2 | **Earlier versions:** reflection dumps of real PHP binaries, made by a generator kept with the sources | decision 6 | OPEN | — |
+| STUB-12.3 | **The rest** (the PECL extensions) from phpstorm-stubs, its attributes read as data | decision 6 | OPEN | STUB-7.3 |
+| STUB-12.4 | **PHPStan's function map by version:** its deltas (`functionMap_php*delta.php`) become readings by version range; today the newest revision is read (`registry/stubs.rs:253`) | decision 6 | OPEN | — |
+| STUB-12.5 | **A check that reports where the sources disagree** on a declaration they share | decision 6 | OPEN | STUB-12.1 to STUB-12.4 |
+| STUB-13 | **PHPStan's own classes read from the project's PHPStan,** not embedded. An embedded copy is right only for the pinned 2.2.16; today they are 15.33 of the 31.35 MB of stub data (`stub-base-phpstan`) | decision 7 | OPEN | — |
+| STUB-13.1 | **A phar locator.** The installed `phpstan.phar` holds 7,127 entries, 1,959 of them under `src/`, none compressed, with their namespaces intact, so its classes are read in place. `crates/stub-sources/build.rs` says the phar ships no loose source, which is wrong | decision 7 | OPEN | STUB-7.4 |
+| STUB-13.2 | **PHPStan's classes as a context package,** from the phar or the source the project installs, cached per file. The PHPStan base (`stub-base-phpstan`) and the switch to it go | decision 7 | OPEN | STUB-13.1 |
 
 ### Targets
 
 | task | target now | report's estimate |
 |---|---|---|
 | item 6 as a whole (REG-7.2, STUB-8, STUB-9, CACHE-9, CACHE-10) | warm run (MEAS-1): 682.5 M of stub decodes, 414.7 M of them forced by `insert_built_decl` | ≈0.35 G, then more of `warm`; ≈40 MB of heap |
-| STUB-11 | — | −5.05 G on the old code; ≈0.2-1.5 G per cold run after the crate split's C4 and C5 |
+| STUB-11 | — | −5.05 G on the old code; ≈0.2-1.5 G per cold run after the crate split's C4 and C5; STUB-10.1 measures it |
 
 ### Notes
 
@@ -799,9 +1007,13 @@ The crate split's Stage C is worked on this branch from C4 on.
   - E1, P1 and P4 (STUB-1, STUB-2, STUB-5) changed how the stub base is built, but not what item 6 reads.
   - The warm run at this code (MEAS-1) decodes 87,146 stub function records.
 - **STUB-7 removes the eager stub build** that STUB-2 to STUB-5 speed up. Until it lands, every cold run pays for that build.
-- **STUB-7.1's version key is decision 6.** The crate split's text says "member and parameter gates are inside the files, so the layer parses per version". The off report recommends a key that keeps the gates as data, with one parse per file.
-- **STUB-8, STUB-7.9 and STUB-7.10 decide guards over the same declarations.** STUB-8 adds the extensions as evidence, and the polyfill check.
-- **STUB-9:** after REG-7 there is no passes' scope left to count. REG-7's test pins that checking one file resolves no class the file doesn't reach, which is what the count was meant to explain.
+- **STUB-7.1's version key (decision 6).** The crate split's text says "member and parameter gates are inside the files, so the layer parses per version". Decision 6 took the off report's recommendation instead: the gates are data, with one parse per file and no version in any key.
+- **STUB-8, STUB-7.9 and STUB-7.10 decide guards over the same declarations.** Since decision 6 all three are range queries over STUB-7.1's data. STUB-8 adds the extensions as evidence, and the polyfill check.
+- **Decision 7 splits the stub data.**
+  - The builtin knowledge is embedded (STUB-11): PHP's declarations, PHPStan's function map and its `.stub` files.
+  - PHPStan's own classes are read from the project (STUB-13), so the plain and the PHPStan bases are no longer two builds.
+  - STUB-12's sources feed STUB-11's build.
+- **STUB-9:** after REG-7 there is no passes' scope left to count. REG-7's test pins that checking one file resolves no class the file doesn't reach, which is what the count was meant to explain. On the engine (decision 3), the stub queries a run executes, by the query that asked for each, are the nearest thing left to count.
 - **Memory (MEAS-2):**
   - In the off run, the stub build (P6 in MEAS-2's item mapping) holds 94.3 / 94.3 MB now, against 132.8 / 111.8 then.
   - In the warm run, the stub records hold 109.2 MB, against item 6's ≈40 MB claim.
@@ -864,6 +1076,7 @@ The crate split's Stage C is worked on this branch from C4 on.
 - *Status, as recorded:* OPEN (reopened by C8, §10.6)
 - *Decision:* How a binary carries the stub data. Decided again once the crate split's C5 sets its version key, on the numbers in §10.6 (≈0.2-1.5 G per cold run once C4 and C5 land, against 5.05 G today). Proposal 6 is not built in today's form.
 - *Gates:* P6
+- *Decided again, 2026-10-15 (§2.4, decision 7):* embed the builtin knowledge (PHP's declarations, PHPStan's function map and its `.stub` files) in C8's form, as per-file records the build script makes with the runtime's code. Read PHPStan's own classes from the PHPStan the project installs (STUB-13). The version key it waited on is decision 6's: none. The measurements are STUB-10.1's.
 
 **STUB-11** (off P6)
 
@@ -872,6 +1085,7 @@ The crate split's Stage C is worked on this branch from C4 on.
 - *Estimated saving:* −5.05 G today; ≈0.2-1.5 G per cold run after the crate split's C4 and C5
 - *Needs:* D3; the reflection crate (C10)
 - *Verify:* If built: B10's guard test, an embedded-equals-runtime-build test, the override equal to the profile (B9).
+- *Since 2026-10-15:* D3 is decided (decision 7), so the row is OPEN and re-specified on its row above. It waits on STUB-10.1's measurements and on REG-15. B10's backstop is the equality test, run on each target the binaries are built for, with `**` folded by a pure-Rust `pow`.
 
 ## 11. CACHE: the stub cache's and the per-file cache's contents and formats
 
@@ -887,13 +1101,13 @@ The crate split's Stage C is worked on this branch from C4 on.
 | CACHE-6 | The analysed files stored in the per-file cache too | off E4 | SKIP: built, measured and reverted: warm −2% to −5%, cold +9% to +14% on two of ten trees | — |
 | CACHE-7 | Each class's assert-tagged method names carried in its `BuiltDecl` | off E12 | SKIP: built, measured and reverted: the 420 M of method decoding moved to the workers, total −23 K | — |
 | CACHE-8 | **Write the cache file from one buffer,** instead of building the file in a second `Vec` beside the body (`Writer::finish`, `container.rs`). −15.3 MB at the cold run's peak and −31.4 MB allocated per cold run, measured with the PHPStan base on the code of `5fb858c9`. A memory row; no instruction saving is claimed (`PROFILE_DRILL_PIWIGO_OFF_HEAP.md` §11) | heap H1 | READY | — |
-| CACHE-9 | **Names stored once per cache file.** A cache file holds a table of its distinct names, and records refer to them by index; an entry is interned on first need (`OnceLock<Name>`). The per-file cache has one table per file. Format bump | 20 G 6.3 | BLOCKED: its form follows the stub layer | STUB-7.6 |
-| CACHE-10 | **Records read, not mapped or copied.** The directory, the keys and the name table are read eagerly. A lazy record is its offset and length, beside a shared `Arc<File>`, read with `read_at` into a per-thread scratch buffer under a decode context. Each record has its own CRC, and failures are recoverable. No `unsafe` and no mapping; `u64` offsets; the stub index's keys are read with the eager sections. Same format bump as CACHE-9 | 20 G 6.5 | BLOCKED: as CACHE-9 | STUB-7.6 |
+| CACHE-9 | **Names stored once per cache file.** A cache file holds a table of its distinct names, and records refer to them by index; an entry is interned on first need (`OnceLock<Name>`). The per-file cache has one table per file. Format bump | 20 G 6.3 | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | STUB-7.6, REG-16.1 |
+| CACHE-10 | **Records read, not mapped or copied.** The directory, the keys and the name table are read eagerly. A lazy record is its offset and length, beside a shared `Arc<File>`, read with `read_at` into a per-thread scratch buffer under a decode context. Each record has its own CRC, and failures are recoverable. No `unsafe` and no mapping; `u64` offsets; the stub index's keys are read with the eager sections. Same format bump as CACHE-9 | 20 G 6.5 | BLOCKED: as CACHE-9 | STUB-7.6, REG-16.1 |
 | CACHE-11 | **A cache file's types stored once,** in a table its records index. Warm-cache runs only | off E8 | OPEN | CACHE-9, CACHE-10 (the name table by index, `read_at` records, a decode context: one format bump) |
 | CACHE-12 | A cached file's origins decoded as the one `Arc<Path>` its file binds | off E11 | OPEN | CACHE-11 (its decode context) |
-| CACHE-13 | Warm runs: cache entries checked by `stat`, and a resolved context base | 20 G 17 | OPEN | — |
+| CACHE-13 | Warm runs: cache entries checked by `stat`, and the engine's results persisted | 20 G 17; decision 3 | OPEN | — |
 | CACHE-13.1 | **Entries checked by `stat`.** A per-project index maps each path to `(size, mtime_ns, inode, device, content hash)`. A context file takes the recorded hash without being read when its four stat fields match and its recorded mtime is older than the index's own write time (git's rule for racily clean entries) | 20 G 17.1 | OPEN; the soundness concern in the notes is not settled | LOAD-1.4 (the hash the read keeps) |
-| CACHE-13.2 | **A resolved context base:** the registry after the finishing passes over the context declarations alone, the reverse indexes restricted to context files, each context file's state less its tree, and the resolved snapshot. It is keyed by the build, the configuration and PHP version range, and the set of `(path, content hash)`, and stored as the stub base is | 20 G 17.2 | OPEN; its content is written for the finishing passes REG-7 replaces | CACHE-9, CACHE-10 (container, name table), REG-13.1 (ids by record index), LOAD-1.4 (the server's load is the same load); its form follows STUB-7 and REG-8 |
+| CACHE-13.2 | **The engine's results persisted with their dependencies.** Each query's result is saved with the dependencies it recorded, as rustc's incremental compilation saves its query results and its dependency graph. A warm run parses and checks again only the files whose recorded reads changed. The plan's resolved context base and a check-results cache are this persistence, not stores of their own; today an analysed file is always parsed and checked (`project/file_cache.rs:1-8`). It is keyed by the build. The configuration, the version range (decision 6) and each `(path, content hash)` are inputs, not keys. Its format is salsa's `persistence` feature or the cache's own container (CACHE-9, CACHE-10), as REG-16.1 decides | 20 G 17.2; decision 3 | OPEN | REG-16.4 |
 
 ### Targets
 
@@ -903,14 +1117,17 @@ The crate split's Stage C is worked on this branch from C4 on.
 | CACHE-9, CACHE-10 | item 6's parts (STUB targets) | ≈40 MB of heap at exit, item 6's |
 | CACHE-11 | types decoded, ≈436.5 M of the warm run (MEAS-1) | ≈ −65 M; ≈ −25 M after item 6 |
 | CACHE-12 | 123.9 M of the warm run (MEAS-1) | ≈ −116 M, per-file cache warm |
-| CACHE-13 | reads, ≈60-70 M Ir; the per-file decode (≈1,260 M, MEAS-1) is not what a `stat` index removes | decoding and reads, ≈0.85 core-s |
+| CACHE-13 | CACHE-13.1: reads, ≈60-70 M Ir; the per-file decode (≈1,260 M, MEAS-1) is not what a `stat` index removes. CACHE-13.2: on the warm run (MEAS-1), the parse of the analysed files (`parse_with_ignores` 1,967.9 M) and their check (`check_program` 6,414.6 M) where their recorded reads did not change, and the per-file decode | decoding and reads, ≈0.85 core-s (item 17's, before decision 3) |
 
 ### Notes
 
 - **CACHE-13.1's soundness concern.** The `stat` index conflicts with an exclusion the earlier work recorded: an mtime shortcut is unsound when a same-size rewrite keeps its mtime (`rsync -t`, `tar`).
-- **CACHE-13 and the per-file decode.** CACHE-13.2's context base is what replaces the per-file decode of the context files; CACHE-13.1 does not touch it. Its weight is syscalls and I/O, which Ir does not count.
-- **CACHE-6 (off E4)** measured the idea nearest to CACHE-13 (the analysed files in the per-file cache) and found no gain worth its cold cost.
-- **CACHE-9 and CACHE-10's form waits on the stub layer.** The crate split reshapes the stub layer, so it decides their form, and with it CACHE-11's, CACHE-12's and CACHE-13.2's.
+- **CACHE-13 and the per-file decode.** CACHE-13.2's persistence is what replaces the per-file decode of the context files, and the parse and check of unchanged analysed files; CACHE-13.1 does not touch them. CACHE-13.1's weight is syscalls and I/O, which Ir does not count.
+- **CACHE-6 (off E4)** measured the idea nearest to CACHE-13 (the analysed files in the per-file cache) and found no gain worth its cold cost. A hit there still parsed the file and checked it. CACHE-13.2 keeps the check's results, so an unchanged file is neither parsed nor checked.
+- **CACHE-9 and CACHE-10's form waits on the stub layer and on the persistence.**
+  - The crate split reshapes the stub layer, so it decides their form, and with it CACHE-11's and CACHE-12's.
+  - Since decision 7 the stub disk cache goes with STUB-11.
+  - Since decision 3 the per-file cache is CACHE-13.2's persistence, whose format REG-16.1 decides. So what is left for CACHE-9 to CACHE-12 is that format, if it is the cache's own container.
 - **CACHE-7 (off E12) and REG-5 touch the same set,** `names_with_assert_tags`.
 
 ### Records
@@ -976,7 +1193,7 @@ The crate split's Stage C is worked on this branch from C4 on.
 | CHECK-6 | The check phase's remainder | 20 G 18 | OPEN | — |
 | CHECK-6.1 | **§12.10 of the 25 G report, as designed: observers, and one inference per node.** It deletes the 25 G report's C5's interim `statement_method_call` record, because the statement rules become the first observer family. The PHPStan-API walker becomes its family. A literal's type is computed once per node per pass | 20 G 18.1; 25 G §12.10, 25 G C5 | READY; approved in principle (VAL-2.8) | — |
 | CHECK-6.2 | **C1 step 5's tail.** Effects are carried in the statement result, so `noop::expr_side_effects`' walk goes; `has_yield` goes; `collect_throws` gives way to the throw tails C1 keeps | 20 G 18.2; 25 G C1 step 5 | READY | — |
-| CHECK-6.3 | **Variables as slots, scopes as radix arrays.** The parser numbers each body's variables, and a variable's `LocalKey` is its slot. Variables that PHP can reach by a computed name or a shared scope keep the name lookup. The scope's maps become a persistent radix array: 32-way, `Arc`-shared, written in place when unshared, iterated in key order | 20 G 18.3 | OPEN | SYN-1 (a variable node holds its `&'a Name` and its `VarSlot`) |
+| CHECK-6.3 | **Variables as slots, scopes as radix arrays.** The parser numbers each body's variables, and a variable's `LocalKey` is its slot. Variables that PHP can reach by a computed name or a shared scope keep the name lookup. The scope's maps become a persistent radix array: 32-way, `Arc`-shared, written in place when unshared, iterated in key order | 20 G 18.3 | OPEN | SYN-1 (a variable node holds its name's id and its `VarSlot`) |
 | CHECK-6.4 | **C2 step 2:** conditional subjects bound by parameter position (`ConditionalSubject::Parameter { name, index }`), with a format bump | 20 G 18.4; 25 G C2 step 2 | READY | — |
 | CHECK-6.5 | **§12.11's rest:** the `MemberIndex`, and the normalized-operand fast path | 20 G 18.5; 25 G §12.11 | READY | — |
 | CHECK-6.6 | **C8 step 2's rest: type operations from borrowed parts.** Members are gathered in a per-thread scratch stack and interned from the borrowed slice; a traversal copies on the first change; memos are probed with the borrowed member list; shared values are borrowed, not cloned; `Display for Type` writes into the formatter | 20 G 18.6; 25 G C8 step 2 | READY | — |
@@ -992,6 +1209,7 @@ The crate split's Stage C is worked on this branch from C4 on.
 | CHECK-6.16 | **F6f: analyses that are a function of a text are made once per distinct text,** scanning bytes and keeping slices: regex groups, `preg` shapes, DQL, SQL query-builder rendering, format strings. It includes the off report's E9 | 20 G 18.10 (F6f); off E9 | READY | — |
 | CHECK-6.17 | **F4: third-party parsers.** The SQL extension parses a query's text once per distinct text, and regex matches are read through one reused `Captures` | 20 G 18.10 (F4) | READY | — |
 | CHECK-6.18 | **One checker per worker,** reset for each file | 20 G 18.10 | READY | — |
+| CHECK-7 | **A constant's throws, where PHP evaluates it.** Each place inherits REG-7.6's outcome for the constant. A definite throw makes the code after it unreachable; a possible one is a throw point that the `try`/`catch` and `@throws` rules see. The places: a read and `defined()`; a parameter's default, where the argument is omitted; a static variable's initializer; a global `const`; an attribute's arguments, where they are read; and every operation that initializes the class's constants. Those are `new` of the class, of a subclass, of an implementer of an interface or of a user of a trait that holds the cause; `newInstanceWithoutConstructor`; a static property read; `getConstants`, and `getConstant` of any name; a backed enum's case access, `from()` and `tryFrom()` (every constant of the enum); and its `cases()` (the case values). The list is read from php-src when the row is built, not from the probes of §2.4 | decision 1 | OPEN; a delta, approved (VAL-2.5) | REG-7.6 |
 
 ### Targets
 
@@ -1004,6 +1222,7 @@ The crate split's Stage C is worked on this branch from C4 on.
 - **CHECK-1, CHECK-2 and CHECK-3 (off E2, E3, E10) cut small parts** of the check phase.
 - **CHECK-6.10 and CHECK-4 are different changes.** CHECK-6.10 formats only what is reported. CHECK-4's part (a) deferred the formatting of what is reported until it is displayed; with part (b) it saved −0.65 M, and its record has the likely cause.
 - **CHECK-6.1 is approved in principle (VAL-2.8).** Each family's output diff is read at VAL-1.
+- **CHECK-7 is semantic,** not an optimization: decision 1's throws, at each place PHP evaluates a constant. Its output changes are VAL-2.5's.
 - **Memory (MEAS-2):** the check phase allocates 232 MB in 2.16 M blocks in `checker`, and holds 0.6 MB of it at the end: the temporaries of item 18.
 
 ### Records
@@ -1061,23 +1280,24 @@ The crate split's Stage C is worked on this branch from C4 on.
 | VAL-1.13 | **After item 19:** `cargo test --workspace` and the fixtures (`--test fixtures`); item 0's dumps taken again with the `gate` build and the `oracle` build, which must finish without an assertion, and every difference from the baseline named as one of VAL-2's, listed with its file and read; O2 compared with the baseline's in output order (`xtask compare`), saved as `.corpus-runs/<scope>/<hash>.txt`, and its diff read line by line | 20 G §11 | OPEN; the last step of the 20 G plan | — |
 | VAL-1.14 | **The equalities that need no baseline:** one thread against the default; the stub cache cold against warm; the per-file cache off against written and read; a warm run against a cold one (CACHE-13); the relation memo on against off (TYPE-4.4); the server's first dumps against the CLI's (LOAD-1); each edit replay against a fresh load of the edited tree | 20 G §11 | OPEN | — |
 | VAL-1.15 | **O3, the measurements:** callgrind in `cl-20g`'s profile; a sampling profile of a cached run, for the serial windows; `hyperfine`, cold and warm, alternating with the starting commit's `gate` binary under `nice`, with the load average noted; the dhat heap profile in the 20 G plan's §8 build, compared by holder with §8's at the peak and at exit, and its allocation count; the server's heap on item 0's in-process session (VAL-1.9); the results in `WORK_STACK.md` | 20 G §11 | OPEN | — |
-| VAL-2 | The output-changing rows | 20 G §11; split | PART: VAL-2.1 to 2.8 decided 2026-10-15; VAL-2.9 is read as its rows land | — |
+| VAL-2 | The output-changing rows | 20 G §11; split | PART: VAL-2.1 to 2.8 decided 2026-10-15 (VAL-2.5 extended by decision 1); VAL-2.9 and 2.10 are read as their rows land | — |
 | VAL-2.1 | A file's identity is its resolved path; links, roles and the server read as the CLI does (LOAD-1) | 20 G 1 | DONE: approved | — |
 | VAL-2.2 | A tree with a link cycle is listed once (LOAD-2.2) | 20 G 2 | DONE: approved | — |
-| VAL-2.3 | The order in which code iterating a class's methods meets them: declaration order (REG-13.3) | 20 G 4 | DONE: approved | — |
+| VAL-2.3 | The order in which code iterating a class's methods meets them: declaration order (REG-7.4's member list, REG-13.3's before decision 3) | 20 G 4 | DONE: approved | — |
 | VAL-2.4 | Guards decided by the stubs' availability, on run-time evidence; a new polyfill-signature check (STUB-8) | 20 G 6.2 | DONE: approved, both parts | — |
-| VAL-2.5 | Constants on a cycle read `never` and are reported; PHPDoc-only cycles keep every possibility (TYPE-4.2) | 20 G 7 | DONE: approved; conflicts with REG-7.6 (decision 1) | — |
-| VAL-2.6 | A `@property` tag shadowed by a declared property is checked against the tag's own names (REG-14.1) | 20 G 8 | DONE: approved | — |
+| VAL-2.5 | Constants on a cycle read `never` and are reported; PHPDoc-only cycles keep every possibility. Extended by decision 1 (REG-7.6, CHECK-7): a constant's evaluation yields its value type and its throws, definite or possible. A cycle over value edges, or arithmetic that fails on literal operands, makes every read `never` and is reported at the constant; an unknown constant or class keeps the value unknown and the throw possible. A constant whose PHPDoc reaches a cycle keeps its type without it, and the PHPDoc is reported as unresolvable. Every place PHP evaluates the constant inherits the throws | 20 G 7; decision 1 | DONE: approved; decision 1 withdrew REG-7.6's `mixed` in its favour | — |
+| VAL-2.6 | A `@property` tag shadowed by a declared property is checked against the tag's own names, which the record of written names holds at the tag (REG-14.1, PROD-5.8) | 20 G 8; decision 2 | DONE: approved | — |
 | VAL-2.7 | Container-field keys canonical as PHP's array keys (NAME-1.2) | 20 G 15 | DONE: approved | — |
 | VAL-2.8 | The rule families of §12.10: observers, one inference per node (CHECK-6.1) | 20 G 18 | DONE: approved in principle; each family's output diff is read at VAL-1, and anything that is not an improvement is fixed or reverted per family | — |
-| VAL-2.9 | **The crate split's output changes, each on its own row:** REG-4.3, REG-4.4 and REG-4.8 (done; see their records); REG-4.2, REG-4.14, REG-5, REG-6, REG-7 (REG-7.2's order for a method two nested traits both supply, REG-7.5's native and PHPDoc combination, REG-7.6's constant cycles), REG-8.1, REG-8.5, REG-9 and REG-11; STUB-7.1, 7.2, 7.3, 7.5, 7.9 and 7.10. The plan states each as a change of its design, most with a fixture, and lists some as approved deltas; this ledger lists them so that VAL-1.13 can name them | split | OPEN: read at VAL-1, as they land | — |
+| VAL-2.9 | **The crate split's output changes, each on its own row:** REG-4.3, REG-4.4 and REG-4.8 (done; see their records); REG-4.2, REG-4.14, REG-5, REG-6, REG-7 (REG-7.2's order for a method two nested traits both supply, REG-7.5's native and PHPDoc combination; REG-7.6's constants are VAL-2.5's since decision 1), REG-8.1, REG-8.5, REG-9 and REG-11; STUB-7.1, 7.2, 7.3, 7.5, 7.9 and 7.10. The plan states each as a change of its design, most with a fixture, and lists some as approved deltas; this ledger lists them so that VAL-1.13 can name them | split | OPEN: read at VAL-1, as they land | — |
+| VAL-2.10 | **The decisions' output changes** beyond VAL-2.5, 2.6 and 2.9: PHPStan's classes read from the PHPStan the project installs (STUB-13); the builtin knowledge from php-src's stubs and real binaries' dumps (STUB-12); a file that fails to parse keeping what parses (SYN-1.9 with Q-10). Each is listed with its file and read at VAL-1 as it lands | decisions 4, 6, 7 | OPEN: read at VAL-1, as they land | — |
 
 ### Notes
 
 - **VAL-1 is not a precondition for any row.** On this branch the rows were validated one at a time: output byte-identical, a debug oracle per row, the touched module's tests. VAL-1 is what the 20 G plan's own end validation needs.
 - **The decisions of VAL-2.1 to 2.8 were made one at a time in the session, on 2026-10-15.** Each difference is listed with its file and read at VAL-1.
 - **VAL-1.12's baseline.** The plan wrote that the baseline commit's release behaviour is `5fb858c9`'s. On this branch it is that of the commit the baseline is taken on: the off drill's rows (output identical) and the crate split's C4 commits (some output changes) lie under it.
-- **VAL-1.13's differences** can also be the crate split's output changes (VAL-2.9), if they land after the baseline.
+- **VAL-1.13's differences** can also be the crate split's output changes (VAL-2.9) and the decisions' (VAL-2.10), if they land after the baseline.
 
 ## 14. MEAS: the measurements that set targets
 
@@ -1169,9 +1389,9 @@ Kept for the record. None is built from this ledger.
 | Q-5 | E10: which facts that outlive an `extract()` body (property assignments, class-level sites) a dropped body still needs. | off U5 | OPEN | Trace in `function_decl.rs` and `checker.rs` before widening E10 past the report calls. |
 | Q-6 | Which truncation holds the 33 `offsetAccess.mightNotExist` reports that `finalize` does not drop (B3 counts them among the discarded reports but not by site). Decides whether P11a's truncation saving is "well under 1 M" or ≈13 M. | off U6 | OPEN | Record the truncation site in the B3 probe (`~/.cache/prs-profile/off-ledger-b/probe.patch`); needs a probe build. |
 | Q-7 | Readers left out of d: the uninitialized-property rules on, or a tree with test classes whose built-in parent-call hook rules fire, add the ancestors' bodies to d. | off U7 | OPEN | Re-run B1's probe on such a tree; needs a probe build. |
-| Q-8 | B9's embed and edit timings were read off the console and not kept; the build script's cost under C8's form (every stub file parsed, no base) is not measured; nothing ran on aarch64 or macOS (B10's backstop is designed, not run). | off U8 | OPEN | Only if P6 is revived (D3). |
+| Q-8 | B9's embed and edit timings were read off the console and not kept; the build script's cost under C8's form (every stub file parsed, no base) is not measured; nothing ran on aarch64 or macOS (B10's backstop is designed, not run). | off U8 | OPEN | Decision 7 revives P6 in C8's form. The build script's cost is measured at STUB-10.1. B10's backstop is STUB-11's equality test, run on each target the binaries are built for. |
 | Q-9 | A third pass on the report's claims the review workflow could not check (102 items). | off U9 | OPEN | Hand check against the code and the profiles, as the 104 confirmed and the 17 split findings were. |
-| Q-10 | D6's parse-failure policy beyond the skim is not built: a context file that fails to parse keeps what it declares (what parses is recovered, what failed is unknown), validity follows the configured PHP version, and one rule holds for the batch run and the language server (the off report's §10.8). | off D6 | OPEN | Built with the parser: recovery points, a registry entry of unknown shape for what failed, marks for syntax the configured version removed (Q-2's `(real)` and `(unset)`), one rule for both entry points. |
+| Q-10 | D6's parse-failure policy beyond the skim is not built: a context file that fails to parse keeps what it declares (what parses is recovered, what failed is unknown), validity follows the configured PHP version, and one rule holds for the batch run and the language server (the off report's §10.8). | off D6 | OPEN | Built with the parser, on SYN-1.9's error nodes: recovery points, a registry entry of unknown shape for what failed, marks for syntax the configured version removed (Q-2's `(real)` and `(unset)`), one rule for both entry points. Since decision 6 the configured version is a range. |
 | Q-11 | The crate split's C1-C3 follow-ups were not audited on this branch. The plan counts `phpstan_class_files` as gone by C3's follow-up, and it is still a field (`registry.rs:276`). | split C3 | OPEN | Read each C1-C3 follow-up against the code before REG-8.4 counts `Registry`'s 22 fields. |
 
 ## Appendix A. Where each earlier id went
@@ -1214,12 +1434,12 @@ Every id the earlier ledgers used, with its id here.
 | 20G-1 | LOAD-1 (its parts are LOAD-1.1 to 1.8) |
 | 20G-2 | LOAD-2 (2.1 to 2.8) |
 | 20G-3 | LOAD-3 (3.1 to 3.6) |
-| 20G-4 | REG-13 (13.1 to 13.9); its per-member flags are REG-4.5, and its private fields REG-4.12 |
+| 20G-4 | REG-13 (13.1 to 13.9); its per-member flags are REG-4.5, and its private fields REG-4.12. Superseded by decision 3, which moved what is still wanted to REG-4.15, REG-7.4, REG-8.3 and REG-16 |
 | 20G-5 | LOAD-4 (4.1 to 4.7) |
 | 20G-6 | step 1: REG-7.2; step 2: STUB-8; step 3: CACHE-9; step 4: STUB-9; step 5: CACHE-10 |
 | 20G-7 | TYPE-4 (4.1 to 4.4) |
 | 20G-8 | REG-14 (14.1 to 14.5) |
-| 20G-9 | SYN-1; steps 1-8 are SYN-1.1 to 1.8 |
+| 20G-9 | SYN-1; steps 1-8 are SYN-1.1 to 1.8. Decision 4 rewrote steps 2-8 for a flat tree, superseded step 6, and added SYN-1.9 and 1.10 |
 | 20G-10 | SYN-2 |
 | 20G-11 | SYN-3; steps 1-4 are SYN-3.1 to 3.4. The earlier ledger's "11.5" (the server's on-demand index) is step 3, SYN-3.3 |
 | 20G-12 | SYN-4; steps 1-10 are SYN-4.1 to 4.10 |
@@ -1316,7 +1536,7 @@ The ids in the first column are the 25 G report's.
 |---|---|
 | C3 steps 6-7: names as `Name` keys (≈0.6 G) | NAME-1.2 (step 6), NAME-1.1 (step 7) |
 | F4: purity and property-write keys as folded strings (≈0.5 G) | gone: P9 (REG-1) removed the eager passes |
-| F3: results inside shared declarations; a serial `changed_since` | the shared-declaration copies are gone with P9 (REG-1); `changed_since` is REG-13.7 |
+| F3: results inside shared declarations; a serial `changed_since` | the shared-declaration copies are gone with P9 (REG-1); `changed_since` goes for the engine's early cutoff (REG-16.3, decision 3; it was REG-13.7) |
 | §14: trees dropped in the serial insert loop | LOAD-3, 267.8 M left |
 | P7 and P11 step 1: PHPDoc lowering and tag effects | the off report's P7 (DOC-1) built the lazy description; DOC-2.1 (lowering) and DOC-2.3 (tag effects) have the rest |
 | P6(d): the streaming lexer's plumbing | SYN-2 |
@@ -1324,7 +1544,7 @@ The ids in the first column are the 25 G report's.
 | F1 and F2: the stubs' availability guards and their count | STUB-8 (the guards) and STUB-9 (the count), F2's other half; what F1 left decoding (R5) is item 6's step 1, in REG-7.2 |
 | C1 step 5, C5, §12.10 | CHECK-6.2 (C1 step 5's tail), CHECK-6.1 (§12.10, which deletes C5's interim record) |
 | C2 steps 2-3, C4 step 5's keys | CHECK-6.4 (C2 step 2); NAME-1.2 (C2 step 3's `TemplateBindings`, and C4 step 5's keys) |
-| F5: a `FileId` bitset, string frontier sets | LOAD-4.6, REG-13.6 |
+| F5: a `FileId` bitset, string frontier sets | no scope is left to hold: the engine runs again only the queries whose recorded reads changed (REG-16.4, decision 3, which superseded LOAD-4.6 and REG-13.6) |
 | P12 steps 3-4: declaration list, the collector goes | PROD-5.1, PROD-5.4 |
 | §12.11: `MemberIndex` | CHECK-6.5 |
 | the sorted traversal's k-way merge | LOAD-2.5 |
@@ -1358,7 +1578,7 @@ The ids in the first column are the 25 G report's.
   - Item 17 was listed as needing item 5. Its ids by record index are item 4's (REG-13.1).
   - Four needs are not in the plan's text and are dropped: §12.10 on item 13, the radix scopes on item 16, item 13 on item 10, and item 14 on item 9 ("doc bytes"). Item 13 needs item 9 for its step 1 only (PROD-5.1).
   - The "11.5" the earlier ledger cited is item 11's step 3 (SYN-3.3).
-- **Item 9 is no longer counted as ready.** Its arena is read from other threads only through step 6's `unsafe impl Sync`, which the workspace denies; only step 1 stands alone (decision 4).
+- **Item 9 is no longer counted as ready.** Its arena is read from other threads only through step 6's `unsafe impl Sync`, which the workspace denies; only step 1 stands alone (decision 4). Decision 4 then replaced the arena with a flat tree, and SYN-1.2 is ready.
 - **The 20G-14 row's "OFF-P11 was measured and not kept" is corrected.** That was the off report's P11 (CHECK-4); the 25 G report's P11 step 1 (DOC-2.3) was never built or measured.
 - **The crate split's rows gained the parts of its plan that the earlier table left out:** REG-4.9, REG-4.10, REG-7.7, REG-7.8, REG-7.10, REG-7.11, REG-7.12, REG-8.5, REG-8.6, REG-8.7 and REG-11.1 to 11.16 as rows. The earlier C4.6f is split into REG-7.6 (constants) and REG-7.9 (reentrancy).
 - **Parts of one design that two sources hold are one row:**
@@ -1370,4 +1590,41 @@ The ids in the first column are the 25 G report's.
   - VAL-1.14 and VAL-1.15 (the 20 G plan's §11, which the earlier VAL-1 left out);
   - VAL-2.9 (the crate split's output changes);
   - Q-10 (D6's policy beyond the skim) and Q-11 (the crate split's C1-C3 follow-ups).
-- **The six decisions in §2.4 were found by the merge.** Each is stated as the sources state it; none is decided here.
+- **The six decisions in §2.4 were found by the merge,** and a seventh waited from before it. The merge stated each as its sources did and decided none.
+
+**What the decisions changed**, on 2026-10-15. All seven were decided after the merge; §2.4 has each, with its evidence and its rows.
+
+- **Superseded:**
+  - REG-13 and its nine sub-tasks;
+  - SYN-1.6;
+  - LOAD-1.6, LOAD-4.1, LOAD-4.2, LOAD-4.6 and LOAD-5.3;
+  - REG-8.2.
+- **Rewritten:**
+  - SYN-1 to SYN-1.8 (SYN-1.6 aside), SYN-2's needs, LOAD-3.5 and CHECK-6.3;
+  - PROD-5, PROD-5.1, PROD-5.4 and PROD-5.7;
+  - TYPE-4 to TYPE-4.2;
+  - REG-4.5, REG-7, REG-7.6, REG-7.7, REG-7.9, REG-8, REG-8.1, REG-8.3, REG-8.5, REG-11.1, REG-14.1 and REG-14.3;
+  - STUB-7.1, STUB-7.3, STUB-7.4, STUB-7.6, STUB-7.9, STUB-7.10, STUB-8, STUB-10 to STUB-11;
+  - CACHE-9, CACHE-10, CACHE-13 and CACHE-13.2;
+  - VAL-2.3, VAL-2.5, VAL-2.6 and VAL-2.9;
+  - Q-8 and Q-10.
+- **New:**
+  - SYN-1.9 and SYN-1.10;
+  - PROD-5.8 and DOC-2.9;
+  - REG-4.15 and REG-16 (16.1 to 16.4);
+  - STUB-12 (12.1 to 12.5) and STUB-13 (13.1, 13.2);
+  - CHECK-7 and VAL-2.10.
+- **The facts the decisions cite from the code** were checked against it on 2026-10-15:
+  - the six declarations' `*case_refs` fields and the assertion's;
+  - `redeclared_methods` (`registry/class_info.rs:382`) and its two readers;
+  - `Recorder` (`syntax/src/references.rs:184`);
+  - `parse`'s `Result` (`syntax/src/parse.rs:82`), and the skip of a file that fails to parse (`project.rs:1141`);
+  - the dependents indexes (`project.rs:250`, `:253`) and `finishing_scopes` (`project.rs:1359`);
+  - the old collector's two callers (`project.rs:2924`, `registry/stubs.rs:1486`);
+  - `resolve_names` (`syntax/src/name_resolution.rs:515`) and its one caller (`stub_attributes.rs:185`);
+  - `name_anonymous_classes` (`registry/anonymous_class.rs:45`);
+  - the functionMap deltas read at the newest revision (`registry/stubs.rs:253`);
+  - Composer's PHP constraint (`crates/composer/src/lib.rs:114`);
+  - `pow`'s folding (`types/src/arithmetic.rs:715-717`);
+  - the 2,612 `ExprKind::`/`StmtKind::` match sites in 135 files.
+- **PHP's behaviour** was read from PHP 8.5.4, not from the sources' texts (§2.4, decision 1).

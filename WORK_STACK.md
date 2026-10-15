@@ -262,8 +262,12 @@ stub bases are left to embed, only each stub file's declarations, and a
 run reaches 6-43% of the stub bytes, so proposal 6 saves ≈0.2-1.5 G per
 cold run instead of 5.05 G. C5's version key should keep the gates as data
 (one parse per file), or the data stops being a function of the source.
-Checked-in binary data is unfit. D3 is decided again once C5 sets its
-version key. These and the investigations are in `PROFILE_DRILL_PIWIGO_OFF.md` (§10,
+Checked-in binary data is unfit. D3 was decided again on 2026-10-15 (the
+ledger's §2.4, decision 7). The builtin knowledge (PHP's declarations, PHPStan's
+function map and `.stub` files) is embedded as per-file records built by the
+runtime's code. PHPStan's own classes are read from the PHPStan the project
+installs. C5's gates are data, with no version in any key (decision 6). These
+and the investigations are in `PROFILE_DRILL_PIWIGO_OFF.md` (§10,
 §13 lists each item's method and data); the ledger that tracked them was
 retired, and is in git at `72cac936`.
 
@@ -274,10 +278,25 @@ with their states.
 State: `PROFILE_DRILL_PIWIGO_LEDGER.md` is one list of every task on this branch: the
 rows of this drill, the 20 G plan's items, the 25 G report's unbuilt designs and the
 crate split from C4 on, grouped by the part of the program each changes, with what
-blocks each; its §2.4 lists the decisions that wait on the user. On this branch E1,
+blocks each. Its §2.4 records seven decisions taken on 2026-10-15, with their
+evidence and the rows each changed:
+
+1. a constant's evaluation yields a value type and its throws, which every place PHP
+   evaluates it inherits;
+2. one record per file of the names it writes replaces the case references;
+3. the 20 G plan's item 4 is retired, and the crate split's memo and snapshots run on
+   one incremental query engine over the whole pipeline, with persistence (REG-16;
+   salsa by default, measured first);
+4. the tree is flat and immutable, with no `unsafe`;
+5. declarations are the tree's own vectors;
+6. the stubs' gates are data;
+7. the builtin knowledge is embedded.
+
+On this branch E1,
 D5 (proposal 2), proposals 1-5, 7, 8 and 9, and the cuts E2, E3, E5-E7, E10, E13-E16
 are built; the off run went from 25.63 G to 20.93 G Ir, output byte-identical at each
-row. Proposal 6 (STUB-11) waits on D3 and the crate split. H1 (CACHE-8) is the one row
+row. Proposal 6 (STUB-11) is decided; it waits on its measurements (STUB-10.1) and the
+crate split. H1 (CACHE-8) is the one row
 of this drill nothing blocks. The 20 G plan's items are open on this branch, except
 item 8's explicit-mixed part, which the crate split's C4 delivered; the ledger
 re-evaluates each against the code and the profile, splits it into its steps, and
