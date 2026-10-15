@@ -107,8 +107,8 @@ pub(crate) struct Node {
     pub(crate) hash: u64,
     pub(crate) exact: u64,
     // Both words below in one, so a node is the size it was: the
-    // reference flags in the top 16 bits (`flags`), which are set when the
-    // node is made, and below them, two bits for each question the node
+    // reference flags and the kind (`kind_of`) in the top 16 bits (`flags`),
+    // which are set when the node is made, and below them, two bits for each question the node
     // has answered (`answers`).
     state: std::sync::atomic::AtomicU64,
 }
@@ -221,8 +221,22 @@ pub fn looks_like_constant_name(name: &str) -> bool {
         && short.iter().all(|&b| is_constant_byte(b))
 }
 
-/// The flags a node passes up to the node it is a child of.
-const PASSED_UP: u16 = !HAS_KEY_REFINEMENT;
+/// Where a node's kind sits in its flags, in four bits: which family of
+/// values the form is of, or plain `mixed`, or `never` (`relation::kind_flags`).
+pub(crate) const KIND_SHIFT: u32 = 11;
+const KIND_BITS: u16 = 0b1111 << KIND_SHIFT;
+/// One scalar value or enum case (`relation::kind_flags`).
+pub(crate) const IS_SCALAR_VALUE: u16 = 1 << 15;
+
+/// The kind code in a node's `flags`.
+pub(crate) fn kind_of(flags: u16) -> u16 {
+    (flags & KIND_BITS) >> KIND_SHIFT
+}
+
+/// The flags a node passes up to the node it is a child of: the kind and the
+/// scalar-value bit are of the node's own form, and a key refinement is not
+/// passed up.
+const PASSED_UP: u16 = !(HAS_KEY_REFINEMENT | KIND_BITS | IS_SCALAR_VALUE);
 
 /// The `HAS_*` flags of `repr`: its own, and its children's.
 pub(crate) fn reference_flags(repr: &Repr) -> u16 {
@@ -265,7 +279,7 @@ pub(crate) fn reference_flags(repr: &Repr) -> u16 {
     if refined {
         flags |= HAS_KEY_REFINEMENT;
     }
-    flags
+    flags | relation::kind_flags(repr)
 }
 
 impl Type {

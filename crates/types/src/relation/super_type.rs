@@ -68,19 +68,20 @@ impl Relation<'_> {
     /// unprovable is `Maybe`, including any comparison with a class the
     /// registry doesn't know.
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
+        // Each shortcut reads the node's kind, set when the node was made.
+        let (sup_flags, sub_flags) = (sup.0.flags(), sub.0.flags());
         // A literal, `true`, `false`, `null` or an enum case is one value:
         // one holds another only when they are the same.
-        if is_scalar_value(sup) && is_scalar_value(sub) {
+        if sup_flags & sub_flags & crate::IS_SCALAR_VALUE != 0 {
             return TrinaryLogic::from_bool(sup == sub);
         }
+        let (sup_kind, sub_kind) = (crate::kind_of(sup_flags), crate::kind_of(sub_flags));
         // Plain `mixed` holds everything and `never` is held by everything.
-        if matches!(sup.repr(), Repr::Mixed(_, None)) || matches!(sub.repr(), Repr::Never) {
+        if sup_kind == KIND_MIXED || sub_kind == KIND_NEVER {
             return TrinaryLogic::Yes;
         }
         // Two scalar families share no value.
-        if let (Some(a), Some(b)) = (scalar_family(sup), scalar_family(sub))
-            && a != b
-        {
+        if is_family_kind(sup_kind) && is_family_kind(sub_kind) && sup_kind != sub_kind {
             return TrinaryLogic::No;
         }
         if self.hierarchy.is_structural() {
@@ -630,7 +631,7 @@ mod structural_memo {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) enum ScalarFamily {
     Int,
     Float,
@@ -642,8 +643,54 @@ pub(crate) enum ScalarFamily {
     Resource,
 }
 
+/// The kind a node has when it is plain `mixed`, and when it is `never`:
+/// the two forms the first shortcuts of `is_super_type_of` ask for. The
+/// kinds 1 to 8 are the `ScalarFamily` values, in order, and 0 is a form
+/// that is none of these.
+const KIND_MIXED: u16 = 9;
+const KIND_NEVER: u16 = 10;
+
+const FAMILIES: [ScalarFamily; 8] = [
+    ScalarFamily::Int,
+    ScalarFamily::Float,
+    ScalarFamily::String,
+    ScalarFamily::Bool,
+    ScalarFamily::Null,
+    ScalarFamily::Array,
+    ScalarFamily::Object,
+    ScalarFamily::Resource,
+];
+
+fn is_family_kind(kind: u16) -> bool {
+    (1..=8).contains(&kind)
+}
+
+/// The kind code and the scalar-value bit of `repr`, as set in its node's
+/// flags (`crate::reference_flags`): what `scalar_family`, `is_scalar_value`
+/// and the `mixed` and `never` tests answer, read once when the node is made.
+pub(crate) fn kind_flags(repr: &Repr) -> u16 {
+    let kind = match family_of(repr) {
+        Some(family) => family as u16 + 1,
+        None => match repr {
+            Repr::Mixed(_, None) => KIND_MIXED,
+            Repr::Never => KIND_NEVER,
+            _ => 0,
+        },
+    };
+    let mut flags = kind << crate::KIND_SHIFT;
+    if is_scalar_value_repr(repr) {
+        flags |= crate::IS_SCALAR_VALUE;
+    }
+    flags
+}
+
 pub(crate) fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
-    match ty.repr() {
+    let kind = crate::kind_of(ty.0.flags());
+    is_family_kind(kind).then(|| FAMILIES[usize::from(kind) - 1])
+}
+
+fn family_of(repr: &Repr) -> Option<ScalarFamily> {
+    match repr {
         Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(_, _) => Some(ScalarFamily::Int),
         Repr::Float | Repr::FloatLiteral(_) => Some(ScalarFamily::Float),
         Repr::String | Repr::StringLiteral(_) | Repr::ClassString(_) | Repr::ClassKindString(_) => {
@@ -664,7 +711,11 @@ pub(crate) fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
 /// Whether `ty` is one scalar value or enum case: a literal (`NAN`
 /// excepted, being no value it equals), `true`, `false`, `null`, a case.
 fn is_scalar_value(ty: &Type) -> bool {
-    match ty.repr() {
+    ty.0.flags() & crate::IS_SCALAR_VALUE != 0
+}
+
+fn is_scalar_value_repr(repr: &Repr) -> bool {
+    match repr {
         Repr::IntLiteral(_)
         | Repr::StringLiteral(_)
         | Repr::True
@@ -727,6 +778,51 @@ mod tests {
                 negated: false,
             }),
         ]
+    }
+
+    #[test]
+    fn a_nodes_kind_is_what_its_own_form_says() {
+        let mut types = samples();
+        types.extend([
+            Type::float_literal(f64::NAN),
+            Type::float_literal(1.5),
+            Type::new(Repr::ClassKindString(crate::ClassKind::Interface)),
+            Type::new(Repr::Mixed(false, Some(Type::int()))),
+            Type::array(Type::int(), Type::int_literal(1)),
+            Type::union_of(vec![Type::int_literal(1), Type::int_literal(2)]),
+            Type::union_of(vec![Type::never(), Type::null()]),
+            Type::array(Type::mixed(), Type::never()),
+        ]);
+        for ty in &types {
+            let repr = ty.repr();
+            assert_eq!(
+                scalar_family(ty).map(|f| f as u16),
+                family_of(repr).map(|f| f as u16)
+            );
+            assert_eq!(is_scalar_value(ty), is_scalar_value_repr(repr), "{ty}");
+            let kind = crate::kind_of(ty.0.flags());
+            assert_eq!(
+                kind == KIND_MIXED,
+                matches!(repr, Repr::Mixed(_, None)),
+                "{ty}"
+            );
+            assert_eq!(kind == KIND_NEVER, matches!(repr, Repr::Never), "{ty}");
+            assert_eq!(
+                kind == 0,
+                family_of(repr).is_none() && !matches!(repr, Repr::Mixed(_, None) | Repr::Never),
+                "{ty}"
+            );
+        }
+        let family = |ty: &Type| scalar_family(ty).map(|f| f as u16);
+        assert_eq!(family(&Type::int_literal(3)), Some(0));
+        assert_eq!(family(&Type::string_literal("a".into())), Some(2));
+        assert_eq!(family(&Type::array(Type::int(), Type::int())), Some(5));
+        assert_eq!(
+            family(&Type::union_of(vec![Type::int(), Type::string()])),
+            None
+        );
+        assert!(!is_scalar_value(&Type::float_literal(f64::NAN)));
+        assert!(is_scalar_value(&Type::float_literal(1.5)));
     }
 
     #[test]

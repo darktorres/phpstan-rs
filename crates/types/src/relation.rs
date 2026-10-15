@@ -6,7 +6,7 @@ mod accepts;
 mod kinds;
 mod super_type;
 
-pub(crate) use super_type::scalar_family;
+pub(crate) use super_type::{kind_flags, scalar_family};
 
 use crate::{ClassHierarchy, TrinaryLogic};
 
