@@ -1098,9 +1098,9 @@ impl Registry {
     /// genuinely untyped native parameter, PSR-3's
     /// `LoggerInterface::log(mixed $level, ...)` shape), there's nothing
     /// to lose - inheriting the ancestor's `Mixed` here is exactly what
-    /// correctly propagates `explicit_mixed_hint` down from wherever it
-    /// was deliberately written, rather than leaving the position
-    /// looking entirely undocumented.
+    /// correctly propagates an explicit `mixed` down from wherever it was
+    /// deliberately written, rather than leaving the position looking
+    /// entirely undocumented.
     pub(crate) fn safe_to_backfill_mixed(ancestor_ty: &Type, native_ty: &Type) -> bool {
         !ancestor_ty.is_mixed() || native_ty.is_mixed()
     }
@@ -1143,7 +1143,7 @@ impl Registry {
     ) -> bool {
         // What one method takes from its ancestors: the parameters by
         // position and the return type.
-        type Backfill = (Name, Vec<(usize, Type, bool)>, Option<(Type, bool)>);
+        type Backfill = (Name, Vec<(usize, Type)>, Option<Type>);
 
         let registry: &Registry = self;
         let backfills: Vec<(Name, Vec<Backfill>)> = order
@@ -1272,7 +1272,6 @@ impl Registry {
                                             &ancestor_bindings,
                                         )
                                         .reconcile_with_native(p.ty_native.clone()),
-                                        ancestor_param.explicit_mixed_hint,
                                     ));
                                 }
                             }
@@ -1304,7 +1303,6 @@ impl Registry {
                                             &ancestor_bindings,
                                         )
                                         .reconcile_with_native(p.ty_native.clone()),
-                                        ancestor_param.explicit_mixed_hint,
                                     ));
                                 }
                             }
@@ -1335,14 +1333,11 @@ impl Registry {
                             &sig.return_type_native,
                         ))
                     .then(|| {
-                        (
-                            Registry::substitute_class_scoped_ancestor_templates(
-                                &ancestor_sig.return_type.bind_self(owner),
-                                &ancestor_bindings,
-                            )
-                            .reconcile_with_native(sig.return_type_native.clone()),
-                            ancestor_sig.return_explicit_mixed_hint,
+                        Registry::substitute_class_scoped_ancestor_templates(
+                            &ancestor_sig.return_type.bind_self(owner),
+                            &ancestor_bindings,
                         )
+                        .reconcile_with_native(sig.return_type_native.clone())
                     });
                     if !param_fills.is_empty() || return_fill.is_some() {
                         per_class.push((method_name.clone(), param_fills, return_fill));
@@ -1361,18 +1356,16 @@ impl Registry {
                 let Some(sig) = info.methods.get_mut(&method_name) else {
                     continue;
                 };
-                for (i, ty, explicit_mixed_hint) in param_fills {
+                for (i, ty) in param_fills {
                     if let Some(p) = sig.params.get_mut(i) {
                         p.ty = ty;
                         p.has_own_doc = true;
-                        p.explicit_mixed_hint = explicit_mixed_hint;
                         changed = true;
                     }
                 }
-                if let Some((ty, explicit_mixed_hint)) = return_fill {
+                if let Some(ty) = return_fill {
                     sig.return_type = ty;
                     sig.return_has_own_doc = true;
-                    sig.return_explicit_mixed_hint = explicit_mixed_hint;
                     changed = true;
                 }
             }

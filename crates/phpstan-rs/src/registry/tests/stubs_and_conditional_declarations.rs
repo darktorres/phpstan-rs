@@ -237,7 +237,6 @@ fn merge_stubs_does_not_override_user_functions() {
             return_doc_ty: None,
             self_out: None,
             return_case_refs: Vec::new(),
-            return_explicit_mixed_hint: false,
             no_discard: false,
             returns_ref: false,
             must_use_result: false,

@@ -18,7 +18,7 @@ use types::{self, TemplateParam, Type};
 /// same resolved value: a virtual member's own "native" type is a
 /// meaningless question (there's no real declaration to have one), so
 /// this simply reuses the docblock-resolved type for both, matching
-/// `is_own_doc`/`explicit_mixed_hint` being irrelevant here too - a
+/// `is_own_doc` being irrelevant here too - a
 /// synthesized member's own `FunctionReflection` never participates in
 /// `flatten_phpdoc_inheritance`'s own backfill machinery in the first
 /// place (it's already fully resolved, not merged from anywhere).
@@ -90,7 +90,6 @@ pub(crate) fn method_tag_sig(
                 doc_ty: None,
                 by_ref: p.by_ref,
                 has_own_doc: true,
-                explicit_mixed_hint: false,
                 case_refs,
                 closure_this_type: None,
                 out_ty: None,
@@ -106,7 +105,6 @@ pub(crate) fn method_tag_sig(
         return_doc_ty: None,
         self_out: None,
         return_case_refs,
-        return_explicit_mixed_hint: false,
         no_discard: false,
         returns_ref: false,
         must_use_result: false,

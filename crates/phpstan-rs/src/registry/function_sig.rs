@@ -4,10 +4,9 @@ use syntax::name::Name;
 use syntax::name::NameMap;
 
 use crate::registry::name_context::{class_ref, resolve_names_in_type};
-use crate::registry::type_node::{mentions_mixed, parse_type_node};
+use crate::registry::type_node::parse_type_node;
 use phpdoc::DocType;
 use phpdoc::docblock::{self, DocBlock};
-use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
 
@@ -58,12 +57,6 @@ pub struct ParameterReflection {
     // ancestor, which then sets this `true` too - what makes
     // multi-level inheritance resolve one level per fixed-point pass.
     pub(in crate::registry) has_own_doc: bool,
-    // Whether this declaration's own native hint/`@param` text spells
-    // out `mixed` explicitly - needed so `checker::missing_typehint`
-    // still recognizes a backfilled (`flatten_phpdoc_inheritance`)
-    // `mixed` as deliberate, not undocumented; that pass copies this
-    // field alongside `ty`.
-    pub(in crate::registry) explicit_mixed_hint: bool,
     // Every class-name reference `ty` carries, as (raw, resolved-FQN)
     // pairs, collected before `resolve_names_in_type` destroys the
     // original spelling. Empty for a backfilled position - the raw text
@@ -102,7 +95,6 @@ impl Clone for ParameterReflection {
             doc_ty,
             by_ref,
             has_own_doc,
-            explicit_mixed_hint,
             case_refs,
             closure_this_type,
             out_ty,
@@ -118,7 +110,6 @@ impl Clone for ParameterReflection {
             doc_ty: doc_ty.clone(),
             by_ref: *by_ref,
             has_own_doc: *has_own_doc,
-            explicit_mixed_hint: *explicit_mixed_hint,
             case_refs: clone_vec(case_refs),
             closure_this_type: closure_this_type.clone(),
             out_ty: out_ty.clone(),
@@ -138,7 +129,6 @@ impl Clone for FunctionReflection {
             return_doc_ty,
             self_out,
             return_case_refs,
-            return_explicit_mixed_hint,
             no_discard,
             returns_ref,
             must_use_result,
@@ -165,7 +155,6 @@ impl Clone for FunctionReflection {
             return_doc_ty: return_doc_ty.clone(),
             self_out: self_out.clone(),
             return_case_refs: clone_vec(return_case_refs),
-            return_explicit_mixed_hint: *return_explicit_mixed_hint,
             no_discard: *no_discard,
             returns_ref: *returns_ref,
             must_use_result: *must_use_result,
@@ -235,10 +224,6 @@ impl ParameterReflection {
         self.has_own_doc
     }
 
-    pub fn explicit_mixed_hint(&self) -> bool {
-        self.explicit_mixed_hint
-    }
-
     pub fn case_refs(&self) -> &Vec<(Name, Name)> {
         &self.case_refs
     }
@@ -273,8 +258,6 @@ pub struct FunctionReflection {
     pub(in crate::registry) self_out: Option<Type>,
     // `ParameterReflection::case_refs`'s return-position equivalent.
     pub(in crate::registry) return_case_refs: Vec<(Name, Name)>,
-    // `ParameterReflection::explicit_mixed_hint`'s return-position equivalent.
-    pub(in crate::registry) return_explicit_mixed_hint: bool,
     // PHP 8.5's `#[\NoDiscard]` marker - `true` when a bare, unused
     // call to this declaration should be flagged
     // (`Checker::check_no_discard_statement`), matching real PHPStan's
@@ -402,10 +385,6 @@ impl FunctionReflection {
 
     pub fn return_case_refs(&self) -> &Vec<(Name, Name)> {
         &self.return_case_refs
-    }
-
-    pub fn return_explicit_mixed_hint(&self) -> bool {
-        self.return_explicit_mixed_hint
     }
 
     pub fn no_discard(&self) -> bool {
@@ -795,8 +774,6 @@ impl FunctionReflection {
                         .map(&resolve_doc_type),
                     by_ref: p.by_ref,
                     has_own_doc: doc_ty.is_some(),
-                    explicit_mixed_hint: p.type_hint.as_ref().is_some_and(TypeHint::is_mixed)
-                        || doc_ty.as_ref().is_some_and(mentions_mixed),
                     case_refs,
                     closure_this_type,
                     out_ty,
@@ -866,8 +843,6 @@ impl FunctionReflection {
                 .and_then(|d| d.self_out.as_ref())
                 .map(resolve_doc_type),
             return_case_refs,
-            return_explicit_mixed_hint: f.return_type.as_ref().is_some_and(TypeHint::is_mixed)
-                || doc_return.is_some_and(mentions_mixed),
             no_discard,
             returns_ref: f.by_ref,
             must_use_result,
@@ -948,9 +923,6 @@ impl FunctionReflection {
                     // documents this position, the merged signature
                     // shouldn't look like a further-inheritance candidate.
                     has_own_doc: a.has_own_doc || b.has_own_doc,
-                    // Same permissive either-overload-wins rule as
-                    // `has_own_doc` just above, for the identical reason.
-                    explicit_mixed_hint: a.explicit_mixed_hint || b.explicit_mixed_hint,
                     // Both real overloads' own case refs are real,
                     // independent class-name references worth checking -
                     // concatenated, not chosen between, matching this
@@ -990,8 +962,6 @@ impl FunctionReflection {
                 .into_iter()
                 .chain(other.return_case_refs)
                 .collect(),
-            return_explicit_mixed_hint: self.return_explicit_mixed_hint
-                || other.return_explicit_mixed_hint,
             no_discard,
             // Only a reference when every overload returns one.
             returns_ref: self.returns_ref && other.returns_ref,

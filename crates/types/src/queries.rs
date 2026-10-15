@@ -154,6 +154,17 @@ impl Type {
         matches!(self.repr(), Repr::Mixed(true, _))
     }
 
+    /// Whether a `mixed` a written type resolved to stands anywhere in this
+    /// type, nested included but for inside a template, whose bound is the
+    /// template's own.
+    pub fn mentions_explicit_mixed(&self) -> bool {
+        match self.repr() {
+            Repr::Mixed(explicit, _) => *explicit,
+            Repr::TemplateParam(_) => false,
+            _ => self.any_child(Type::mentions_explicit_mixed),
+        }
+    }
+
     /// A union's members, or this type alone.
     pub fn union_members(&self) -> &[Type] {
         match self.repr() {

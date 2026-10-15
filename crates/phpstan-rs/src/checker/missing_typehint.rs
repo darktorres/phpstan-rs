@@ -21,12 +21,8 @@
 //! `array_map`'s callback), so inventing that check here would be new,
 //! false-positive-prone behavior with no real rule to model it on.
 use crate::checker::Checker;
-use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
-use phpdoc::DocType;
 use phpdoc::docblock;
-use phpdoc::grammar::TypeNode;
-use syntax::ast::TypeHint;
 use syntax::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use syntax::span::Span;
 use types::Type;
@@ -114,47 +110,6 @@ pub(crate) fn class_kind_word(kind: ClassKind) -> &'static str {
     }
 }
 
-/// True when the type actually written for this declaration - its native
-/// hint, or its own PHPDoc type tag - is the literal word `mixed`
-/// (case-insensitively, tolerating a leading `?` some PHPDoc authors
-/// still write out of habit even though `mixed` alone already includes
-/// `null`). This project's `Type` model has exactly one `Mixed` variant
-/// for both "the author wrote `mixed`" and "the author wrote nothing at
-/// all" - real PHPStan's own `MixedType::isExplicitMixed()` distinguishes
-/// the two at the type level (`types::parse_type_string` doesn't carry
-/// that bit through, see its own doc comments on why), so the distinction
-/// is recovered here instead, straight from the declaration.
-fn is_explicit_mixed_text(native_hint: Option<&TypeHint>, doc_type: Option<&DocType>) -> bool {
-    let is_mixed_node = |node: &TypeNode| {
-        let node = match node {
-            TypeNode::Nullable(inner) => inner.as_ref(),
-            other => other,
-        };
-        matches!(node, TypeNode::Identifier(name) if name.eq_ignore_ascii_case("mixed"))
-    };
-    doc_type.map(DocType::node).is_some_and(is_mixed_node)
-        || native_hint.is_some_and(TypeHint::is_mixed)
-}
-
-/// Whether the native hint or the PHPDoc type spells out `mixed` anywhere,
-/// nested included. A native type can only be `mixed` as a whole.
-fn mentions_mixed(native_hint: Option<&TypeHint>, doc_type: Option<&DocType>) -> bool {
-    native_hint.is_some_and(TypeHint::is_mixed)
-        || doc_type.is_some_and(crate::registry::mentions_mixed)
-}
-
-/// The "no type specified at all" case each of the six rules below leads
-/// with - `ty` resolved to plain `Mixed` (this project's stand-in for
-/// both "no hint at all" and "explicit `mixed`" alike) where the source
-/// itself didn't actually spell out `mixed`.
-fn is_implicit_mixed(
-    ty: &Type,
-    native_hint: Option<&TypeHint>,
-    doc_type: Option<&DocType>,
-) -> bool {
-    ty.is_implicit_mixed() && !is_explicit_mixed_text(native_hint, doc_type)
-}
-
 impl<'a> Checker<'a> {
     /// Walks `ty` for every bare reference (no `<...>` type arguments at
     /// all) to a class this project knows has its own `@template`s -
@@ -220,10 +175,9 @@ impl<'a> Checker<'a> {
         iterable_message: impl Fn(&str) -> String,
         generics_message: impl Fn(&str, &str) -> String,
         ty: &Type,
-        explicit_mixed: bool,
     ) {
         let mut iterable = Vec::new();
-        iterable.extend(ty.iterable_types_missing_value_type(explicit_mixed));
+        iterable.extend(ty.iterable_types_missing_value_type());
         for desc in iterable {
             self.report_builder(
                 DiagnosticBuilder::new(
@@ -284,12 +238,7 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            let doc_var_type = p
-                .doc_comment
-                .as_deref()
-                .map(docblock::parse_shared)
-                .and_then(|d| d.var_type.clone());
-            if is_implicit_mixed(&ty, p.type_hint.as_ref(), doc_var_type.as_ref()) {
+            if ty.is_implicit_mixed() {
                 self.report(
                     format!("Property {fqn}::${} has no type specified.", p.name),
                     p.span,
@@ -309,7 +258,6 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                mentions_mixed(p.type_hint.as_ref(), doc_var_type.as_ref()),
             );
         }
     }
@@ -361,7 +309,6 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                mentions_mixed(c.type_hint.as_ref(), doc_var_type.as_ref()),
             );
         }
     }
@@ -379,19 +326,10 @@ impl<'a> Checker<'a> {
     /// e.g. a genuinely untyped `...$args`'s own per-argument `mixed`
     /// behind an `array<mixed>`).
     ///
-    /// `sig` is the same `Option<&FunctionReflection>` `check_function`
-    /// itself already looked up - when present, its `ParameterReflection::
-    /// explicit_mixed_hint`/`FunctionReflection::return_explicit_mixed_hint`
-    /// (computed once in `from_decl`, from whichever declaration's
-    /// docblock `ty`/`return_type` actually came from - this declaration's
-    /// own, or an ancestor's via `Registry::flatten_phpdoc_inheritance`)
-    /// are used instead of re-deriving "was `mixed` written explicitly"
-    /// from `f`'s own raw text: re-deriving from `f` alone would silently
-    /// miss every inherited `array<string, mixed>`/nested-`mixed` type
-    /// on a class implementing an interface with no docblock of its own.
-    /// `sig` is only ever `None` for an anonymous class (never indexed
-    /// into the registry - see `lookup_own_signature`'s own doc comment),
-    /// where the text-based fallback below still applies.
+    ///
+    /// Whether `mixed` was written is read from the types themselves: a
+    /// written `mixed` is an explicit one, wherever it stands in the type
+    /// and whether it came from this declaration or an ancestor's.
     pub(crate) fn check_missing_function_typehints(
         &mut self,
         f: &FunctionDecl,
@@ -399,27 +337,19 @@ impl<'a> Checker<'a> {
         label: &str,
         resolved_params: &[(String, Type, Span)],
         declared_return: Option<&Type>,
-        sig: Option<&FunctionReflection>,
     ) {
-        // The registry-computed `sig` (built once at index time via
-        // `FunctionReflection::from_decl`) already carries every per-param/
-        // return "was there an explicit `mixed` somewhere" verdict this
-        // function would otherwise re-derive by re-parsing the identical
-        // raw docblock text again here - a real, measured cost at
-        // `check_function`'s own call volume. Skip the full parse
-        // whenever `sig` already covers every param (`resolved_params`
-        // and `sig.params` are always built 1:1 from the same `f.params`,
-        // so `sig.is_some()` alone is enough - see `lookup_own_signature`'s
-        // own doc comment: `sig` is only ever `None` for an anonymous
-        // class method) *and* the magic-method short-circuit just below
-        // can't possibly need `doc_return`'s real presence/absence either
-        // (checked here, cheaply, via the same name-table lookup that
-        // short-circuit itself uses - not a substring probe, to avoid any
-        // false-positive risk on that carefully-tuned check).
+        // The PHPDoc is parsed only where a magic method's implicit
+        // return type or `__serialize`/`__debugInfo`'s fixed one depends
+        // on whether a `@return` was written.
         let magic_method_may_need_doc_return = class_name.is_some()
             && f.return_type.is_none()
             && is_magic_method_with_implicit_return_type(&f.name);
-        let doc = if sig.is_none() || magic_method_may_need_doc_return {
+        let serialization_method = class_name.is_some()
+            && matches!(
+                f.name.to_ascii_lowercase().as_str(),
+                "__serialize" | "__debuginfo"
+            );
+        let doc = if magic_method_may_need_doc_return || serialization_method {
             f.doc_comment.as_deref().map(docblock::parse_shared)
         } else {
             None
@@ -440,24 +370,14 @@ impl<'a> Checker<'a> {
             node.is_some_and(|n| this.type_node_unresolvable(n, class_name))
         };
 
-        for (i, (name, ty, span)) in resolved_params.iter().enumerate() {
+        for (name, ty, span) in resolved_params {
             if unresolvable(
                 self,
                 doc_nodes.as_ref().and_then(|n| n.params.get(name.as_str())),
             ) {
                 continue;
             }
-            let native_hint = f
-                .params
-                .iter()
-                .find(|p| *p.name == **name)
-                .and_then(|p| p.type_hint.as_ref());
-            let doc_ty = doc.as_ref().and_then(|d| d.params.get(name));
-            let explicit_mixed = match sig.and_then(|s| s.params().get(i)) {
-                Some(param_sig) => param_sig.explicit_mixed_hint(),
-                None => mentions_mixed(native_hint, doc_ty),
-            };
-            if ty.is_mixed() && !explicit_mixed {
+            if ty.is_implicit_mixed() {
                 self.report(
                     format!("{kind_word} {label}() has parameter ${name} with no type specified."),
                     *span,
@@ -480,7 +400,6 @@ impl<'a> Checker<'a> {
                     )
                 },
                 ty,
-                explicit_mixed,
             );
         }
 
@@ -535,12 +454,19 @@ impl<'a> Checker<'a> {
         ) {
             return;
         }
-        let return_explicit_mixed = match sig {
-            Some(s) => s.return_explicit_mixed_hint(),
-            None => mentions_mixed(native_return, doc_return),
-        };
         let return_ty = declared_return.cloned().unwrap_or(Type::mixed());
-        if return_ty.is_mixed() && !return_explicit_mixed {
+        if return_ty.is_implicit_mixed() {
+            // A built-in method's return type is tentative (PHP 8.1): an
+            // override may omit it, and then has it still.
+            let overrides_built_in = class_name
+                .and_then(|class| {
+                    self.registry
+                        .lookup_ancestor_method_with_owner(class, &f.name)
+                })
+                .is_some_and(|(owner, _)| self.registry.built_in_stub_classes.contains_key(&owner));
+            if overrides_built_in && f.return_type.is_none() {
+                return;
+            }
             self.report(
                 format!("{kind_word} {label}() has no return type specified."),
                 f.span,
@@ -559,7 +485,6 @@ impl<'a> Checker<'a> {
                 )
             },
             &return_ty,
-            return_explicit_mixed,
         );
     }
 }

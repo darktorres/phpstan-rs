@@ -1,0 +1,13 @@
+4:12-4:63 missingType.iterableValue L6 | Method Cases::conditional_else_branch() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+4:45-4:47 missingType.parameter L6 | Method Cases::conditional_else_branch() has parameter $x with no type specified.
+12:54-12:73 missingType.iterableValue L6 | Method Cases::condition_is_not_a_declared_type() has parameter $keys with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+14:65-14:72 missingType.iterableValue L6 | Method Cases::bare_array_beside_a_closure_returning_mixed() has parameter $column with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+16:21-16:36 missingType.iterableValue L6 | Property Cases::$callbacks type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+23:5-23:42 method.tentativeReturnType L0 | Return type mixed of method Counter::count() is not covariant with tentative return type int of method Countable::count().
+    tip: Make it covariant, or use the #[\\ReturnTypeWillChange] attribute to temporarily suppress the error.
+    non-ignorable
+29:12-29:40 missingType.return L6 | Method Reader::key() has no return type specified.

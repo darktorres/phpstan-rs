@@ -63,6 +63,20 @@ pub trait UnionAll: Iterator<Item = Type> + Sized {
 
 impl<I: Iterator<Item = Type>> UnionAll for I {}
 
+/// `member` added to `members` unless one equal to it is there, which
+/// keeps a `mixed` written out where the other has it implicit: the two
+/// are one type, but what was written as `mixed` is not implicit.
+fn push_member(members: &mut Vec<Type>, member: Type) {
+    match members.iter().position(|m| *m == member) {
+        None => members.push(member),
+        Some(at) => {
+            if !members[at].mentions_explicit_mixed() && member.mentions_explicit_mixed() {
+                members[at] = member;
+            }
+        }
+    }
+}
+
 /// The union of `members`: none is `never`, one is itself, two are joined
 /// as `Type::union` does, and more in one normalization, remembered by the
 /// list of members.
@@ -102,7 +116,12 @@ fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>)
         match operands.len() {
             0 => return Type::never(),
             1 => return operands.pop().expect("one operand"),
-            2 if operands[0] == operands[1] => return operands.swap_remove(0),
+            2 if operands[0] == operands[1] => {
+                let keep = usize::from(
+                    !operands[0].mentions_explicit_mixed() && operands[1].mentions_explicit_mixed(),
+                );
+                return operands.swap_remove(keep);
+            }
             _ => {}
         }
         // An error absorbs everything, as a `mixed` does.
@@ -124,17 +143,10 @@ fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>)
             match operand.into_repr() {
                 Repr::Union(inner) => {
                     for member in inner {
-                        if !members.contains(&member) {
-                            members.push(member);
-                        }
+                        push_member(&mut members, member);
                     }
                 }
-                other => {
-                    let other = Type::new(other);
-                    if !members.contains(&other) {
-                        members.push(other);
-                    }
-                }
+                other => push_member(&mut members, Type::new(other)),
             }
         }
         // Same `Mixed`-absorption the fast-path check above already gives a

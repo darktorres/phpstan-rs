@@ -799,7 +799,6 @@ impl<'a> Checker<'a> {
             &label,
             &resolved_params,
             declared_return.as_ref(),
-            sig,
         );
         if self.settings.extras.check_native_type_hints
             && let Some(sig) = sig

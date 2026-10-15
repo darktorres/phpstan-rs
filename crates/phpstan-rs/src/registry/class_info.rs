@@ -1653,7 +1653,6 @@ impl ClassReflection {
                 // No real docblock/native text behind any of these
                 // synthesized enum methods - nothing to check the case of.
                 return_case_refs: Vec::new(),
-                return_explicit_mixed_hint: false,
                 no_discard: false,
                 returns_ref: false,
                 must_use_result: false,
@@ -1691,7 +1690,6 @@ impl ClassReflection {
                 doc_ty: None,
                 by_ref: false,
                 has_own_doc: true,
-                explicit_mixed_hint: false,
                 case_refs: Vec::new(),
                 closure_this_type: None,
                 out_ty: None,
@@ -1707,7 +1705,6 @@ impl ClassReflection {
                     return_doc_ty: None,
                     self_out: None,
                     return_case_refs: Vec::new(),
-                    return_explicit_mixed_hint: false,
                     no_discard: false,
                     returns_ref: false,
                     must_use_result: false,
@@ -1740,7 +1737,6 @@ impl ClassReflection {
                     return_doc_ty: None,
                     self_out: None,
                     return_case_refs: Vec::new(),
-                    return_explicit_mixed_hint: false,
                     no_discard: false,
                     returns_ref: false,
                     must_use_result: false,

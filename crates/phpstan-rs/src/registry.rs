@@ -84,7 +84,7 @@ pub use provenance::{Origin, Provenance};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
 pub use reflection_attribute::{AttributeArgument, AttributeValue, ReflectionAttribute};
-pub(crate) use type_node::{mentions_mixed, parse_type_node};
+pub(crate) use type_node::parse_type_node;
 
 /// Real PHPStan's own `ApiRuleHelper::isPhpStanName()` - whether
 /// `fqn` is under the `PHPStan\` namespace itself (excluding the two

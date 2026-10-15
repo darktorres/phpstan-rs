@@ -5,11 +5,11 @@ use crate::{Repr, Type};
 
 impl Type {
     /// The iterable types in this type whose value type is implicit
-    /// `mixed`, each as `iterable type <display>`; `explicit_mixed` when
-    /// the source spelled `mixed` out, which silences those findings.
-    pub fn iterable_types_missing_value_type(&self, explicit_mixed: bool) -> Vec<String> {
+    /// `mixed`, each as `iterable type <display>`. A value type the source
+    /// spelled `mixed` out for is not implicit.
+    pub fn iterable_types_missing_value_type(&self) -> Vec<String> {
         let mut out = Vec::new();
-        collect_iterable_missing_value_types(self, explicit_mixed, &mut out);
+        collect_iterable_missing_value_types(self, &mut out);
         out
     }
 
@@ -61,33 +61,38 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
 /// `@template` placeholder itself, matching that function's own
 /// `TemplateType` early-return.
 ///
-/// `explicit_mixed` suppresses a finding whose own element type is
-/// `Mixed` when the source text actually spelled `mixed` out explicitly
-/// (e.g. `array<string, mixed>`) - real PHPStan's own `$iterableValue
-/// instanceof MixedType && !$iterableValue->isExplicitMixed()` guard.
+/// An element type that is `mixed` because the source spelled `mixed` out
+/// (`array<string, mixed>`) is not a finding - real PHPStan's own
+/// `$iterableValue instanceof MixedType && !$iterableValue->isExplicitMixed()`
+/// guard, read here at each element type itself.
 /// Writing `mixed` explicitly is a common,
 /// deliberate idiom for "I don't know/care about the element type, and
 /// I don't want this rule to nag about it" - unlike a bare `array` (no
 /// generic arguments at all), which real PHPStan still flags exactly as
 /// before.
-fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &mut Vec<String>) {
+fn collect_iterable_missing_value_types(ty: &Type, out: &mut Vec<String>) {
     syntax::stack::guard(|| {
-        let mut missing = |desc: String| {
-            if !explicit_mixed {
-                out.push(desc);
-            }
-        };
+        let mut missing = |desc: String| out.push(desc);
         match ty.repr() {
             Repr::TemplateParam(_) => return,
-            Repr::Array(_, inner) if inner.is_mixed() => {
+            // A conditional return type is read at its two branches; the
+            // type its condition tests for is not a declared one.
+            Repr::Conditional {
+                if_true, if_false, ..
+            } => {
+                collect_iterable_missing_value_types(if_true, out);
+                collect_iterable_missing_value_types(if_false, out);
+                return;
+            }
+            Repr::Array(_, inner) if inner.is_implicit_mixed() => {
                 return missing(format!("iterable type {ty}"));
             }
             Repr::Union(members) => {
                 if let Some(inner) = iterable_union_value_type(members) {
-                    if inner.is_mixed() {
+                    if inner.is_implicit_mixed() {
                         missing("iterable type iterable".to_string());
                     } else {
-                        collect_iterable_missing_value_types(inner, explicit_mixed, out);
+                        collect_iterable_missing_value_types(inner, out);
                     }
                     return;
                 }
@@ -101,7 +106,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                 let specified: Vec<&Type> = members
                     .iter()
                     .filter_map(|m| match m.repr() {
-                        Repr::Array(_, inner) if !inner.is_mixed() => Some(inner),
+                        Repr::Array(_, inner) if !inner.is_implicit_mixed() => Some(inner),
                         _ => None,
                     })
                     .collect();
@@ -109,15 +114,13 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                     return missing(format!("iterable type {ty}"));
                 }
                 for inner in specified {
-                    collect_iterable_missing_value_types(inner, explicit_mixed, out);
+                    collect_iterable_missing_value_types(inner, out);
                 }
                 return;
             }
             _ => {}
         }
-        ty.for_each_child(&mut |child| {
-            collect_iterable_missing_value_types(child, explicit_mixed, out)
-        });
+        ty.for_each_child(&mut |child| collect_iterable_missing_value_types(child, out));
     })
 }
 

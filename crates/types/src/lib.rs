@@ -54,7 +54,7 @@ pub(crate) use intersection::intersect_types;
 pub use late::ClassConstants;
 pub use numeric::{PhpNumber, numeric_value};
 pub use offsets::OffsetPresence;
-pub use parse::{canonical_int_key, is_reserved_type_word, text_mentions_mixed};
+pub use parse::{canonical_int_key, is_reserved_type_word};
 pub use parse::{native_type, parse_type_string, parse_written_type};
 pub use parse_display::{try_parse_displayed, try_parse_displayed_with};
 pub(crate) use php_float_format::format_php_float;

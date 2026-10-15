@@ -1,1 +1,1 @@
-no diagnostics
+8:12-8:18 missingType.generics L6 | Function f() has parameter $b with generic class Box but does not specify its types: T

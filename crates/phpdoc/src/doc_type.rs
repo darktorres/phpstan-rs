@@ -22,13 +22,7 @@ pub struct DocType(Arc<Inner>);
 #[derive(Debug)]
 struct Inner {
     node: TypeNode,
-    lowered: OnceLock<Lowered>,
-}
-
-#[derive(Debug, Clone)]
-struct Lowered {
-    ty: Type,
-    mentions_mixed: bool,
+    lowered: OnceLock<Type>,
 }
 
 impl DocType {
@@ -52,24 +46,11 @@ impl DocType {
         }
     }
 
-    fn lowered(&self) -> &Lowered {
-        self.0.lowered.get_or_init(|| {
-            let text = self.0.node.to_source_string();
-            Lowered {
-                ty: types::parse_written_type(&text),
-                mentions_mixed: types::text_mentions_mixed(&text),
-            }
-        })
-    }
-
     /// The `Type` the node denotes as written.
     pub fn ty(&self) -> &Type {
-        &self.lowered().ty
-    }
-
-    /// Whether the type spells out `mixed` anywhere, nested included.
-    pub fn mentions_mixed(&self) -> bool {
-        self.lowered().mentions_mixed
+        self.0
+            .lowered
+            .get_or_init(|| types::parse_written_type(&self.0.node.to_source_string()))
     }
 }
 
@@ -79,29 +60,17 @@ pub trait WrittenType {
     /// The `Type` the written type denotes as written: names unresolved,
     /// template and alias references not yet marked.
     fn written_type(&self) -> Type;
-
-    /// Whether the written type spells out `mixed` anywhere, nested
-    /// included.
-    fn mentions_mixed(&self) -> bool;
 }
 
 impl WrittenType for TypeNode {
     fn written_type(&self) -> Type {
         types::parse_written_type(&self.to_source_string())
     }
-
-    fn mentions_mixed(&self) -> bool {
-        types::text_mentions_mixed(&self.to_source_string())
-    }
 }
 
 impl WrittenType for DocType {
     fn written_type(&self) -> Type {
         self.ty().clone()
-    }
-
-    fn mentions_mixed(&self) -> bool {
-        DocType::mentions_mixed(self)
     }
 }
 

@@ -1489,7 +1489,6 @@ impl<'a> Checker<'a> {
         }
         // `AssertRuleHelper`'s missing-typehint checks on the asserted
         // type itself.
-        let explicit_mixed = crate::registry::mentions_mixed(&info.written_ty);
         self.report_missing_typehint_findings(
             span,
             |desc| format!("{subject} has no value type specified in {desc}."),
@@ -1499,7 +1498,6 @@ impl<'a> Checker<'a> {
                 )
             },
             &info.ty,
-            explicit_mixed,
         );
         self.check_type_class_names_exist(&info.ty, &subject, span);
         self.check_type_trait_refs(&info.ty, &subject, span, "assert.trait");

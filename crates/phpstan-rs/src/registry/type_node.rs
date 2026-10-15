@@ -8,8 +8,3 @@ use types::Type;
 pub(crate) fn parse_type_node<T: WrittenType + ?Sized>(node: &T) -> Type {
     node.written_type()
 }
-
-/// Whether a PHPDoc type spells out `mixed` anywhere, nested included.
-pub(crate) fn mentions_mixed<T: WrittenType + ?Sized>(node: &T) -> bool {
-    node.mentions_mixed()
-}
