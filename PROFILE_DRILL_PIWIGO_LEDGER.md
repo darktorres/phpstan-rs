@@ -152,7 +152,13 @@ Defects fixed along the way:
 
 The off drill's decisions: D6 is decided (skim unchecked, 2026-10-15; PROD-4.3), and so are D1, D2 and D5 (PROD-4.1, PROD-4.2, CACHE-2). D3 was decided again on 2026-10-15 as §2.4's decision 7 (STUB-10): the analyser's builtin knowledge is built at compile time, and PHPStan's own classes are read from the PHPStan the project installs.
 
-Four of the off drill's rows are open: CACHE-8 (READY); STUB-11 (OPEN: decided, it waits on STUB-10.1's measurements and on the reflection crate); CACHE-11 and CACHE-12, which wait on CACHE-9 and CACHE-10. The rest are done or skipped.
+Six of the off drill's rows are open:
+- CACHE-8 (READY);
+- CHECK-4, re-opened: CHECK-4.2 is READY, and CHECK-4.1 is built with CHECK-6.10;
+- STUB-10, whose measurements (STUB-10.1) are left, and STUB-11, which waits on them and on the reflection crate;
+- CACHE-11 and CACHE-12, which wait on CACHE-9 and CACHE-10.
+
+E9's cut is CHECK-6.16's (READY). The off drill's questions (U1-U9) and D6's unbuilt policy are §15's Q-1 to Q-10, of which Q-6 is done. The rest of its rows are done or skipped.
 
 None of the 20 G items is built whole. Four of the off drill's rows changed what some of them would save:
 
@@ -165,7 +171,7 @@ None of the 20 G items is built whole. Four of the off drill's rows changed what
 
 One part of an item is built, by the crate split: item 8's explicit-mixed flags (REG-14.2, delivered by REG-4.8).
 
-On 2026-10-15 the seven decisions of §2.4 were taken. They:
+On 2026-10-15 the ten decisions of §2.4 were taken. They:
 
 - retire item 4 (REG-13), whose wanted parts move to REG-4.15, REG-7.4 and REG-8.3;
 - retire SYN-1.6's `unsafe impl Sync`;
@@ -177,7 +183,11 @@ On 2026-10-15 the seven decisions of §2.4 were taken. They:
   - the sources of the builtin knowledge (STUB-12);
   - PHPStan's own classes read from the installed PHPStan (STUB-13);
   - two parts of the flat tree (SYN-1.9, SYN-1.10);
+  - `iterable<K, V>`'s array keys (TYPE-5);
+  - what a body shows, inferred on demand (REG-17);
+  - the reports of a kind a PHPDoc leaves out (CHECK-8, opt-in) and of a dead catch (CHECK-9);
   - the output changes they bring (VAL-2.10);
+- re-specify how a declaration's native and PHPDoc types combine (REG-7.5, REG-7.12), and how a builtin's sources combine (STUB-12);
 - unblock SYN-1, PROD-5.1, TYPE-4, REG-7.6, REG-7.7, REG-11.1, REG-14.1, REG-14.3, STUB-7.1, STUB-10 and STUB-11.
 
 ## 2. At a glance
@@ -186,7 +196,7 @@ On 2026-10-15 the seven decisions of §2.4 were taken. They:
 
 These rows are open with every need met:
 
-- **CACHE-8** (heap H1), a memory row. It is the one off-drill row nothing blocks.
+- **CACHE-8** (heap H1), a memory row. With CHECK-4.2 (off P11, under CHECK below), it is one of the two off-drill rows nothing blocks.
 - **LOAD:**
   - LOAD-1.1, 1.3, 1.4 and 1.5 (their output changes are approved and are read at VAL-1);
   - LOAD-2.1, and LOAD-2.8 except its third part;
@@ -1724,7 +1734,7 @@ The ids in the first column are the 25 G report's.
   - Q-10 (D6's policy beyond the skim) and Q-11 (the crate split's C1-C3 follow-ups).
 - **The six decisions in §2.4 were found by the merge,** and a seventh waited from before it. The merge stated each as its sources did and decided none.
 
-**What the decisions changed**, on 2026-10-15. All seven were decided after the merge; §2.4 has each, with its evidence and its rows.
+**What the decisions changed**, on 2026-10-15. All ten were decided after the merge; §2.4 has each, with its evidence and its rows.
 
 - **Superseded:**
   - REG-13 and its nine sub-tasks;
@@ -1735,7 +1745,7 @@ The ids in the first column are the 25 G report's.
   - SYN-1 to SYN-1.8 (SYN-1.6 aside), SYN-2's needs, LOAD-3.5 and CHECK-6.3;
   - PROD-5, PROD-5.1, PROD-5.4 and PROD-5.7;
   - TYPE-4 to TYPE-4.2;
-  - REG-4.5, REG-7, REG-7.6, REG-7.7, REG-7.9, REG-8, REG-8.1, REG-8.3, REG-8.5, REG-11.1, REG-14.1 and REG-14.3;
+  - REG-4.5, REG-7, REG-7.5, REG-7.6, REG-7.7, REG-7.9, REG-7.12, REG-8, REG-8.1, REG-8.3, REG-8.5, REG-11.1, REG-14.1 and REG-14.3;
   - STUB-7.1, STUB-7.3, STUB-7.4, STUB-7.6, STUB-7.9, STUB-7.10, STUB-8, STUB-10 to STUB-11;
   - CACHE-9, CACHE-10, CACHE-13 and CACHE-13.2;
   - VAL-2.3, VAL-2.5, VAL-2.6 and VAL-2.9;
@@ -1743,9 +1753,10 @@ The ids in the first column are the 25 G report's.
 - **New:**
   - SYN-1.9 and SYN-1.10;
   - PROD-5.8 and DOC-2.9;
-  - REG-4.15 and REG-16 (16.1 to 16.4);
-  - STUB-12 (12.1 to 12.5) and STUB-13 (13.1, 13.2);
-  - CHECK-7 and VAL-2.10.
+  - TYPE-5;
+  - REG-4.15, REG-16 (16.1 to 16.4) and REG-17 (17.1 to 17.4);
+  - STUB-12 (12.1 to 12.5), which decision 10 re-specified, and STUB-13 (13.1, 13.2);
+  - CHECK-7, CHECK-8, CHECK-9 and VAL-2.10.
 - **The facts the decisions cite from the code** were checked against it on 2026-10-15:
   - the six declarations' `*case_refs` fields and the assertion's;
   - `redeclared_methods` (`registry/class_info.rs:382`) and its two readers;
@@ -1758,5 +1769,6 @@ The ids in the first column are the 25 G report's.
   - the functionMap deltas read at the newest revision (`registry/stubs.rs:253`);
   - Composer's PHP constraint (`crates/composer/src/lib.rs:114`);
   - `pow`'s folding (`types/src/arithmetic.rs:715-717`);
-  - the 2,612 `ExprKind::`/`StmtKind::` match sites in 135 files.
-- **PHP's behaviour** was read from PHP 8.5.4, not from the sources' texts (§2.4, decision 1).
+  - the 2,612 `ExprKind::`/`StmtKind::` match sites in 135 files;
+  - for decisions 8 and 9 and their rows, the lines they cite in `types/src/decide.rs`, `types/src/parse.rs`, `registry/function_sig/type_resolution.rs`, `registry/function_sig.rs`, `checker/phpdoc_type_compat.rs`, `checker/function_decl.rs`, `checker/throws.rs`, `checker/stmt/try_catch.rs`, `checker/expr.rs`, `registry/summaries.rs`, `registry/purity.rs` and `project/session.rs`.
+- **PHP's behaviour** was read from PHP 8.5.4, not from the sources' texts (§2.4, decisions 1, 8 and 9). Decision 10 read php-src 8.5.4's sources and PHPStan 2.3.1's.
