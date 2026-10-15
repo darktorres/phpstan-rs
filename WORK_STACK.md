@@ -267,16 +267,22 @@ version key. These and the investigations are in `PROFILE_DRILL_PIWIGO_OFF.md` (
 §13 lists each item's method and data); the ledger that tracked them was
 retired, and is in git at `72cac936`.
 
-The crate split's Stage C is worked on this branch from C4 on; its sub-tasks, with their states, are in the ledger's §2.2.
+The crate split's Stage C is worked on this branch from C4 on. In the ledger its C4 is
+REG-2 to REG-12, its C5 is STUB-7 and its C10 is REG-15, each split into sub-tasks
+with their states.
 
-State: `PROFILE_DRILL_PIWIGO_LEDGER.md` holds every row of this drill and of the
-20 G plan, with what blocks each. On this branch E1, D5 (proposal 2), proposals 1-5,
-7, 8 and 9, and the cuts E2, E3, E5-E7, E10, E13-E16 are built; the off run went from
-25.63 G to 20.93 G Ir, output byte-identical at each row. Proposal 6 waits on D3 and
-the crate split. H1 is the one row nothing blocks. The 20 G plan's twenty items
-are all still open on this branch; the ledger re-evaluates each against the code
-and the profile and lists what blocks it. Each row's saving is a callgrind run against the previous row's
-commit; tests, clippy and fixtures were run only as each row's text says.
+State: `PROFILE_DRILL_PIWIGO_LEDGER.md` is one list of every task on this branch: the
+rows of this drill, the 20 G plan's items, the 25 G report's unbuilt designs and the
+crate split from C4 on, grouped by the part of the program each changes, with what
+blocks each; its §2.4 lists the decisions that wait on the user. On this branch E1,
+D5 (proposal 2), proposals 1-5, 7, 8 and 9, and the cuts E2, E3, E5-E7, E10, E13-E16
+are built; the off run went from 25.63 G to 20.93 G Ir, output byte-identical at each
+row. Proposal 6 (STUB-11) waits on D3 and the crate split. H1 (CACHE-8) is the one row
+of this drill nothing blocks. The 20 G plan's items are open on this branch, except
+item 8's explicit-mixed part, which the crate split's C4 delivered; the ledger
+re-evaluates each against the code and the profile, splits it into its steps, and
+lists what blocks each. Each row's saving is a callgrind run against the previous
+row's commit; tests, clippy and fixtures were run only as each row's text says.
 
 The ledger's items were checked one by one on 2026-10-14 and the report corrected.
 The check found two bugs, both fixed: E14 (`instanceof` with a static property as the
