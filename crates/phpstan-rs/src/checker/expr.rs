@@ -204,7 +204,10 @@ impl<'a> Checker<'a> {
                             method,
                             sig,
                         )
-                        .then(|| self.registry.method_property_writes(&owner, method))
+                        .then(|| {
+                            self.registry
+                                .method_property_writes(&owner, method, self.bodies)
+                        })
                     })
                     .unwrap_or(PropertyWrites::Anything);
                 (locals.key_of(recv), args, writes)
@@ -234,19 +237,23 @@ impl<'a> Checker<'a> {
                         .as_ref()
                         .is_some_and(|(owner, _)| self.method_is_static(owner, method));
                 let writes = match resolved {
-                    Some((owner, true)) => self.registry.method_property_writes(&owner, method),
+                    Some((owner, true)) => {
+                        self.registry
+                            .method_property_writes(&owner, method, self.bodies)
+                    }
                     _ => PropertyWrites::Anything,
                 };
                 (forwards_this.then(|| locals.var_key("this")), args, writes)
             }
             ExprKind::Call(callee, args) => {
                 let writes = match &callee.kind {
-                    ExprKind::Name(name) => self
-                        .registry
-                        .resolve_function(name)
-                        .map_or(PropertyWrites::Anything, |(resolved, _)| {
-                            self.registry.function_property_writes(resolved)
-                        }),
+                    ExprKind::Name(name) => self.registry.resolve_function(name).map_or(
+                        PropertyWrites::Anything,
+                        |(resolved, _)| {
+                            self.registry
+                                .function_property_writes(resolved, self.bodies)
+                        },
+                    ),
                     _ => PropertyWrites::Anything,
                 };
                 (None, args, writes)
@@ -263,9 +270,11 @@ impl<'a> Checker<'a> {
                             .as_deref()
                             .and_then(|t| self.lookup_method_with_owner(t, "__construct"))
                         {
-                            Some((owner, _)) => {
-                                self.registry.method_property_writes(&owner, "__construct")
-                            }
+                            Some((owner, _)) => self.registry.method_property_writes(
+                                &owner,
+                                "__construct",
+                                self.bodies,
+                            ),
                             None => PropertyWrites::Nothing,
                         }
                     }

@@ -12,6 +12,7 @@ mod assertion_table;
 pub mod bodies;
 mod class_info;
 mod container;
+mod demand;
 mod function_sig;
 mod generics;
 mod global_vars;
@@ -183,7 +184,6 @@ pub(crate) struct ResolvedSnapshot {
     classes: Vec<Option<Detached<ClassReflection>>>,
     function_keys: Option<Arc<FxHashSet<String>>>,
     functions: Vec<Option<Detached<FunctionReflection>>>,
-    property_writes: FxHashMap<property_writes::DeclKey, PropertyWrites>,
     global_variables: syntax::name::NameMap<Type>,
 }
 
@@ -405,18 +405,27 @@ pub struct Registry {
     // `lookup_method`/`precompute_member_owners` (`registry/hierarchy.rs`).
     #[serde(skip)]
     pub(crate) member_owners: NameTable<hierarchy::ClassOwners>,
-    // Whose properties each function and method with a body may write
-    // (`registry::property_writes`), keyed by lowercased (class, name).
-    pub(crate) property_writes: FxHashMap<property_writes::DeclKey, PropertyWrites>,
+    // The purity and property writes found when asked (`registry::demand`).
+    #[serde(skip)]
+    demand: demand::Demand,
+    // The same, found for every declaration at once, which a debug build
+    // checks the ones found when asked against.
+    #[cfg(debug_assertions)]
+    #[serde(skip)]
+    as_built: Option<std::sync::Arc<AsBuilt>>,
     // What each file's walk for global variables found, kept for the files
     // a later finish doesn't walk again (`infer_global_variables_of`).
     #[serde(skip)]
     global_sites: FxHashMap<crate::file_id::FileId, global_vars::FileSites>,
-    // What each body's property writes were classified as, kept for the
-    // declarations a later finish doesn't classify again.
-    #[serde(skip)]
-    property_write_classes:
-        FxHashMap<property_writes::DeclKey, Option<property_writes::Classification>>,
+}
+
+/// The purity and property writes of every declaration with a body, found
+/// at once.
+#[cfg(debug_assertions)]
+#[derive(Debug, Default)]
+struct AsBuilt {
+    pure: FxHashSet<property_writes::DeclKey>,
+    writes: FxHashMap<property_writes::DeclKey, PropertyWrites>,
 }
 
 impl Registry {
@@ -475,7 +484,7 @@ impl Registry {
 
     pub fn build(program: &[Stmt]) -> Registry {
         let mut registry = Registry::index_and_flatten(program, &Origin::Unknown);
-        registry.resolve_transitive_purity(&FileBodies::of(program));
+        registry.reset_demand(&FileBodies::of(program));
         registry
     }
 
@@ -517,6 +526,44 @@ impl Registry {
             &GlobalFacts::of(program),
         )]);
         registry
+    }
+
+    /// Forgets the purity and property writes found when asked, for the
+    /// declarations they were found from to change; returns them, to find
+    /// again once the declarations have (`changed_since`). In a debug build
+    /// the same are found for every declaration at once, to check the ones
+    /// found when asked against.
+    pub(crate) fn reset_demand(
+        &mut self,
+        bodies: &dyn BodySource,
+    ) -> Vec<(property_writes::DeclKey, demand::Answer)> {
+        #[cfg(debug_assertions)]
+        {
+            self.as_built = Some(std::sync::Arc::new(AsBuilt {
+                pure: self.pure_among_every_declaration(bodies),
+                writes: self.writes_of_every_declaration(bodies),
+            }));
+        }
+        #[cfg(not(debug_assertions))]
+        let _ = bodies;
+        self.demand.take()
+    }
+
+    /// The answer found when asked that `key` has now.
+    fn answer(
+        &self,
+        key: &property_writes::DeclKey,
+        old: demand::Answer,
+        bodies: &dyn BodySource,
+    ) -> demand::Answer {
+        match old {
+            demand::Answer::Pure(_) => {
+                demand::Answer::Pure(self.declaration_is_pure(key.clone(), bodies))
+            }
+            demand::Answer::Writes(_) => {
+                demand::Answer::Writes(self.declaration_writes(key.clone(), bodies))
+            }
+        }
     }
 
     /// Makes `classes` and `functions` the declarations as built, for
@@ -583,7 +630,6 @@ impl Registry {
             classes,
             function_keys: body_scope.and_then(scope::Scope::shared_function_keys),
             functions,
-            property_writes: registry.property_writes.clone(),
             global_variables: registry.global_variables.clone(),
         };
         if scope.is_all() {
@@ -650,6 +696,8 @@ impl Registry {
         &self,
         before: &ResolvedSnapshot,
         changed: &ChangedNames,
+        asked: &[(property_writes::DeclKey, demand::Answer)],
+        bodies: &dyn BodySource,
     ) -> FxHashSet<crate::deps::RefKey> {
         use crate::deps::RefKey;
         let mut keys = FxHashSet::default();
@@ -672,16 +720,16 @@ impl Registry {
                 keys.insert(RefKey::constant_text(name));
             }
         }
-        let decls = before
-            .property_writes
-            .keys()
-            .chain(self.property_writes.keys())
-            .filter(|key| before.property_writes.get(*key) != self.property_writes.get(*key));
-        for key in decls {
-            keys.insert(match &key.class {
-                Some(class) => RefKey::class_text(class),
-                None => RefKey::function_text(&key.member),
-            });
+        // An answer nothing asked for cannot have changed what anything
+        // reads, so only those found since the declarations last changed
+        // are found again.
+        for (key, old) in asked {
+            if self.answer(key, *old, bodies) != *old {
+                keys.insert(match &key.class {
+                    Some(class) => RefKey::class_text(class),
+                    None => RefKey::function_text(&key.member),
+                });
+            }
         }
         keys
     }

@@ -1443,9 +1443,6 @@ impl Project {
             changed.as_ref().map(|_| &body_scope),
             !self.built_once,
         );
-        if !body_scope.is_all() {
-            self.registry.clear_purity(&body_scope.minus(&scope));
-        }
         self.registry.set_scope(scope.clone());
         self.finished = true;
         self.registry.reset_lazy_tables();
@@ -1465,26 +1462,25 @@ impl Project {
         self.registry.flatten_phpdoc_inheritance();
         self.registry.inherit_property_hooks();
         self.registry.apply_assertion_table();
-        // Adds more method/property names (mixin members) -
-        // `resolve_transitive_purity` right after this also consumes
-        // `lookup_method_with_owner`/`lookup_ancestor_method_with_owner`
-        // internally, so the member-owner maps take in the mixin members
-        // here, before it runs.
+        // Adds more method/property names (mixin members), which the
+        // member-owner maps take in here, before the passes below look
+        // methods up. None of those adds or removes a
+        // method/property/const name anywhere, so the maps stay correct
+        // through them and for the checker's own later use - no third
+        // rebuild needed.
         self.registry.resolve_deferred_mixins();
         self.registry.precompute_member_owners_after_mixins();
-        // Neither `resolve_transitive_purity` nor anything below it adds
-        // or removes a method/property/const name anywhere, so the
-        // member-owner maps built just above stay correct through this
-        // point and for the checker's own later use - no third rebuild
-        // needed.
-        self.registry.set_scope(body_scope);
-        self.registry.resolve_transitive_purity(&self.files);
-        self.registry.set_scope(scope);
+        // Purity and property writes are found when asked; what was found
+        // is kept to find again once the declarations have settled.
+        let asked = self.registry.reset_demand(&self.files);
         self.registry.precompute_ancestor_names();
         self.registry.resolve_constant_named_types();
         self.registry.drop_doc_members_excluded_by_native();
         let changed_keys = match (&before, &changed) {
-            (Some(before), Some(changed)) => self.registry.changed_since(before, changed),
+            (Some(before), Some(changed)) => {
+                self.registry
+                    .changed_since(before, changed, &asked, &self.files)
+            }
             _ => FxHashSet::default(),
         };
         // What a file contributes to a global's type reads what it

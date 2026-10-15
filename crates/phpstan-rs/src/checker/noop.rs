@@ -243,16 +243,16 @@ impl<'a> Checker<'a> {
                 let ExprKind::Name(name) = &callee.kind else {
                     return;
                 };
-                let Some((resolved, sig)) = self.registry.resolve_function(name) else {
+                let Some((resolved, _)) = self.registry.resolve_function(name) else {
                     return;
                 };
-                if !sig.is_transitively_pure() {
-                    return;
-                }
                 let declared = self
                     .registry
                     .lookup_function_with_name(resolved)
                     .map_or(resolved, |(declared, _)| declared);
+                if !self.registry.function_is_pure(declared, self.bodies) {
+                    return;
+                }
                 (
                     format!("Call to function {declared}() on a separate line has no effect."),
                     "function.resultUnused",
@@ -267,17 +267,17 @@ impl<'a> Checker<'a> {
                     .filter(|call| call.id == e.id)
                     .map(|call| (call.owner.clone(), call.receiver.clone()))
                     .and_then(|(owner, recv_ty)| {
-                        let (_, sig) = self.lookup_method_with_owner(&owner, method)?;
-                        Some((owner, sig, recv_ty))
+                        let (holder, sig) = self.lookup_method_with_owner(&owner, method)?;
+                        Some((owner, holder, sig, recv_ty))
                     });
-                let Some((owner, sig, recv_ty)) = resolved.or_else(|| {
+                let Some((owner, holder, sig, recv_ty)) = resolved.or_else(|| {
                     let recv_ty = self.infer_expr(recv, locals);
                     let (owner, sig) = self.find_method_owner(&recv_ty, method)?;
-                    Some((owner, sig, recv_ty))
+                    Some((owner.clone(), owner, sig, recv_ty))
                 }) else {
                     return;
                 };
-                if !sig.is_transitively_pure() {
+                if !self.registry.method_is_pure(&holder, method, self.bodies) {
                     return;
                 }
                 // Real PHPStan's own `PossiblyPureMethodCallCollector`
@@ -326,13 +326,13 @@ impl<'a> Checker<'a> {
                 let Some(resolved_class) = self.infer_static_target_class(target, locals) else {
                     return;
                 };
-                let Some((owner, sig)) = self
+                let Some((owner, _)) = self
                     .registry
                     .lookup_method_with_owner(&resolved_class, method)
                 else {
                     return;
                 };
-                if !sig.is_transitively_pure() {
+                if !self.registry.method_is_pure(&owner, method, self.bodies) {
                     return;
                 }
                 (
@@ -345,10 +345,15 @@ impl<'a> Checker<'a> {
                 let Some((class, _)) = new_ty.as_object() else {
                     return;
                 };
-                let Some(sig) = self.registry.lookup_method(class, "__construct") else {
+                let Some((holder, _)) =
+                    self.registry.lookup_method_with_owner(class, "__construct")
+                else {
                     return;
                 };
-                if !sig.is_transitively_pure() {
+                if !self
+                    .registry
+                    .method_is_pure(&holder, "__construct", self.bodies)
+                {
                     return;
                 }
                 (
@@ -386,13 +391,11 @@ impl<'a> Checker<'a> {
         &mut self,
         f: &FunctionDecl,
         sig: Option<&FunctionReflection>,
-        is_method: bool,
+        class_name: Option<&str>,
         label: &str,
     ) {
-        let Some(sig) = sig else {
-            return;
-        };
-        if !sig.is_transitively_pure() {
+        let is_method = class_name.is_some();
+        if sig.is_none() {
             return;
         }
         let Some(doc) = f.doc_comment.as_deref() else {
@@ -403,6 +406,13 @@ impl<'a> Checker<'a> {
         }
         let block = docblock::parse_shared(doc);
         if !block.impure {
+            return;
+        }
+        let pure = match class_name {
+            Some(class) => self.registry.method_is_pure(class, &f.name, self.bodies),
+            None => self.registry.function_is_pure(&f.name, self.bodies),
+        };
+        if !pure {
             return;
         }
         let (description, identifier) = if is_method {

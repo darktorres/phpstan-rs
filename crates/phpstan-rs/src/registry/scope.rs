@@ -81,26 +81,6 @@ impl Scope {
         })
     }
 
-    /// What `self` has that `other` hasn't; both are named sets.
-    pub(crate) fn minus(&self, other: &Scope) -> Scope {
-        type Keys = Option<Arc<FxHashSet<String>>>;
-        let diff = |ours: &Keys, theirs: &Keys| -> Keys {
-            ours.as_ref().map(|ours| {
-                Arc::new(
-                    ours.iter()
-                        .filter(|key| !theirs.as_ref().is_none_or(|theirs| theirs.contains(*key)))
-                        .cloned()
-                        .collect(),
-                )
-            })
-        };
-        Scope {
-            classes: diff(&self.classes, &other.classes),
-            functions: diff(&self.functions, &other.functions),
-            id: next_id(),
-        }
-    }
-
     /// The lowercased class names, when not every class.
     pub(crate) fn class_keys(&self) -> Option<&FxHashSet<String>> {
         self.classes.as_deref()
@@ -122,12 +102,11 @@ impl Scope {
     }
 }
 
-/// The names `Registry::scoped_class_names` and `scoped_function_names`
-/// made last, with the scope and the table's version they are of.
+/// The names `Registry::scoped_class_names` made last, with the scope and
+/// the table's version they are of.
 #[derive(Default)]
 pub(crate) struct ScopedNames {
     classes: Mutex<Option<Made>>,
-    functions: Mutex<Option<Made>>,
 }
 
 type Made = (u64, u64, Arc<[Name]>);
@@ -140,15 +119,6 @@ impl ScopedNames {
         make: impl FnOnce() -> Vec<Name>,
     ) -> Arc<[Name]> {
         Self::of(&self.classes, scope, version, make)
-    }
-
-    fn functions(
-        &self,
-        scope: &Scope,
-        version: u64,
-        make: impl FnOnce() -> Vec<Name>,
-    ) -> Arc<[Name]> {
-        Self::of(&self.functions, scope, version, make)
     }
 
     fn of(
@@ -195,25 +165,6 @@ impl Registry {
                         .iter()
                         .filter_map(|key| {
                             self.classes
-                                .get_with_name(&FoldedKey(key))
-                                .map(|(name, _)| name.clone())
-                        })
-                        .collect(),
-                }
-            })
-    }
-
-    /// The declared names of the functions in the passes' scope, made
-    /// once like the classes'.
-    pub(crate) fn scoped_function_names(&self) -> Arc<[Name]> {
-        self.scoped_names
-            .functions(&self.scope, self.functions.version(), || {
-                match self.scope.function_keys() {
-                    None => self.functions.keys().cloned().collect(),
-                    Some(keys) => keys
-                        .iter()
-                        .filter_map(|key| {
-                            self.functions
                                 .get_with_name(&FoldedKey(key))
                                 .map(|(name, _)| name.clone())
                         })
@@ -283,32 +234,6 @@ impl Registry {
                     raw.functions.get_with_name(&FoldedKey(key));
                 }
             });
-    }
-
-    /// Forgets the purity of the functions and methods in `scope`, for
-    /// the purity passes to settle again; their declarations are as
-    /// resolved otherwise.
-    pub(crate) fn clear_purity(&mut self, scope: &Scope) {
-        for key in scope.function_keys().into_iter().flatten() {
-            let Some((name, sig)) = self.functions.get_with_name(&FoldedKey(key)) else {
-                continue;
-            };
-            if sig.has_purity() {
-                let name = name.clone();
-                self.functions.get_mut(&name).unwrap().clear_purity();
-            }
-        }
-        for key in scope.class_keys().into_iter().flatten() {
-            let Some((name, info)) = self.classes.get_with_name(&FoldedKey(key)) else {
-                continue;
-            };
-            if info.methods.values().any(|m| m.has_purity()) {
-                let name = name.clone();
-                for method in self.classes.get_mut(&name).unwrap().methods.values_mut() {
-                    method.clear_purity();
-                }
-            }
-        }
     }
 
     /// Sets which classes and functions the next finishing passes resolve.

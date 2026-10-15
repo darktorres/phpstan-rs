@@ -5,10 +5,10 @@
 //!
 //! Unlike purity (`registry::purity`), output, throwing, exiting or a
 //! `void` return don't matter here - only property writes do. A body is
-//! classified once, at registry build time, into the property writes it
+//! classified, when its verdict is asked for, into the property writes it
 //! makes itself and the calls whose own writes it inherits; a monotonic
-//! fixed point then settles every verdict, a dependency cycle keeping
-//! the most conservative one. A call is followed through `$this`, a
+//! search then settles a verdict, a dependency cycle keeping the most
+//! conservative one. A call is followed through `$this`, a
 //! `$this` property or a parameter never reassigned (by its declared
 //! class), `self::`/`static::`/`parent::`, a named class's static
 //! method, `new`, and a function by name; any other call may write
@@ -18,11 +18,13 @@
 //! unless a parameter of it takes something through which it runs code
 //! or writes properties (`CODE_RUNNING_PARAMETER_TYPES`).
 
-use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
+#[cfg(debug_assertions)]
+use rustc_hash::FxHashSet;
 use syntax::name::Name;
 
 use crate::registry::bodies::BodySource;
+use crate::registry::name_table::FoldedKey;
 use crate::registry::summaries::{CallWrites, Callee, PropertyOf, Receiver, WriteFacts};
 use crate::registry::{FunctionReflection, Registry, is_non_overridable};
 use types::Type;
@@ -65,13 +67,13 @@ pub(crate) struct DeclKey {
 }
 
 /// What a `DeclKey` is looked up by: the class and member as written.
-struct DeclRef<'a> {
-    class: Option<&'a str>,
-    member: &'a str,
+pub(in crate::registry) struct DeclRef<'a> {
+    pub(in crate::registry) class: Option<&'a str>,
+    pub(in crate::registry) member: &'a str,
 }
 
 /// The two ways of naming a declaration, which hash and compare alike.
-trait DeclQuery {
+pub(in crate::registry) trait DeclQuery {
     fn class(&self) -> Option<&str>;
     fn member(&self) -> &str;
 }
@@ -148,45 +150,18 @@ impl<'a> std::borrow::Borrow<dyn DeclQuery + 'a> for DeclKey {
     }
 }
 
-fn function_key(name: &str) -> DeclKey {
+pub(in crate::registry) fn function_key(name: &str) -> DeclKey {
     DeclKey {
         class: None,
         member: name.to_ascii_lowercase(),
     }
 }
 
-fn method_key(class: &str, method: &str) -> DeclKey {
+pub(in crate::registry) fn method_key(class: &str, method: &str) -> DeclKey {
     DeclKey {
         class: Some(class.to_ascii_lowercase()),
         member: method.to_ascii_lowercase(),
     }
-}
-
-/// The verdict of the function `name` among `verdicts`, with no copy of
-/// the name made.
-fn function_verdict(
-    verdicts: &FxHashMap<DeclKey, PropertyWrites>,
-    name: &str,
-) -> Option<PropertyWrites> {
-    let query = DeclRef {
-        class: None,
-        member: name,
-    };
-    verdicts.get(&query as &dyn DeclQuery).copied()
-}
-
-/// The verdict of `class`'s `method` among `verdicts`, with no copy of
-/// either name made.
-fn method_verdict(
-    verdicts: &FxHashMap<DeclKey, PropertyWrites>,
-    class: &str,
-    method: &str,
-) -> Option<PropertyWrites> {
-    let query = DeclRef {
-        class: Some(class),
-        member: method,
-    };
-    verdicts.get(&query as &dyn DeclQuery).copied()
 }
 
 /// What a called declaration's verdict must be for the caller to keep
@@ -211,70 +186,293 @@ pub(in crate::registry) struct Classification {
     deps: Vec<(DeclKey, Need)>,
 }
 
-impl Registry {
-    /// Classifies every function and method with a body, then settles
-    /// their verdicts. Run with `resolve_transitive_purity`, after every
-    /// class is indexed and flattened.
-    pub(crate) fn resolve_property_writes(&mut self, bodies: &dyn BodySource) {
-        // Only the declarations in scope are classified again; the rest
-        // keep the classification of their unchanged bodies.
-        let scope = std::mem::take(&mut self.scope);
-        self.property_write_classes
-            .retain(|key, _| match &key.class {
-                Some(class) => !scope.has_class(class),
-                None => !scope.has_function(&key.member),
-            });
-        // A shared base holds only built-in stubs, which have no body.
-        let functions: Vec<(&Name, &FunctionReflection)> = match scope.function_keys() {
-            Some(keys) => keys
-                .iter()
-                .filter_map(|key| self.functions.get_with_name(key))
-                .collect(),
-            None => self.functions.own_iter().collect(),
-        };
-        let classes: Vec<_> = match scope.class_keys() {
-            Some(keys) => keys
-                .iter()
-                .filter_map(|key| self.classes.get_with_name(key))
-                .collect(),
-            None => self.classes.own_iter().collect(),
-        };
-        let methods: Vec<(&Name, &Name, &FunctionReflection)> = classes
-            .iter()
-            .flat_map(|(class, info)| {
-                info.methods
+/// What the search for a declaration's verdict finds at it.
+enum Settled {
+    /// A body to follow the calls of.
+    Body(Classification),
+    /// Its verdict outright: a builtin's, or `Anything`.
+    Verdict(PropertyWrites),
+}
+
+/// A declaration the search has entered and not left.
+struct Frame {
+    key: DeclKey,
+    classification: Classification,
+    /// The next of the classification's calls to follow.
+    next: usize,
+    /// The verdicts of the calls followed so far, in their order.
+    seen: Vec<PropertyWrites>,
+}
+
+impl Frame {
+    /// The lowest verdict the declaration's own writes and the verdicts of
+    /// its calls allow.
+    fn settle(&self) -> PropertyWrites {
+        for candidate in [PropertyWrites::Nothing, PropertyWrites::OwnObject] {
+            if candidate == PropertyWrites::Nothing && self.classification.writes_own_object {
+                continue;
+            }
+            let satisfied =
+                self.classification
+                    .deps
                     .iter()
-                    .filter(|(_, sig)| !sig.is_stub)
-                    .map(move |(method, sig)| (*class, method, sig))
-            })
-            .collect();
-        // Each body is read on its own, so they are classified in parallel.
-        let registry: &Registry = self;
-        let mut classified: Vec<(DeclKey, Option<Classification>)> = functions
-            .par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
+                    .zip(&self.seen)
+                    .all(|((_, need), verdict)| match need {
+                        Need::Nothing => *verdict == PropertyWrites::Nothing,
+                        Need::OwnObject => *verdict <= PropertyWrites::OwnObject,
+                        Need::SameAsCaller => *verdict <= candidate,
+                    });
+            if satisfied {
+                return candidate;
+            }
+        }
+        PropertyWrites::Anything
+    }
+}
+
+impl Registry {
+    /// The declaration `key` names, when it is a function or method of the
+    /// project with a body: with its declaring class's name for a method.
+    fn writing_declaration(&self, key: &DeclKey) -> Option<(Option<&Name>, &FunctionReflection)> {
+        match &key.class {
+            None => self
+                .functions
+                .get(key.member.as_str())
+                .filter(|sig| !sig.is_stub)
+                .map(|sig| (None, sig)),
+            Some(class) => {
+                let (name, info) = self.classes.get_with_name(&FoldedKey(class.as_str()))?;
+                let sig = info
+                    .methods
+                    .get(key.member.as_str())
+                    .filter(|sig| !sig.is_stub)?;
+                Some((Some(name), sig))
+            }
+        }
+    }
+
+    /// What a declaration's verdict starts from: its body's classification,
+    /// or the verdict a declaration with no body of the project has.
+    fn writes_settled(&self, key: &DeclKey, bodies: &dyn BodySource) -> Settled {
+        match self.writing_declaration(key) {
+            Some((class, sig)) => match classify_summary(bodies, class, sig, self) {
+                Some(classification) => Settled::Body(classification),
+                None => Settled::Verdict(PropertyWrites::Anything),
+            },
+            None => Settled::Verdict(self.outside_verdict(key)),
+        }
+    }
+
+    /// A declaration without a body of the project: a stub's verdict by its
+    /// parameters, anything else's `Anything`.
+    fn outside_verdict(&self, dep: &DeclKey) -> PropertyWrites {
+        let sig = match &dep.class {
+            Some(class) => self.lookup_method(class, &dep.member),
+            None => self.functions.get(dep.member.as_str()),
+        };
+        match sig {
+            Some(sig) if sig.is_stub => stub_verdict(sig),
+            _ => PropertyWrites::Anything,
+        }
+    }
+
+    /// The verdict of `root`, a declaration with a body, found by following
+    /// the calls its body makes and remembered for every declaration the
+    /// search settles. A call back into a declaration the search is inside of
+    /// is a cycle, whose verdict is `Anything`: a verdict only goes down from
+    /// `Anything` once the verdicts it needs have, and none in a cycle can
+    /// go first. So a verdict does not depend on where the search began.
+    pub(in crate::registry) fn declaration_writes(
+        &self,
+        root: DeclKey,
+        bodies: &dyn BodySource,
+    ) -> PropertyWrites {
+        // `None` while the search is inside the declaration.
+        let mut done: FxHashMap<DeclKey, Option<PropertyWrites>> = FxHashMap::default();
+        let mut settled: Vec<(DeclKey, PropertyWrites)> = Vec::new();
+        let mut stack: Vec<Frame> = Vec::new();
+        let enter = |key: DeclKey,
+                     done: &mut FxHashMap<DeclKey, Option<PropertyWrites>>|
+         -> Result<PropertyWrites, Frame> {
+            if let Some(verdict) = self.demand.writes_of(&key) {
+                return Ok(verdict);
+            }
+            match done.get(&key) {
+                Some(Some(verdict)) => return Ok(*verdict),
+                Some(None) => return Ok(PropertyWrites::Anything),
+                None => {}
+            }
+            match self.writes_settled(&key, bodies) {
+                Settled::Verdict(verdict) => {
+                    done.insert(key, Some(verdict));
+                    Ok(verdict)
+                }
+                Settled::Body(classification) => {
+                    done.insert(key.clone(), None);
+                    Err(Frame {
+                        key,
+                        classification,
+                        next: 0,
+                        seen: Vec::new(),
+                    })
+                }
+            }
+        };
+        match enter(root, &mut done) {
+            Ok(verdict) => return verdict,
+            Err(frame) => stack.push(frame),
+        }
+        let mut returned: Option<PropertyWrites> = None;
+        let verdict = loop {
+            let top = stack
+                .last_mut()
+                .expect("the search is inside a declaration");
+            if let Some(verdict) = returned.take() {
+                top.seen.push(verdict);
+            }
+            // A call that may write anything leaves no verdict below it.
+            let ended = if top.seen.contains(&PropertyWrites::Anything) {
+                Some(PropertyWrites::Anything)
+            } else if top.next == top.classification.deps.len() {
+                Some(top.settle())
+            } else {
+                None
+            };
+            match ended {
+                Some(verdict) => {
+                    let frame = stack.pop().expect("the search is inside a declaration");
+                    done.insert(frame.key.clone(), Some(verdict));
+                    settled.push((frame.key, verdict));
+                    if stack.is_empty() {
+                        break verdict;
+                    }
+                    returned = Some(verdict);
+                }
+                None => {
+                    let dep = top.classification.deps[top.next].0.clone();
+                    top.next += 1;
+                    match enter(dep, &mut done) {
+                        Ok(verdict) => returned = Some(verdict),
+                        Err(frame) => stack.push(frame),
+                    }
+                }
+            }
+        };
+        self.demand.record_writes(settled);
+        verdict
+    }
+
+    /// Whose properties calling function `name` may write.
+    pub(crate) fn function_property_writes(
+        &self,
+        name: &str,
+        bodies: &dyn BodySource,
+    ) -> PropertyWrites {
+        let verdict = match self.functions.get(name) {
+            Some(sig) if sig.is_stub => stub_verdict(sig),
+            Some(_) => {
+                let query = DeclRef {
+                    class: None,
+                    member: name,
+                };
+                match self.demand.writes_of(&query) {
+                    Some(verdict) => verdict,
+                    None => self.declaration_writes(function_key(name), bodies),
+                }
+            }
+            None => PropertyWrites::Anything,
+        };
+        #[cfg(debug_assertions)]
+        self.assert_writes_as_built(&function_key(name), verdict, bodies);
+        verdict
+    }
+
+    /// Whose properties calling `owner`'s `method` - the declaration a
+    /// call reaches, not an override of it - may write.
+    pub(crate) fn method_property_writes(
+        &self,
+        owner: &str,
+        method: &str,
+        bodies: &dyn BodySource,
+    ) -> PropertyWrites {
+        let verdict = match self.lookup_method(owner, method) {
+            Some(sig) if sig.is_stub => stub_verdict(sig),
+            Some(_) => {
+                let query = DeclRef {
+                    class: Some(owner),
+                    member: method,
+                };
+                match self.demand.writes_of(&query) {
+                    Some(verdict) => verdict,
+                    None => self.declaration_writes(method_key(owner, method), bodies),
+                }
+            }
+            None => PropertyWrites::Anything,
+        };
+        #[cfg(debug_assertions)]
+        self.assert_writes_as_built(&method_key(owner, method), verdict, bodies);
+        verdict
+    }
+
+    /// The verdict `key` has among the ones built for every declaration at
+    /// once, which a verdict found when asked has to equal.
+    #[cfg(debug_assertions)]
+    fn assert_writes_as_built(
+        &self,
+        key: &DeclKey,
+        found: PropertyWrites,
+        bodies: &dyn BodySource,
+    ) {
+        let Some(built) = &self.as_built else {
+            return;
+        };
+        // Only where the bodies at hand are those the verdicts were built from.
+        let Some((_, sig)) = self.writing_declaration(key) else {
+            return;
+        };
+        if bodies.summary(&sig.provenance).is_none() {
+            return;
+        }
+        let expected = built
+            .writes
+            .get(key)
+            .copied()
+            .unwrap_or(PropertyWrites::Anything);
+        assert_eq!(
+            found, expected,
+            "the verdict found when asked and the one built for every declaration differ for {key:?}"
+        );
+    }
+
+    /// The verdict of every function and method with a body, settled for
+    /// all of them at once: the answer the verdicts found when asked are
+    /// checked against.
+    #[cfg(debug_assertions)]
+    pub(in crate::registry) fn writes_of_every_declaration(
+        &self,
+        bodies: &dyn BodySource,
+    ) -> FxHashMap<DeclKey, PropertyWrites> {
+        let mut classified: Vec<(DeclKey, Option<Classification>)> = self
+            .functions
+            .own_iter()
             .filter(|(_, sig)| !sig.is_stub)
             .map(|(name, sig)| {
                 (
                     function_key(name),
-                    classify_summary(bodies, None, sig, registry),
+                    classify_summary(bodies, None, sig, self),
                 )
             })
             .collect();
-        classified.par_extend(
-            methods
-                .par_iter()
-                .with_min_len(crate::registry::PASS_CHUNK)
-                .map(|(class, method, sig)| {
-                    (
-                        method_key(class, method),
-                        classify_summary(bodies, Some(class), sig, registry),
-                    )
-                }),
-        );
-        self.scope = scope;
-        self.property_write_classes.extend(classified);
-        let classified = &self.property_write_classes;
+        for (class, info) in self.classes.own_iter() {
+            for (method, sig) in info.methods.iter().filter(|(_, sig)| !sig.is_stub) {
+                classified.push((
+                    method_key(class, method),
+                    classify_summary(bodies, Some(class), sig, self),
+                ));
+            }
+        }
+        let classified: FxHashMap<DeclKey, Option<Classification>> =
+            classified.into_iter().collect();
         let mut verdicts: FxHashMap<DeclKey, PropertyWrites> = classified
             .keys()
             .map(|key| (key.clone(), PropertyWrites::Anything))
@@ -285,7 +483,7 @@ impl Registry {
         // it calls has gone down.
         let mut callers: FxHashMap<&DeclKey, Vec<&DeclKey>> = FxHashMap::default();
         let mut queue: std::collections::VecDeque<&DeclKey> = std::collections::VecDeque::new();
-        for (key, classification) in classified {
+        for (key, classification) in &classified {
             let Some(classification) = classification else {
                 continue;
             };
@@ -311,7 +509,10 @@ impl Registry {
                     continue;
                 }
                 let satisfied = classification.deps.iter().all(|(dep, need)| {
-                    let verdict = self.dependency_verdict(dep, &verdicts);
+                    let verdict = match verdicts.get(dep) {
+                        Some(verdict) => *verdict,
+                        None => self.outside_verdict(dep),
+                    };
                     match need {
                         Need::Nothing => verdict == PropertyWrites::Nothing,
                         Need::OwnObject => verdict <= PropertyWrites::OwnObject,
@@ -329,49 +530,7 @@ impl Registry {
                 }
             }
         }
-        self.property_writes = verdicts;
-    }
-
-    /// A dependency's verdict: a stub's by its parameters, a classified
-    /// declaration's as settled so far, anything else's `Anything`.
-    fn dependency_verdict(
-        &self,
-        dep: &DeclKey,
-        verdicts: &FxHashMap<DeclKey, PropertyWrites>,
-    ) -> PropertyWrites {
-        if let Some(verdict) = verdicts.get(dep) {
-            return *verdict;
-        }
-        let sig = match &dep.class {
-            Some(class) => self.lookup_method(class, &dep.member),
-            None => self.functions.get(dep.member.as_str()),
-        };
-        match sig {
-            Some(sig) if sig.is_stub => stub_verdict(sig),
-            _ => PropertyWrites::Anything,
-        }
-    }
-
-    /// Whose properties calling function `name` may write.
-    pub(crate) fn function_property_writes(&self, name: &str) -> PropertyWrites {
-        match self.functions.get(name) {
-            Some(sig) if sig.is_stub => stub_verdict(sig),
-            Some(_) => {
-                function_verdict(&self.property_writes, name).unwrap_or(PropertyWrites::Anything)
-            }
-            None => PropertyWrites::Anything,
-        }
-    }
-
-    /// Whose properties calling `owner`'s `method` - the declaration a
-    /// call reaches, not an override of it - may write.
-    pub(crate) fn method_property_writes(&self, owner: &str, method: &str) -> PropertyWrites {
-        match self.lookup_method(owner, method) {
-            Some(sig) if sig.is_stub => stub_verdict(sig),
-            Some(_) => method_verdict(&self.property_writes, owner, method)
-                .unwrap_or(PropertyWrites::Anything),
-            None => PropertyWrites::Anything,
-        }
+        verdicts
     }
 }
 

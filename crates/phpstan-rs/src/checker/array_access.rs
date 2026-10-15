@@ -88,7 +88,8 @@ impl<'a> Checker<'a> {
                         method,
                         sig,
                     ) {
-                        self.registry.method_property_writes(owner, method)
+                        self.registry
+                            .method_property_writes(owner, method, self.bodies)
                     } else {
                         PropertyWrites::Anything
                     };

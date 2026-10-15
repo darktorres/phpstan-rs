@@ -1769,8 +1769,6 @@ impl ClassReflection {
                 assert_if_true: Vec::new(),
                 assert_if_false: Vec::new(),
                 assert: Vec::new(),
-                purity_dependencies: None,
-                is_transitively_pure: false,
                 is_stub: false,
                 // A real, unconditional PHP built-in, not a textual
                 // declaration - but never reachable through `required_
@@ -1828,8 +1826,6 @@ impl ClassReflection {
                     assert_if_true: Vec::new(),
                     assert_if_false: Vec::new(),
                     assert: Vec::new(),
-                    purity_dependencies: None,
-                    is_transitively_pure: false,
                     is_stub: false,
                     is_magic: true,
                     stub_writes: Default::default(),
@@ -1860,8 +1856,6 @@ impl ClassReflection {
                     assert_if_true: Vec::new(),
                     assert_if_false: Vec::new(),
                     assert: Vec::new(),
-                    purity_dependencies: None,
-                    is_transitively_pure: false,
                     is_stub: false,
                     is_magic: true,
                     stub_writes: Default::default(),

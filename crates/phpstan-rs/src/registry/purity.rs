@@ -1,14 +1,15 @@
-//! The transitive-purity half: a registry-build-time fixed point over
-//! the whole project's own call graph, deciding which
-//! functions/methods/constructors are provably effect-free - either
-//! directly (an empty/pure-arithmetic body) or transitively (every call
-//! they make resolves to something *else* already proven effect-free).
+//! The transitive-purity half: which functions/methods/constructors are
+//! provably effect-free - either directly (an empty/pure-arithmetic body)
+//! or transitively (every call they make resolves to something *else*
+//! already proven effect-free).
 //!
-//! **The real architecture**: a plain, monotonic fixed point over a
-//! dependency graph, run once, immediately after every class is
-//! indexed - the same placement `flatten_phpdoc_inheritance`/
-//! `resolve_deferred_value_of` already established for "needs the whole
-//! project visible first" passes.
+//! **The real architecture**: a plain, monotonic search over a dependency
+//! graph, run for a declaration when something asks whether it is pure
+//! (`Registry::function_is_pure`/`method_is_pure`) and remembered
+//! (`registry::demand`). Few declarations are ever asked about, and none is
+//! settled that nothing asks about. A debug build also settles every
+//! declaration at once, the way the registry did before it was asked, and
+//! checks each answer against that.
 //!
 //! **A disclosed precision restriction**: real call-target resolution
 //! for `MethodCall`/`StaticCall` depends on a live, fully-inferred
@@ -36,7 +37,8 @@
 //! taxonomy.
 
 use crate::registry::bodies::BodySource;
-use rayon::prelude::*;
+use crate::registry::name_table::FoldedKey;
+use crate::registry::property_writes::{DeclKey, DeclRef, function_key, method_key};
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
 
@@ -49,7 +51,7 @@ use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base
 /// case a fixed point grows outward from; `None` (not this type, see
-/// `FunctionReflection::purity_dependencies`) means "can never be proven
+/// `Registry::purity_dependencies_of`) means "can never be proven
 /// effect-free, no matter what". Both variants store a lower-cased key
 /// (matching real PHPStan's own `functionKey`/`methodKey`, which
 /// `strtolower`s both parts) - so the same declaration referenced under
@@ -62,228 +64,249 @@ pub enum PurityDependency {
     Method(Name, Name),
 }
 
-/// The functions and methods `classify_purity` found a body with
-/// dependencies for: the only ones a fixed point can mark pure, since every
-/// declaration in scope starts with no dependencies and none is pure.
-#[derive(Default)]
-struct PurityCandidates {
-    functions: Vec<Name>,
-    methods: Vec<(Name, Name)>,
+/// A declaration the search has entered and not left.
+struct Frame {
+    key: DeclKey,
+    /// The declarations the purity of this one is conditional on.
+    deps: Vec<DeclKey>,
+    /// The next of them to follow.
+    next: usize,
+}
+
+/// The declaration a dependency names.
+fn dependency_key(dep: &PurityDependency) -> DeclKey {
+    match dep {
+        PurityDependency::Function(name) => function_key(name),
+        PurityDependency::Method(class, method) => method_key(class, method),
+    }
 }
 
 impl Registry {
-    /// Wired into `Registry::build` immediately after
-    /// `resolve_deferred_value_of` (and into `Project`'s own incremental
-    /// single-file-reload path, the same precedent) - re-runs from
-    /// scratch on every reload rather than incrementally recomputing,
-    /// prioritizing correctness over performance, the same tradeoff
-    /// `resolve_deferred_value_of` already made. Each body comes from
-    /// `bodies`, found by its declaration's provenance.
-    #[hotpath::measure]
-    pub(crate) fn resolve_transitive_purity(&mut self, bodies: &dyn BodySource) {
-        let candidates = self.classify_purity(bodies);
-        self.run_purity_fixed_point(&candidates);
-        self.resolve_property_writes(bodies);
-    }
-
-    /// Populates `purity_dependencies` on every function/method this
-    /// project's own registry has a real body for - gated the same way
-    /// real PHPStan's own `*WithoutImpurePointsCollector`s gate before
-    /// ever calling `resolveDependencies`: no by-reference parameter (a
-    /// disclosed simplification of real PHPStan's own
-    /// `createsNewVariable()` distinction - see the gating check below
-    /// for why treating every by-ref parameter as disqualifying is the
-    /// safe direction here), no `@phpstan-assert`-family tag, and no
-    /// declared throw. This project has no `@phpstan-pure`/
-    /// `@phpstan-impure`/`hasSideEffects` annotation surface at all, so
-    /// unlike real PHPStan's own gate, nothing here is ever
-    /// pre-disqualified by an existing annotation - every declaration
-    /// starts "maybe pure" until its own body says otherwise.
-    /// `classify_body` only ever *reads* the registry (resolving
-    /// `$this`/`self`/`parent`/`static`/plain-function call targets, see
-    /// its own doc comment) - the write
-    /// (`...purity_dependencies = deps`) happens after, per function/
-    /// method, to a disjoint key, so this parallelizes with the same
-    /// reborrow-as-`&Registry` technique `flatten_traits_one_pass`/
-    /// `flatten_phpdoc_inheritance_one_pass` already use. Two separate
-    /// parallel passes (functions, then class methods) rather than one
-    /// combined one, matching the two loops this replaces - each needs
-    /// its own fresh reborrow since the sequential apply loop in between
-    /// needs `&mut self` again.
-    #[allow(clippy::type_complexity)]
-    fn classify_purity(&mut self, bodies: &dyn BodySource) -> PurityCandidates {
-        let mut candidates = PurityCandidates::default();
-        let function_names = self.scoped_function_names();
-        let registry: &Registry = self;
-        let function_deps: Vec<(Name, Option<Vec<PurityDependency>>)> = function_names
-            .par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
-            .filter_map(|name| {
-                let sig = &registry.functions[name];
-                if !purity_gate_passes(sig, false) {
-                    return None;
-                }
-                let deps = classify_summary(bodies, &sig.provenance, None, registry)?;
-                Some((name.clone(), deps))
-            })
-            .collect();
-        for (name, deps) in function_deps {
-            let has_deps = deps.is_some();
-            self.functions.get_mut(&name).unwrap().purity_dependencies = deps;
-            if has_deps {
-                candidates.functions.push(name);
-            }
-        }
-
-        let class_names = self.scoped_class_names();
-        let registry: &Registry = self;
-        let method_deps: Vec<(Name, Name, Option<Vec<PurityDependency>>)> = class_names
-            .par_iter()
-            .with_min_len(crate::registry::PASS_CHUNK)
-            .flat_map(|class_name| {
-                let mut per_class = Vec::new();
-                for (method_name, sig) in registry.classes[class_name].methods.iter() {
-                    if !purity_gate_passes(sig, syntax::ast::is_constructor_name(method_name)) {
-                        continue;
-                    }
-                    let Some(deps) =
-                        classify_summary(bodies, &sig.provenance, Some(class_name), registry)
-                    else {
-                        continue;
-                    };
-                    per_class.push((class_name.clone(), method_name.clone(), deps));
-                }
-                per_class
-            })
-            .collect();
-        for (class_name, method_name, deps) in method_deps {
-            let has_deps = deps.is_some();
-            self.classes
-                .get_mut(&class_name)
-                .unwrap()
-                .methods
-                .get_mut(&method_name)
-                .unwrap()
-                .purity_dependencies = deps;
-            if has_deps {
-                candidates.methods.push((class_name, method_name));
-            }
-        }
-        candidates
-    }
-
-    /// A plain, monotonic fixed point (bounded by declaration count, no
-    /// `MAX_PASSES` cap needed - this is a monotonically growing set
-    /// over a finite graph, not approximating a possibly-nonconvergent
-    /// narrowing fixed point): mark a declaration pure once every one of
-    /// its own dependencies is marked pure. A dependency cycle with no
-    /// external pure base case is correctly never marked pure, matching
-    /// real PHPStan's own identical behavior for the same shape.
+    /// What the purity of the declaration `key` names is conditional on:
+    /// the declarations its body calls, none for a body that calls none.
+    /// `None` when it can never be proven effect-free: it is no function or
+    /// method of the project, fails the gate, has no body at hand, or has a
+    /// construct or a call that decides against it.
     ///
-    /// Each candidate counts the dependencies of it that are not pure yet;
-    /// a candidate marked pure takes one off the count of every candidate
-    /// that depends on it, and one whose count reaches nothing is marked
-    /// in turn. A dependency that is not pure and is no candidate (nothing
-    /// will ever mark it) leaves its dependent's count above nothing for
-    /// good, as the passes over every candidate it replaces never
-    /// satisfied it either.
-    fn run_purity_fixed_point(&mut self, candidates: &PurityCandidates) {
-        let candidate_count = candidates.functions.len() + candidates.methods.len();
-        let signature = |index: usize| -> &FunctionReflection {
-            match index.checked_sub(candidates.functions.len()) {
-                None => &self.functions[&candidates.functions[index]],
-                Some(i) => {
-                    let (class, method) = &candidates.methods[i];
-                    self.classes[class]
-                        .methods
-                        .get(method)
-                        .expect("a candidate method is declared")
+    /// Gated the same way real PHPStan's own `*WithoutImpurePointsCollector`s
+    /// gate before ever calling `resolveDependencies` (`purity_gate_passes`).
+    /// This project has no `@phpstan-pure`/`@phpstan-impure`/
+    /// `hasSideEffects` annotation surface at all, so unlike real PHPStan's
+    /// own gate, nothing here is ever pre-disqualified by an existing
+    /// annotation - every declaration starts "maybe pure" until its own
+    /// body says otherwise.
+    fn purity_dependencies_of(
+        &self,
+        key: &DeclKey,
+        bodies: &dyn BodySource,
+    ) -> Option<Vec<DeclKey>> {
+        let (class, sig, is_constructor) = match &key.class {
+            None => (None, self.functions.get(key.member.as_str())?, false),
+            Some(class) => {
+                let (name, info) = self.classes.get_with_name(&FoldedKey(class.as_str()))?;
+                let sig = info.methods.get(key.member.as_str())?;
+                (
+                    Some(name),
+                    sig,
+                    syntax::ast::is_constructor_name(&key.member),
+                )
+            }
+        };
+        if !purity_gate_passes(sig, is_constructor) {
+            return None;
+        }
+        let deps = classify_summary(
+            bodies,
+            &sig.provenance,
+            class.map(|name| name.as_ref()),
+            self,
+        )??;
+        Some(deps.iter().map(dependency_key).collect())
+    }
+
+    /// Whether `root` is provably effect-free, found by following the
+    /// calls its body makes and remembered for every declaration the search
+    /// settles. A declaration is pure once every one of its dependencies is:
+    /// plain, monotonic, and a dependency cycle with no external pure base
+    /// case is correctly never pure, matching real PHPStan's own identical
+    /// behavior for the same shape. So a call back into a declaration the
+    /// search is inside of is impure, and so is every declaration on the way
+    /// back to it, as each is in the cycle or reaches it. A declaration's
+    /// answer therefore does not depend on where the search began.
+    pub(in crate::registry) fn declaration_is_pure(
+        &self,
+        root: DeclKey,
+        bodies: &dyn BodySource,
+    ) -> bool {
+        // `None` while the search is inside the declaration.
+        let mut done: FxHashMap<DeclKey, Option<bool>> = FxHashMap::default();
+        let mut stack: Vec<Frame> = Vec::new();
+        let enter =
+            |key: DeclKey, done: &mut FxHashMap<DeclKey, Option<bool>>| -> Result<bool, Frame> {
+                if let Some(pure) = self.demand.pure_of(&key) {
+                    return Ok(pure);
+                }
+                match done.get(&key) {
+                    Some(Some(pure)) => return Ok(*pure),
+                    Some(None) => return Ok(false),
+                    None => {}
+                }
+                match self.purity_dependencies_of(&key, bodies) {
+                    None => {
+                        done.insert(key, Some(false));
+                        Ok(false)
+                    }
+                    Some(deps) => {
+                        done.insert(key.clone(), None);
+                        Err(Frame { key, deps, next: 0 })
+                    }
+                }
+            };
+        match enter(root, &mut done) {
+            Ok(pure) => return pure,
+            Err(frame) => stack.push(frame),
+        }
+        let mut returned: Option<bool> = None;
+        let pure = loop {
+            let top = stack
+                .last_mut()
+                .expect("the search is inside a declaration");
+            // A dependency that is not pure leaves no purity below it.
+            let ended = match returned.take() {
+                Some(false) => Some(false),
+                _ if top.next == top.deps.len() => Some(true),
+                _ => None,
+            };
+            match ended {
+                Some(pure) => {
+                    let frame = stack.pop().expect("the search is inside a declaration");
+                    done.insert(frame.key, Some(pure));
+                    if stack.is_empty() {
+                        break pure;
+                    }
+                    returned = Some(pure);
+                }
+                None => {
+                    let dep = top.deps[top.next].clone();
+                    top.next += 1;
+                    match enter(dep, &mut done) {
+                        Ok(pure) => returned = Some(pure),
+                        Err(frame) => stack.push(frame),
+                    }
                 }
             }
         };
-        // Which candidate each signature is, found by address before any
-        // is changed.
-        let mut index_of: FxHashMap<*const FunctionReflection, usize> = FxHashMap::default();
-        for index in 0..candidate_count {
-            index_of.insert(std::ptr::from_ref(signature(index)), index);
-        }
-        let mut waiting = vec![0usize; candidate_count];
-        let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); candidate_count];
-        let mut ready: Vec<usize> = Vec::new();
-        for (index, wait) in waiting.iter_mut().enumerate() {
-            let sig = signature(index);
-            if sig.is_transitively_pure {
-                continue;
-            }
-            let Some(deps) = &sig.purity_dependencies else {
-                continue;
-            };
-            let mut not_pure = 0;
-            for dep in deps {
-                if self.dependency_is_pure(dep) {
-                    continue;
-                }
-                not_pure += 1;
-                let target = match dep {
-                    PurityDependency::Function(name) => self.functions.get(name),
-                    PurityDependency::Method(class, method) => self
-                        .classes
-                        .get(class)
-                        .and_then(|info| info.methods.get(method)),
-                };
-                if let Some(&target) = target.and_then(|sig| index_of.get(&std::ptr::from_ref(sig)))
-                {
-                    dependents[target].push(index);
-                }
-            }
-            *wait = not_pure;
-            if not_pure == 0 {
-                ready.push(index);
-            }
-        }
-        let mut pure: Vec<usize> = Vec::new();
-        while let Some(index) = ready.pop() {
-            pure.push(index);
-            for &dependent in &dependents[index] {
-                waiting[dependent] -= 1;
-                if waiting[dependent] == 0 {
-                    ready.push(dependent);
-                }
-            }
-        }
-        for index in pure {
-            match index.checked_sub(candidates.functions.len()) {
-                None => {
-                    self.functions
-                        .get_mut(&candidates.functions[index])
-                        .unwrap()
-                        .is_transitively_pure = true;
-                }
-                Some(i) => {
-                    let (class, method) = &candidates.methods[i];
-                    self.classes
-                        .get_mut(class)
-                        .unwrap()
-                        .methods
-                        .get_mut(method)
-                        .unwrap()
-                        .is_transitively_pure = true;
-                }
-            }
-        }
+        self.demand.record_pure(
+            done.into_iter()
+                .filter_map(|(key, pure)| Some((key, pure?)))
+                .collect(),
+        );
+        pure
     }
 
-    fn dependency_is_pure(&self, dep: &PurityDependency) -> bool {
-        match dep {
-            PurityDependency::Function(name) => self
-                .functions
-                .get(name)
-                .is_some_and(|sig| sig.is_transitively_pure),
-            PurityDependency::Method(class, method) => self
+    /// Whether calling function `name` is provably effect-free.
+    pub(crate) fn function_is_pure(&self, name: &str, bodies: &dyn BodySource) -> bool {
+        let query = DeclRef {
+            class: None,
+            member: name,
+        };
+        let pure = match self.demand.pure_of(&query) {
+            Some(pure) => pure,
+            None => self.declaration_is_pure(function_key(name), bodies),
+        };
+        #[cfg(debug_assertions)]
+        self.assert_pure_as_built(&function_key(name), pure, bodies);
+        pure
+    }
+
+    /// Whether calling `class`'s `method` is provably effect-free: `class`
+    /// is the one that declares it (`lookup_method_with_owner`'s).
+    pub(crate) fn method_is_pure(
+        &self,
+        class: &str,
+        method: &str,
+        bodies: &dyn BodySource,
+    ) -> bool {
+        let query = DeclRef {
+            class: Some(class),
+            member: method,
+        };
+        let pure = match self.demand.pure_of(&query) {
+            Some(pure) => pure,
+            None => self.declaration_is_pure(method_key(class, method), bodies),
+        };
+        #[cfg(debug_assertions)]
+        self.assert_pure_as_built(&method_key(class, method), pure, bodies);
+        pure
+    }
+
+    /// Whether `key` is among the declarations found pure for every
+    /// declaration at once, which an answer found when asked has to agree
+    /// with.
+    #[cfg(debug_assertions)]
+    fn assert_pure_as_built(&self, key: &DeclKey, found: bool, bodies: &dyn BodySource) {
+        let Some(built) = &self.as_built else {
+            return;
+        };
+        // Only where the bodies at hand are those the answers were built from.
+        let sig = match &key.class {
+            None => self.functions.get(key.member.as_str()),
+            Some(class) => self
                 .classes
-                .get(class)
-                .and_then(|info| info.methods.get(method))
-                .is_some_and(|sig| sig.is_transitively_pure),
+                .get(class.as_str())
+                .and_then(|info| info.methods.get(key.member.as_str())),
+        };
+        let Some(sig) = sig else {
+            return;
+        };
+        if bodies.summary(&sig.provenance).is_none() {
+            return;
+        }
+        assert_eq!(
+            found,
+            built.pure.contains(key),
+            "the purity found when asked and the one built for every declaration differ for {key:?}"
+        );
+    }
+
+    /// The functions and methods found pure for every declaration with a
+    /// body at once: the answers the ones found when asked are checked
+    /// against.
+    #[cfg(debug_assertions)]
+    pub(in crate::registry) fn pure_among_every_declaration(
+        &self,
+        bodies: &dyn BodySource,
+    ) -> rustc_hash::FxHashSet<DeclKey> {
+        let mut candidates: FxHashMap<DeclKey, Vec<DeclKey>> = FxHashMap::default();
+        for (name, _) in self.functions.own_iter() {
+            let key = function_key(name);
+            if let Some(deps) = self.purity_dependencies_of(&key, bodies) {
+                candidates.insert(key, deps);
+            }
+        }
+        for (class, info) in self.classes.own_iter() {
+            for (method, _) in info.methods.iter() {
+                let key = method_key(class, method);
+                if let Some(deps) = self.purity_dependencies_of(&key, bodies) {
+                    candidates.insert(key, deps);
+                }
+            }
+        }
+        // A candidate is pure once every dependency is; one that is no
+        // candidate never is.
+        let mut pure: rustc_hash::FxHashSet<DeclKey> = rustc_hash::FxHashSet::default();
+        loop {
+            let found: Vec<DeclKey> = candidates
+                .iter()
+                .filter(|(key, deps)| {
+                    !pure.contains(*key) && deps.iter().all(|dep| pure.contains(dep))
+                })
+                .map(|(key, _)| key.clone())
+                .collect();
+            if found.is_empty() {
+                return pure;
+            }
+            pure.extend(found);
         }
     }
 }
