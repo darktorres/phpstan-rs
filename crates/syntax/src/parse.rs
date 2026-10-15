@@ -113,6 +113,7 @@ pub fn parse_watching<'a>(
     let has_anonymous_class = parser.saw_anonymous_class();
     let has_nested_declaration = parser.saw_nested_declaration();
     let has_declaration_in_body = parser.saw_declaration_in_body();
+    let has_global_or_include = parser.saw_global_or_include();
     let goto_labels = parser.file_goto_labels();
     let references = parser.take_references();
     // The rest of the file is lexed even when the parse failed: a lexer
@@ -136,6 +137,7 @@ pub fn parse_watching<'a>(
     facts.has_anonymous_class = has_anonymous_class;
     facts.has_nested_declaration = has_nested_declaration;
     facts.has_declaration_in_body = has_declaration_in_body;
+    facts.has_global_or_include = has_global_or_include;
     Ok(ParsedFile {
         stmts,
         ignore_marks,
@@ -164,6 +166,38 @@ pub fn parse_function_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn facts_of(src: &str) -> FileFacts {
+        parse(src.as_bytes()).expect("parses").facts
+    }
+
+    #[test]
+    fn a_global_statement_or_an_include_is_a_fact_of_the_file() {
+        assert!(!facts_of("<?php function f() { return 1; } $x = 2;").has_global_or_include);
+        assert!(facts_of("<?php function f() { global $x; }").has_global_or_include);
+        assert!(facts_of("<?php function f() { return include 'a.php'; }").has_global_or_include);
+        assert!(facts_of("<?php require_once 'a.php';").has_global_or_include);
+        assert!(
+            facts_of("<?php function f($a) { return \"{$a->m(include 'a.php')}\"; }")
+                .has_global_or_include
+        );
+    }
+
+    #[test]
+    fn a_declaration_as_a_statement_of_a_body_is_a_fact_of_the_file() {
+        assert!(
+            !facts_of("<?php function f() {} class A { function m() {} } const C = 1;")
+                .has_declaration_in_body
+        );
+        for src in [
+            "<?php function f() { function g() {} }",
+            "<?php class A { function m() { class B {} } }",
+            "<?php function f() { const C = 1; }",
+            "<?php function f($a) { return \"{$a->m(function () { function h() {} })}\"; }",
+        ] {
+            assert!(facts_of(src).has_declaration_in_body, "{src}");
+        }
+    }
 
     #[test]
     fn a_leading_zero_literal_with_an_8_or_9_is_a_parse_error() {

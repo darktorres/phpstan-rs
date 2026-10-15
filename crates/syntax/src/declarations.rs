@@ -88,10 +88,24 @@ pub fn for_each_declaration<'a>(
 pub fn for_each_declaration_in<'a>(
     stmts: &'a [Stmt],
     in_expressions: bool,
+    f: impl FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>]),
+) {
+    for_each_declaration_with(stmts, in_expressions, true, f);
+}
+
+/// `for_each_declaration_in`, which enters the body of a function or
+/// method only when `in_bodies`: a file with no declaration as a statement
+/// of a body (`FileFacts::has_declaration_in_body`), and none in an
+/// expression, has none there to find.
+pub fn for_each_declaration_with<'a>(
+    stmts: &'a [Stmt],
+    in_expressions: bool,
+    in_bodies: bool,
     mut f: impl FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>]),
 ) {
     let mut walk = Declarations {
         in_expressions,
+        in_bodies,
         ctx: NameContext::default(),
         conditional: false,
         early: Vec::new(),
@@ -124,6 +138,7 @@ fn ends_in_return(stmt: &Stmt) -> bool {
 
 struct Declarations<'a, 'f, F> {
     in_expressions: bool,
+    in_bodies: bool,
     ctx: NameContext,
     conditional: bool,
     /// The negated conditions of the early returns passed so far.
@@ -206,7 +221,9 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Visitor<'a>
             }
             StmtKind::FunctionDecl(func) => {
                 self.found(Declared::Function(func), stmt.span);
-                self.conditionally(|v| walk_function_decl(v, func));
+                if self.in_bodies {
+                    self.conditionally(|v| walk_function_decl(v, func));
+                }
             }
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
@@ -223,6 +240,12 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Visitor<'a>
             | StmtKind::Try { .. } => self.conditionally(|v| walk_stmt(v, stmt)),
             _ => walk_stmt(self, stmt),
         })
+    }
+
+    fn visit_function_decl(&mut self, function: &'a FunctionDecl) {
+        if self.in_bodies {
+            walk_function_decl(self, function);
+        }
     }
 
     fn visit_expr(&mut self, e: &'a Expr) {

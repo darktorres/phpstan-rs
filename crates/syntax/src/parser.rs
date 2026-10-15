@@ -69,6 +69,8 @@ pub struct Parser<'a> {
     // a declaration was a statement of one.
     pub(crate) body_depth: std::cell::Cell<u32>,
     pub(crate) saw_declaration_in_body: std::cell::Cell<bool>,
+    // Whether a `global` statement or an `include` or `require` was parsed.
+    pub(crate) saw_global_or_include: std::cell::Cell<bool>,
     // The labels `goto` statements name, one entry per function-like body
     // being parsed, the file's own first.
     pub(crate) goto_scopes: Vec<GotoScope>,
@@ -209,6 +211,7 @@ impl<'a> Parser<'a> {
             saw_nested_declaration: std::cell::Cell::new(false),
             body_depth: std::cell::Cell::new(0),
             saw_declaration_in_body: std::cell::Cell::new(false),
+            saw_global_or_include: std::cell::Cell::new(false),
             goto_scopes: vec![GotoScope::default()],
         };
         parser.fill(LOOKAHEAD);
@@ -325,6 +328,12 @@ impl Parser<'_> {
     /// declared as a statement of a function or method body.
     pub fn saw_declaration_in_body(&self) -> bool {
         self.saw_declaration_in_body.get()
+    }
+
+    /// Whether the tree built so far has a `global` statement or an
+    /// `include` or `require` expression.
+    pub fn saw_global_or_include(&self) -> bool {
+        self.saw_global_or_include.get()
     }
 
     /// The span of the token about to be read: the last one's when none
@@ -566,6 +575,7 @@ impl Parser<'_> {
                 }
             }
             StmtKind::Global(vars) => {
+                self.saw_global_or_include.set(true);
                 let mut recorder = self.recorder.borrow_mut();
                 for name in vars.iter().filter_map(|v| v.name()) {
                     recorder.global_variable(name);

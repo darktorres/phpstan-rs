@@ -40,6 +40,8 @@ impl Parser<'_> {
                     // imports where it sits.
                     *sub.ctx.borrow_mut() = self.ctx.borrow().clone();
                     sub.next_node_id.set(self.next_node_id.get());
+                    sub.nested_depth.set(self.nested_depth.get());
+                    sub.body_depth.set(self.body_depth.get());
                     *sub.recorder.borrow_mut() = self.recorder.borrow().fork();
                     let parsed = sub.parse_expression()?;
                     sub.check_pattern_only()?;
@@ -63,6 +65,14 @@ impl Parser<'_> {
                         });
                     }
                     self.next_node_id.set(sub.next_node_id.get());
+                    self.saw_anonymous_class |= sub.saw_anonymous_class;
+                    for (seen, sub_seen) in [
+                        (&self.saw_nested_declaration, &sub.saw_nested_declaration),
+                        (&self.saw_declaration_in_body, &sub.saw_declaration_in_body),
+                        (&self.saw_global_or_include, &sub.saw_global_or_include),
+                    ] {
+                        seen.set(seen.get() || sub_seen.get());
+                    }
                     self.recorder.borrow_mut().absorb(sub.take_references());
                     exprs.push(parsed);
                 }

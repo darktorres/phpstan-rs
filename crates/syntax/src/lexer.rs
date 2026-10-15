@@ -227,6 +227,10 @@ pub struct FileFacts {
     /// function or method, as a statement of it: a walk of the statements
     /// reaches it, but only by walking the bodies.
     pub has_declaration_in_body: bool,
+    /// The file has a `global` statement or an `include` or `require`
+    /// expression, which is all that makes a function body add to what
+    /// the file does to the global scope.
+    pub has_global_or_include: bool,
     /// The bits of the `WatchList` the lexer was given for the spellings
     /// the file names: an identifier, a whole name or one segment of a
     /// qualified one, in any case.

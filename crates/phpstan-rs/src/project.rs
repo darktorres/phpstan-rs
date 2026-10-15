@@ -1899,7 +1899,7 @@ impl Project {
         // which has no `stub_paths` concept.
         self.duplicate_class_sites.index(&ast, path, false);
         let bodies = FileBodies::of(&ast);
-        let global_facts = Arc::new(GlobalFacts::of(&ast));
+        let global_facts = Arc::new(GlobalFacts::of_file(&ast, &facts));
         let pest_facts = PestFacts::of(path, &ast);
         let declared_classes = declared_classes(&ast);
         let id = self.files.id_for(path);
@@ -3071,7 +3071,7 @@ pub fn parse_file_with_names<'a>(
         })
         .collect();
     let bodies = FileBodies::of_file(&ast, &facts, skim_bodies.then_some(source));
-    let global_facts = Arc::new(GlobalFacts::of(&ast));
+    let global_facts = Arc::new(GlobalFacts::of_file(&ast, &facts));
     let pest_facts = PestFacts::of(path, &ast);
     Ok(ParsedFile {
         ast: Some(ast),

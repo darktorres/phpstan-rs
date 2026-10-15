@@ -229,6 +229,23 @@ impl GlobalFacts {
         facts
     }
 
+    /// `of` for a file whose facts are known: with no `global` statement
+    /// and no `include` or `require` in the file, no function, method or
+    /// closure body adds a site, so none is walked.
+    pub fn of_file(stmts: &[Stmt], facts: &syntax::FileFacts) -> GlobalFacts {
+        let mut found = GlobalFacts::default();
+        let walk_bodies = facts.has_global_or_include;
+        walk_scope(stmts, true, &NameSet::default(), walk_bodies, &mut found);
+        // What a walk of the bodies too finds.
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            format!("{found:?}"),
+            format!("{:?}", GlobalFacts::of(stmts)),
+            "a file whose facts say its bodies add no global site has one"
+        );
+        found
+    }
+
     /// The sites with what they assign, as `registry` says it is.
     fn resolve(&self, id: FileId, registry: &Registry) -> FileSites {
         FileSites {
@@ -470,7 +487,7 @@ fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
 /// already, potentially, the real global scope).
 fn walk_top_level(stmts: &[Stmt], out: &mut GlobalFacts) {
     let empty = NameSet::default();
-    walk_scope(stmts, true, &empty, out);
+    walk_scope(stmts, true, &empty, true, out);
 }
 
 /// Walks one function/method/closure body - `global_names` is the
@@ -483,7 +500,7 @@ fn walk_top_level(stmts: &[Stmt], out: &mut GlobalFacts) {
 /// include-graph check the way file top level is.
 fn walk_function_body(stmts: &[Stmt], out: &mut GlobalFacts) {
     let global_names = collect_global_names(stmts);
-    walk_scope(stmts, false, &global_names, out);
+    walk_scope(stmts, false, &global_names, true, out);
 }
 
 /// Every name a `global` statement in this body imports. A nested
@@ -503,10 +520,17 @@ fn collect_global_names(stmts: &[Stmt]) -> NameSet {
     out
 }
 
-fn walk_scope(stmts: &[Stmt], top_level: bool, global_names: &NameSet, out: &mut GlobalFacts) {
+fn walk_scope(
+    stmts: &[Stmt],
+    top_level: bool,
+    global_names: &NameSet,
+    walk_bodies: bool,
+    out: &mut GlobalFacts,
+) {
     let mut scope = Scope {
         top_level,
         global_names,
+        walk_bodies,
         out,
     };
     for stmt in stmts {
@@ -519,6 +543,8 @@ fn walk_scope(stmts: &[Stmt], top_level: bool, global_names: &NameSet, out: &mut
 struct Scope<'r> {
     top_level: bool,
     global_names: &'r NameSet,
+    // Whether a nested body is walked: not when nothing in it can add.
+    walk_bodies: bool,
     out: &'r mut GlobalFacts,
 }
 
@@ -526,12 +552,16 @@ impl<'a> Visitor<'a> for Scope<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => {
-                walk_function_body(f.body_stmts(), self.out);
+                if self.walk_bodies {
+                    walk_function_body(f.body_stmts(), self.out);
+                }
                 return;
             }
             StmtKind::ClassDecl(c) => {
-                for method in &c.def.methods {
-                    walk_function_body(method.function.body_stmts(), self.out);
+                if self.walk_bodies {
+                    for method in &c.def.methods {
+                        walk_function_body(method.function.body_stmts(), self.out);
+                    }
                 }
                 return;
             }
@@ -547,12 +577,16 @@ impl<'a> Visitor<'a> for Scope<'_> {
         match &expr.kind {
             ExprKind::Closure(closure) => {
                 let syntax::ast::ClosureExpr { body, .. } = &**closure;
-                walk_function_body(body, self.out);
+                if self.walk_bodies {
+                    walk_function_body(body, self.out);
+                }
                 return;
             }
             ExprKind::NewAnonymousClass(class) => {
-                for method in &class.def.methods {
-                    walk_function_body(method.function.body_stmts(), self.out);
+                if self.walk_bodies {
+                    for method in &class.def.methods {
+                        walk_function_body(method.function.body_stmts(), self.out);
+                    }
                 }
                 return;
             }

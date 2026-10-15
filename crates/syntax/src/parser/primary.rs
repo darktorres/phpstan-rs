@@ -432,6 +432,7 @@ impl Parser<'_> {
                     _ => IncludeKind::RequireOnce,
                 };
                 self.skip();
+                self.saw_global_or_include.set(true);
                 let e = self.parse_expression()?;
                 self.expr(ExprKind::Include(kind, Box::new(e)), start)
             }

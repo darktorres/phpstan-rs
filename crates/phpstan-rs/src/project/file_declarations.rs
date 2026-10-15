@@ -12,7 +12,7 @@ use std::path::Path;
 
 use syntax::FileFacts;
 use syntax::ast::Stmt;
-use syntax::declarations::{Declared, for_each_declaration_in};
+use syntax::declarations::{Declared, for_each_declaration_with};
 use syntax::name::Name;
 
 use super::declared_classes::DeclaredClass;
@@ -74,47 +74,54 @@ pub(super) fn collect(
         duplicate_class_sites: DuplicateClassSites::default(),
         declared_classes: Vec::new(),
     };
-    for_each_declaration_in(ast, in_expressions, |declaration, ctx, guards| {
-        let name = declaration.name();
-        match declaration.declared {
-            Declared::Function(f) => {
-                if !declaration.conditional {
-                    found.duplicate_fn_sites.record(name.clone(), path, f);
+    // A body is entered only where it can hold a declaration.
+    let in_bodies = in_expressions || facts.has_declaration_in_body;
+    for_each_declaration_with(
+        ast,
+        in_expressions,
+        in_bodies,
+        |declaration, ctx, guards| {
+            let name = declaration.name();
+            match declaration.declared {
+                Declared::Function(f) => {
+                    if !declaration.conditional {
+                        found.duplicate_fn_sites.record(name.clone(), path, f);
+                    }
+                    found.functions.push(Name::from(name));
                 }
-                found.functions.push(Name::from(name));
-            }
-            Declared::Class(c) => {
-                if !declaration.conditional {
-                    found.declared_classes.push(DeclaredClass::of(
-                        name.clone(),
-                        declaration.span,
-                        c,
-                    ));
-                    found.duplicate_class_sites.record(
-                        name.clone(),
-                        path,
-                        c.name.span,
-                        c.def.kind,
-                        is_stub,
-                    );
+                Declared::Class(c) => {
+                    if !declaration.conditional {
+                        found.declared_classes.push(DeclaredClass::of(
+                            name.clone(),
+                            declaration.span,
+                            c,
+                        ));
+                        found.duplicate_class_sites.record(
+                            name.clone(),
+                            path,
+                            c.name.span,
+                            c.def.kind,
+                            is_stub,
+                        );
+                    }
+                    found.classes.push(Name::from(name));
                 }
-                found.classes.push(Name::from(name));
+                Declared::Constant(_) | Declared::Define { .. } => {
+                    found
+                        .constants
+                        .push(Name::from(name.trim_start_matches('\\')));
+                }
             }
-            Declared::Constant(_) | Declared::Define { .. } => {
-                found
-                    .constants
-                    .push(Name::from(name.trim_start_matches('\\')));
-            }
-        }
-        built_declaration(
-            declaration,
-            ctx,
-            guards,
-            origin,
-            None,
-            &mut found.built_decls,
-        );
-    });
+            built_declaration(
+                declaration,
+                ctx,
+                guards,
+                origin,
+                None,
+                &mut found.built_decls,
+            );
+        },
+    );
     if has_anonymous_class {
         found.built_decls.extend(anonymous_class_decls(ast, origin));
     }
