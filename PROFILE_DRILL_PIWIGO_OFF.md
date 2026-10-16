@@ -55,7 +55,7 @@ Profile: `~/.cache/prs-profile/callgrind-20g-modes/off/` (`cg.out-01..17`, 17 th
   - one rayon pool, as a speed-up by itself (it is part of proposal 5);
   - a narrower stub-cache key, while the stub build reads most of the main crate;
   - a dedicated reader for Composer's autoload file.
-- **Where it ends** (§11). With the plan, proposals 7-11 and the cuts, the warm run comes to ≈9.6-10.0 G when the files' parse verdicts are cached, and ≈11.0-11.4 G when they are not. The off run meets it only with proposal 6. Without proposal 6, proposals 1-4 take ≈1.6 G off the stub build.
+- **Where it ends** (§11). With the plan, proposals 7-11 and the cuts, the warm run comes to ≈9.6-10.0 G when the files' parse verdicts are cached, and ≈11.1-11.5 G when they are not. The off run meets it only with proposal 6. Without proposal 6, proposals 1-4 take ≈1.6 G off the stub build.
 - **Decided** (2026-10-13):
   - a skimmed body is still checked for syntax errors, by a pass that builds only what its checks read, and each file's verdict is cached (D1, §10.8);
   - a skimmed body's text is kept from the bytes the load reads (D2, §10.8);
@@ -256,7 +256,7 @@ The profile's binary ran under callgrind on Piwigo with a cache directory that t
 - **The floor of today's code is 14.34 G**, with nothing cold.
 - **What the parse phase keeps, 3.83 G:**
   - **the 2,792 analysed files, ≈2.51 G.** Their parse is 1,961.2 M (`parse_with_ignores`), and their products 548.0 M: `file_declarations::collect` 262.4 M (`from_def` 200.4 M of it), `FileBodies::collect`'s walk 141.3 M, `recorded_references` 79.5 M, `GlobalFacts::of` 64.8 M;
-  - **the 11,459 cache hits, ≈1.12 G**, ≈98 K per entry, ≈23 per stored byte: decoding 985.6 M (`BuiltDecl` 452.7 M, `FileBodies` 338.4 M, the references 86.3 M, `LineIndex` 51.0 M, `DeclaredClass` 29.8 M, the rest 27.4 M), making the references' sets 30.0 M, the checksum 23.7 M, the key's content hash 19.7 M, the reads 29.1 M, and the entry's path 30.8 M (`format!` and `Path::join`, twice per hit).
+  - **the 11,459 cache hits, ≈1.12 G**, ≈98 K per entry, ≈23 per stored byte: decoding 985.6 M (`BuiltDecl` 452.7 M, `FileBodies` 338.4 M, the references 86.3 M, `LineIndex` 51.0 M, `DeclaredClass` 29.8 M, the rest 27.4 M), making the references' sets 30.0 M, the checksum 23.7 M, the key's content hash 19.7 M, the reads 29.1 M, and the entry's path 30.8 M (`format!` and `Path::join`, twice per hit). About 4 M of the reads and joins are the 2,792 analysed files', which are read and joined too.
   - The two bullets make up 3.63 G of the 3.83 G. The other ≈0.2 G is parse-phase work that they do not itemise, such as the load closure's per-file path work.
 - **`from_def`** falls from 1,519.7 M over 12,546 calls to 202.1 M over 2,005: the analysed files' 1,932 classes and 73 anonymous ones.
 - **The analysed files' declarations (N3).** The per-file cache stores context files only (`project/file_cache.rs:7-8`; `cacheable` is false for analysed files, `project/session.rs:762`), because checking needs the tree. Their products do not, and they cost 548 M here, matching the ≈0.5-0.6 G that N3 estimated from the tokens (`analysis/nn/decls.php`, `docs.php`):
@@ -504,7 +504,7 @@ With both carved out (`bl/find/cfd-*.txt`), every other block agrees within 32 M
   | item 14, PHPDoc | 76.1 | `var_tag_nodes` 16.2 (112 inclusive); 540 `parse_shared` misses at ≈160 K each |
   | item 16, interning | 73.2 | `remembered` 20.9, `Type::new` 16.7, `Type::eq` 9.0, `canonical_int_key` and `ShapeKey` 9.2 |
   | item 18.3, slots and radix scopes | 60.1 | |
-  | item 18.10, F1, F4, F6f | 51.8 | `write_str` 14.4, the SQL parser ≈10, regex 7.1 |
+  | item 18.10, F1, F4, F6f | 51.8 | `write_str` 16.1 (14.4 in one function), the regex crates 14.8 (7.1 in `BoundedBacktracker::search_imp`), the SQL parser 13.7 |
   | item 18.1, one inference per node | 37.7 | `open_infer_scope` and `close_infer_scope` 22.4, over 1.43 M opens |
   | items 18.7 and 18.9, argument binding and signatures | 34.5 | |
   | item 9, `peeled` as a loop | 25.7 | 3.08 M calls; 74.1 M over the whole run |
@@ -523,8 +523,8 @@ With both carved out (`bl/find/cfd-*.txt`), every other block agrees within 32 M
   | site | Piwigo | Laravel |
   |---|---:|---:|
   | `rewind_to` from `control_flow.rs:242` | 214 (133 KB) | 285 (27 KB) |
-  | `rewind_to` from `loops.rs:105` | 8 | 12 |
-  | `rewind_to` from `loops.rs:382` | 48 | 5 |
+  | `rewind_to` from `stmt/loops.rs:105` | 8 | 12 |
+  | `rewind_to` from `stmt/loops.rs:382` | 48 | 5 |
   | `rewind_to` from `stmt.rs:271` | 0 | 2 |
   | `check_function`'s dynamic-variable truncation (`function_decl.rs:1208`) | 31,660 (1.81 MB) | 2 |
   | `check_program`'s (`checker.rs:1806`) | 0 | 0 |
@@ -538,7 +538,7 @@ The off run runs the passes three times (for the two stub bases and the project)
 
 | block | off, M | warm, M | what it is | removed by | verdict |
 |---|---:|---:|---|---|---|
-| purity | 660.4 | 621.4 | `resolve_transitive_purity`. Its 259.3 M of self cost is case-folded hashing of `DeclKey`s (the ASCII case fold at `num/mod.rs:863` 91.1 M, FxHash's multiply and rotate ≈57 M). The `DeclKey` maps cost 67.3 M and 38.8 M, and `DeclQuery::eq` 34.0 M | item 4 (ids: ≈0.5 G of string keys across this row, property writes and classification); proposal 9 | covered by item 4; proposal 9 removes the pass |
+| purity | 660.4 | 621.4 | `resolve_transitive_purity`. Its 259.3 M of self cost is case-folded hashing of `DeclKey`s (the ASCII case fold at `core/src/num/mod.rs:863` 91.1 M, FxHash's multiply and rotate ≈57 M). The `DeclKey` maps cost 67.3 M and 38.8 M, and `DeclQuery::eq` 34.0 M | item 4 (ids: ≈0.5 G of string keys across this row, property writes and classification); proposal 9 | covered by item 4; proposal 9 removes the pass |
 | name-table lookups | 238.5 | 44.9 | `Base<Option<u32>>::find` 183.9 M: the off run bisects bases built in memory | proposal 3; item 15 | new for the off run |
 | member owners | 190.2 | 141.8 | `precompute_member_owners` | items 4, 5 | covered |
 | property writes | 188.2 | 189.2 | `classify_summary` over every body | item 4; proposal 9 | as purity |
@@ -568,7 +568,7 @@ The off run runs the passes three times (for the two stub bases and the project)
 **Serial insert, 739.8 M**, on the main thread, ≈0.2 s of wall (B4).
 - **Dropping the trees.** Dropping the 11,459 context files' trees costs 567.8 M (`drop_glue::<[Stmt]>` called from `insert_numbered_file`).
   - It includes mimalloc's cross-thread frees: `mi_free_try_collect_mt` 75.1 M, `mi_abandoned_page_try_reclaim` 68.9 M and `_mi_page_free_collect_partly` 58.3 M. The trees were allocated on the workers and are freed on the main thread.
-  - Item 3 drops each tree on its worker, which takes the drop off the serial path and makes the frees local. Proposal 8 makes the trees about two thirds smaller.
+  - Item 3 drops each tree on its worker, which takes the drop off the serial path and makes the frees local. Proposal 8 takes away about two thirds of the drop's cost, the share the 20 G report puts on function bodies (387.3 of 575.5 M). Built as PROD-1 to PROD-3, it cut the drop by 53% (575.5 to 267.8 M) and the context trees at the off run's peak by ≈42% (MEAS-2).
 - **`register_references`**, with the `FileId` set inserts, costs 92.7 M. Item 5 replaces them with posting lists.
 - **`insert_built_decl`** costs 44.8 M. Items 4 and 5 cover it.
 - **With the per-file cache warm** the insert has no trees to drop, and costs 582.7 M, ≈0.1 s: 419.2 M of it decodes every method of every cached class to read its assert tags (E12, §3.4).
@@ -616,7 +616,7 @@ The off run runs the passes three times (for the two stub bases and the project)
 - **Item 18's display work, 26.0 M.** `write_shape` 20.8 M and `quote_php_string` 5.2 M.
 - **Reported, then dropped: 22.5 M (proposal 11).**
   - `report_missing_offset` formats 55 messages at ≈409 K Ir each. All of them are `offsetAccess.mightNotExist`: the only format with a cost is the one at `checker/assignment.rs:809`.
-  - That message is level 7, and the run reports at the default level 6 (`DEFAULT_REPORT_LEVEL`, `project/session.rs:39`), so `finalize` drops 22 of the 55 (`session.rs:206`; B3's `level.txt`). The other 33 are discarded earlier by the report truncations (B3: 33 `offsetAccess.mightNotExist` among the discarded reports), so all 55 are formatted for nothing. Which truncation holds the 33 is not traced (§12).
+  - That message is level 7, and the run reports at the default level 6 (`DEFAULT_REPORT_LEVEL`, `project/session.rs:39`), so `finalize` drops 22 of the 55 (`session.rs:206`; B3's `level.txt`). The other 33 are discarded earlier by the report truncations (B3: 33 `offsetAccess.mightNotExist` among the discarded reports), so all 55 are formatted for nothing. Q-6 traced the 33 since: 30 are in a convergence pass's `rewind_to` and 3 in bodies that call `extract()`.
   - F1 does not reach them, because they are reported.
 - **A key for an empty map: 6.6 M (proposal 11; 5.1 M of it in `format_inner`).** `ConstantResolver::class_constant_type` formats a lowercased `class::NAME` key on every class-constant read: 6,854 calls (`checker/constant_resolver.rs:13-18`, `:94`). It does this to probe `dynamic`, which is empty when no `dynamicConstantNames` are configured, as here.
 - **Only in part by F4 and F6f, ≈13 M:**
@@ -941,8 +941,8 @@ Each step is measured with paired cold runs; B4 gives them their wall-time weigh
   | the lexer's token layer (keywords, names, interning), leaving the raw scan (`next_raw`, `lex_operator`, `lex_ident_raw`, `scan_interpolated`: 23% of the lexer) or a cheaper byte scanner | ≈1.07 |
   | those bodies' summaries, flows and walks (67% of the 617 M body blocks) | ≈0.41 |
   | about two thirds of the 567.8 M of tree drops at the insert | ≈0.38 |
-  | the global-facts and reference walks over those bodies | ≈0.19 |
-  | **total, F, before the bodies something reads are taken out** | **≈3.8** |
+  | the global-facts walk over those bodies, ≈44 Ir a body token by its fall when PROD-2 left bodies with nothing to add unwalked (the reference walk reads only doc comments, which a skim leaves) | ≈0.12 |
+  | **total, F, before the bodies something reads are taken out** | **≈3.7** |
 
   Call this F. Items 9, 10 and 12 lower the cost per token, items 3 and 19 lower the drops, and item 13 merges the walks; after them, F is ≈2.0-2.3 G. A body that something reads costs its share of F as before, so with d the share of body tokens parsed in full, the most proposal 8 can save is F × (1 − d). Two values of d appear below: the bodies something reads are d_read ≈ 0.005-0.006 (by count and by bytes, B1), and with the bodies a skimmer trigger flags added, d ≈ 0.01-0.02 by tokens (B1, below).
 - **Who reads a context file's bodies today.** Each reader was traced in the code:
@@ -997,7 +997,7 @@ Each step is measured with paired cold runs; B4 gives them their wall-time weigh
     - **Why the bodies must be checked.** Today a context file whose parse fails is skipped with a warning, and its declarations are lost (`project/session.rs:669-679`, `:828-837`). PHP refuses the whole file too, for one bad method body (php 8.5.4; `~/.cache/prs-probe/syntax-in-body/`, `validate/d1/`):
       - a parse error throws a catchable `ParseError`, and nothing the file declares exists;
       - a compile-time error, such as "Cannot mix keyed and unkeyed array entries" or a `goto` to a missing label, is fatal: the process ends at the `include`, and the declarations compiled before the error are seen only by a shutdown function;
-      - the modifier checks (`zend_compile.c:946-1044`, "Multiple final modifiers are not allowed") throw `CompileError` instead, which is caught as a `ParseError` is.
+      - the modifier checks (`zend_compile.c:946-1044`, "Multiple final modifiers are not allowed") throw `CompileError` instead, `ParseError`'s parent, which a `catch` of `CompileError` or `Throwable` catches and one of `ParseError` does not.
 
       Either way no code after the `include` runs. Leaving a skimmed body unchecked would make whether a file loads depend on whether an optimization skipped one of its bodies. On Piwigo no context file failed to parse: the off run's stderr (`off/valgrind.err`) holds no warning.
     - **Every error is the parser's or the lexer's.** `syntax::parse_watching` is the only step of a load that fails (`project.rs:2892`), and a lexer error anywhere in the file outranks the parser's first error (`syntax/src/parse.rs:116-133`). So the check needs the grammar and the lexer's token layer, and no later pass over the tree.
@@ -1017,14 +1017,14 @@ Each step is measured with paired cold runs; B4 gives them their wall-time weigh
   | recording references and resolving names | ≈0.09 | ≈0.05-0.09 |
   | interning names | ≈0.17 | ≈0.08-0.12 |
   | the bodies' summaries, flows and walks | ≈0.41 | ≈0.27 |
-  | the global-facts and reference walks | ≈0.19 | ≈0.1-0.15 |
+  | the global-facts walk | ≈0.12 | ≈0.06-0.1 |
   | the tree drops at the insert | ≈0.38 | ≈0.05-0.15 |
-  | **S** | **≈1.3-1.5** | **≈0.6-0.9** |
+  | **S** | **≈1.3-1.4** | **≈0.55-0.85** |
 
   At d ≈ 0.02 by tokens (B1):
-  - **With the file's verdict cached:** F × (1 − d), ≈3.7 G today and **≈2.0-2.3 G after the plan**.
-  - **Without it** (a file not seen before, or the first run after a change to `syntax`): S − F × d, ≈1.2-1.4 G today and **≈0.55-0.85 G after the plan**. That is nothing only from d ≈ 0.26-0.45, so proposal 8 pays on every run.
-  - **The verdict cache** is worth F − S ≈ 1.1-1.7 G after the plan on a run whose files have verdicts. It no longer decides whether proposal 8 pays.
+  - **With the file's verdict cached:** F × (1 − d), ≈3.6 G today and **≈2.0-2.3 G after the plan**.
+  - **Without it** (a file not seen before, or the first run after a change to `syntax`): S − F × d, ≈1.25-1.35 G today and **≈0.5-0.8 G after the plan**. That is nothing only from d ≈ 0.24-0.42, so proposal 8 pays on every run.
+  - **The verdict cache** is worth F − S ≈ 1.2-1.7 G after the plan on a run whose files have verdicts. It no longer decides whether proposal 8 pays.
 - **Adversarial checks.**
   - **The verdict cache cannot go stale the way a narrower stub-cache key would (§10.12).** The verdict's inputs are one crate and its locked dependencies, and the key covers them whole. The stub cache's inputs are most of the main crate.
   - **A panic is not a verdict.** A parse that panics makes the file unread today (`session.rs:661-666`), and nothing caches it.
@@ -1059,7 +1059,7 @@ Each step is measured with paired cold runs; B4 gives them their wall-time weigh
     | inheritance in one file | 5 | a final method overridden by a class declared later in the same file |
     | lexer | 4 | `(real)`, an unterminated `/*`, a heredoc whose indentation mixes tabs with spaces or is too shallow |
 
-    The parser's 10 grammar rejections are `list()` outside a destructuring, `__halt_compiler()` inside a block, a braced namespace inside another, an unmatched `)`, four hook forms (`get()`, `set` with two parameters, a variadic one, one with a default), and `static` or `abstract` on a trait alias. A reading of `crates/syntax` came first, and the run corrected it on three cases (`f as static g` and `f as abstract g` are rejected, `namespace namespace;` accepted). 19 triggers are not compile-time refusals: they fail only when the declaration runs, after the statements before it (a class declared twice, the enum checks, a trait that does not exist, an interface implemented twice). `zend_inheritance.c`'s checks refuse at compile time only when the parent and interfaces are declared earlier in the same file (early binding); 13 of its 54 sites were triggered, 11 at compile time, and the other 41 are linking checks of the same kind, not triggered one by one. A few sites are not reached from source: PHP raises an earlier error first (`:1153`, `:8253`, `:9810`), the value is folded to a string first (`:11120`), no input reaches them (`:11523`, `:11542`), or the environment raises them (the stack limit, the scanner's encoding errors). Almost all 238 are local to the file, so a pass over the tree could decide them; the checker reports some as diagnostics (`case` outside an enum, `goto` to a missing label, `checker/keywords.rs:180`), in analysed files only, so a context file with one of these errors keeps its declarations. Which of the 238 the checker reports was not counted. On these triggers, when the parser fails PHP refuses too, on PHP 8.5. That does not hold on PHP 7 (`$s{0}`), nor in real code on PHP 8.5 (E14). Proposal 8 does not change this split, since its pass runs the same parser.
+    The parser's 10 grammar rejections are `list()` outside a destructuring, `__halt_compiler()` inside a block, a braced namespace inside another, an unmatched `)`, four hook forms (`get()`, `set` with two parameters, a variadic one, one with a default), and `static` or `abstract` on a trait alias. A reading of `crates/syntax` came first, and the run corrected it on three cases (`f as static g` and `f as abstract g` are rejected, `namespace namespace;` accepted). 19 triggers are not compile-time refusals: they fail only when the declaration runs, after the statements before it (a class declared twice, the enum checks, a trait that does not exist, an interface implemented twice). `zend_inheritance.c`'s checks refuse at compile time only when the parent and interfaces are declared earlier in the same file (early binding); 13 of its 54 sites were triggered, 11 at compile time, and the other 41 are linking checks of the same kind, not triggered one by one. A few sites are not reached from source: PHP raises an earlier error first (`:1153`, `:8253`, `:9810`), the value is folded to a string first (`:11120`), no input reaches them (`:11523`, `:11542`), or the environment raises them (the stack limit, the scanner's encoding errors). Almost all 238 are local to the file, so a pass over the tree could decide them; the checker reports some as diagnostics (`case` outside an enum, `goto` to a missing label, `checker/keywords.rs:180`), in analysed files only, so a context file with one of these errors keeps its declarations. Which of the 238 the checker reports was not counted here; Q-3 counted it since, over the 247 trigger files the parser accepted when C7 ran: 120 reported as PHP does, 1 more with an opt-in rule, 115 by nothing. On these triggers, when the parser fails PHP refuses too, on PHP 8.5. That does not hold on PHP 7 (`$s{0}`), nor in real code on PHP 8.5 (E14). Proposal 8 does not change this split, since its pass runs the same parser.
 
 ### 10.9 Purity and property writes on demand
 
@@ -1103,7 +1103,7 @@ Each step is measured with paired cold runs; B4 gives them their wall-time weigh
 ### 10.10 Check UTF-8 with SIMD
 
 - **Now.** `String::from_utf8` in the file read costs 29.8 M over the 14,251 files, about 56 MB (19.07 MB analysed plus the context files' 37.1 MB): ≈0.5 Ir per byte on std's word-at-a-time path for ASCII. The 66.5 M in the parse block is every caller of `core::str::converts::from_utf8` in that phase: it also holds the `UseMap` name folding, `ShapeKey::from_bytes`, the lexer's numeric literals and others.
-- **Design.** `simdutf8`'s AVX2 path checks 32 bytes per step, roughly a quarter of the cost (an estimate, not measured): a saving of ≈22 M.
+- **Design.** `simdutf8`'s AVX2 path checks 32 bytes per step, roughly a quarter of the cost (an estimate): a saving of ≈22 M. LOAD-6 measured a third: `validate_utf8_basic` took 10.2 M over the 14,248 files against std's 29.8 M, so ≈20 M came off the check, and the copy into a `String`, which the workspace's no-`unsafe` rule forces, took it back (−0.47 M; not kept).
 - **Adversarial checks.**
   - The check cannot be dropped: whether the text is UTF-8 decides the length a file is weighed by and the source that is kept (`session.rs:649-660`).
   - The `Utf8Chunks` in `LineIndex::new` (70.6 M) is item 11's.
@@ -1116,7 +1116,7 @@ Each step is measured with paired cold runs; B4 gives them their wall-time weigh
   - **Adversarial checks.**
     - A message's text must not depend on state that changes after the report. Type display depends on the type and on settings fixed for the run.
     - The per-file cache stores no diagnostics (`project/file_cache.rs`), so nothing forces the text early.
-  - **The truncations (B3).** Reports that a loop's convergence passes discard (`rewind_to`) stop paying for their text too, but there are few: 270 on Piwigo, 304 on Laravel, well under 1 M. The 33 `offsetAccess.mightNotExist` messages of §9.2 are discarded by one of the truncations, and B3 does not say which. If they are among the loops' 270, those discards are not well under 1 M (at ≈409 K each they are ≈13 M); if they are among the `extract()` truncation's, they are inside the figures below, not additional. The `extract()` truncation discards 31,660 on Piwigo; 11a would save only their formatting, ≈11 M, and E10 saves all ≈35 M (§10.13).
+  - **The truncations (B3).** Reports that a loop's convergence passes discard (`rewind_to`) stop paying for their text too: 270 on Piwigo, 304 on Laravel. Most cost little, but 30 of Piwigo's are §9.2's `offsetAccess.mightNotExist` messages (Q-6), at ≈409 K each ≈12.3 M. The other 3 of those 33 are the `extract()` truncation's, inside the figures below. The `extract()` truncation discards 31,660 on Piwigo; 11a would save only their formatting, ≈11 M, and E10 saves all ≈35 M (§10.13).
   - **Relation to F1.** F1 defers the text of what a rule formats before it knows whether to report. This proposal continues F1 past the report.
 - **Class-constant keys: 6.6 M (11b).**
   - **Design.** `class_constant_type` returns the declared type at once when `dynamic` is empty (`has_dynamic_constants`). When dynamic constants are configured, they are keyed by the class's folded name and the constant's name, with no `String` built per read.
@@ -1222,7 +1222,7 @@ Applied in order, each row on what the rows above it leave. The columns assume p
 | **left** | **≈9.6-10.0** | **≈9.6-10.0** |
 
 - **The off and warm runs meet** once proposal 6 builds the stub data into the binary. After the crate split, proposal 6 saves ≈0.2-1.5 G instead of 5.05 G, so a cold run ends that much above the warm one, or nothing above it if the per-file cache holds the stub files' declarations (§10.6).
-- **On a run whose files have no cached verdict,** proposal 8 saves ≈0.55-0.85 G instead, which leaves ≈11.0-11.4 G.
+- **On a run whose files have no cached verdict,** proposal 8 saves ≈0.5-0.8 G instead, which leaves ≈11.1-11.5 G.
 - **The off run without proposal 6.** Proposals 1-4 take ≈1.6 G instead of 5.05 G: 1 ≈0.39-0.41 G (C5), 2 after 1 ≈0.71-0.74 G (C3), 3 ≈0.29 G, 4 ≥0.2 G, less what 1 and 3 share in the plain base's finishing run. That leaves ≈24.0 G before the plan. After the plan, proposal 7 (≈0.19 G with the stub build, after item 14), proposals 8-11 and the cuts, ≈12.9-13.3 G, less what items 9-14 save on the stub parse, and plus up to ≈0.3 G of the plan's savings that an off run without proposal 6 never paid for, because it decodes no stub entries (§7: decoding 0 against 275.1 M warm): item 6 step 1's 178 M, item 4's `Members::eq` decodes (88.6 M) and the cheaper decodes of item 6's steps 3 and 5 (§9.5). A cold run gains proposals 1, 3 and 4 but not 2, since it keeps and writes the encodings (+58 M), so it ends ≈0.8 G above that, at ≈13.7-14.1 G.
 - **With the per-file cache warm**, today's floor is 14.34 G (B5). E12, E4 and E11 take ≈0.7-0.8 G of it, and the plan's items apply as they do to the shared phases; that mode was not estimated item by item. Proposal 8 does not change it, since such a run parses no context file.
 - **Wall time.** The stub build is 0.37 s of the off run's 2.68 s, and proposal 6 takes all of it; proposals 1-5 at most that. The finishing passes are the longest stretch after the parse in every mode, at 1-3 cores, so items 4-6 and proposal 9 weigh more in wall time than in instructions (§3.3).
@@ -1233,7 +1233,7 @@ Applied in order, each row on what the rows above it leave. The columns assume p
 
 ## 12. What this drill does not establish
 
-The investigations settled most of what the drill left open: wall time (B4), a run with both caches warm (B5), the cache writes on disk (B6), d and proposal 9's reach (B1), proposal 7's saving (B2), the discarded reports (B3), the relation's operands (B7), proposal 6's compile-time cost (B9) and its equality across targets on the host (B10), and the split of the stub bases' finishing runs (C4, C5). What is still not established:
+The investigations settled most of what the drill left open: wall time (B4), a run with both caches warm (B5), the cache writes on disk (B6), d and proposal 9's reach (B1), proposal 7's saving (B2), the discarded reports (B3), the relation's operands (B7), proposal 6's compile-time cost (B9) and its equality across targets on the host (B10), and the split of the stub bases' finishing runs (C4, C5). The ledger (`PROFILE_DRILL_PIWIGO_LEDGER.md`) records what the later work settled: E1's fix, proposals 1-5 and 7-9, D5, E2, E3, E5-E7, E10 and E13 were built and measured in the off mode (its run register: 25.63 G to 20.93 G), E4, E12 and proposals 10 and 11 were measured and not kept, E14-E16 were fixed, and its questions Q-1, Q-3, Q-5, Q-6 and Q-7 answer the corpus run and the count of C7's errors, E10's dropped bodies, the 33 truncated reports and the readers left out of d below; Q-8's timings are STUB-10.1's to measure, and E1's reproduction (Q-4) and an on-target run (STUB-11) remain. What is still not established, as the drill left it:
 
 - **Instructions are not time.** The allocator's and the copies' costs are memory-bound, so their weight in wall time is higher than in Ir. B4's wall times are of one machine.
 - **No calling context** (§2). Shared functions are split by edge shares. The split of the stub bases' Ir and the plain base's finishing run (≈35-52 M, scaled from the measured 117.2 M) are estimates for that reason.
@@ -1288,7 +1288,7 @@ All paths are under `~/.cache/prs-profile/callgrind-20g-modes/` unless marked. S
   | C7 | every compile-error site in php-src 8.5.4 listed, one trigger file per site (299 files), each run with `php -l` and with `echo "RAN\n";` first, against the parser; 13 of `zend_inheritance.c`'s 54 sites triggered, the rest read | `~/.cache/php-src/src-8.5.4`, `p/c7/` (`cases/`, `scripts/run.py`, `verdicts.tsv`, `verdicts_run.tsv`), `p/syntax-in-body/goto.php`, `p/validate/c7-accepted.tsv` |
   | C8 | no build: the names each project's files reference (PHP's tokenizer), closed over the checked-in index to a lower and an upper bound; the context files as `composer/src/vendor.rs` discovers them; the crate split's plan read; cargo's cyclic-dependency rejection on a two-crate workspace | `p/c8/` (`scripts/names.php`, `reach.py`, `context.php`, `cyc/`), `p/validate/c8/` (`gates.php`, `reach_lib.py`), `crates/stub-sources/index.tsv` on master |
   | E1 | read every lock that holds a build and every caller that forces it; a deterministic reproduction is designed, not run | none |
-  | E2, E4, E5, E6, E8, E11, E12 | callers, call counts and Ir read from the pickles (`q.py incl|callers|callees|lines`); the code at the cited lines read; E6's counts from B7 | `callgrind-20g-modes/{off,warm}/*.pkl`, `b/b5/`, `b/b7/` |
+  | E2, E4, E5, E6, E8, E11, E12 | callers, call counts and Ir read from the pickles (`q.py incl\|callers\|callees\|lines`); the code at the cited lines read; E6's counts from B7 | `callgrind-20g-modes/{off,warm}/*.pkl`, `b/b5/`, `b/b7/` |
   | E3, E7 | as above, with the analysed files' calls and integer literals counted with PHP's tokenizer | `a/ee/asserts.php`, `a/ee/ints.php`, `a/n5/analysed.txt` |
   | E9 | the regex scanner's calls and `format!` costs from the pickle; the 170 patterns from N4's count | `a/nn/preg.php` |
   | E10 | the reports the truncations drop, from B3's probe; the flag's scope read in `function_decl.rs` and `checker.rs` | `b/b1/` |
