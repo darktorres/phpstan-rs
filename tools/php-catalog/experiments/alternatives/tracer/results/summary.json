@@ -1,0 +1,15 @@
+{
+ "bad_lines": 0,
+ "observed_keys": 1183,
+ "summary": {
+  "calls/missing": 12,
+  "calls/table": 15,
+  "method/missing": 182,
+  "method/table": 45,
+  "other-method/not-a-row": 271,
+  "receives-argument/not-a-row": 70,
+  "user-function/not-a-row": 505,
+  "wrapper/missing": 23,
+  "wrapper/table": 60
+ }
+}
