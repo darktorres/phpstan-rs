@@ -1857,7 +1857,7 @@ The ids in the first column are the 25 G report's.
   - the 2,612 `ExprKind::`/`StmtKind::` match sites in 135 files;
   - for decisions 8 and 9 and their rows, the lines they cite in `types/src/decide.rs`, `types/src/parse.rs`, `registry/function_sig/type_resolution.rs`, `registry/function_sig.rs`, `checker/phpdoc_type_compat.rs`, `checker/function_decl.rs`, `checker/throws.rs`, `checker/stmt/try_catch.rs`, `checker/expr.rs`, `registry/summaries.rs`, `registry/purity.rs` and `project/session.rs`;
   - for decision 11, the merges in `registry/index.rs` (`:144`, `:244`, `:329`, `:344`, `:434`, `:436`, `:589`) and `registry/function_sig.rs` (`:951`, `:1019`), and `own_declaration_sig` (`checker/function_decl.rs:206`).
-- **PHP's behaviour** was read from PHP 8.5.4, not from the sources' texts (§2.4, decisions 1, 8 and 9). Decision 10 read php-src 8.5.4's sources and PHPStan 2.3.1's. Decisions 11 and 14 probed PHP 8.5.4 too: decision 11 read Composer's loader and PHPStan 2.3.1's phar, decision 13 probed ext4 on Linux 7.0 and read Linux's FAT and exFAT code, git 2.47.0's stat check and Rust 1.98's `std`, and decision 14 read php-src 8.3.0's and 8.4.0's stubs.
+- **PHP's behaviour** was read from PHP 8.5.4, not from the sources' texts (§2.4, decisions 1, 8 and 9). Decision 10 read php-src 8.5.4's sources and PHPStan 2.3.1's. Decisions 11 and 14 probed PHP 8.5.4 too. Decision 11 also read Composer's loader and PHPStan 2.3.1's phar; decision 13 probed ext4 on Linux 7.0 and read Linux's FAT and exFAT code, git 2.47.0's stat check and Rust 1.98's `std`; decision 14 read php-src 8.3.0's and 8.4.0's stubs.
 
 **What a reading after the decisions found**, on 2026-10-15, reading the whole ledger again:
 
