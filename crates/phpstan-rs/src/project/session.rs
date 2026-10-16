@@ -31,9 +31,9 @@ use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
 use super::file_cache;
-use super::walk::{Role, Walk};
+use super::walk::{Listed, Role, Walk};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
-use super::{ParsedFile, Project, ProjectSettings};
+use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 
 /// The level reported when neither the command line nor the config sets
@@ -85,6 +85,57 @@ pub struct Overrides {
     /// instead of `diagnostic::diagnostic_order`: the determinism gate runs
     /// twice with this and requires identical output.
     pub emission_order: bool,
+    /// The baseline file to report against, over the config's.
+    pub baseline: Option<PathBuf>,
+    pub baseline_match_identifier: bool,
+    pub baseline_per_identifier: bool,
+}
+
+/// What `Session::resolve` does with a configuration it cannot use. The
+/// command line fails on the first problem; the editor keeps the default of
+/// each part it cannot read and reports the problem.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorPolicy {
+    /// The first problem ends the resolution with an error.
+    Fail,
+    /// Each problem is recorded in `Session::warnings`, and the part it
+    /// concerns takes its default. Without a configured `paths`, the whole
+    /// root is analysed, less `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`.
+    Degrade,
+}
+
+/// Records `error` under `policy`: `Fail` returns it, `Degrade` adds it to
+/// `warnings`.
+fn report(error: String, policy: ErrorPolicy, warnings: &mut Vec<String>) -> Result<(), String> {
+    match policy {
+        ErrorPolicy::Fail => Err(error),
+        ErrorPolicy::Degrade => {
+            warnings.push(error);
+            Ok(())
+        }
+    }
+}
+
+/// `result`, or under `Degrade` `fallback` once its error is recorded.
+fn settle<T>(
+    result: Result<T, String>,
+    policy: ErrorPolicy,
+    warnings: &mut Vec<String>,
+    fallback: T,
+) -> Result<T, String> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => report(error, policy, warnings).map(|()| fallback),
+    }
+}
+
+/// The section `S` of `config`, or its default under `Degrade`.
+fn section<S: config::Section>(
+    config: &ConfigFile,
+    policy: ErrorPolicy,
+    warnings: &mut Vec<String>,
+) -> Result<S, String> {
+    settle(config.section::<S>(), policy, warnings, S::default())
 }
 
 /// A fully resolved `check-project` run: every path, setting and derived
@@ -118,8 +169,17 @@ pub struct Session {
     architecture_rules: Vec<architecture::ArchitectureRule>,
     check_mock_hygiene: bool,
     mock_banned_classes: Vec<String>,
-    /// Non-fatal problems found while resolving (e.g. SQL schema drift,
-    /// an old config key).
+    /// The directory names the walk of the analysed directories leaves out:
+    /// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` when the root is analysed because no
+    /// `paths` are configured, nothing otherwise.
+    excluded_dir_names: &'static [&'static str],
+    /// The baseline the run reports against, resolved, with how its entries
+    /// match and whether it is written per identifier.
+    baseline: Option<PathBuf>,
+    baseline_mode: crate::baseline::MatchMode,
+    baseline_per_identifier: bool,
+    /// Non-fatal problems found while resolving (e.g. SQL schema drift, an
+    /// old config key, a section that degraded under `ErrorPolicy::Degrade`).
     pub warnings: Vec<String>,
 }
 
@@ -302,32 +362,36 @@ impl Session {
     /// Resolves `config`, whose relative paths are relative to
     /// `config_dir` (or to `root` without one), and the command-line
     /// `overrides` against `root`, the directory the run's relative paths
-    /// are relative to.
+    /// are relative to. What `policy` says of a configuration that cannot be
+    /// used is in `ErrorPolicy`.
     pub fn resolve(
         config: &ConfigFile,
         config_dir: Option<PathBuf>,
         root: PathBuf,
         overrides: Overrides,
         stubs: Stubs,
+        policy: ErrorPolicy,
     ) -> Result<Session, String> {
-        let session = config.section::<SessionSettings>()?;
-        let reflection = config.section::<ReflectionSettings>()?;
-        let engine = config.section::<EngineSettings>()?;
-        let overlays = config.section::<OverlaySettings>()?;
-        let rules = config.section::<RulesSettings>()?;
-        let banned_settings = config.section::<BannedSettings>()?;
-        let architecture = config.section::<ArchitectureSettings>()?;
-        let class_shape = config.section::<ClassShapeSettings>()?;
-        let disallowed_calls = config.section::<DisallowedCallsSettings>()?;
-        let sql_settings = config.section::<SqlSettings>()?;
-        let mockstan = config.section::<MockstanSettings>()?;
-        let psr3 = config.section::<ext::psr3::Psr3Settings>()?;
+        let mut warnings: Vec<String> = config.warnings().to_vec();
+        let session = section::<SessionSettings>(config, policy, &mut warnings)?;
+        let reflection = section::<ReflectionSettings>(config, policy, &mut warnings)?;
+        let engine = section::<EngineSettings>(config, policy, &mut warnings)?;
+        let overlays = section::<OverlaySettings>(config, policy, &mut warnings)?;
+        let rules = section::<RulesSettings>(config, policy, &mut warnings)?;
+        let banned_settings = section::<BannedSettings>(config, policy, &mut warnings)?;
+        let architecture = section::<ArchitectureSettings>(config, policy, &mut warnings)?;
+        let class_shape = section::<ClassShapeSettings>(config, policy, &mut warnings)?;
+        let disallowed_calls = section::<DisallowedCallsSettings>(config, policy, &mut warnings)?;
+        let sql_settings = section::<SqlSettings>(config, policy, &mut warnings)?;
+        let mockstan = section::<MockstanSettings>(config, policy, &mut warnings)?;
+        let psr3 = section::<ext::psr3::Psr3Settings>(config, policy, &mut warnings)?;
 
         let resolve_against_config = |p: PathBuf| match &config_dir {
             Some(dir) => dir.join(p),
             None => p,
         };
-        let dirs: Vec<PathBuf> = if !overrides.paths.is_empty() {
+        let mut excluded_dir_names: &'static [&'static str] = &[];
+        let mut dirs: Vec<PathBuf> = if !overrides.paths.is_empty() {
             overrides.paths
         } else {
             session
@@ -339,31 +403,69 @@ impl Session {
                 .collect()
         };
         if dirs.is_empty() {
-            return Err("no paths given on the command line or in the config file".to_string());
+            match policy {
+                ErrorPolicy::Fail => {
+                    return Err(
+                        "no paths given on the command line or in the config file".to_string()
+                    );
+                }
+                ErrorPolicy::Degrade => {
+                    excluded_dir_names = DEFAULT_SCAN_EXCLUDED_DIR_NAMES;
+                    dirs.push(root.clone());
+                }
+            }
         }
         let configured_level = overrides.level.or(session.level);
         let level = overrides
             .report_level
             .or(configured_level)
             .unwrap_or(DEFAULT_REPORT_LEVEL);
-        psr3.context_key_pattern()?;
-        let php_version = overrides
-            .php_version
-            .clone()
-            .or(reflection.php_version.clone())
-            .map(|s| types::parse_php_version(&s))
-            .transpose()?;
-        let restricted_symbols = disallowed_calls.entries()?;
-        let banned_constructs = banned_settings
-            .constructs
-            .iter()
-            .map(|name| banned::BannedConstruct::parse(name))
-            .collect::<Result<Vec<_>, _>>()?;
-        overlays.validate()?;
+        let psr3 = match psr3.context_key_pattern() {
+            Ok(_) => psr3,
+            Err(error) => {
+                report(error, policy, &mut warnings)?;
+                ext::psr3::Psr3Settings::default()
+            }
+        };
+        let php_version = settle(
+            overrides
+                .php_version
+                .clone()
+                .or(reflection.php_version.clone())
+                .map(|s| types::parse_php_version(&s))
+                .transpose(),
+            policy,
+            &mut warnings,
+            None,
+        )?;
+        let mut restricted_symbols = disallowed_calls.restricted_symbols.clone();
+        for preset in &disallowed_calls.restricted_symbol_presets {
+            match banned::restricted_symbol_preset(preset) {
+                Ok(entries) => restricted_symbols.extend(entries),
+                Err(error) => report(error, policy, &mut warnings)?,
+            }
+        }
+        let mut banned_constructs = Vec::new();
+        for name in &banned_settings.constructs {
+            match banned::BannedConstruct::parse(name) {
+                Ok(construct) => banned_constructs.push(construct),
+                Err(error) => report(error, policy, &mut warnings)?,
+            }
+        }
+        let overlays = match overlays.validate() {
+            Ok(()) => overlays,
+            Err(error) => {
+                report(error, policy, &mut warnings)?;
+                OverlaySettings::default()
+            }
+        };
         let parent_call_rules = class_shape.rules();
-        let architecture_rules = architecture.0;
-        for rule in &architecture_rules {
-            rule.validate()?;
+        let mut architecture_rules = Vec::new();
+        for rule in architecture.0 {
+            match rule.validate() {
+                Ok(()) => architecture_rules.push(rule),
+                Err(error) => report(error, policy, &mut warnings)?,
+            }
         }
         let sql_reflection = sql_settings.reflection;
         let sql_schema = match sql_reflection
@@ -372,11 +474,15 @@ impl Session {
         {
             Some((path, driver)) => {
                 let path = resolve_against_config(path);
-                Some(sql::schema::parse_ddl_file(&root.join(path), driver)?)
+                settle(
+                    sql::schema::parse_ddl_file(&root.join(path), driver).map(Some),
+                    policy,
+                    &mut warnings,
+                    None,
+                )?
             }
             None => None,
         };
-        let mut warnings: Vec<String> = config.warnings().to_vec();
         if let Some(schema) = &sql_schema
             && let Some(sql_config) = &sql_reflection
         {
@@ -421,7 +527,6 @@ impl Session {
         let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         let mut composer_php_versions = None;
         let mut root_manifest = None;
-        let mut dirs = dirs;
         if !no_composer {
             let canonical_root = absolute_root.clone();
             for composer_root in composer_roots(&dirs, &canonical_root) {
@@ -467,9 +572,25 @@ impl Session {
         let php_versions = php_version
             .map(types::PhpVersions::exactly)
             .or(composer_php_versions);
-        let extensions = ext::ActiveExtensions::resolve(config, &|p| {
-            ext::installed_in(root_manifest.as_ref(), p)
-        })?;
+        let extensions = settle(
+            ext::ActiveExtensions::resolve(config, &|p| {
+                ext::installed_in(root_manifest.as_ref(), p)
+            }),
+            policy,
+            &mut warnings,
+            ext::ActiveExtensions::default(),
+        )?;
+        let baseline = overrides
+            .baseline
+            .or(session.baseline.clone().map(resolve_against_config));
+        let baseline_mode =
+            if overrides.baseline_match_identifier || session.baseline_match_identifier {
+                crate::baseline::MatchMode::Identifier
+            } else {
+                crate::baseline::MatchMode::Message
+            };
+        let baseline_per_identifier =
+            overrides.baseline_per_identifier || session.baseline_per_identifier;
 
         let settings = ProjectSettings {
             working_dir: Some(root.clone()),
@@ -483,16 +604,20 @@ impl Session {
             built_once: true,
             rules,
             extensions,
-            extras: config.section::<ext::extras::ExtrasSettings>()?,
-            strict_rules: config.section::<ext::strict_rules::StrictRulesSettings>()?,
-            shipmonk: config.section::<ext::shipmonk::ShipmonkSettings>()?,
-            voku: config.section::<ext::voku::VokuSettings>()?,
-            slam: config.section::<ext::slam::SlamSettings>()?,
+            extras: section::<ext::extras::ExtrasSettings>(config, policy, &mut warnings)?,
+            strict_rules: section::<ext::strict_rules::StrictRulesSettings>(
+                config,
+                policy,
+                &mut warnings,
+            )?,
+            shipmonk: section::<ext::shipmonk::ShipmonkSettings>(config, policy, &mut warnings)?,
+            voku: section::<ext::voku::VokuSettings>(config, policy, &mut warnings)?,
+            slam: section::<ext::slam::SlamSettings>(config, policy, &mut warnings)?,
             psr3,
-            sidz: config.section::<ext::sidz::SidzSettings>()?,
-            phpunit: config.section::<ext::phpunit::PhpunitSettings>()?,
+            sidz: section::<ext::sidz::SidzSettings>(config, policy, &mut warnings)?,
+            phpunit: section::<ext::phpunit::PhpunitSettings>(config, policy, &mut warnings)?,
             restricted_symbols,
-            doctrine: config.section::<ext::doctrine::DoctrineSettings>()?,
+            doctrine: section::<ext::doctrine::DoctrineSettings>(config, policy, &mut warnings)?,
             dynamic_constant_names: engine.dynamic_constant_entries(),
             overlays,
             sql_reflection,
@@ -520,6 +645,10 @@ impl Session {
             architecture_rules,
             check_mock_hygiene: mockstan.check_mock_hygiene.unwrap_or(extensions.mockstan),
             mock_banned_classes: mockstan.mock_banned_classes,
+            excluded_dir_names,
+            baseline,
+            baseline_mode,
+            baseline_per_identifier,
             warnings,
         })
     }
@@ -563,7 +692,14 @@ impl Session {
         // Paths stay relative to the fixture's own directory, so where the
         // fixture suite lives (under `tests/`) never shows in the analysed
         // paths - path-sensitive checks see only the fixture's own layout.
-        let session = Session::resolve(config, None, base.clone(), overrides, stubs)?;
+        let session = Session::resolve(
+            config,
+            None,
+            base.clone(),
+            overrides,
+            stubs,
+            ErrorPolicy::Fail,
+        )?;
         Ok((session, base))
     }
 
@@ -587,6 +723,74 @@ impl Session {
     /// promotion), relative to the root as given.
     pub fn dirs(&self) -> &[PathBuf] {
         &self.dirs
+    }
+
+    /// The baseline the run reports against, as the config or the command
+    /// line names it.
+    pub(crate) fn baseline_path(&self) -> Option<&Path> {
+        self.baseline.as_deref()
+    }
+
+    pub(crate) fn baseline_mode(&self) -> crate::baseline::MatchMode {
+        self.baseline_mode
+    }
+
+    pub(crate) fn baseline_per_identifier(&self) -> bool {
+        self.baseline_per_identifier
+    }
+
+    /// The config's `ignore_errors` entries.
+    pub(crate) fn ignore_error_entries(&self) -> &[ignore_errors::IgnoreErrorEntry] {
+        &self.session.ignore_errors
+    }
+
+    /// The settings a language server's project is configured with: this
+    /// session's, except for the three that describe how the server keeps
+    /// its files. The server keeps each file's source and its context
+    /// trees, and applies inline ignores when it publishes.
+    pub(crate) fn editor_settings(&self) -> ProjectSettings {
+        ProjectSettings {
+            defer_inline_ignores: false,
+            retain_source: true,
+            built_once: false,
+            ..self.settings.clone()
+        }
+    }
+
+    /// Every file the configuration lists, once, with its role and whether
+    /// it is a stub. The command line and the language server both load
+    /// from this listing.
+    pub(crate) fn listing(&self) -> Vec<Listed> {
+        let mut walk = Walk::new();
+        for dir in &self.dirs {
+            let excluded: &'static [&'static str] = if self.promoted.contains(dir) {
+                &[]
+            } else {
+                self.excluded_dir_names
+            };
+            walk.add(&self.root.join(dir), dir, Role::Analysed, excluded);
+        }
+        // The vendor context was being found while the analysed files were
+        // listed.
+        for vendor in &self.vendors {
+            let found = vendor.get();
+            for dir in found.dirs.iter().filter(|d| !self.is_promoted(d)) {
+                walk.add(&self.root.join(dir), dir, Role::Context, &[]);
+            }
+            for file in found.files.iter().filter(|f| !self.is_promoted(f)) {
+                walk.add_file(&self.root.join(file), file, Role::Context);
+            }
+        }
+        for file in &self.scan_files {
+            walk.add_file(&self.root.join(file), file, Role::Context);
+        }
+        for dir in &self.scan_dirs {
+            walk.add(&self.root.join(dir), dir, Role::Context, &[]);
+        }
+        for dir in &self.stub_dirs {
+            walk.add(&self.root.join(dir), dir, Role::Stub, &[]);
+        }
+        walk.finish()
     }
 
     fn configure(&self, project: &mut Project) {
@@ -704,34 +908,10 @@ impl Session {
     /// Parses every context and analysed file into a configured,
     /// finished `Project`, ready for `analyse`.
     pub fn load(&self) -> Result<Loaded, String> {
-        let mut walk = Walk::new();
-        for dir in &self.dirs {
-            walk.add(&self.root.join(dir), dir, Role::Analysed, &[]);
-        }
-        // The vendor context was being found while the analysed files were
-        // listed.
-        for vendor in &self.vendors {
-            let found = vendor.get();
-            for dir in found.dirs.iter().filter(|d| !self.is_promoted(d)) {
-                walk.add(&self.root.join(dir), dir, Role::Context, &[]);
-            }
-            for file in found.files.iter().filter(|f| !self.is_promoted(f)) {
-                walk.add_file(&self.root.join(file), file, Role::Context);
-            }
-        }
-        for file in &self.scan_files {
-            walk.add_file(&self.root.join(file), file, Role::Context);
-        }
-        for dir in &self.scan_dirs {
-            walk.add(&self.root.join(dir), dir, Role::Context, &[]);
-        }
-        for dir in &self.stub_dirs {
-            walk.add(&self.root.join(dir), dir, Role::Stub, &[]);
-        }
         let mut analyze_files = Vec::new();
         let mut context_files = Vec::new();
         let mut stub_files: FxHashSet<PathBuf> = FxHashSet::default();
-        for listed in walk.finish() {
+        for listed in self.listing() {
             if listed.stub {
                 stub_files.insert(listed.path.clone());
             }

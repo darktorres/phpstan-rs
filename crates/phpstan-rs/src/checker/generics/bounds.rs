@@ -335,9 +335,8 @@ impl<'a> Checker<'a> {
     /// \CachingIterator<TKey, TValue, Iterator<TKey, TValue>>` supplies 3
     /// type arguments to real PHP's own `\CachingIterator`, which has no
     /// `@template` tag anywhere). That worry doesn't actually apply:
-    /// confirmed directly (`main/check_project.rs`'s own `analyze_files`/
-    /// `context_files` split, `lsp/workspace_config.rs`'s own
-    /// `extra_context_dirs`, which `stub_paths` feeds into) that a
+    /// confirmed directly (`Session::listing`, where a configured stub
+    /// directory is listed as a stub, never analysed) that a
     /// project's own configured stub file is always loaded as *context*
     /// (`analyzed: false`) - its own class declarations, `@extends`
     /// clause included, are never run through this checker's own

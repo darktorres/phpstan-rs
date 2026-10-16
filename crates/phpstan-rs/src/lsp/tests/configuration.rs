@@ -292,6 +292,68 @@ fn reload_configuration_rereads_an_on_disk_config_change() {
 }
 
 #[test]
+fn a_reload_whose_config_drops_a_path_clears_the_files_it_no_longer_lists() {
+    let dir = TempDir::new("dcc_drop_path");
+    dir.write(
+        "phpstan-rs.toml",
+        "paths = [\"src\", \"lib\"]\n\n[ext.deprecation-rules]\nenabled = true\n",
+    );
+    dir.write("src/a.php", DEPRECATED_FIXTURE);
+    let lib_path = dir.write(
+        "lib/b.php",
+        "<?php\n/** @deprecated use newLib() instead */\nfunction oldLib(): void {}\noldLib();\n",
+    );
+    let lib_uri = path_to_uri(&lib_path).to_string();
+
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(std::slice::from_ref(&dir.0));
+    let initial: Vec<Value> = server
+        .publish_workspace_diagnostics()
+        .iter()
+        .map(|m| serde_json::to_value(m).unwrap())
+        .collect();
+    assert!(
+        publishes_for(&initial, &lib_uri)
+            .iter()
+            .any(|m| m["params"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "function.deprecated")),
+        "lib/b.php is listed at start, so its deprecation must be reported, got: {initial:?}"
+    );
+
+    dir.write(
+        "phpstan-rs.toml",
+        "paths = [\"src\"]\n\n[ext.deprecation-rules]\nenabled = true\n",
+    );
+    let reload: Vec<Value> = server
+        .reload_configuration(settings::PhpstanRsSettings {
+            enable: true,
+            config_path: None,
+        })
+        .iter()
+        .map(|m| serde_json::to_value(m).unwrap())
+        .collect();
+
+    let cleared = publishes_for(&reload, &lib_uri);
+    assert!(
+        !cleared.is_empty()
+            && cleared
+                .iter()
+                .all(|m| m["params"]["diagnostics"] == json!([])),
+        "a file the new config no longer lists must have its diagnostics cleared, got: {reload:?}"
+    );
+    assert!(
+        !server
+            .project
+            .loaded_paths()
+            .any(|p| p == lib_path.as_path()),
+        "a file the new config no longer lists must leave the project"
+    );
+}
+
+#[test]
 fn resolved_config_equality_is_not_fooled_by_sql_reflection_password_redaction() {
     use sql::config::{SqlDriver, SqlReflectionConfig};
 

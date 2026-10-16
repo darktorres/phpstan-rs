@@ -69,8 +69,9 @@ impl<'a> Walk<'a> {
 
     /// Adds `path` as a root. A directory is walked now; a file is listed
     /// when it is PHP. The files under the root are listed as `spelling`
-    /// joined with their names below it. The walk does not enter a directory
-    /// named in `excluded`, nor follow a link of that name.
+    /// joined with their names below it. The names in `excluded` apply below
+    /// the root: the walk does not enter a directory of such a name, nor
+    /// follow a link of it, and the root itself is walked whatever its name.
     pub(crate) fn add(
         &mut self,
         path: &Path,
@@ -81,12 +82,6 @@ impl<'a> Walk<'a> {
         let identity = resolve(path);
         self.roots.push(identity.clone());
         if identity.is_dir() {
-            if path
-                .file_name()
-                .is_some_and(|name| excludes(excluded, name))
-            {
-                return;
-            }
             if let Ok(handle) = Handle::from_path(&identity) {
                 self.walk_dir(
                     &identity,

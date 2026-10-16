@@ -199,7 +199,7 @@ fn definition_repopulates_after_a_did_change_moves_the_declaration() {
 
     // Move Widget's own declaration down a line via didChange - the
     // index must repopulate from the new source, not keep serving the
-    // stale line-1 location load_workspace originally indexed.
+    // stale line-1 location the workspace load originally indexed.
     let new_a_src = "<?php\nclass Widget {}";
     let pos = lsp_pos(b_src, "Widget $w");
     // `didChange` is debounced (VSCode plan item 2.2) - the definition

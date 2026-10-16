@@ -520,8 +520,7 @@ pub struct ProjectSettings {
     pub psr3: crate::ext::psr3::Psr3Settings,
     pub sidz: crate::ext::sidz::SidzSettings,
     pub phpunit: crate::ext::phpunit::PhpunitSettings,
-    /// Every restricted symbol, the presets' included
-    /// (`DisallowedCallsSettings::entries`).
+    /// Every restricted symbol, the presets' included (`Session::resolve`).
     pub restricted_symbols: Vec<crate::restricted_symbols::RestrictedSymbolEntry>,
     pub doctrine: crate::ext::doctrine::DoctrineSettings,
     /// `EngineSettings::dynamic_constant_entries`.
@@ -1137,20 +1136,21 @@ impl Project {
     }
 
     /// Reads, parses and indexes `files` in parallel on `pool`, then
-    /// inserts them in order - context and analyzed alike (`analyzed`
-    /// as `load_analyzed_file`'s). A file that can't be read is skipped;
-    /// one that fails to parse is skipped and returned with its error.
+    /// inserts them in order - context and analyzed alike. Each file is
+    /// `(path, analyzed, stub)`: whether it is analyzed, and whether it is
+    /// parsed as a stub. A file that can't be read is skipped; one that
+    /// fails to parse is skipped and returned with its error.
     pub fn load_files(
         &mut self,
-        files: &[(PathBuf, bool)],
+        files: &[(PathBuf, bool, bool)],
         pool: Option<&rayon::ThreadPool>,
         stubs: &Stubs,
     ) -> Vec<(PathBuf, ParseError)> {
         let this = &*self;
-        let parsed = map_on_pool(pool, files, |(path, _)| {
+        let parsed = map_on_pool(pool, files, |(path, _, stub)| {
             let bytes = fs::read(path).ok()?;
             let source = String::from_utf8_lossy(&bytes).into_owned();
-            Some(parse_file(path, source.as_str(), false).map(|mut parsed| {
+            Some(parse_file(path, source.as_str(), *stub).map(|mut parsed| {
                 this.index_use_sites(&mut parsed, &source);
                 this.note_owner(&mut parsed, path);
                 (source, parsed)
@@ -1164,7 +1164,7 @@ impl Project {
             stubs,
         );
         let mut failed = Vec::new();
-        for ((path, analyzed), parsed) in files.iter().zip(parsed) {
+        for ((path, analyzed, _), parsed) in files.iter().zip(parsed) {
             match parsed {
                 Some(Ok((source, parsed))) => {
                     self.insert_parsed_file(path.clone(), parsed, source, *analyzed)
@@ -1784,7 +1784,7 @@ impl Project {
     /// Builds Tier 2 (member-reference) of `use_sites` for every
     /// currently-loaded file, exactly once - idempotent, a no-op on every
     /// call after the first. Deliberately NOT run as part of
-    /// `finish_loading`/`load_workspace`: unlike Tier 1 (purely
+    /// `finish_loading` or a load: unlike Tier 1 (purely
     /// syntactic, no `Checker` needed), Tier 2 needs one real `Checker`
     /// pass per file, which would make every workspace open pay a cost
     /// only `textDocument/references`/`textDocument/rename` actually
@@ -1922,12 +1922,12 @@ impl Project {
         // `analyzed` flag (an edit doesn't change what kind of file it
         // is). A never-before-seen path - reachable via `textDocument/
         // didOpen` for ANY URI the editor opens, including one
-        // `discover_vendor_context`/`load_workspace`'s own excluded-
+        // `discover_vendor_context`'s and `Session::listing`'s own excluded-
         // dir walk never touched (a vendor file outside any discovered
         // autoload entry, or with no composer.json at all) - defaults
         // to context (`analyzed: false`) when it's under a directory
         // name `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` lists, matching
-        // `load_workspace`'s own walk; otherwise `true`, the same "a
+        // `Session::listing`'s own walk; otherwise `true`, the same "a
         // brand-new first-party file is analyzed by default" behavior
         // this had before this distinction existed. Without this, a
         // same-name collision (`insert_built_decl`'s own doc comment)
@@ -3227,9 +3227,9 @@ impl ParsedFile {
     }
 }
 
-/// Recursively collects every `.php` file under `path` - shared by the CLI
-/// (`main.rs`'s own subcommands) and the LSP's own workspace-loading path
-/// (`lsp.rs`'s `load_workspace`). Deliberately NOT `#[hotpath::measure]`d
+/// Recursively collects every `.php` file under `path`, for the CLI's own
+/// subcommands (`main/check.rs`, `main/incremental_bench.rs`). Deliberately
+/// NOT `#[hotpath::measure]`d
 /// itself - it's self-recursive (one call per directory in the tree), and
 /// hotpath's per-call "Total" sums every call's own measured span, so a
 /// recursive function's aggregate massively over-counts its true unique

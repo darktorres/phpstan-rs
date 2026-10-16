@@ -426,8 +426,8 @@ pub(super) fn last_publish_diagnostics_for<'a>(messages: &'a [Value], uri: &str)
 }
 
 /// A fresh, unique scratch directory per test - real files on disk,
-/// since `load_workspace` walks the real filesystem via
-/// `collect_php_files`/`std::fs::read`, not something worth faking.
+/// since the server walks the real filesystem (`Session::listing`) and
+/// reads it with `std::fs::read`, not something worth faking.
 pub(super) struct TempDir(pub(super) PathBuf);
 impl TempDir {
     pub(super) fn new(label: &str) -> Self {

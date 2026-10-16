@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use output::OutputFormat;
 use phpstan_rs::app::check_project::{self, CheckRequest, CheckRun};
-use phpstan_rs::project::session::AnalysisResult;
+use phpstan_rs::project::session::{AnalysisResult, ErrorPolicy};
 use phpstan_rs::{baseline, output};
 
 /// Load every .php file under the given paths and run the full checker
@@ -121,7 +121,13 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
             std::process::exit(1);
         }
     };
-    let run = match check_project::prepare(&request, &config, stubs) {
+    let run = match check_project::prepare(
+        &request,
+        &config,
+        stubs,
+        PathBuf::from("."),
+        ErrorPolicy::Fail,
+    ) {
         Ok(run) => run,
         Err(e) => {
             eprintln!("{e}");

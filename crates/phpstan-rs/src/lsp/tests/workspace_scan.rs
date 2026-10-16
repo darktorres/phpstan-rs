@@ -120,13 +120,11 @@ fn first_party_declaration_wins_a_same_name_collision_with_vendor_context() {
 }
 
 // A configured `phpstan-rs.toml` `paths` key is an include-only
-// allowlist (mirrors `run_check_project`'s own `config.paths` handling)
-// - `load_workspace_files` must scan exactly those paths instead of the
-// whole workspace root when one is set, the real gap a real editor
-// session surfaced: Piwigo's own `phpstan-rs.toml` deliberately omits
-// `_data/` (compiled Smarty template cache) from `paths`, but the LSP
-// scanned it anyway since `ResolvedWorkspaceConfig` never carried
-// `config.paths` through at all before this fix.
+// allowlist (mirrors `check-project`'s own `config.paths` handling)
+// - the workspace load must scan exactly those paths instead of the
+// whole workspace root when one is set. Piwigo's own `phpstan-rs.toml`
+// omits `_data/` (compiled Smarty template cache) from `paths`, and that
+// directory must stay out of the scan.
 
 #[test]
 fn configured_paths_restrict_the_analyzed_walk_to_only_those_paths() {
@@ -183,7 +181,7 @@ fn configured_paths_still_fully_analyze_everything_inside_them() {
 #[test]
 fn opening_an_undiscovered_vendor_file_does_not_clobber_a_first_party_declaration() {
     // No composer.json at all: discover_vendor_context finds nothing,
-    // so vendor/acme/Shared.php is never touched by load_workspace -
+    // so vendor/acme/Shared.php is never touched by the workspace load -
     // genuinely never-before-seen by Project until the didOpen below.
     let dir = TempDir::new("undiscovered_vendor_didopen");
     dir.write(

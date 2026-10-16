@@ -354,3 +354,64 @@ fn baseline_entries_from_a_root_relative_baseline_file_suppress_matching_diagnos
         "handle_open_or_change must never surface baseline::filter's stale-entry report: {messages:?}"
     );
 }
+
+fn show_messages(messages: &[Value]) -> Vec<&Value> {
+    messages
+        .iter()
+        .filter(|m| m["method"] == "window/showMessage")
+        .collect()
+}
+
+#[test]
+fn a_config_that_does_not_parse_is_reported_as_a_warning() {
+    let dir = TempDir::new("config_malformed");
+    dir.write("phpstan-rs.toml", "paths = [\n");
+
+    let messages = run(&dir, &[]);
+
+    assert!(
+        show_messages(&messages)
+            .iter()
+            .any(|m| m["params"]["type"] == 2
+                && m["params"]["message"].as_str().is_some_and(|text| {
+                    text.starts_with("phpstan-rs: ") && text.contains("failed to parse")
+                })),
+        "a config that does not parse must be reported as a warning, got: {messages:?}"
+    );
+}
+
+#[test]
+fn an_unknown_restricted_symbols_preset_is_reported_and_the_known_one_still_applies() {
+    let dir = TempDir::new("config_unknown_preset");
+    dir.write(
+        "phpstan-rs.toml",
+        "[ext.disallowed-calls]\nrestricted_symbol_presets = [\"nope\", \"multibyte-strings\"]\n",
+    );
+    let fixture = "<?php\nfunction f(string $s): int {\n    return strlen($s);\n}\n";
+    let path = dir.write("a.php", fixture);
+    let uri = path_to_uri(&path).to_string();
+
+    let messages = run(
+        &dir,
+        &[notification(
+            "textDocument/didOpen",
+            json!({"textDocument": {"uri": uri, "languageId": "php", "version": 1, "text": fixture}}),
+        )],
+    );
+
+    assert!(
+        show_messages(&messages)
+            .iter()
+            .any(|m| m["params"]["message"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("phpstan-rs: ") && text.contains("\"nope\""))),
+        "an unknown preset must be reported as a warning, got: {messages:?}"
+    );
+    let diags = diagnostics_for(&messages, &uri);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d["code"] == "restrictedSymbol.function"),
+        "the preset that does resolve must still apply, got: {diags:?}"
+    );
+}

@@ -108,16 +108,23 @@ fn a_context_root_inside_an_excluding_root_is_walked_with_its_own_exclusions() {
 }
 
 #[test]
-fn a_root_named_like_an_excluded_name_is_walked_when_it_has_no_exclusions() {
+fn a_root_named_like_an_excluded_name_is_walked_and_the_names_exclude_only_below_it() {
     let dir = TempDir::new("walk_root_named_vendor");
     dir.write("vendor/x.php", "<?php");
+    dir.write("vendor/vendor/y.php", "<?php");
     let vendor = resolved(&dir).join("vendor");
 
     assert_eq!(
         listing(&[(vendor.clone(), Role::Context, &[])]),
+        vec![
+            (vendor.join("vendor/y.php"), Role::Context, false),
+            (vendor.join("x.php"), Role::Context, false),
+        ]
+    );
+    assert_eq!(
+        listing(&[(vendor.clone(), Role::Context, &["vendor"])]),
         vec![(vendor.join("x.php"), Role::Context, false)]
     );
-    assert!(listing(&[(vendor, Role::Context, &["vendor"])]).is_empty());
 }
 
 #[test]

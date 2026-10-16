@@ -16,7 +16,7 @@
 //! symbolic label (e.g. `"ClassName::methodName"`) is still folded into
 //! the message text rather than dropped - LSP has no field for it.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +25,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use types::Name;
 
+use config::ConfigFile;
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use lsp_server::{
     ErrorCode, Message, Notification as LspNotification, Request, RequestId, Response,
@@ -43,9 +44,11 @@ use lsp_types::{
     WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 
+use crate::app::check_project::{self, CheckRequest};
 use crate::checker::Checker;
+use crate::project::session::ErrorPolicy;
 use crate::project::use_sites;
-use crate::project::walk::{Role, Walk};
+use crate::project::walk::{Listed, Role};
 use crate::project::{Project, ProjectSettings};
 use crate::registry::stub_set::{StubSource, Stubs};
 use crate::registry::{FunctionReflection, format_signature, param_label};
@@ -63,7 +66,6 @@ mod protocol;
 mod semantic_tokens;
 mod settings;
 mod signature_help;
-mod workspace_config;
 mod workspace_symbol;
 
 #[cfg(test)]
@@ -71,7 +73,8 @@ use protocol::percent_decode;
 use protocol::{
     Positions, diagnostic_fix_to_code_action, log_message_notification, offset_from_lsp,
     path_to_uri, progress_notification, publish_diagnostics_notification, pump_messages,
-    range_to_lsp, ranges_overlap, to_request_id, uri_to_path, write_message,
+    range_to_lsp, ranges_overlap, show_message_notification, to_request_id, uri_to_path,
+    write_message,
 };
 
 /// Resolves a receiver's own (possibly multi-class) type down to every
@@ -213,26 +216,17 @@ struct Server {
     // Every workspace folder root already loaded - `add_workspace_folders`/
     // `remove_workspace_folders` dedup/filter against this.
     workspace_roots: Vec<PathBuf>,
-    // The most recently configured workspace root, kept around so
-    // `apply_post_filters` can rewrite a diagnostic's path to root-
-    // relative before consulting `ignore_error_entries`/`baseline` - see
-    // `configure_from_workspace`. With more than one workspace folder,
-    // this (and `baseline`/`ignore_error_entries`/`level_cutoff` below)
-    // are last-root-wins: `Project`/`Registry` have no per-root config
-    // scoping today, matching 1.1's own already-accepted single-
-    // workspace-config limitation, generalized rather than newly
-    // introduced here.
+    // The most recently configured workspace root, which `apply_post_filters`
+    // rewrites a diagnostic's path against before consulting the applied
+    // `ignore_error_entries` and `baseline`. With more than one workspace
+    // folder, this and `applied` are last-root-wins: `Project`/`Registry`
+    // have no per-root config scoping.
     root: Option<PathBuf>,
-    baseline: Option<crate::baseline::Baseline>,
-    ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
-    // The same `Option<u8>` `Project::apply_settings` also
-    // received - kept separately here too since `Project`/`Registry`
-    // only use it for type-strictness, not for filtering already-
-    // produced diagnostics before they're published.
-    level_cutoff: Option<u8>,
+    // What `root`'s configuration applies, once it has been applied.
+    applied: Option<Applied>,
     // A `phpstan-rs.configPath` setting override, applied on top of
     // `root`'s own default `phpstan-rs.toml` lookup by every subsequent
-    // `configure_from_workspace`/`reload_configuration` call. `None`
+    // `add_workspace_folders`/`reload_configuration` call. `None`
     // until a `workspace/didChangeConfiguration` notification sets one.
     config_path_override: Option<PathBuf>,
     // `phpstan-rs.enable` - "stop showing squiggles", not "stop the
@@ -247,20 +241,6 @@ struct Server {
     // `settings` value, so the pushed-settings path alone would never see
     // an actual `phpstan-rs.*` value from it.
     supports_configuration_pull: bool,
-    // The last `ResolvedWorkspaceConfig` actually applied to
-    // `self.project`/`self` - `reload_configuration`'s no-op fast path
-    // compares a freshly resolved value against this via real `PartialEq`
-    // (never a `Debug`-formatted fingerprint - `SqlReflectionConfig`'s own
-    // `Debug` impl always prints its `password` field as a constant
-    // redacted token, which would make a password-only edit invisible to
-    // a string-based comparison).
-    last_applied_config: Option<workspace_config::ResolvedWorkspaceConfig>,
-    // The last resolved config a "this needs a window reload" warning was
-    // already emitted for (see `reload_configuration`'s file-set-affecting
-    // check) - distinct from `last_applied_config` so the warning doesn't
-    // re-fire on every subsequent unrelated settings save while the same
-    // unapplied change sits on disk.
-    last_warned_pending_config: Option<workspace_config::ResolvedWorkspaceConfig>,
     // Captured once at `"initialize"` from
     // `capabilities.workspace.didChangeWatchedFiles.dynamicRegistration` -
     // whether this client can even be asked to watch files for this
@@ -286,6 +266,29 @@ struct Server {
     version: String,
     // Every section a workspace's `phpstan-rs.toml` may set.
     config_schema: config::Schema,
+}
+
+/// What a workspace's configuration applies to the server: the settings its
+/// project runs with, the post-filters its diagnostics pass through, and the
+/// files it lists. A reload compares the newly resolved one with the applied
+/// one by real `PartialEq`, never a `Debug` fingerprint: the SQL reflection
+/// config's `Debug` redacts its password.
+#[derive(PartialEq)]
+struct Applied {
+    settings: ProjectSettings,
+    baseline: Option<baseline::Baseline>,
+    ignore_error_entries: Vec<ignore_errors::IgnoreErrorEntry>,
+    listing: Vec<Listed>,
+}
+
+/// One `window/showMessage` warning for each problem a configuration has.
+fn configuration_warnings(warnings: Vec<String>) -> Vec<Message> {
+    warnings
+        .into_iter()
+        .map(|warning| {
+            show_message_notification(MessageType::WARNING, format!("phpstan-rs: {warning}"))
+        })
+        .collect()
 }
 
 impl Server {
@@ -322,14 +325,10 @@ impl Server {
             pending_workspace_scan: None,
             workspace_roots: Vec::new(),
             root: None,
-            baseline: None,
-            ignore_error_entries: Vec::new(),
-            level_cutoff: None,
+            applied: None,
             config_path_override: None,
             enabled: true,
             supports_configuration_pull: false,
-            last_applied_config: None,
-            last_warned_pending_config: None,
             supports_watched_files: false,
             file_versions: FxHashMap::default(),
             inlay_hint_cache: FxHashMap::default(),
@@ -338,46 +337,53 @@ impl Server {
         }
     }
 
-    /// Resolves `root`'s own `phpstan-rs.toml` and applies it to
-    /// `self.project`/`self`, so a workspace's config produces the same
-    /// `Project` state (and the same published-diagnostic set) `check-
-    /// project` would build/report for the identical tree. Returns the
-    /// context paths (`vendor`/`scan_paths`/`stub_paths`) `load_workspace`
-    /// needs to load before walking `root` itself.
-    fn configure_from_workspace(&mut self, root: &Path) -> workspace_config::WorkspaceContextPaths {
-        let resolved = workspace_config::resolve(
-            root,
-            self.config_path_override.as_deref(),
-            &self.config_schema,
-        );
-        self.apply_resolved_config(root, resolved)
-    }
-
-    /// The apply half of `configure_from_workspace`, factored out so
-    /// `reload_configuration` can apply an already-resolved value (its own
-    /// no-op fast path needs the resolved value in hand *before* deciding
-    /// whether to apply it, which `configure_from_workspace`'s
-    /// resolve-then-apply-in-one-call shape doesn't allow). Stores a clone
-    /// of `resolved` into `self.last_applied_config` before any of its
-    /// fields are moved out below.
-    fn apply_resolved_config(
-        &mut self,
+    /// Resolves `root`'s configuration into what the server applies: the
+    /// `config_path` given, or else `root`'s own `phpstan-rs.toml`. It
+    /// follows `check-project`'s rules under `ErrorPolicy::Degrade`, so a
+    /// problem the configuration cannot be used with comes back as a
+    /// warning, and the part it concerns takes its default. A missing file
+    /// is an empty configuration, not a problem.
+    fn resolve_workspace(
+        &self,
         root: &Path,
-        resolved: workspace_config::ResolvedWorkspaceConfig,
-    ) -> workspace_config::WorkspaceContextPaths {
-        self.last_applied_config = Some(resolved.clone());
-        self.level_cutoff = resolved.settings.configured_level;
-        self.project.apply_settings(resolved.settings);
-
-        self.root = Some(root.to_path_buf());
-        self.baseline = resolved.baseline;
-        self.ignore_error_entries = resolved.ignore_error_entries;
-
-        workspace_config::WorkspaceContextPaths {
-            vendor: resolved.vendor_context,
-            extra_dirs: resolved.extra_context_dirs,
-            analyze_paths: resolved.analyze_paths,
-        }
+        config_path: Option<&Path>,
+    ) -> Result<(Applied, Vec<String>), String> {
+        let mut warnings = Vec::new();
+        let config_path =
+            config_path.map_or_else(|| root.join("phpstan-rs.toml"), Path::to_path_buf);
+        let config = if config_path.is_file() {
+            ConfigFile::load(&config_path, &self.config_schema)
+                .and_then(|config| config.validate(&self.config_schema).map(|()| config))
+                .unwrap_or_else(|error| {
+                    warnings.push(error);
+                    ConfigFile::empty()
+                })
+        } else {
+            ConfigFile::empty()
+        };
+        let run = check_project::prepare(
+            &CheckRequest::default(),
+            &config,
+            self.stubs.clone(),
+            root.to_path_buf(),
+            ErrorPolicy::Degrade,
+        )?;
+        warnings.extend(run.notices());
+        let baseline = match run.load_baseline() {
+            Some(Ok(baseline)) => Some(baseline),
+            Some(Err(line)) => {
+                warnings.push(line);
+                None
+            }
+            None => None,
+        };
+        let applied = Applied {
+            settings: run.session.editor_settings(),
+            baseline,
+            ignore_error_entries: run.session.ignore_error_entries().to_vec(),
+            listing: run.session.listing(),
+        };
+        Ok((applied, warnings))
     }
 
     /// Applies the same severity-level cutoff / `ignore_errors` /
@@ -396,12 +402,15 @@ impl Server {
         &self,
         mut results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
     ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        if let Some(cutoff) = self.level_cutoff {
+        let Some(applied) = &self.applied else {
+            return results;
+        };
+        if let Some(cutoff) = applied.settings.configured_level {
             for diagnostics in results.values_mut() {
                 diagnostics.retain(|d| d.level <= cutoff);
             }
         }
-        if self.ignore_error_entries.is_empty() && self.baseline.is_none() {
+        if applied.ignore_error_entries.is_empty() && applied.baseline.is_none() {
             return results;
         }
         let Some(root) = &self.root else {
@@ -416,10 +425,10 @@ impl Server {
             .into_iter()
             .map(|(path, diags)| (to_relative(path), diags))
             .collect();
-        if !self.ignore_error_entries.is_empty() {
-            ignore_errors::filter(&mut relative, &self.ignore_error_entries);
+        if !applied.ignore_error_entries.is_empty() {
+            ignore_errors::filter(&mut relative, &applied.ignore_error_entries);
         }
-        if let Some(baseline) = &self.baseline {
+        if let Some(baseline) = &applied.baseline {
             let _stale = baseline::filter(&mut relative, baseline);
         }
         relative
@@ -429,11 +438,10 @@ impl Server {
     }
 
     /// Reads and parses `files` in parallel on the worker pool, inserting
-    /// each as context (vendor/scan/stub, never analyzed or reported) or
-    /// analyzed (a real, first-party file under `root`) in order. A parse
+    /// each as context or analyzed, as `Project::load_files` does. A parse
     /// failure is logged (both to stderr and as a `window/logMessage`
     /// notification) and skipped, not fatal to the rest of the scan.
-    fn load_files(&mut self, files: &[(PathBuf, bool)], messages: &mut Vec<Message>) {
+    fn load_files(&mut self, files: &[(PathBuf, bool, bool)], messages: &mut Vec<Message>) {
         for (path, e) in self
             .project
             .load_files(files, Some(&self.pool), &self.stubs)
@@ -452,21 +460,13 @@ impl Server {
         }
     }
 
-    /// Loads `context`'s vendor/scan/stub paths first (`analyzed:
-    /// false`), then every `.php` file under `context.analyze_paths`
-    /// (falling back to the whole of `root` when the config sets no
-    /// `paths` at all - see `WorkspaceContextPaths::analyze_paths`'s own
-    /// doc comment) as `analyzed: true` (skipping any path already loaded
-    /// as context or by an earlier call,
-    /// e.g. a prior workspace folder, or an already-`didOpen`ed file),
-    /// so the cross-file registry and dependency graph this whole phase
-    /// is about are populated from the very first diagnostic, not built
-    /// up one `didOpen` at a time. Deliberately does NOT call
-    /// `Project::finish_loading` itself - `add_workspace_folders` calls
-    /// it once for a whole batch of roots, not once per root here; a
-    /// bare call to this method with no `finish_loading` afterward would
-    /// leave the registry's derived state (trait flattening, ancestor
-    /// names, ...) stale for whatever it just loaded.
+    /// Applies `next` to `self.project` and `self`, then loads the files it
+    /// lists that are not loaded yet, context first. `previous` is the listing
+    /// the project was configured with before: a file it listed under another
+    /// role, or not at all, is removed first, unless the editor has it open.
+    /// Returns the messages of those removals and loads, and whether a file
+    /// was loaded, in which case the caller runs `finish_loading_with` once
+    /// for its batch.
     ///
     /// **Context-before-root load order is a correctness invariant, not
     /// just a dedup convenience**: `Registry::insert_built_decl`'s
@@ -479,74 +479,72 @@ impl Server {
     /// genuinely different `Project` state for the identical tree. A
     /// future refactor of this method must preserve this order
     /// explicitly.
-    fn load_workspace_files(
-        &mut self,
-        root: &Path,
-        context: &workspace_config::WorkspaceContextPaths,
-    ) -> Vec<Message> {
+    fn apply_configuration(&mut self, next: Applied, previous: &[Listed]) -> (Vec<Message>, bool) {
         let mut messages = Vec::new();
-        let mut walk = Walk::new();
-        for file in &context.vendor.files {
-            walk.add_file(file, file, Role::Context);
-        }
-        for dir in context.vendor.dirs.iter().chain(context.extra_dirs.iter()) {
-            walk.add(dir, dir, Role::Context, &[]);
-        }
-        if context.analyze_paths.is_empty() {
-            walk.add(
-                root,
-                root,
-                Role::Analysed,
-                crate::project::DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
-            );
-        } else {
-            // A configured `paths` is an include-only allowlist, same as
-            // `run_check_project`'s own `collect_analyze_and_context_files`
-            // - no `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` floor applies on top
-            // of it (an explicitly-listed `vendor/`-named entry, unlikely
-            // but real, would otherwise be silently dropped again here).
-            for path in &context.analyze_paths {
-                walk.add(path, path, Role::Analysed, &[]);
-            }
-        }
-        let mut context_files = Vec::new();
-        let mut files = Vec::new();
-        for listed in walk.finish() {
-            if listed.role == Role::Analysed {
-                files.push(listed.path);
-            } else {
-                context_files.push(listed.path);
-            }
-        }
-        context_files.sort();
-        let mut to_load: Vec<(PathBuf, bool)> = context_files
-            .into_iter()
-            .map(|path| (path, false))
+        self.project.apply_settings(next.settings.clone());
+
+        let current: FxHashMap<&Path, (Role, bool)> = next
+            .listing
+            .iter()
+            .map(|listed| (listed.path.as_path(), (listed.role, listed.stub)))
             .collect();
-        // See main.rs's run_check_project for why this matters: a real
-        // workspace can genuinely declare the same fully-qualified class
-        // twice (duplicate vendored copies of a library), and
-        // unsorted readdir order would make which one wins the
-        // registry slot filesystem-dependent.
-        files.sort();
-        for path in files {
-            // A non-conformant client that sends didOpen/didChange for a
-            // path already loaded before "initialized" arrives - this
-            // scan must not re-register a file update_file's own caller
-            // already indexed, since load_file has no idempotency guard
-            // of its own.
-            if self.project.ast(&path).is_some() {
-                continue;
+        let removed: Vec<PathBuf> = {
+            let loaded: FxHashSet<&Path> = self.project.loaded_paths().collect();
+            previous
+                .iter()
+                .filter(|old| current.get(old.path.as_path()) != Some(&(old.role, old.stub)))
+                .filter(|old| {
+                    loaded.contains(old.path.as_path()) && !self.open_uris.contains_key(&old.path)
+                })
+                .map(|old| old.path.clone())
+                .collect()
+        };
+        if !removed.is_empty() {
+            for path in &removed {
+                self.last_diagnostics.remove(path);
+                self.latest_text.remove(path);
             }
-            to_load.push((path, true));
+            let results = self.project.remove_files(&removed);
+            messages.extend(self.publish_diagnostics_for(results));
         }
+
+        let to_load: Vec<(PathBuf, bool, bool)> = {
+            let loaded: FxHashSet<&Path> = self.project.loaded_paths().collect();
+            let mut context = Vec::new();
+            let mut analysed = Vec::new();
+            for listed in &next.listing {
+                if loaded.contains(listed.path.as_path()) {
+                    continue;
+                }
+                if listed.role == Role::Analysed {
+                    analysed.push(listed.path.clone());
+                } else {
+                    context.push(listed.path.clone());
+                }
+            }
+            // The order `Session::load` loads in.
+            composer::path_order::sort_paths(&mut context);
+            composer::path_order::sort_paths(&mut analysed);
+            context
+                .into_iter()
+                .map(|path| {
+                    let stub = current[path.as_path()].1;
+                    (path, false, stub)
+                })
+                .chain(analysed.into_iter().map(|path| {
+                    let stub = current[path.as_path()].1;
+                    (path, true, stub)
+                }))
+                .collect()
+        };
+        let loaded = !to_load.is_empty();
         self.load_files(&to_load, &mut messages);
-        messages
+        self.applied = Some(next);
+        (messages, loaded)
     }
 
     /// Loads every not-yet-tracked root in `roots` (deduped against
-    /// `self.workspace_roots`) via `configure_from_workspace` +
-    /// `load_workspace_files`, then runs `Project::finish_loading` at
+    /// `self.workspace_roots`), then runs `Project::finish_loading_with` at
     /// most ONCE for the whole batch - not once per root, which would
     /// pay N whole-registry recomputes for N roots (each re-scanning
     /// every previously-loaded root's own files again) instead of one.
@@ -558,26 +556,31 @@ impl Server {
     /// be violated.
     fn add_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
         let mut messages = Vec::new();
-        let mut any_new = false;
+        let mut any_loaded = false;
         for root in roots {
             if self.workspace_roots.contains(root) {
                 continue;
             }
-            // Config resolution (a workspace's own phpstan-rs.toml,
-            // Composer vendor discovery) is genuinely per-root - but its
-            // *effect* on `self`/`self.project` (opt-in checks, php
-            // version, the post-filter fields `apply_post_filters`
-            // reads) is last-root-wins for now: `Project`/`Registry`
-            // have no per-root config scoping, only one shared instance
-            // for however many folders are open. Matches 1.1's own
-            // already-accepted single-workspace-config limitation,
-            // generalized rather than newly introduced here.
-            let context = self.configure_from_workspace(root);
-            messages.extend(self.load_workspace_files(root, &context));
-            self.workspace_roots.push(root.clone());
-            any_new = true;
+            // What a root's configuration applies to `self`/`self.project` is
+            // last-root-wins: `Project`/`Registry` have no per-root config
+            // scoping, only one shared instance for however many folders are
+            // open.
+            match self.resolve_workspace(root, self.config_path_override.as_deref()) {
+                Ok((next, warnings)) => {
+                    messages.extend(configuration_warnings(warnings));
+                    self.root = Some(root.clone());
+                    let (applied, loaded) = self.apply_configuration(next, &[]);
+                    messages.extend(applied);
+                    any_loaded |= loaded;
+                    self.workspace_roots.push(root.clone());
+                }
+                Err(error) => messages.push(show_message_notification(
+                    MessageType::ERROR,
+                    format!("phpstan-rs: {error}"),
+                )),
+            }
         }
-        if any_new {
+        if any_loaded {
             self.project.finish_loading_with(&self.stubs);
         }
         messages
@@ -628,10 +631,9 @@ impl Server {
         if paths.is_empty() {
             return FxHashMap::default();
         }
-        // Deterministic order (matches load_workspace's own `files.sort()`
-        // rationale) - HashMap/HashSet iteration order would otherwise
-        // make repeated runs against an unchanged workspace look like a
-        // spurious diff to anyone comparing published-message order.
+        // Deterministic order - HashMap/HashSet iteration order would
+        // otherwise make repeated runs against an unchanged workspace look
+        // like a spurious diff to anyone comparing published-message order.
         paths.sort();
         let (results, panics) = self
             .project
@@ -757,7 +759,8 @@ impl Server {
             };
             return self.publish_diagnostics_for(FxHashMap::from_iter([(path, diags)]));
         }
-        // Same graceful-degradation as load_workspace, and more exposed
+        // Same graceful degradation as a file that fails to parse on load,
+        // and more exposed
         // in practice here: momentarily-invalid syntax is the normal
         // state while a file is being typed, not an edge case.
         // `update_file`'s `Result` makes a parse failure here a plain,
@@ -869,7 +872,7 @@ impl Server {
             };
             // No document version exists for an externally-observed
             // change (there is no didOpen/didChange behind it) - `None`
-            // matches load_workspace's own "never opened" default.
+            // matches a file that was only ever loaded from disk.
             self.open_uris.insert(path.clone(), (uri, None));
             self.latest_text.insert(path.clone(), text.clone());
             match self.project.update_file(&path, &text) {
@@ -1946,23 +1949,18 @@ impl Server {
     /// The actual `workspace/didChangeConfiguration` work, shared by both
     /// the direct-push and pull-response paths: re-resolves `self.root`'s
     /// config (honoring `settings.config_path`, resolved against `root`
-    /// when relative) and republishes whatever changed.
+    /// when relative) and applies what changed.
     ///
-    /// A true no-op - the freshly resolved config and `enable` flag both
-    /// match what's already applied - returns `Vec::new()` without
+    /// A true no-op - the freshly resolved configuration and `enable` flag
+    /// both match what's already applied - returns `Vec::new()` without
     /// re-checking anything, since this notification fires for ANY client
     /// settings save under the registered section, not just a
     /// `phpstan-rs` one; re-checking every analyzed file on every
     /// unrelated settings.json save would be a real, common-case cost.
     ///
-    /// `scan_paths`/`stub_paths`/`no_composer` changes are detected
-    /// separately (via the resolved `vendor_context`/`extra_context_dirs`)
-    /// but not specially skipped: `Project` has no unload/reset primitive,
-    /// so the already-loaded file set simply stays what it was, while
-    /// every other (hot-appliable) field still applies immediately. A
-    /// one-time `window/logMessage` (deduped via `last_warned_pending_config`)
-    /// tells the user the file set itself needs a window reload to catch
-    /// up - it is not silently wrong, just stale until then.
+    /// Otherwise the file set changes by its difference from what was
+    /// applied (`apply_configuration`), and the warnings about the
+    /// configuration are reported.
     fn reload_configuration(&mut self, settings: settings::PhpstanRsSettings) -> Vec<Message> {
         let Some(root) = self.root.clone() else {
             return Vec::new();
@@ -1976,32 +1974,30 @@ impl Server {
                 root.join(candidate)
             }
         });
-        let resolved =
-            workspace_config::resolve(&root, config_path_override.as_deref(), &self.config_schema);
-        if settings.enable == was_enabled && self.last_applied_config.as_ref() == Some(&resolved) {
+        let resolved = self.resolve_workspace(&root, config_path_override.as_deref());
+        self.enabled = settings.enable;
+        self.config_path_override = config_path_override;
+        let (next, warnings) = match resolved {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                return vec![show_message_notification(
+                    MessageType::ERROR,
+                    format!("phpstan-rs: {error}"),
+                )];
+            }
+        };
+        if settings.enable == was_enabled && self.applied.as_ref() == Some(&next) {
             return Vec::new();
         }
 
-        let file_set_changed = self.last_applied_config.as_ref().is_some_and(|prev| {
-            prev.vendor_context != resolved.vendor_context
-                || prev.extra_context_dirs != resolved.extra_context_dirs
-        });
-
-        self.enabled = settings.enable;
-        self.config_path_override = config_path_override;
-        self.apply_resolved_config(&root, resolved);
-
-        let mut messages = Vec::new();
-        if file_set_changed
-            && self.last_warned_pending_config.as_ref() != self.last_applied_config.as_ref()
-        {
-            self.last_warned_pending_config = self.last_applied_config.clone();
-            messages.push(log_message_notification(
-                MessageType::WARNING,
-                "phpstan-rs: scan_paths/stub_paths/no_composer changed - reload the window to pick up the new file set".to_string(),
-            ));
+        let mut messages = configuration_warnings(warnings);
+        let previous = self.applied.take();
+        let previous: &[Listed] = previous.as_ref().map_or(&[], |old| old.listing.as_slice());
+        let (applied, loaded) = self.apply_configuration(next, previous);
+        messages.extend(applied);
+        if loaded {
+            self.project.finish_loading_with(&self.stubs);
         }
-
         messages.extend(self.republish_known_files());
         messages
     }

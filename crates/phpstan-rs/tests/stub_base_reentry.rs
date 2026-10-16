@@ -34,7 +34,7 @@ fn a_cold_base_forced_by_two_jobs_of_one_pool_completes() {
             .num_threads(1)
             .build()
             .unwrap();
-        let files = [(file, true)];
+        let files = [(file, true, false)];
         pool.install(|| {
             (0..2).into_par_iter().for_each(|_| {
                 let mut project = Project::loading();

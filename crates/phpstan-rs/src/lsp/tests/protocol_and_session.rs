@@ -131,7 +131,7 @@ fn initialize_tolerates_unrecognized_initialization_options() {
     // Forward-compatibility guard for the VS Code extension's settings:
     // configPath/enable are sent via initializationOptions, but config
     // resolution actually runs from the workspace root's own
-    // phpstan-rs.toml (lsp/workspace_config.rs), not from these -
+    // phpstan-rs.toml (`resolve_workspace` in lsp.rs), not from these -
     // InitializeParams.initialization_options is already Option<Value>
     // in lsp-types and is simply dropped, so this must keep working
     // rather than start erroring if a future field ever gets read here.

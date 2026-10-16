@@ -24,14 +24,3 @@ pub struct DisallowedCallsSettings {
 impl config::Section for DisallowedCallsSettings {
     const PATH: &'static [&'static str] = &["ext", "disallowed-calls"];
 }
-
-impl DisallowedCallsSettings {
-    /// Every entry, the presets' included.
-    pub fn entries(&self) -> Result<Vec<RestrictedSymbolEntry>, String> {
-        let mut entries = self.restricted_symbols.clone();
-        for preset in &self.restricted_symbol_presets {
-            entries.extend(crate::banned::restricted_symbol_preset(preset)?);
-        }
-        Ok(entries)
-    }
-}

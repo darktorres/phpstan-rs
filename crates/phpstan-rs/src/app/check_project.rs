@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use config::ConfigFile;
 
 use crate::baseline::{self, Baseline};
-use crate::project::session::{Finalize, Overrides, Session, SessionSettings};
+use crate::project::session::{ErrorPolicy, Finalize, Overrides, Session};
 use crate::registry::stub_set::Stubs;
 
 /// What a `check-project` run asks for, after its command line is parsed.
@@ -56,28 +56,15 @@ pub struct CheckRun {
 }
 
 /// Resolves `request` with `config` (`load_config`) into a run on the pool
-/// of `stubs`, rooted at the working directory.
+/// of `stubs`, rooted at `root`. `policy` is what a configuration that cannot
+/// be used does (`ErrorPolicy`).
 pub fn prepare(
     request: &CheckRequest,
     config: &ConfigFile,
     stubs: Stubs,
+    root: PathBuf,
+    policy: ErrorPolicy,
 ) -> Result<CheckRun, String> {
-    let config_dir = config.dir().map(Path::to_path_buf);
-    let session = config.section::<SessionSettings>()?;
-    let baseline_path = request
-        .baseline
-        .clone()
-        .or(session.baseline.map(|p| match &config_dir {
-            Some(dir) => dir.join(p),
-            None => p,
-        }));
-    let baseline_mode = if request.baseline_match_identifier || session.baseline_match_identifier {
-        baseline::MatchMode::Identifier
-    } else {
-        baseline::MatchMode::Message
-    };
-    let baseline_per_identifier =
-        request.baseline_per_identifier || session.baseline_per_identifier;
     let overrides = Overrides {
         paths: request.paths.clone(),
         scan_paths: request.scan_paths.clone(),
@@ -87,13 +74,23 @@ pub fn prepare(
         php_version: request.php_version.clone(),
         no_composer: request.no_composer,
         emission_order: request.emission_order,
+        baseline: request.baseline.clone(),
+        baseline_match_identifier: request.baseline_match_identifier,
+        baseline_per_identifier: request.baseline_per_identifier,
     };
-    let session = Session::resolve(config, config_dir, PathBuf::from("."), overrides, stubs)?;
+    let session = Session::resolve(
+        config,
+        config.dir().map(Path::to_path_buf),
+        root,
+        overrides,
+        stubs,
+        policy,
+    )?;
     Ok(CheckRun {
+        baseline_path: session.baseline_path().map(Path::to_path_buf),
+        baseline_mode: session.baseline_mode(),
+        baseline_per_identifier: session.baseline_per_identifier(),
         session,
-        baseline_path,
-        baseline_mode,
-        baseline_per_identifier,
     })
 }
 
