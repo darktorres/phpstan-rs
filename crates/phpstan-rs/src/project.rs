@@ -47,6 +47,7 @@ mod file_table;
 mod mock_hygiene;
 pub mod session;
 pub(crate) mod use_sites;
+pub(crate) mod walk;
 mod whole_program;
 
 use duplicate_class_sites::DuplicateClassSites;
@@ -3269,29 +3270,9 @@ pub fn collect_php_files_excluding(
     excluded_dir_names: &[&str],
     out: &mut Vec<PathBuf>,
 ) {
-    if path.is_dir() {
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| excluded_dir_names.contains(&n))
-        {
-            return;
-        }
-        let Ok(entries) = fs::read_dir(path) else {
-            return;
-        };
-        // Each directory's entries by name before the walk goes into them,
-        // so the files come in the order paths compare in: a name is
-        // before the longer ones it begins, and what is in a directory is
-        // before what comes after the directory's name.
-        let mut entries: Vec<_> = entries.flatten().map(|entry| entry.file_name()).collect();
-        entries.sort_unstable_by(|a, b| a.as_encoded_bytes().cmp(b.as_encoded_bytes()));
-        for entry in entries {
-            collect_php_files_excluding(&path.join(entry), excluded_dir_names, out);
-        }
-    } else if path.extension().is_some_and(|e| e == "php") {
-        out.push(path.to_path_buf());
-    }
+    let mut walk = walk::Walk::new();
+    walk.add(path, path, walk::Role::Analysed, excluded_dir_names);
+    out.extend(walk.finish().into_iter().map(|listed| listed.path));
 }
 
 /// What `Project::unindex_file` removed.

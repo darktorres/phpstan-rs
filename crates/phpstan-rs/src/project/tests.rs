@@ -18,3 +18,4 @@ mod property_assign_facts;
 mod reflection_rule;
 mod skipped_bodies;
 mod use_site_index;
+mod walk_identity;

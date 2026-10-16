@@ -31,6 +31,7 @@ use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
 use super::file_cache;
+use super::walk::{Role, Walk};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
@@ -604,24 +605,6 @@ impl Session {
             .any(|dir| composer::manifest::path_starts_with(&path, dir))
     }
 
-    /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`
-    /// joined with its path below it - the same spelling the command line
-    /// gave - while the walk itself happens under the root.
-    fn collect_php_files(&self, dir: &Path, out: &mut Vec<PathBuf>) {
-        let walked = self.root.join(dir);
-        let mut found = Vec::new();
-        super::collect_php_files(&walked, &mut found);
-        out.extend(
-            found
-                .into_iter()
-                .map(|path| match path.strip_prefix(&walked) {
-                    Ok(rest) if rest.as_os_str().is_empty() => dir.to_path_buf(),
-                    Ok(rest) => dir.join(rest),
-                    Err(_) => path,
-                }),
-        );
-    }
-
     /// `cacheable` is whether the file may be read from and stored in the
     /// per-file cache, which a context file may; `index_use_sites` is
     /// whether its use sites are indexed with its parse.
@@ -721,25 +704,45 @@ impl Session {
     /// Parses every context and analysed file into a configured,
     /// finished `Project`, ready for `analyse`.
     pub fn load(&self) -> Result<Loaded, String> {
-        let mut analyze_files = Vec::new();
+        let mut walk = Walk::new();
         for dir in &self.dirs {
-            self.collect_php_files(dir, &mut analyze_files);
+            walk.add(&self.root.join(dir), dir, Role::Analysed, &[]);
         }
-        composer::path_order::sort_paths(&mut analyze_files);
         // The vendor context was being found while the analysed files were
         // listed.
-        let mut scan_dirs = self.scan_dirs.clone();
-        let mut context_files: Vec<PathBuf> = self.scan_files.clone();
         for vendor in &self.vendors {
             let found = vendor.get();
-            scan_dirs.extend(found.dirs.iter().filter(|d| !self.is_promoted(d)).cloned());
-            context_files.extend(found.files.iter().filter(|f| !self.is_promoted(f)).cloned());
+            for dir in found.dirs.iter().filter(|d| !self.is_promoted(d)) {
+                walk.add(&self.root.join(dir), dir, Role::Context, &[]);
+            }
+            for file in found.files.iter().filter(|f| !self.is_promoted(f)) {
+                walk.add_file(&self.root.join(file), file, Role::Context);
+            }
         }
-        for dir in &scan_dirs {
-            self.collect_php_files(dir, &mut context_files);
+        for file in &self.scan_files {
+            walk.add_file(&self.root.join(file), file, Role::Context);
         }
+        for dir in &self.scan_dirs {
+            walk.add(&self.root.join(dir), dir, Role::Context, &[]);
+        }
+        for dir in &self.stub_dirs {
+            walk.add(&self.root.join(dir), dir, Role::Stub, &[]);
+        }
+        let mut analyze_files = Vec::new();
+        let mut context_files = Vec::new();
+        let mut stub_files: FxHashSet<PathBuf> = FxHashSet::default();
+        for listed in walk.finish() {
+            if listed.stub {
+                stub_files.insert(listed.path.clone());
+            }
+            if listed.role == Role::Analysed {
+                analyze_files.push(listed.path);
+            } else {
+                context_files.push(listed.path);
+            }
+        }
+        composer::path_order::sort_paths(&mut analyze_files);
         composer::path_order::sort_paths(&mut context_files);
-        context_files.dedup();
         if analyze_files.is_empty() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
@@ -749,12 +752,6 @@ impl Session {
         self.configure(&mut project);
 
         let pool = &self.pool;
-
-        let mut stub_files_vec = Vec::new();
-        for dir in &self.stub_dirs {
-            self.collect_php_files(dir, &mut stub_files_vec);
-        }
-        let stub_files: FxHashSet<PathBuf> = stub_files_vec.into_iter().collect();
 
         let index_use_sites = project.check_settings().rules.check_dead_code;
         let combined_files: Vec<&PathBuf> =

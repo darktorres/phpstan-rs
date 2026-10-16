@@ -45,6 +45,7 @@ use lsp_types::{
 
 use crate::checker::Checker;
 use crate::project::use_sites;
+use crate::project::walk::{Role, Walk};
 use crate::project::{Project, ProjectSettings};
 use crate::registry::stub_set::{StubSource, Stubs};
 use crate::registry::{FunctionReflection, format_signature, param_label};
@@ -484,29 +485,19 @@ impl Server {
         context: &workspace_config::WorkspaceContextPaths,
     ) -> Vec<Message> {
         let mut messages = Vec::new();
-        let mut loaded: rustc_hash::FxHashSet<PathBuf> = rustc_hash::FxHashSet::default();
-        let mut to_load: Vec<(PathBuf, bool)> = Vec::new();
-
-        let mut context_files = context.vendor.files.clone();
+        let mut walk = Walk::new();
+        for file in &context.vendor.files {
+            walk.add_file(file, file, Role::Context);
+        }
         for dir in context.vendor.dirs.iter().chain(context.extra_dirs.iter()) {
-            crate::project::collect_php_files(dir, &mut context_files);
+            walk.add(dir, dir, Role::Context, &[]);
         }
-        context_files.sort();
-        context_files.dedup();
-        for path in context_files {
-            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-            if !loaded.insert(canonical) {
-                continue;
-            }
-            to_load.push((path, false));
-        }
-
-        let mut files = Vec::new();
         if context.analyze_paths.is_empty() {
-            crate::project::collect_php_files_excluding(
+            walk.add(
                 root,
+                root,
+                Role::Analysed,
                 crate::project::DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
-                &mut files,
             );
         } else {
             // A configured `paths` is an include-only allowlist, same as
@@ -515,9 +506,23 @@ impl Server {
             // of it (an explicitly-listed `vendor/`-named entry, unlikely
             // but real, would otherwise be silently dropped again here).
             for path in &context.analyze_paths {
-                crate::project::collect_php_files(path, &mut files);
+                walk.add(path, path, Role::Analysed, &[]);
             }
         }
+        let mut context_files = Vec::new();
+        let mut files = Vec::new();
+        for listed in walk.finish() {
+            if listed.role == Role::Analysed {
+                files.push(listed.path);
+            } else {
+                context_files.push(listed.path);
+            }
+        }
+        context_files.sort();
+        let mut to_load: Vec<(PathBuf, bool)> = context_files
+            .into_iter()
+            .map(|path| (path, false))
+            .collect();
         // See main.rs's run_check_project for why this matters: a real
         // workspace can genuinely declare the same fully-qualified class
         // twice (duplicate vendored copies of a library), and
@@ -525,10 +530,6 @@ impl Server {
         // registry slot filesystem-dependent.
         files.sort();
         for path in files {
-            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-            if !loaded.insert(canonical) {
-                continue;
-            }
             // A non-conformant client that sends didOpen/didChange for a
             // path already loaded before "initialized" arrives - this
             // scan must not re-register a file update_file's own caller
