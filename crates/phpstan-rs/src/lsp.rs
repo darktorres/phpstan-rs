@@ -17,6 +17,9 @@
 //! the message text rather than dropped - LSP has no field for it.
 
 use rustc_hash::{FxHashMap, FxHashSet};
+#[cfg(test)]
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,7 +29,7 @@ use std::time::{Duration, Instant};
 use types::Name;
 
 use config::ConfigFile;
-use crossbeam_channel::{Receiver, RecvTimeoutError};
+use crossbeam_channel::Receiver;
 use lsp_server::{
     ErrorCode, Message, Notification as LspNotification, Request, RequestId, Response,
 };
@@ -145,6 +148,21 @@ struct PendingWorkspaceScan {
     progress_token: Option<lsp_types::ProgressToken>,
 }
 
+/// A workspace load the message loop runs on its own thread: the folders
+/// `roots` name are added, analysed, and their diagnostics published. The
+/// handler that wants one sets `Server::pending_load`, and
+/// `Dispatch::start_pending_load` starts it once that handler returns.
+struct PendingLoad {
+    roots: Vec<PathBuf>,
+    // The `$/progress` token the load reports under, when `initialize` gave
+    // one. A folder added later reports nothing.
+    progress_token: Option<lsp_types::ProgressToken>,
+    // Whether the watched-files registration waits for this load to end. The
+    // initial scan's does. Without a scan, `initialized` sends the request at
+    // once.
+    register_watched_files: bool,
+}
+
 struct Server {
     // The built-in stubs, which every project takes its base from.
     stubs: Stubs,
@@ -185,7 +203,7 @@ struct Server {
     // What a column of a position counts: UTF-16 code units unless the
     // client offered UTF-8 and `initialize` agreed to it.
     unit: Unit,
-    // Set once a real `shutdown` request has been handled - `run_loop`'s
+    // Set once a real `shutdown` request has been handled - the message loop's
     // own `exit` arm consults this to pick the LSP spec's mandated
     // process exit code (0 if `shutdown` preceded `exit`, 1 otherwise).
     shutdown_received: bool,
@@ -216,6 +234,10 @@ struct Server {
     // `PendingWorkspaceScan`'s own doc comment for why the scan itself
     // can't just run inline in `"initialize"`.
     pending_workspace_scan: Option<PendingWorkspaceScan>,
+    // The workspace load that `initialized` or a folder add asked for. The
+    // message loop starts it once that message has been handled - see
+    // `PendingLoad`.
+    pending_load: Option<PendingLoad>,
     // The workspace folders, in the order they were added. Each has its own
     // configuration and project - see `Folder`.
     folders: Vec<Folder>,
@@ -391,6 +413,7 @@ impl Server {
             pending_incoming_requests: lsp_server::ReqQueue::<Arc<AtomicBool>, ()>::default()
                 .incoming,
             pending_workspace_scan: None,
+            pending_load: None,
             folders: Vec::new(),
             aliases: Mutex::default(),
             config_path_override: None,
@@ -2641,9 +2664,9 @@ pub fn run(version: &str, config_schema: config::Schema) -> i32 {
 /// Returns the process exit code the LSP spec's `exit` notification
 /// mandates: 0 if a `shutdown` request preceded it, 1 otherwise. A
 /// transport ending (clean EOF or a real I/O disconnection - both
-/// collapse to the same `RecvTimeoutError::Disconnected` here, since
-/// `pump_messages` already logs which one it actually was) is this
-/// server's existing "no incident" end-of-session path and always
+/// collapse to the same closed channel here, since `pump_messages` already
+/// logs which one it actually was) is this server's existing "no incident"
+/// end-of-session path and always
 /// returns 0 regardless of `shutdown_received` - the spec's exit-code
 /// contract binds the `exit` notification specifically, not every way a
 /// session can end.
@@ -2666,7 +2689,16 @@ fn run_loop<W: Write + Send + 'static>(
         Arc::clone(&shutdown),
     );
 
-    let exit_code = run_dispatch_loop(receiver, &server, &writer, &debounce);
+    let exit_code = Dispatch {
+        receiver,
+        server: &server,
+        writer: &writer,
+        debounce: &debounce,
+        loading: None,
+        held: VecDeque::new(),
+        shutdown_during_load: false,
+    }
+    .run();
 
     // Shutdown handshake: wake the worker (a plain `store` alone would
     // never be noticed until its own next timeout/edit-driven wake),
@@ -2684,103 +2716,323 @@ fn run_loop<W: Write + Send + 'static>(
     exit_code
 }
 
-/// The main dispatch loop itself, split out of `run_loop` only so the
-/// latter reads as "set up shared state, run the loop, tear down shared
-/// state" - not a reusable entry point of its own.
-fn run_dispatch_loop<W: Write>(
-    receiver: &Receiver<Message>,
-    server: &Arc<Mutex<Server>>,
-    writer: &Arc<Mutex<W>>,
-    debounce: &Arc<DebounceHandle>,
-) -> i32 {
-    loop {
-        let message = match receiver.recv_timeout(RUN_LOOP_TICK) {
-            Ok(m) => m,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => return 0,
-        };
+/// A load the message loop has started and not yet installed.
+struct Loading {
+    // Disconnects when the load's thread ends, however it ends.
+    done: Receiver<()>,
+    handle: thread::JoinHandle<()>,
+    progress_token: Option<lsp_types::ProgressToken>,
+    register_watched_files: bool,
+}
 
-        match message {
-            Message::Request(req) => handle_request(
-                &mut server.lock().unwrap(),
-                &mut *writer.lock().unwrap(),
-                req,
-            ),
-            Message::Notification(not) => {
-                if not.method == "exit" {
-                    return if server.lock().unwrap().shutdown_received {
-                        0
-                    } else {
-                        1
-                    };
-                }
-                // `pump_messages` (the reader thread) forwards its own
-                // recoverable-failure reports as a `window/logMessage`
-                // notification on this same channel, since it has no
-                // writer of its own - this loop is the only thing that
-                // does, so it just writes it straight through rather
-                // than routing it into `handle_notification`, which only
-                // ever expects a real client-originated notification.
-                if not.method == "window/logMessage" {
-                    let _ =
-                        write_message(&mut *writer.lock().unwrap(), &Message::Notification(not));
-                    continue;
-                }
-                // `didChange` is diverted here, before `handle_notification`
-                // ever sees it: queuing it is the reader/main thread's
-                // entire involvement (see `queue_change`'s own doc
-                // comment) - the debounce worker thread runs the actual
-                // recheck once the edit's own debounce window elapses (or
-                // is coalesced by a newer one first).
-                if not.method == "textDocument/didChange" {
-                    if let Ok(params) =
-                        serde_json::from_value::<DidChangeTextDocumentParams>(not.params)
-                        && let Some(path) = document_key(&params.text_document.uri)
-                        && let Some(change) = params.content_changes.into_iter().next()
-                    {
-                        queue_change(
-                            debounce,
-                            path,
-                            params.text_document.uri,
-                            change.text,
-                            params.text_document.version,
-                        );
+/// A test's hook for the next load a `run_loop` thread starts: the load waits
+/// at the gate the test holds, or panics. It is taken when that load starts.
+#[cfg(test)]
+enum LoadHook {
+    Gate(Receiver<()>),
+    Panic,
+}
+
+#[cfg(test)]
+thread_local! {
+    static LOAD_HOOK: RefCell<Option<LoadHook>> = const { RefCell::new(None) };
+}
+
+/// Holds or fails a load as its test asked (see `LoadHook`).
+#[cfg(test)]
+fn await_load_hook(hook: Option<LoadHook>) {
+    match hook {
+        Some(LoadHook::Gate(gate)) => {
+            let _ = gate.recv();
+        }
+        Some(LoadHook::Panic) => panic!("a load hook asked this load to panic"),
+        None => {}
+    }
+}
+
+/// The message loop. A workspace load runs on its own thread and holds the
+/// server's lock for its whole length, so the loop never touches the server
+/// while one runs. It answers `shutdown`, removes the request a
+/// `$/cancelRequest` names, writes a log line through, and holds everything
+/// else in arrival order until the load installs.
+struct Dispatch<'a, W: Write> {
+    receiver: &'a Receiver<Message>,
+    server: &'a Arc<Mutex<Server>>,
+    writer: &'a Arc<Mutex<W>>,
+    debounce: &'a Arc<DebounceHandle>,
+    loading: Option<Loading>,
+    // Messages received while a load runs, replayed in this order once it
+    // installs.
+    held: VecDeque<Message>,
+    // Set when a `shutdown` was answered while a load ran. The server takes it
+    // on install, before a held `exit` is replayed.
+    shutdown_during_load: bool,
+}
+
+impl<W: Write + Send + 'static> Dispatch<'_, W> {
+    /// Runs until an `exit` comes through (its exit code is returned), or the
+    /// input has closed and nothing is left to do (0 is returned).
+    fn run(&mut self) -> i32 {
+        let mut input_open = true;
+        loop {
+            if self.loading.is_none() {
+                if let Some(message) = self.held.pop_front() {
+                    if let Some(code) = self.route(message) {
+                        return code;
                     }
                     continue;
                 }
-                // A save queues the project's full analysis for the debounce
-                // worker, which runs it once no further save has arrived within
-                // the debounce window, after any edits due by then.
-                if not.method == "textDocument/didSave" {
-                    debounce.queue.lock().unwrap().record_save(Instant::now());
-                    debounce.cv.notify_one();
-                    continue;
+                if !input_open {
+                    return 0;
                 }
-                // A pending or in-flight debounced edit for a now-closed
-                // file must not fire/publish - `cancel` drops both its
-                // pending entry and its generation, so an in-flight
-                // recheck's own `should_abort` (capturing a generation
-                // `>= 1`) aborts the moment it next checks, since
-                // `current_generation` for an absent path reads `0`.
-                if not.method == "textDocument/didClose"
-                    && let Ok(params) = serde_json::from_value::<
-                        lsp_types::DidCloseTextDocumentParams,
-                    >(not.params.clone())
-                    && let Some(path) = document_key(&params.text_document.uri)
-                {
-                    debounce.queue.lock().unwrap().cancel(&path);
-                }
-                handle_notification(
-                    &mut server.lock().unwrap(),
-                    &mut *writer.lock().unwrap(),
-                    not,
+            }
+            let done = match &self.loading {
+                Some(loading) => loading.done.clone(),
+                None => crossbeam_channel::never(),
+            };
+            let input = if input_open {
+                self.receiver.clone()
+            } else {
+                crossbeam_channel::never()
+            };
+            crossbeam_channel::select_biased! {
+                recv(done) -> _ => self.finish_load(),
+                recv(input) -> message => match message {
+                    Ok(message) if self.loading.is_some() => self.hold(message),
+                    Ok(message) => {
+                        if let Some(code) = self.route(message) {
+                            return code;
+                        }
+                    }
+                    Err(_) => input_open = false,
+                },
+                default(RUN_LOOP_TICK) => {}
+            }
+        }
+    }
+
+    /// Takes a message that arrives while a load runs.
+    fn hold(&mut self, message: Message) {
+        match message {
+            Message::Request(req) if req.method == "shutdown" => {
+                self.shutdown_during_load = true;
+                let _ = write_message(
+                    &mut *self.writer.lock().unwrap(),
+                    &ok_response(&req.id, serde_json::Value::Null),
                 );
             }
-            Message::Response(resp) => handle_response(
-                &mut server.lock().unwrap(),
-                &mut *writer.lock().unwrap(),
-                resp,
-            ),
+            Message::Notification(not) if not.method == "$/cancelRequest" => {
+                if let Ok(params) = serde_json::from_value::<CancelParams>(not.params) {
+                    let id = to_request_id(params.id);
+                    if let Some(position) = self
+                        .held
+                        .iter()
+                        .position(|held| matches!(held, Message::Request(req) if req.id == id))
+                    {
+                        self.held.remove(position);
+                        let _ = write_message(
+                            &mut *self.writer.lock().unwrap(),
+                            &Message::Response(Response::new_err(
+                                id,
+                                ErrorCode::RequestCanceled as i32,
+                                "canceled by client".to_string(),
+                            )),
+                        );
+                    }
+                }
+            }
+            Message::Notification(not) if not.method == "window/logMessage" => {
+                let _ = write_message(
+                    &mut *self.writer.lock().unwrap(),
+                    &Message::Notification(not),
+                );
+            }
+            message => self.held.push_back(message),
+        }
+    }
+
+    /// Handles a message as it arrives with no load running, or as it is
+    /// replayed once one has installed. Returns the exit code for `exit`.
+    fn route(&mut self, message: Message) -> Option<i32> {
+        let exit = match message {
+            Message::Request(req) => {
+                handle_request(
+                    &mut self.server.lock().unwrap(),
+                    &mut *self.writer.lock().unwrap(),
+                    req,
+                );
+                None
+            }
+            Message::Notification(not) => self.route_notification(not),
+            Message::Response(resp) => {
+                handle_response(
+                    &mut self.server.lock().unwrap(),
+                    &mut *self.writer.lock().unwrap(),
+                    resp,
+                );
+                None
+            }
+        };
+        self.start_pending_load();
+        exit
+    }
+
+    /// Handles a notification. Returns the exit code for `exit`.
+    fn route_notification(&mut self, not: LspNotification) -> Option<i32> {
+        if not.method == "exit" {
+            return Some(if self.server.lock().unwrap().shutdown_received {
+                0
+            } else {
+                1
+            });
+        }
+        // `pump_messages` (the reader thread) forwards its own
+        // recoverable-failure reports as a `window/logMessage` notification on
+        // this same channel, since it has no writer of its own - this loop is
+        // the only thing that does, so it just writes it straight through rather
+        // than routing it into `handle_notification`, which only ever expects a
+        // real client-originated notification.
+        if not.method == "window/logMessage" {
+            let _ = write_message(
+                &mut *self.writer.lock().unwrap(),
+                &Message::Notification(not),
+            );
+            return None;
+        }
+        // `didChange` is diverted here, before `handle_notification` ever sees
+        // it: queuing it is the reader/main thread's entire involvement (see
+        // `queue_change`'s own doc comment) - the debounce worker thread runs
+        // the actual recheck once the edit's own debounce window elapses (or is
+        // coalesced by a newer one first).
+        if not.method == "textDocument/didChange" {
+            if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(not.params)
+                && let Some(path) = document_key(&params.text_document.uri)
+                && let Some(change) = params.content_changes.into_iter().next()
+            {
+                queue_change(
+                    self.debounce,
+                    path,
+                    params.text_document.uri,
+                    change.text,
+                    params.text_document.version,
+                );
+            }
+            return None;
+        }
+        // A save queues the project's full analysis for the debounce worker,
+        // which runs it once no further save has arrived within the debounce
+        // window, after any edits due by then.
+        if not.method == "textDocument/didSave" {
+            self.debounce
+                .queue
+                .lock()
+                .unwrap()
+                .record_save(Instant::now());
+            self.debounce.cv.notify_one();
+            return None;
+        }
+        // A pending or in-flight debounced edit for a now-closed file must not
+        // fire/publish - `cancel` drops both its pending entry and its
+        // generation, so an in-flight recheck's own `should_abort` (capturing a
+        // generation `>= 1`) aborts the moment it next checks, since
+        // `current_generation` for an absent path reads `0`.
+        if not.method == "textDocument/didClose"
+            && let Ok(params) =
+                serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(not.params.clone())
+            && let Some(path) = document_key(&params.text_document.uri)
+        {
+            self.debounce.queue.lock().unwrap().cancel(&path);
+        }
+        handle_notification(
+            &mut self.server.lock().unwrap(),
+            &mut *self.writer.lock().unwrap(),
+            not,
+        );
+        None
+    }
+
+    /// Starts the load that the message just handled asked for, if it asked
+    /// for one.
+    fn start_pending_load(&mut self) {
+        let Some(pending) = self.server.lock().unwrap().pending_load.take() else {
+            return;
+        };
+        if let Some(token) = &pending.progress_token {
+            let _ = write_message(
+                &mut *self.writer.lock().unwrap(),
+                &progress_notification(
+                    token.clone(),
+                    WorkDoneProgress::Begin(WorkDoneProgressBegin {
+                        title: "phpstan-rs: scanning workspace".to_string(),
+                        cancellable: Some(false),
+                        message: None,
+                        percentage: None,
+                    }),
+                ),
+            );
+        }
+        #[cfg(test)]
+        let hook = LOAD_HOOK.with(|slot| slot.borrow_mut().take());
+        let (done_tx, done) = crossbeam_channel::bounded::<()>(0);
+        let server = Arc::clone(self.server);
+        let writer = Arc::clone(self.writer);
+        let handle = thread::Builder::new()
+            .name("phpstan-rs-lsp-load".to_string())
+            .stack_size(crate::project::WORKER_STACK_SIZE)
+            .spawn(move || {
+                // Dropped when this thread ends, however it ends: `Dispatch::run`
+                // waits on it.
+                let _done = done_tx;
+                #[cfg(test)]
+                await_load_hook(hook);
+                let mut server = server.lock().unwrap();
+                let mut messages = server.add_workspace_folders(&pending.roots);
+                messages.extend(server.publish_workspace_diagnostics());
+                // Written before the lock is released, so a recheck waiting on
+                // the lock cannot publish ahead of these.
+                let mut writer = writer.lock().unwrap();
+                for message in messages {
+                    let _ = write_message(&mut *writer, &message);
+                }
+            })
+            .expect("spawning the LSP load thread");
+        self.loading = Some(Loading {
+            done,
+            handle,
+            progress_token: pending.progress_token,
+            register_watched_files: pending.register_watched_files,
+        });
+    }
+
+    /// Installs the load that has ended: its progress ends, the server takes
+    /// the `shutdown` answered meanwhile, and the watched-files registration
+    /// follows the end of the scan.
+    fn finish_load(&mut self) {
+        let loading = self
+            .loading
+            .take()
+            .expect("a load that finished was running");
+        // Joined first, so that a panic in the load resumes on the message
+        // loop.
+        if let Err(payload) = loading.handle.join() {
+            std::panic::resume_unwind(payload);
+        }
+        let mut server = self.server.lock().unwrap();
+        server.shutdown_received |= std::mem::take(&mut self.shutdown_during_load);
+        let mut writer = self.writer.lock().unwrap();
+        if let Some(token) = loading.progress_token {
+            let _ = write_message(
+                &mut *writer,
+                &progress_notification(
+                    token,
+                    WorkDoneProgress::End(WorkDoneProgressEnd { message: None }),
+                ),
+            );
+        }
+        if loading.register_watched_files
+            && let Some(request) = server.request_watched_files_registration()
+        {
+            let _ = write_message(&mut *writer, &request);
         }
     }
 }
@@ -3287,37 +3539,15 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
     match not.method.as_str() {
         "initialized" => {
             if let Some(scan) = server.pending_workspace_scan.take() {
-                if let Some(token) = &scan.progress_token {
-                    let _ = write_message(
-                        writer,
-                        &progress_notification(
-                            token.clone(),
-                            WorkDoneProgress::Begin(WorkDoneProgressBegin {
-                                title: "phpstan-rs: scanning workspace".to_string(),
-                                cancellable: Some(false),
-                                message: None,
-                                percentage: None,
-                            }),
-                        ),
-                    );
-                }
-                for message in server.add_workspace_folders(&scan.roots) {
-                    let _ = write_message(writer, &message);
-                }
-                for message in server.publish_workspace_diagnostics() {
-                    let _ = write_message(writer, &message);
-                }
-                if let Some(token) = scan.progress_token {
-                    let _ = write_message(
-                        writer,
-                        &progress_notification(
-                            token,
-                            WorkDoneProgress::End(WorkDoneProgressEnd { message: None }),
-                        ),
-                    );
-                }
-            }
-            if let Some(request) = server.request_watched_files_registration() {
+                // The scan runs off the message loop. `Dispatch::start_pending_load`
+                // starts it once this notification returns, and the watched-files
+                // registration follows its end.
+                server.pending_load = Some(PendingLoad {
+                    roots: scan.roots,
+                    progress_token: scan.progress_token,
+                    register_watched_files: true,
+                });
+            } else if let Some(request) = server.request_watched_files_registration() {
                 let _ = write_message(writer, &request);
             }
         }
@@ -3371,12 +3601,13 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                     .filter_map(|f| uri_to_path(&f.uri))
                     .collect();
                 if !added.is_empty() {
-                    for message in server.add_workspace_folders(&added) {
-                        let _ = write_message(writer, &message);
-                    }
-                    for message in server.publish_workspace_diagnostics() {
-                        let _ = write_message(writer, &message);
-                    }
+                    // Loaded off the message loop, as the initial scan is, with
+                    // no progress report.
+                    server.pending_load = Some(PendingLoad {
+                        roots: added,
+                        progress_token: None,
+                        register_watched_files: false,
+                    });
                 }
             }
         }
@@ -3433,7 +3664,7 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
             }
         }
         // `textDocument/didChange` is deliberately NOT handled here -
-        // `run_dispatch_loop` diverts it to `queue_change` before
+        // `Dispatch::route_notification` diverts it to `queue_change` before
         // `handle_notification` is ever called at all (VSCode plan item
         // 2.2's own debounce/coalesce mechanism). A direct test call to
         // `handle_notification` with a didChange notification is

@@ -6,6 +6,7 @@ mod debounce_integration;
 mod document_highlight;
 mod helpers;
 mod inlay_hints;
+mod load_off_loop;
 mod navigation;
 mod protocol_and_session;
 mod references_and_rename;
