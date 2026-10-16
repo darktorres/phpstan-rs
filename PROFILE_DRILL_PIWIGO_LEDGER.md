@@ -171,7 +171,7 @@ None of the 20 G items is built whole. Four of the off drill's rows changed what
 
 One part of an item is built, by the crate split: item 8's explicit-mixed flags (REG-14.2, delivered by REG-4.8).
 
-On 2026-10-15 the fourteen decisions of §2.4 were taken. They:
+On 2026-10-15 the eighteen decisions of §2.4 were taken. They:
 
 - retire item 4 (REG-13), whose wanted parts move to REG-4.15, REG-7.4 and REG-8.3;
 - retire SYN-1.6's `unsafe impl Sync`;
@@ -187,12 +187,13 @@ On 2026-10-15 the fourteen decisions of §2.4 were taken. They:
   - `iterable<K, V>`'s array keys (TYPE-5);
   - what a body shows, inferred on demand (REG-17);
   - the reports of a kind a PHPDoc leaves out (CHECK-8, opt-in) and of a dead catch (CHECK-9);
+  - the engine read over a version range (CHECK-10);
   - the output changes they bring (VAL-2.10);
-- re-specify how a declaration's native and PHPDoc types combine (REG-7.5, REG-7.12), how a builtin's sources combine (STUB-12), how a name binds to its declarations (REG-8.1, STUB-7.4 to 7.6, STUB-8), and when a file's `stat` stands in for its bytes (CACHE-13.1);
+- re-specify how a declaration's native and PHPDoc types combine (REG-7.5, REG-7.12), how a builtin's sources combine (STUB-12), how a name binds to its declarations (REG-8.1, STUB-7.4 to 7.6, STUB-8), when a file's `stat` stands in for its bytes (CACHE-13.1), and which versions a file and the builtin knowledge are read over (Q-10, STUB-7.1, STUB-12.2);
 - approve the crate split's output changes that had no approval, correcting STUB-7.2 and REG-8.5 (VAL-2.9);
 - unblock SYN-1, PROD-5.1, TYPE-4, REG-4.11, REG-7.6, REG-7.7, REG-11.1, REG-14.1, REG-14.3, STUB-7.1, STUB-10 and STUB-11.
 
-Four questions the decisions leave open are §15's Q-12 to Q-15: a file's syntax judged against a version range, a builtin's result before PHP 8.0 when its arguments fail to parse, an inferred return's literals, and the oldest version the builtin knowledge covers.
+Four questions that a reading of the whole ledger found the decisions had left open, §15's Q-12 to Q-15, were then decided as decisions 15 to 18: a file's syntax against a version range, a builtin's result before PHP 8.0 when an argument fails its parameter parsing, an inferred return's literals, and the oldest version the builtin knowledge covers.
 
 ## 2. At a glance
 
@@ -1908,7 +1909,7 @@ The ids in the first column are the 25 G report's.
   - Q-10 (D6's policy beyond the skim) and Q-11 (the crate split's C1-C3 follow-ups).
 - **The six decisions in §2.4 were found by the merge,** and a seventh waited from before it. The merge stated each as its sources did and decided none.
 
-**What the decisions changed**, on 2026-10-15. All fourteen were decided after the merge, the eleventh to the fourteenth on what a reading of the whole ledger found open; §2.4 has each, with its evidence and its rows.
+**What the decisions changed**, on 2026-10-15. All eighteen were decided after the merge, the eleventh to the eighteenth on what a reading of the whole ledger found open; §2.4 has each, with its evidence and its rows.
 
 - **Superseded:**
   - REG-13 and its nine sub-tasks;
@@ -1933,8 +1934,8 @@ The ids in the first column are the 25 G report's.
   - PROD-5.8 and DOC-2.9;
   - TYPE-5;
   - REG-4.15, REG-16 (16.1 to 16.5) and REG-17 (17.1 to 17.4);
-  - STUB-12 (12.1 to 12.5), which decision 10 re-specified, and STUB-13 (13.1, 13.2);
-  - CHECK-7, CHECK-8, CHECK-9 and VAL-2.10.
+  - STUB-12 (12.1 to 12.5), which decisions 10, 16 and 18 re-specified, and STUB-13 (13.1, 13.2);
+  - CHECK-7 to CHECK-10 and VAL-2.10.
 - **The facts the decisions cite from the code** were checked against it on 2026-10-15:
   - the six declarations' `*case_refs` fields and the assertion's;
   - `redeclared_methods` (`registry/class_info.rs:382`) and its two readers;
@@ -1950,13 +1951,13 @@ The ids in the first column are the 25 G report's.
   - the 2,612 `ExprKind::`/`StmtKind::` match sites in 135 files;
   - for decisions 8 and 9 and their rows, the lines they cite in `types/src/decide.rs`, `types/src/parse.rs`, `registry/function_sig/type_resolution.rs`, `registry/function_sig.rs`, `checker/phpdoc_type_compat.rs`, `checker/function_decl.rs`, `checker/throws.rs`, `checker/stmt/try_catch.rs`, `checker/expr.rs`, `registry/summaries.rs`, `registry/purity.rs` and `project/session.rs`;
   - for decision 11, the merges in `registry/index.rs` (`:144`, `:244`, `:329`, `:344`, `:434`, `:436`, `:589`) and `registry/function_sig.rs` (`:951`, `:1019`), and `own_declaration_sig` (`checker/function_decl.rs:206`).
-- **PHP's behaviour** was read from PHP 8.5.4, not from the sources' texts (§2.4, decisions 1, 8 and 9). Decision 10 read php-src 8.5.4's sources and PHPStan 2.3.1's. Decisions 11 and 14 probed PHP 8.5.4 too. Decision 11 also read Composer's loader and PHPStan 2.3.1's phar; decision 13 probed ext4 on Linux 7.0 and read Linux's FAT and exFAT code, git 2.47.0's stat check and Rust 1.98's `std`; decision 14 read php-src 8.3.0's and 8.4.0's stubs.
+- **PHP's behaviour** was read from PHP 8.5.4, not from the sources' texts (§2.4, decisions 1, 8 and 9). Decision 10 read php-src 8.5.4's sources and PHPStan 2.3.1's. Decisions 11 and 14 probed PHP 8.5.4 too. Decision 11 also read Composer's loader and PHPStan 2.3.1's phar; decision 13 probed ext4 on Linux 7.0 and read Linux's FAT and exFAT code, git 2.47.0's stat check and Rust 1.98's `std`; decision 14 read php-src 8.3.0's and 8.4.0's stubs. Decisions 15 to 18 probed PHP 8.5.4 and the official PHP 5.6, 7.3, 7.4 and 8.0 images, read PHPStan 2.3.1's phar and the installed packages' Composer requirements, and checked HEAD's gate build.
 
 **What a reading after the decisions found**, on 2026-10-15, reading the whole ledger again:
 
 - Q-2's policy question was decided with D6 (the off report's §10.8), so only the parser work is left.
 - Q-8's parts are STUB-10.1's and STUB-11's, so it is superseded, and STUB-10.1 names B9's timings.
-- Four questions the decisions leave open are new rows: Q-12 to Q-15. Q-13 read php-src 7.4.33's sources (`~/.cache/prs-ledger/php-src-7.4.33/`).
+- Four questions the decisions leave open are new rows: Q-12 to Q-15. Q-13 read php-src 7.4.33's sources (`~/.cache/prs-ledger/php-src-7.4.33/`). Decisions 15 to 18 settled them.
 - Four rulings it found open are decisions 11 to 14: REG-4.11's location rule, STUB-9's form, CACHE-13.1's soundness, and the crate split's output changes that had no approval.
 
 **What the runs settled**, on 2026-10-15, one heavy job at a time under `nice -n 19`:
