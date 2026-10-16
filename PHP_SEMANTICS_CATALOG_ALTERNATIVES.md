@@ -111,3 +111,63 @@ its arguments. "Never" facts worth having for the common mechanisms need to know
 reaches the handler call: argument-sensitive analysis, or the per-parameter bound plus
 observation. Function-level reachability earns its keep only for narrow mechanisms and as the
 generator of the mechanism list itself.
+
+## Experiment 1: reusing sound or scalable C analyzers
+
+**Question.** Does any existing analyzer produce a call graph or points-to result for php-src
+that fits the plan's 10 GiB envelope, is sound against what PHP was seen doing, and tells
+builtins apart (which builtin can reach which user-code mechanism)?
+
+**Method.** Input: the minimal CLI used throughout (`--disable-all --enable-cli --enable-session`,
+PHP 8.5.4), 523 C objects, 14,142 functions, 3,727,445 LLVM instructions. Each tool ran in a
+10 GiB cgroup (no swap) or container memory limit, with a time box, one at a time under
+`nice -n 19`. Results were scored with `score_reach.py` against experiment 3's 357 observed
+builtin-to-mechanism pairs, over 31 mechanisms (each magic method, iterators, lazy
+initialisers, `Serializable`, each user-wrapper and user-stream operation, and any user code).
+Tools needing LLVM 14 got a clang-14 rebuild of the same configuration through wllvm.
+
+**Numbers.**
+
+| Tool | Configuration | Outcome | Time | Peak |
+|---|---|---|---:|---:|
+| Own baseline B0 | every indirect call may reach every address-taken function | completes; all 31 mechanisms reached by 1,517/1,518 builtins | 205 s | 1.6 GB |
+| Own baseline B1 | indirect calls by LLVM function type | identical to B0 (opaque pointers make the types uninformative) | (same run) | |
+| CodeQL 2.27.2 + field-based (experiment 5) | struct-field, variable and parameter resolution | completes; recall 1.000; 22/31 mechanisms reached by 1,517 builtins | 93 s query | |
+| Phasar (development, LLVM 21) | OTF call graph, CFL-Steensgaard | completes; recall 1.000; all 31 reached by 1,516/1,517 builtins (62 of 47,058 pairs ruled out) | 1,129 s | 2.6 GB |
+| Phasar | OTF call graph, union-find aliases | killed at 10 GiB | 1,080 s | 10 GiB |
+| SVF 3.4 | Steensgaard | killed at 10 GiB | 147 s | 10 GiB |
+| SVF 3.4, compact layouts | Steensgaard | killed at 10 GiB | 154 s | 10 GiB |
+| SVF 3.4 | type-based call graph | killed at 10 GiB | 169 s | 10 GiB |
+| SVF 3.4, compact layouts | Steensgaard on mem2reg'd bitcode | killed at 10 GiB | 163 s | 10 GiB |
+| sea-dsa (SeaHorn, LLVM 14) | context-sensitive + complete call graph | killed at 10 GiB | 137 s | 10 GiB |
+| sea-dsa | context-insensitive + complete call graph, mem2reg'd | killed at 10 GiB | 139 s | 10 GiB |
+| sea-dsa | context-insensitive, no call graph | segmentation fault, no result | 526 s | 1.8 GB |
+| Yapall 0.1.2 (LLVM 14) | unification | killed at 10 GiB (after a rebuild without `asm goto` and `ifunc`, which its LLVM reader rejects) | 188 s | 10 GiB |
+| Yapall 0.1.2 | subset (Andersen) | killed at 10 GiB | 205 s | 10 GiB |
+| Goblint 2.7.1 (CIL) | from `main` | front end cannot parse PHP 8.5's configured C; stopped after 8 successive incompatibilities | < 1 min each | 3 GB |
+| IKOS 3.5 (LLVM 14) | interval domain, from `main` | preprocessor crashes on AVX-512 vector selects in `php_base64_encode_avx512` (its select-lowering pass is mandatory, also with `--opt=none`) | 13 s | 0.9 GB |
+
+The plan's own earlier results belong in the same table: the custom whole-program pass of
+October 4–5 exceeded 10 GiB on PHP 8.4, and SVF's demand-driven analysis (stock and compact) was
+killed at 10 GiB on this same CLI. cclyzer++ was not run: it is tested only up to LLVM 10, and its
+authors' successor, Yapall, was run instead.
+
+**What it means.**
+
+- Nothing that tells builtins apart fits. Every analysis that tracks which object reaches which
+  call (subset or unification points-to: SVF, sea-dsa, Yapall, Phasar's union-find) is killed at
+  10 GiB, crashes, or rejects the module, on the smallest PHP build there is. Production builds
+  with every extension are several times larger.
+- What completes is sound but says nothing per builtin. B0/B1, CodeQL with field resolution and
+  Phasar with CFL-Steensgaard all keep every observed pair (recall 1.000) and all conclude that
+  essentially every builtin may run every magic method: whole-program reachability goes through
+  the engine core (errors, releases, handler tables), whatever the arguments.
+- Fitting a mature tool to php-src costs one fix after another: Yapall needed a rebuild without
+  `asm goto` and `ifunc`; Goblint needed eight successive workarounds and still failed; IKOS
+  cannot get past AVX-512 code.
+
+So reuse does not rescue the native-analysis route, and a custom engine would face the same
+scale with less infrastructure. The sound bound that survives is the cheap one: reachability says
+which mechanisms exist and which builtins could ever reach the narrow ones (wrapper
+`rename`/`mkdir`/`rmdir`/`unlink`), and per-argument precision has to come from the parameter
+bound plus observation, not from whole-program pointer analysis.

@@ -1,0 +1,86 @@
+{
+ "baseline": {
+  "exit": 0,
+  "name": "baseline",
+  "peak_rss_kb": 1657256,
+  "seconds": 205
+ },
+ "goblint-last": {
+  "exit": 2,
+  "memory_peak": 3061112832,
+  "oom": "oom_kill 0",
+  "seconds": 42
+ },
+ "ikos-last": {
+  "exit": 250,
+  "memory_peak": 909369344,
+  "oom": "oom_kill 0",
+  "seconds": 11
+ },
+ "phasar-cflsteens": {
+  "exit": 0,
+  "memory_peak": 2647932928,
+  "oom": "oom_kill 0",
+  "seconds": 1129
+ },
+ "phasar-unionfind": {
+  "exit": 137,
+  "memory_peak": 10737418240,
+  "oom": "oom_kill 1",
+  "seconds": 1080
+ },
+ "seadsa-ci-cg": {
+  "exit": 137,
+  "memory_peak": 10737418240,
+  "oom_events": "oom_kill 1",
+  "seconds": 139
+ },
+ "seadsa-ci-nocg": {
+  "exit": 139,
+  "memory_peak": 1797980160,
+  "oom_events": "oom_kill 0",
+  "seconds": 526
+ },
+ "seadsa-cs-cg": {
+  "exit": 137,
+  "memory_peak": 10737418240,
+  "oom_events": "oom_kill 1",
+  "seconds": 137
+ },
+ "svf-steens": {
+  "exit": 143,
+  "name": "svf-steens",
+  "peak_rss_kb": null,
+  "seconds": 146
+ },
+ "svf-steens-compact": {
+  "exit": 137,
+  "name": "svf-steens-compact",
+  "peak_rss_kb": 10488308,
+  "seconds": 154
+ },
+ "svf-steens-promoted": {
+  "exit": 137,
+  "name": "svf-steens-promoted",
+  "peak_rss_kb": 10486296,
+  "seconds": 163
+ },
+ "svf-type": {
+  "exit": 137,
+  "name": "svf-type",
+  "peak_rss_kb": 10489120,
+  "seconds": 169
+ },
+ "yapall-subset": {
+  "exit": 137,
+  "name": "yapall-subset",
+  "peak_rss_kb": 10472756,
+  "seconds": 205
+ },
+ "yapall-unif": {
+  "exit": 137,
+  "name": "yapall-unif",
+  "peak_rss_kb": 10472404,
+  "seconds": 188
+ }
+}
