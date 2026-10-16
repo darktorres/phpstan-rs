@@ -263,7 +263,7 @@ The estimates are the 20 G report's. REG-13's estimate no longer held, and REG-1
 
 ### 2.4 Decisions
 
-Merging the sources into one list found six places where two of them disagree, or where a design cannot be built as written. A seventh decision waited from before the merge. All seven were decided on 2026-10-15, on what PHP does at run time and on what is most proper; churn and PHPStan's output were given no weight. An eighth (REG-7.5's combination of native and PHPDoc types), a ninth (what a body shows, inferred on demand), a tenth (how the sources of a builtin's types combine), an eleventh (how a name binds to its declarations, which REG-4.11's location rule needed) and a twelfth (what STUB-9's count explained, once REG-7 removes its scope) were decided the same day on the same grounds. Rows cite them as "decision n".
+Merging the sources into one list found six places where two of them disagree, or where a design cannot be built as written. A seventh decision waited from before the merge. All seven were decided on 2026-10-15, on what PHP does at run time and on what is most proper; churn and PHPStan's output were given no weight. An eighth (REG-7.5's combination of native and PHPDoc types), a ninth (what a body shows, inferred on demand), a tenth (how the sources of a builtin's types combine), an eleventh (how a name binds to its declarations, which REG-4.11's location rule needed), a twelfth (what STUB-9's count explained, once REG-7 removes its scope) and a thirteenth (when a file's `stat` can stand in for its bytes) were decided the same day on the same grounds. Rows cite them as "decision n".
 
 1. **What evaluating a constant yields.**
    - *The question was* how a constant on a reference cycle types. REG-7.6 typed it as `mixed`, an approved delta of the crate split; TYPE-4.2 read each member as `never` and reported it, approved as VAL-2.5.
@@ -582,6 +582,24 @@ Merging the sources into one list found six places where two of them disagree, o
    - *What is left to explain.* On the engine a stub class is resolved only by a query that reads it, and REG-12's test pins that checking one file resolves no class the file doesn't reach. That test says that something was resolved, not why. And the question is not the stubs' alone: any query can be reached by more than it needs, a project class's as much as a stub's.
    - *The rule:* when a runtime switch asks for it, in any build (as TYPE-4.4's switch works), the engine reports every query a run executes, with the query that first asked for it, and counts the stub layer's queries apart. It gates nothing; REG-12's test is the gate.
    - *Rows:* STUB-9 is superseded by REG-16.5, which is new and needs REG-16.3.
+
+13. **A file's recorded hash stands in for its bytes only where a change time sees every write.**
+   - *The question was* CACHE-13.1's soundness concern. A per-project index of `(size, mtime_ns, inode, device, content hash)` takes a file's hash without reading it when those fields match, and a same-size rewrite that keeps its mtime matches too (`rsync -t`, `tar`).
+   - *What a rewrite leaves* (Linux 7.0, ext4; `~/.cache/prs-ledger/cache131/`). Each case put back a file of the same size with the old mtime, to the nanosecond:
+     - an in-place write followed by `touch -d`, `cp -p`, and `rsync -c --inplace` left size, mtime and inode unchanged;
+     - `rsync -c` wrote a new file, which took an inode number an earlier file had used, and `mv` gave another inode;
+     - the change time moved every time. The kernel sets it to now on every write and every change of the times, and no call sets it to a chosen value;
+     - plain `rsync -t` copied nothing: its own quick check compares size and mtime, so it has the same blind spot, and the file kept its old bytes.
+   - *Where the change time can't be trusted:*
+     - FAT and exFAT store none, and Linux fills it from the modification time when it reads an inode (`fat_fill_inode`, `fs/fat/inode.c:568`; `exfat_fill_inode`, `fs/exfat/inode.c:652`; Linux 7.0, `~/.cache/prs-ledger/linux-7.0/`), so a restored mtime restores it once the inode is read again.
+     - On Windows a program can set it, or ask that a write leave it (`FILE_BASIC_INFORMATION`, Microsoft's driver documentation), and `std` exposes it only behind an unstable feature (`MetadataExt::change_time`, `windows_change_time`; Rust 1.98's `library/std/src/os/windows/fs.rs:613`).
+   - *Git* compares mtime, ctime, inode, owner and size, and the device only when built with `USE_STDEV`, since it is unstable on network file systems (`match_stat_data`, `statinfo.c`; `Documentation/technical/racy-git.txt`; git 2.47.0, `~/.cache/prs-ledger/git-2.47.0/`). An entry whose mtime is not older than the index file's is checked by its content ("racily clean"), and its recorded size is zeroed when the index is written again.
+   - *The rule:*
+     - The index records `(size, mtime_ns, ctime_ns, inode, device, content hash)`, from a stat taken before the bytes are read, so a write during the read shows next time.
+     - A file takes its recorded hash without being read only when all five stat fields match and both recorded times are older than the index's own write time: git's rule for racily clean entries, applied to the change time too.
+     - That holds only on a file system known to keep a change time that no program sets (ext4, xfs, btrfs, APFS and the like). On any other, and on Windows, every file is read and hashed.
+     - It covers analysed files as well as context files. Since decision 3 an unchanged analysed file is neither parsed nor checked (CACHE-13.2), so it need not be read either.
+   - *Rows:* CACHE-13.1 is re-specified, and its soundness concern is settled.
 
 ## 3. LOAD: the session, the walk, the load's merge, how long a tree lives
 
@@ -1276,7 +1294,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | CACHE-11 | **A cache file's types stored once,** in a table its records index. Warm-cache runs only | off E8 | OPEN | CACHE-9, CACHE-10 (the name table by index, `read_at` records, a decode context: one format bump) |
 | CACHE-12 | A cached file's origins decoded as the one `Arc<Path>` its file binds | off E11 | OPEN | CACHE-11 (its decode context) |
 | CACHE-13 | Warm runs: cache entries checked by `stat`, and the engine's results persisted | 20 G 17; decision 3 | OPEN | — |
-| CACHE-13.1 | **Entries checked by `stat`.** A per-project index maps each path to `(size, mtime_ns, inode, device, content hash)`. A context file takes the recorded hash without being read when its four stat fields match and its recorded mtime is older than the index's own write time (git's rule for racily clean entries) | 20 G 17.1 | OPEN; the soundness concern in the notes is not settled | LOAD-1.4 (the hash the read keeps) |
+| CACHE-13.1 | **Entries checked by `stat`.** A per-project index maps each path to `(size, mtime_ns, ctime_ns, inode, device, content hash)`, from a stat taken before the file's bytes are read. A file, analysed or context, takes the recorded hash without being read when its five stat fields match and both its recorded times are older than the index's own write time (git's rule for racily clean entries, applied to the change time too). That holds only on a file system known to keep a change time that no program sets (ext4, xfs, btrfs, APFS and the like); on any other, and on Windows, every file is read and hashed (decision 13) | 20 G 17.1; decision 13 | OPEN | LOAD-1.4 (the hash the read keeps); for analysed files, CACHE-13.2 |
 | CACHE-13.2 | **The engine's results persisted with their dependencies.** Each query's result is saved with the dependencies it recorded, as rustc's incremental compilation saves its query results and its dependency graph. A warm run parses and checks again only the files whose recorded reads changed. The plan's resolved context base and a check-results cache are this persistence, not stores of their own; today an analysed file is always parsed and checked (`project/file_cache.rs:1-8`). It is keyed by the build. The configuration, the version range (decision 6) and each `(path, content hash)` are inputs, not keys. Its format is salsa's `persistence` feature or the cache's own container (CACHE-9, CACHE-10), as REG-16.1 decides | 20 G 17.2; decision 3 | OPEN | REG-16.4 |
 
 ### Targets
@@ -1291,7 +1309,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 
 ### Notes
 
-- **CACHE-13.1's soundness concern.** The `stat` index conflicts with an exclusion the earlier work recorded: an mtime shortcut is unsound when a same-size rewrite keeps its mtime (`rsync -t`, `tar`).
+- **CACHE-13.1's soundness concern is settled (decision 13).** An mtime shortcut alone is unsound when a same-size rewrite keeps its mtime (`cp -p`, `rsync -c --inplace`); the change time sees every such write, where the file system keeps one that no program sets.
 - **CACHE-13 and the per-file decode.** CACHE-13.2's persistence is what replaces the per-file decode of the context files, and the parse and check of unchanged analysed files; CACHE-13.1 does not touch them. CACHE-13.1's weight is syscalls and I/O, which Ir does not count.
 - **CACHE-6 (off E4)** measured the idea nearest to CACHE-13 (the analysed files in the per-file cache) and found no gain worth its cold cost. A hit there still parsed the file and checked it. CACHE-13.2 keeps the check's results, so an unchanged file is neither parsed nor checked.
 - **CACHE-9 and CACHE-10's form waits on the stub layer and on the persistence.**
@@ -1519,7 +1537,7 @@ Targets this run reads:
 - **CACHE-13 (item 17), reads by `stat`: the reads it would replace cost ≈60-70 M in Ir** (`fs::read` 15.2 M, `File::open` 4.3 M, `crc32` 30.4 M, `xxh3` 17.1 M).
   - The item's weight is syscalls and I/O, which Ir does not count.
   - The decode (≈1,260 M above) is not what a `stat` index removes.
-  - Its soundness concern (the mtime shortcut) is on the row.
+  - Its soundness concern (the mtime shortcut) is settled on the row (decision 13).
 
 ### MEAS-2: the heap
 
