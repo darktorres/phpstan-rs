@@ -1,0 +1,51 @@
+{
+ "reach": {
+  "__toString": 1,
+  "any-user-code": 1517,
+  "lazy-initializer": 1517
+ },
+ "reach_fields": {
+  "Serializable": 22,
+  "__debugInfo": 1517,
+  "__destruct": 1517,
+  "__get": 1517,
+  "__isset": 1517,
+  "__set": 1517,
+  "__toString": 1517,
+  "__unset": 3,
+  "any-user-code": 1517,
+  "iterator": 1517,
+  "lazy-initializer": 1517,
+  "stream:cast": 1517,
+  "stream:close": 1517,
+  "stream:closedir": 1517,
+  "stream:flush": 1517,
+  "stream:read": 1517,
+  "stream:readdir": 1517,
+  "stream:rewinddir": 1517,
+  "stream:seek": 1517,
+  "stream:set_option": 1517,
+  "stream:stat": 16,
+  "stream:write": 1517,
+  "wrapper:close": 1517,
+  "wrapper:metadata": 8,
+  "wrapper:mkdir": 3,
+  "wrapper:opendir": 21,
+  "wrapper:opener": 1517,
+  "wrapper:rename": 3,
+  "wrapper:rmdir": 3,
+  "wrapper:stat_url": 1517,
+  "wrapper:unlink": 3
+ },
+ "dispatch": {
+  "indirect_sites": 2358,
+  "resolved": 0,
+  "max_targets": 0
+ },
+ "dispatch_fields": {
+  "indirect_sites": 2380,
+  "resolved": 1910,
+  "max_targets": 1551
+ },
+ "roots": 1518
+}

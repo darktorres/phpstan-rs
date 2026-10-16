@@ -62,3 +62,52 @@ dozen more, across hooks, destructors, callbacks and stream wrappers. The table'
 probes miss whole mechanisms, and the type-derived bound misses method names (`__get`, hooks,
 `__destruct`, wrapper `rename`) and callback places. Observing workloads belongs in the
 evidence; it finds what neither the probes nor the hand-written bound name.
+
+## Experiment 5: CodeQL, with and without field-based dispatch
+
+**Question.** Can a mature, scalable (but unsound) C analyzer find H1 and H2 from the builtin's
+entry, and what does its call graph give as a reachability baseline?
+
+**Licence.** The CodeQL CLI terms allow analysis of an open-source codebase under an
+OSI-approved licence; php-src 8.5.4 is under the PHP License 3.01 (OSI-approved, May 2020) and
+hosted on GitHub. CodeQL itself is not redistributed.
+
+**Method.** CodeQL 2.27.2. A database of php-src 8.5.4 built as the minimal CLI
+(`--disable-all --enable-cli --enable-session`, clang-21 `-O0`): 453 s, 248 MB. Queries in
+`tools/php-catalog/experiments/alternatives/codeql/` compute, for every builtin function and method
+(1,518 roots), which engine functions that dispatch to user code it can reach, stopping at user
+code itself (`zend_call_function`, `execute_ex`, `zend_execute`). Two call graphs:
+
+- CodeQL's own (`viableCallable`: static calls plus its function-pointer and lambda tracking);
+- the same plus field-based resolution (`FieldResolution.qll`, about 40 lines): a call through a
+  struct field reaches every function stored in a field of that name; a call through a variable,
+  every function assigned to it; a call through a parameter, every function passed there by a
+  direct caller.
+
+Each was scored against experiment 3's observations of the same builtins (357 observed
+builtin-to-mechanism pairs) with `score_reach.py`.
+
+**Numbers.**
+
+| Call graph | Indirect calls resolved | Recall on observed pairs | Builtin × mechanism pairs ruled out |
+|---|---:|---:|---:|
+| CodeQL's own | 0 of 2,358 | 0.711 (103 missed, including H2) | 36,433 of 39,468 |
+| CodeQL + field-based | 1,910 of 2,380 | 1.000 | 13,602 of 47,058 |
+
+Its own dispatch resolves none of php-src's calls through handler tables
+(`Z_OBJ_HT_P(zv)->read_property`, `wrapper->wops->rename`), so every builtin "reaches" only
+`zend_call_function` (through error reporting) and `zend_lazy_object_init`, and H1 and H2 are not
+found. With field-based resolution both are found, and nothing observed is missed, but 22 of the
+31 mechanisms are reached by 1,517 of the 1,518 builtins, `abs()` and `is_string()` included:
+`__get`, `__set`, `__isset`, `__toString`, `__debugInfo`, `__destruct`, iterators, lazy
+initializers and every user-stream operation. The pairs ruled out are almost all for narrow
+mechanisms: wrapper `rename`/`mkdir`/`rmdir`/`unlink` (3 builtins reach them), `metadata` (8),
+`stat` (16), `opendir` (21), `Serializable` (22), `__unset` (3).
+
+**Meaning.** Unsound dispatch is unusable here: it misses what matters. Sound function-level
+reachability is cheap (two minutes) but says "everything may run every magic method", because
+every builtin reaches the engine core (error objects, releasing values, handler tables) whatever
+its arguments. "Never" facts worth having for the common mechanisms need to know *which object*
+reaches the handler call: argument-sensitive analysis, or the per-parameter bound plus
+observation. Function-level reachability earns its keep only for narrow mechanisms and as the
+generator of the mechanism list itself.

@@ -1,0 +1,4 @@
+name: phpstan-rs/php-builtin-reach
+version: 0.0.1
+dependencies:
+  codeql/cpp-all: "*"
