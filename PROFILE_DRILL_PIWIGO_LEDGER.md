@@ -1901,3 +1901,9 @@ The ids in the first column are the 25 G report's.
 - Q-8's parts are STUB-10.1's and STUB-11's, so it is superseded, and STUB-10.1 names B9's timings.
 - Four questions the decisions leave open are new rows: Q-12 to Q-15. Q-13 read php-src 7.4.33's sources (`~/.cache/prs-ledger/php-src-7.4.33/`).
 - Four rulings it found open are decisions 11 to 14: REG-4.11's location rule, STUB-9's form, CACHE-13.1's soundness, and the crate split's output changes that had no approval.
+
+**What the runs settled**, on 2026-10-15, one heavy job at a time under `nice -n 19`:
+
+- Q-1, Q-3 and Q-7 ran HEAD's gate build (`7a449c44`, saved under `.corpus-runs/gate/bin/`), and Q-7 a probe build of it. MEAS-3 ran the P8b binary under callgrind. REG-16.1 ran a probe build of HEAD and a replay against salsa 0.28.5.
+- Each probe build patched the checkout and was reverted after its binary was saved; the gate build made again from the clean tree is byte-identical to the saved one.
+- The results are on the rows, with MEAS-3's in §14 and REG-16.1's in §9's records.
