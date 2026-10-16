@@ -2,6 +2,7 @@
 //! at the load, and what a project asked what depends on a name registers.
 
 use super::super::*;
+use crate::project::session::load_test_file;
 
 const CONTEXT: &str = "<?php
 namespace Lib;
@@ -12,6 +13,15 @@ const APP: &str = "<?php function helper(int $x): int { return $x; }";
 
 fn parsed(skip: BodyText) -> ParsedFile {
     parse_file_with_names(Path::new("ctx.php"), CONTEXT, false, skip, None).expect("parses")
+}
+
+/// Inserts `ctx.php` as a context file parsed with `skip`, as a load inserts a
+/// file it has parsed.
+fn insert_context(project: &mut Project, skip: BodyText) {
+    let path = PathBuf::from("ctx.php");
+    let id = project.files.id_for(&path);
+    let hash = crate::project::source::content_hash(CONTEXT.as_bytes());
+    project.insert_numbered_file(id, &path, parsed(skip), CONTEXT.to_string(), hash, false);
 }
 
 #[test]
@@ -56,11 +66,8 @@ fn a_project_asked_what_depends_on_a_name_has_what_the_skipped_bodies_refer_to()
     };
     let load = |skip: BodyText| {
         let mut project = Project::new();
-        let source = CONTEXT.to_string();
-        project.insert_parsed_file(PathBuf::from("ctx.php"), parsed(skip), source, false);
-        project
-            .load_file(PathBuf::from("app.php"), APP)
-            .expect("parses");
+        insert_context(&mut project, skip);
+        load_test_file(&mut project, PathBuf::from("app.php"), APP, false);
         project
     };
     let (mut skipped, mut whole) = (load(BodyText::Skipped), load(BodyText::Parsed));

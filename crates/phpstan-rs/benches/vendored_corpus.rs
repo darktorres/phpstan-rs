@@ -14,9 +14,13 @@
 //!
 //! Source files are read once, up front, outside the benchmarked
 //! closure - each `Criterion::bench_function` iteration re-runs only the
-//! `Project::load_file`/`finish_loading`/`check_all` work, not disk I/O,
+//! `Session::load`/`check_all` work, not disk I/O,
 //! which would otherwise dominate the measurement and mask the actual
 //! parse/index/check throughput this benchmark exists to track.
+//!
+//! Context files are read through the per-file parse cache after the first
+//! iteration, as the CLI reads them; `PHPSTAN_RS_NO_FILE_CACHE=1` makes every
+//! iteration parse each file.
 //!
 //! Criterion's headline feature - comparing a run against its last
 //! recorded baseline (stored under `target/criterion/`) and flagging a
@@ -27,7 +31,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use phpstan_rs::project::{self, Project};
+use phpstan_rs::project::{
+    self,
+    session::{OverlayFile, Session},
+};
 
 fn load_sources(dirs: &[&str]) -> Vec<(PathBuf, String)> {
     let mut files = Vec::new();
@@ -66,14 +73,20 @@ fn bench_vendored_corpus(c: &mut Criterion) {
         project::worker_pool(),
     );
     let pool = Arc::clone(stubs.pool());
+    let overlay: Vec<OverlayFile> = sources
+        .into_iter()
+        .map(|(path, source)| OverlayFile {
+            path,
+            bytes: source.into_bytes(),
+            analysed: false,
+            stub: false,
+        })
+        .collect();
+    let session = Session::for_overlay(overlay, stubs);
     c.bench_function("load_and_check_vendored_corpus", |b| {
         b.iter(|| {
-            let mut project = Project::from_stubs(&stubs);
-            for (path, source) in &sources {
-                let _ = project.load_file(path.clone(), source);
-            }
-            project.finish_loading_with(&stubs);
-            std::hint::black_box(project.check_all(&pool));
+            let loaded = session.load().expect("the corpus loads");
+            std::hint::black_box(loaded.project.check_all(&pool));
         });
     });
 }

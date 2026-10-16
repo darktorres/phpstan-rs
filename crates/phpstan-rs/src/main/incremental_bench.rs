@@ -33,20 +33,30 @@ pub(crate) fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
         return;
     }
 
-    let sources: Vec<(PathBuf, String)> = files
+    let sources: Vec<(PathBuf, Vec<u8>)> = files
         .iter()
         .map(|p| {
             let bytes = fs::read(p).unwrap_or_else(|e| panic!("failed to read {p:?}: {e}"));
-            (p.clone(), String::from_utf8_lossy(&bytes).into_owned())
+            (p.clone(), bytes)
         })
         .collect();
 
     let full_load_start = std::time::Instant::now();
+    let overlay = sources
+        .iter()
+        .map(|(path, bytes)| project::session::OverlayFile {
+            path: path.clone(),
+            bytes: bytes.clone(),
+            analysed: false,
+            stub: false,
+        })
+        .collect();
+    // Not built once: the edit below changes the project.
+    let session = project::session::Session::for_overlay(overlay, stubs.clone());
     let mut project = project::Project::from_stubs(&stubs);
-    for (path, source) in &sources {
-        project.load_file(path.clone(), source).unwrap();
-    }
-    project.finish_loading_with(&stubs);
+    session
+        .load_into(&mut project)
+        .unwrap_or_else(|e| panic!("failed to load the files: {e}"));
     let full_load = full_load_start.elapsed();
 
     let target_source = sources

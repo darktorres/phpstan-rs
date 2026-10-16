@@ -1,4 +1,5 @@
 use crate::checker::settings::CheckSettings;
+use crate::project::session::load_test_file;
 use diagnostics::Diagnostic;
 
 pub(super) fn all_diagnostics_for(src: &str) -> Vec<Diagnostic> {
@@ -9,9 +10,12 @@ pub(super) fn all_diagnostics_for(src: &str) -> Vec<Diagnostic> {
 /// every production path finishes one.
 fn project_for(src: &str, configure: impl FnOnce(&mut CheckSettings)) -> crate::project::Project {
     let mut project = crate::project::Project::new();
-    project
-        .load_analyzed_file(std::path::PathBuf::from("test.php"), src)
-        .unwrap();
+    load_test_file(
+        &mut project,
+        std::path::PathBuf::from("test.php"),
+        src,
+        true,
+    );
     project.finish_loading();
     configure(project.check_settings_mut());
     project

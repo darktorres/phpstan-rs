@@ -19,7 +19,7 @@
 //! comment. Not run unconditionally, though: this walk is too
 //! expensive to pay
 //! for every loaded file (including every vendor/context one) when
-//! nothing consumes it - `Project::insert_parsed_file` gates it on
+//! nothing consumes it - `Project::class_fn_refs_of` gates it on
 //! `check_dead_code` specifically, its only batch-mode consumer.
 //!
 //! Tier 2 (member reference sites - method/property/class-constant

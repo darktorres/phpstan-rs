@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use syntax::ast::{FunctionDecl, Stmt, TypeHint};
+#[cfg(test)]
+use syntax::ast::Stmt;
+use syntax::ast::{FunctionDecl, TypeHint};
+#[cfg(test)]
 use syntax::declarations::Declared;
 use syntax::name::Name;
 use syntax::span::Span;
@@ -44,6 +47,7 @@ impl DuplicateFunctionSites {
     /// the identical polyfill name) - a deliberate, stricter departure
     /// from literal real-PHPStan behavior, matching this project's own
     /// "favor false negatives over false positives" precedent.
+    #[cfg(test)]
     pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path) {
         syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
             if let Declared::Function(f) = declaration.declared

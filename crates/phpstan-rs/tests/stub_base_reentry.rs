@@ -7,18 +7,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use phpstan_rs::project::Project;
+use phpstan_rs::project::session::{OverlayFile, Session};
 use phpstan_rs::registry::stub_set::{StubSource, Stubs};
 use rayon::prelude::*;
 
 #[test]
 fn a_cold_base_forced_by_two_jobs_of_one_pool_completes() {
-    let file = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cold_base.php");
-    std::fs::write(
-        &file,
-        "<?php\nfunction cold_base(): int {\n    return 1;\n}\n",
-    )
-    .unwrap();
     let (done, finished) = mpsc::channel();
     std::thread::spawn(move || {
         // The build gets a pool of its own: the one worker under test waits
@@ -34,11 +28,17 @@ fn a_cold_base_forced_by_two_jobs_of_one_pool_completes() {
             .num_threads(1)
             .build()
             .unwrap();
-        let files = [(file, true, false)];
         pool.install(|| {
             (0..2).into_par_iter().for_each(|_| {
-                let mut project = Project::loading();
-                assert!(project.load_files(&files, None, &stubs).is_empty());
+                let file = OverlayFile {
+                    path: PathBuf::from("cold_base.php"),
+                    bytes: b"<?php\nfunction cold_base(): int {\n    return 1;\n}\n".to_vec(),
+                    analysed: true,
+                    stub: false,
+                };
+                Session::for_overlay(vec![file], stubs.clone())
+                    .load()
+                    .expect("the file loads");
             });
         });
         let _ = done.send(());

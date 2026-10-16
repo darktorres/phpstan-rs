@@ -1,6 +1,5 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use syntax::name::{NameMap, NameSet};
@@ -21,7 +20,7 @@ use crate::registry::{
 };
 #[cfg(debug_assertions)]
 use crate::registry::{Keep, build_declarations_where};
-use declared_classes::{DeclaredClass, declared_classes};
+use declared_classes::DeclaredClass;
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::FileFacts;
 use syntax::ast::{Stmt, StmtKind};
@@ -46,6 +45,7 @@ mod file_declarations;
 mod file_table;
 mod mock_hygiene;
 pub mod session;
+pub mod source;
 pub(crate) mod use_sites;
 pub(crate) mod walk;
 mod whole_program;
@@ -102,6 +102,8 @@ pub(crate) struct FileState {
     kept_ast: Option<Vec<Stmt>>,
     // The source's length in bytes: what checking the file costs, roughly.
     source_len: usize,
+    // The digest of the bytes the file was read from (`source::content_hash`).
+    content_hash: u128,
     // Where the file came in the order files were loaded, which a rebuild of
     // a name declared in several of them follows; an edited file keeps it.
     load_order: u64,
@@ -125,7 +127,7 @@ pub(crate) struct FileState {
     // `None` for every ordinary `check-project` batch run, which never
     // needs it again once this file's own diagnostics are computed.
     source: Option<String>,
-    // Same meaning as `load_analyzed_file`'s own `analyzed` parameter -
+    // Same meaning as the `analyzed` parameter of `insert_numbered_file` -
     // `true` for a real, first-party file being checked, `false` for
     // context (vendor/scan/stub, never analyzed or reported). Recorded
     // per-file so `Project::is_analyzed`/`analyzed_paths` can answer
@@ -241,7 +243,7 @@ impl BodySource for file_table::FileTable<FileState> {
 /// every file that *references* `name` - used to find which other files
 /// need re-checking when a file's declarations change.
 ///
-/// `load_file` is for the initial, full load of a codebase; `update_file`
+/// `Session::load` is for the initial, full load of a codebase; `update_file`
 /// is the incremental path: re-parsing and re-checking only the file that
 /// changed, plus the files reading a declaration whose resolved form the
 /// change altered (see `affected_files`) - every other file's parse tree
@@ -263,6 +265,9 @@ pub struct Project {
     // resolves them against the working directory. `None` means the
     // process's own working directory.
     working_dir: Option<PathBuf>,
+    // The bytes the loads and the edits read a file's text from, in place
+    // of the disk's where it has an entry (see `source`).
+    source: source::FileSource,
     // `working_dir` canonicalized, which
     // `absolute_path` resolves analysed paths against.
     absolute_root: Option<PathBuf>,
@@ -274,7 +279,7 @@ pub struct Project {
     // When set, per-file and whole-program checks leave inline
     // `@phpstan-ignore*` suppression to `apply_inline_ignores`.
     defer_inline_ignores: bool,
-    // Whether `load_file`/`update_file` keep each file's own raw source
+    // Whether `Session::load`/`update_file` keep each file's own raw source
     // text around in its `FileState` (see that field's own doc comment) -
     // off by default. Only `lsp.rs`'s `Server` turns this on:
     // hover/definition's own text-split technique (`lsp::text_split`)
@@ -332,7 +337,7 @@ pub struct Project {
     // Whether Tier 2 (member references) of `use_sites` has ever been
     // built for this project - `false` until the first
     // `ensure_member_index_built` call. Deliberately NOT built as part
-    // of `finish_loading`/`load_file`: Tier 2 needs one real `Checker`
+    // of `finish_loading`/`Session::load`: Tier 2 needs one real `Checker`
     // pass per file, which would make every workspace load pay a cost
     // only `textDocument/references`/`textDocument/rename` actually
     // need - see `ensure_member_index_built`'s own doc comment.
@@ -612,6 +617,7 @@ impl Project {
             sql: sql::context::SqlContext::default(),
             pest_config: PestConfig::default(),
             working_dir: None,
+            source: source::FileSource::default(),
             absolute_root: None,
             packages: composer::PackageIndex::default(),
             settings: CheckSettings::default(),
@@ -884,6 +890,43 @@ impl Project {
         self.files.get(path)?.source.as_deref()
     }
 
+    /// The digest of the bytes the file at `path` was loaded or last edited
+    /// with, which an edit compares against to find a document unchanged.
+    pub fn content_hash(&self, path: &Path) -> Option<u128> {
+        self.files.get(path).map(|file| file.content_hash)
+    }
+
+    /// Gives the file at `path` the bytes `bytes` for every load and edit
+    /// that reads it, in place of the disk's (the editor's open documents).
+    pub fn set_document(&mut self, path: &Path, bytes: &[u8]) {
+        let full = self.full_path(path);
+        self.source.set(&full, bytes);
+    }
+
+    /// Replaces every document the loads and edits read, with `source`.
+    pub(crate) fn set_source(&mut self, source: source::FileSource) {
+        self.source = source;
+    }
+
+    /// Gives the file at `path` back to the disk for the reads after this.
+    pub fn unset_document(&mut self, path: &Path) {
+        let full = self.full_path(path);
+        self.source.unset(&full);
+    }
+
+    /// The bytes of the file at `path`: the document's, else the disk's.
+    pub(crate) fn read_bytes(&self, path: &Path) -> std::io::Result<std::borrow::Cow<'_, [u8]>> {
+        self.source.read(&self.full_path(path))
+    }
+
+    /// `path` as the disk names it: under `working_dir`, when there is one.
+    fn full_path(&self, path: &Path) -> PathBuf {
+        match &self.working_dir {
+            Some(root) => root.join(path),
+            None => path.to_path_buf(),
+        }
+    }
+
     /// The tree of a loaded file: the one it kept, or, for a context file
     /// of a batch run, one parsed from the file again.
     pub(crate) fn ast_of(&self, path: &Path) -> Option<AstRef<'_>> {
@@ -894,14 +937,10 @@ impl Project {
         if let Some(ast) = self.ast_cache.lock().ok()?.get(path) {
             return Some(AstRef::Parsed(ast));
         }
-        let full = match &self.working_dir {
-            Some(root) => root.join(path),
-            None => path.to_path_buf(),
-        };
-        let bytes = std::fs::read(full).ok()?;
-        let parsed = match String::from_utf8(bytes) {
-            Ok(text) => parse_with_ignores(path, &text, None, false),
-            Err(error) => parse_with_ignores(path, &error.into_bytes(), None, false),
+        let bytes = self.read_bytes(path).ok()?;
+        let parsed = match std::str::from_utf8(&bytes) {
+            Ok(text) => parse_with_ignores(path, text, None, false),
+            Err(_) => parse_with_ignores(path, &bytes[..], None, false),
         }
         .ok()?;
         let ast = Arc::new(parsed.ast);
@@ -916,66 +955,6 @@ impl Project {
     /// (`lsp::navigation`) own entry point.
     pub(crate) fn ast(&self, path: &Path) -> Option<&[Stmt]> {
         self.files.get(path)?.tree()
-    }
-
-    /// Parses one file and indexes its declarations into the shared
-    /// registry. Call `finish_loading` once after the initial batch of
-    /// `load_file` calls - trait flattening is a global pass over every
-    /// class, so it's wasteful to re-run it after each individual file
-    /// during a bulk load the way `update_file` has to for a single
-    /// incremental change.
-    #[hotpath::measure]
-    pub fn load_file(&mut self, path: PathBuf, source: &str) -> Result<(), ParseError> {
-        self.load_file_impl(path, source, false)
-    }
-
-    /// Same as `load_file`, but marks the file as a first-party,
-    /// actually-analyzed one rather than context (`--scan-dir`/composer
-    /// vendor) - see `Registry::insert_built_decl`'s own `analyzed`
-    /// parameter doc comment for why this distinction has to reach all
-    /// the way down to class indexing: an analyzed file's own declaration
-    /// must always win a same-name collision outright, never merge with a
-    /// pre-existing context/stub entry.
-    pub fn load_analyzed_file(&mut self, path: PathBuf, source: &str) -> Result<(), ParseError> {
-        self.load_file_impl(path, source, true)
-    }
-
-    fn load_file_impl(
-        &mut self,
-        path: PathBuf,
-        source: &str,
-        analyzed: bool,
-    ) -> Result<(), ParseError> {
-        // `is_stub: false` - `load_file`/`load_analyzed_file` are the
-        // LSP/test-harness convenience path, which has no `stub_paths`
-        // concept at all (that's a batch `check-project`-only config key,
-        // wired through `read_and_parse_file` instead) and no way to
-        // enable `check_duplicate_class_declarations` in the first place.
-        let parsed = parse_file(&path, source, false)?;
-        self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
-        Ok(())
-    }
-
-    /// The order-sensitive second half of `load_file`, taking an
-    /// already-computed `ParsedFile` (see that type's own doc comment) -
-    /// the split exists so a caller loading many files at once (batch
-    /// `check-project`) can compute every file's `ParsedFile` in parallel
-    /// (pure, no `&self`/registry dependency at all) and then feed them
-    /// into this method one at a time, sequentially, in whatever order
-    /// its own collision-resolution policy needs - exactly the loop
-    /// `load_file` above already ran, just no longer coupled to also
-    /// doing the parse itself synchronously. `analyzed` has the same
-    /// meaning as `load_analyzed_file`'s own - see that method's doc
-    /// comment.
-    pub fn insert_parsed_file(
-        &mut self,
-        path: PathBuf,
-        parsed: ParsedFile,
-        source: String,
-        analyzed: bool,
-    ) {
-        let id = self.files.id_for(&path);
-        self.insert_numbered_file(id, &path, parsed, source, analyzed);
     }
 
     /// Numbers `paths` before any is inserted, which a caller can do while
@@ -996,13 +975,14 @@ impl Project {
         numbers
     }
 
-    /// `insert_parsed_file`, for the file `id` numbers `path` as.
+    /// Inserts `parsed` as the file `path`, which `id` numbers.
     pub(crate) fn insert_numbered_file(
         &mut self,
         id: FileId,
         path: &Path,
         parsed: ParsedFile,
         source: String,
+        content_hash: u128,
         analyzed: bool,
     ) {
         let ParsedFile {
@@ -1064,6 +1044,7 @@ impl Project {
             FileState {
                 kept_ast: ast.filter(|_| analyzed || !self.built_once),
                 source_len: source.len(),
+                content_hash,
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
@@ -1120,7 +1101,7 @@ impl Project {
         }
     }
 
-    /// Indexes `parsed`'s use sites ahead of `insert_parsed_file`, so a
+    /// Indexes `parsed`'s use sites ahead of its insertion, so a
     /// caller parsing many files in parallel indexes them there too.
     pub(crate) fn index_use_sites(&self, parsed: &mut ParsedFile, source: &str) {
         if let Some(ast) = &parsed.ast {
@@ -1129,51 +1110,10 @@ impl Project {
     }
 
     /// Finds the composer package `parsed`, the file at `path`, belongs to
-    /// ahead of `insert_parsed_file`, so a caller parsing many files in
+    /// ahead of its insertion, so a caller parsing many files in
     /// parallel does the path work there too.
     pub(crate) fn note_owner(&self, parsed: &mut ParsedFile, path: &Path) {
         parsed.owner = Some(self.packages.owner(&self.absolute_path(path)));
-    }
-
-    /// Reads, parses and indexes `files` in parallel on `pool`, then
-    /// inserts them in order - context and analyzed alike. Each file is
-    /// `(path, analyzed, stub)`: whether it is analyzed, and whether it is
-    /// parsed as a stub. A file that can't be read is skipped; one that
-    /// fails to parse is skipped and returned with its error.
-    pub fn load_files(
-        &mut self,
-        files: &[(PathBuf, bool, bool)],
-        pool: Option<&rayon::ThreadPool>,
-        stubs: &Stubs,
-    ) -> Vec<(PathBuf, ParseError)> {
-        let this = &*self;
-        let parsed = map_on_pool(pool, files, |(path, _, stub)| {
-            let bytes = fs::read(path).ok()?;
-            let source = String::from_utf8_lossy(&bytes).into_owned();
-            Some(parse_file(path, source.as_str(), *stub).map(|mut parsed| {
-                this.index_use_sites(&mut parsed, &source);
-                this.note_owner(&mut parsed, path);
-                (source, parsed)
-            }))
-        });
-        self.expect_files(
-            parsed.iter().filter_map(|p| match p {
-                Some(Ok((_, parsed))) => Some(parsed),
-                _ => None,
-            }),
-            stubs,
-        );
-        let mut failed = Vec::new();
-        for ((path, analyzed, _), parsed) in files.iter().zip(parsed) {
-            match parsed {
-                Some(Ok((source, parsed))) => {
-                    self.insert_parsed_file(path.clone(), parsed, source, *analyzed)
-                }
-                Some(Err(e)) => failed.push((path.clone(), e)),
-                None => {}
-            }
-        }
-        failed
     }
 
     /// Merges PHPStan's own source in with the built-in stubs while some
@@ -1452,7 +1392,7 @@ impl Project {
         Scope::from_keys(classes, functions)
     }
 
-    /// Finalizes an initial batch of `load_file` calls (trait flattening).
+    /// Finalizes an initial load (trait flattening).
     #[hotpath::measure]
     pub fn finish_loading_with(&mut self, stubs: &Stubs) {
         self.finish_declarations(Some(stubs));
@@ -1870,9 +1810,9 @@ impl Project {
     pub fn update_file(
         &mut self,
         path: &Path,
-        new_source: &str,
+        source: impl AsRef<[u8]>,
     ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
-        self.update_file_cancellable(path, new_source, || false)
+        self.update_file_cancellable(path, source, || false)
     }
 
     /// The debounce worker's own entry point (VSCode plan item 2.2) -
@@ -1886,7 +1826,7 @@ impl Project {
     pub fn update_file_cancellable(
         &mut self,
         path: &Path,
-        new_source: &str,
+        source: impl AsRef<[u8]>,
         mut should_abort: impl FnMut() -> bool,
     ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         // Parse BEFORE unindexing anything - on a parse failure (the
@@ -1905,18 +1845,36 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let Parsed {
+        let bytes = source.as_ref();
+        let parsed = match std::str::from_utf8(bytes) {
+            Ok(text) => parse_file(path, text, false),
+            Err(_) => parse_file(path, bytes, false),
+        }?;
+        let previous = self.unindex_file(path);
+        let ParsedFile {
             ast,
+            lex_warnings: _,
+            functions,
+            classes,
+            constants,
             references,
+            declaration_references,
             ignores,
+            built_decls,
+            anonymous_classes,
+            duplicate_fn_sites,
+            duplicate_class_sites,
+            bodies,
+            global_facts,
+            pest_facts,
+            declared_classes,
+            origin_path: _,
             facts,
             line_index,
-            ..
-        } = parse_with_ignores(path, new_source, None, false)?;
-        let previous = self.unindex_file(path);
-        let (functions, classes) = declared_names(&ast);
-        let constants = declared_constants(&ast);
-        let (references, declaration_references) = file_references(&ast, references);
+            class_fn_refs: _,
+            owner: _,
+        } = parsed;
+        let ast = ast.expect("a parse keeps its tree");
 
         // A file `update_file` has already seen keeps its own recorded
         // `analyzed` flag (an edit doesn't change what kind of file it
@@ -1955,22 +1913,9 @@ impl Project {
             rebuilt.classes.extend(previous.classes);
             rebuilt.constants.extend(previous.constants);
         }
-        let built_decls = crate::registry::build_declarations(&ast, &Origin::File(Arc::from(path)));
         self.rebuild_declarations(&rebuilt, Some((path, &built_decls, analyzed, load_order)));
-        let anonymous_classes = if facts.has_anonymous_class {
-            anonymous_class_names(&ast)
-        } else {
-            Vec::new()
-        };
-        self.duplicate_fn_sites.index(&ast, path);
-        // `is_stub: false` - same reasoning as `load_file_impl`'s own
-        // identical note: `update_file` is the LSP/incremental-edit path,
-        // which has no `stub_paths` concept.
-        self.duplicate_class_sites.index(&ast, path, false);
-        let bodies = FileBodies::of(&ast);
-        let global_facts = Arc::new(GlobalFacts::of_file(&ast, &facts));
-        let pest_facts = PestFacts::of(path, &ast);
-        let declared_classes = declared_classes(&ast);
+        self.duplicate_fn_sites.merge(duplicate_fn_sites);
+        self.duplicate_class_sites.merge(duplicate_class_sites);
         let id = self.files.id_for(path);
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
@@ -1979,7 +1924,8 @@ impl Project {
             path.to_path_buf(),
             FileState {
                 kept_ast: Some(ast),
-                source_len: new_source.len(),
+                source_len: bytes.len(),
+                content_hash: source::content_hash(bytes),
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,
@@ -1989,7 +1935,9 @@ impl Project {
                 declaration_references,
                 ignores,
                 anonymous_classes,
-                source: self.retain_source.then(|| new_source.to_string()),
+                source: self
+                    .retain_source
+                    .then(|| String::from_utf8_lossy(bytes).into_owned()),
                 analyzed,
                 owner: self.packages.owner(&self.absolute_path(path)),
                 bodies,
@@ -2665,9 +2613,8 @@ impl Project {
     /// complete no-op. `check_dead_code` needs only Tier 1 (`use_sites`'s
     /// class/function reference sites) - cheaper than Tier 2 (a plain
     /// syntactic walk, not a real `Checker` pass), but still real per-
-    /// loaded-file cost, so `Project::insert_parsed_file` itself gates
-    /// populating it in batch mode on this exact flag - see that call
-    /// site's own doc comment. `check_circular_dependencies` and
+    /// loaded-file cost, so `class_fn_refs_of` gates
+    /// populating it in batch mode only on this exact flag. `check_circular_dependencies` and
     /// `check_dead_abstract_classes` need neither Tier - both read
     /// directly off `Registry.classes`' own already-resolved fields, so
     /// each costs nothing beyond its own traversal regardless of how
@@ -3014,7 +2961,7 @@ fn parse_with_ignores<'a>(
 /// Everything about loading one file that's pure - parsing, plus every
 /// fact derived only from the parsed AST or the raw source text, with no
 /// dependency on (or mutation of) a `Project`'s shared registry. Computing
-/// this for many files is embarrassingly parallel - `insert_parsed_file`
+/// this for many files is embarrassingly parallel - `insert_numbered_file`
 /// below does the remaining, order-sensitive registry-mutating half,
 /// meant to stay sequential and run in whatever order a caller's own
 /// collision-resolution policy needs (see that method's own doc comment).
@@ -3035,7 +2982,7 @@ pub struct ParsedFile {
     // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
     // `registry::build_declarations`'s own doc comment for why that
     // split is pure and safe to compute here, alongside everything else
-    // in this struct) - `insert_parsed_file` feeds these into
+    // in this struct) - `insert_numbered_file` feeds these into
     // `Registry::insert_built_decl` one at a time instead of re-deriving
     // them from `ast` via `Registry::index`, so the expensive "turn an
     // AST node into a ClassReflection/FunctionReflection" work runs here, in
@@ -3047,7 +2994,7 @@ pub struct ParsedFile {
     declared_classes: Vec<DeclaredClass>,
     // This file's own top-level function declaration sites, already
     // built (see `DuplicateFunctionSites::merge`'s own doc comment) -
-    // `insert_parsed_file` merges these into the project-wide table
+    // `insert_numbered_file` merges these into the project-wide table
     // instead of re-walking `ast` via `DuplicateFunctionSites::index`,
     // moving the per-function type-hint cloning `record` does into this
     // already-parallel step. Unlike `built_decls`, this needs `path`
@@ -3071,11 +3018,11 @@ pub struct ParsedFile {
     // Its lines, which the lines and columns of its spans are found by.
     line_index: Arc<LineIndex>,
     // The file's class and function use sites, when indexed alongside the
-    // parse (`Project::index_use_sites`); `insert_parsed_file` indexes
+    // parse (`Project::index_use_sites`); `insert_numbered_file` indexes
     // them itself otherwise.
     class_fn_refs: Option<Vec<(Span, use_sites::RefTarget)>>,
     // The composer package that owns the file, when found alongside the
-    // parse (`Project::note_owner`); `insert_parsed_file` finds it itself
+    // parse (`Project::note_owner`); `insert_numbered_file` finds it itself
     // otherwise.
     owner: Option<Option<composer::PackageOwner>>,
 }
@@ -3200,26 +3147,6 @@ pub fn parse_file_with_names<'a>(
     Ok(parsed)
 }
 
-/// The registry names of the anonymous classes in `ast`.
-fn anonymous_class_names(ast: &[Stmt]) -> Vec<Name> {
-    struct Names(Vec<Name>);
-    impl<'a> syntax::visit::Visitor<'a> for Names {
-        fn visit_expr(&mut self, expr: &'a syntax::ast::Expr) {
-            if let syntax::ast::ExprKind::NewAnonymousClass(class) = &expr.kind
-                && let Some(name) = &class.name
-            {
-                self.0.push(name.clone());
-            }
-            syntax::visit::walk_expr(self, expr);
-        }
-    }
-    let mut names = Names(Vec::new());
-    for stmt in ast {
-        syntax::visit::Visitor::visit_stmt(&mut names, stmt);
-    }
-    names.0
-}
-
 impl ParsedFile {
     /// What the lexer skipped over rather than failing on.
     pub fn lex_warnings(&self) -> &[LexWarning] {
@@ -3302,18 +3229,6 @@ struct DeclaredNames {
     functions: Vec<Name>,
     classes: Vec<Name>,
     constants: Vec<Name>,
-}
-
-/// The global constants one file's parse tree declares, by the names
-/// `Registry::global_constants` holds them under.
-fn declared_constants(stmts: &[Stmt]) -> Vec<Name> {
-    let mut constants = Vec::new();
-    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
-        if let Declared::Constant(_) | Declared::Define { .. } = declaration.declared {
-            constants.push(Name::from(declaration.name().trim_start_matches('\\')));
-        }
-    });
-    constants
 }
 
 /// The function and class names one file's parse tree declares - exactly

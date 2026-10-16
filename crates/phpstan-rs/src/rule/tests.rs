@@ -1,5 +1,6 @@
 use super::*;
 use crate::checker::Checker;
+use crate::project::session::load_test_file;
 use diagnostics::DiagnosticBuilder;
 
 /// Flags every bare-variable expression named `$flag_me`, regardless of
@@ -52,7 +53,7 @@ impl Rule for FlagsEchoStatements {
 fn diagnostics_with(src: &str, rules: &[Box<dyn Rule>]) -> Vec<Diagnostic> {
     let path = std::path::Path::new("test.php");
     let mut project = crate::project::Project::new();
-    project.load_analyzed_file(path.to_path_buf(), src).unwrap();
+    load_test_file(&mut project, path.to_path_buf(), src, true);
     project.finish_loading();
     let program = project.ast(path).unwrap();
     let mut checker = Checker::new(project.registry());

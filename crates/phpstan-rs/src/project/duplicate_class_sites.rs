@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use syntax::ast::{ClassKind, Stmt};
+use syntax::ast::ClassKind;
+#[cfg(test)]
+use syntax::ast::Stmt;
+#[cfg(test)]
 use syntax::declarations::Declared;
 use syntax::name::Name;
 use syntax::span::Span;
@@ -43,6 +46,7 @@ impl DuplicateClassSites {
     /// the `function_exists`-guarded polyfill idiom: `if (!class_exists(
     /// Foo::class)) { class Foo {} }`). `is_stub` is the file's
     /// provenance.
+    #[cfg(test)]
     pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path, is_stub: bool) {
         syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
             if let Declared::Class(c) = declaration.declared

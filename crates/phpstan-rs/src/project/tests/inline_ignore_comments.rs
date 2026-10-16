@@ -2,6 +2,7 @@
 //! edit. Suppression itself is covered by the fixtures under
 //! `tests/fixtures/project/inline_ignore_comments`.
 
+use crate::project::session::load_test_file;
 use std::path::PathBuf;
 
 use super::super::*;
@@ -14,12 +15,12 @@ fn update_file_recomputes_ignore_lines_too() {
     // every other per-file cached fact in `FileState` already has to
     // handle on an edit.
     let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("f.php"),
-            "<?php\nfunction f() {\n    totallyUndefinedFunction();\n}\n",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("f.php"),
+        "<?php\nfunction f() {\n    totallyUndefinedFunction();\n}\n",
+        false,
+    );
     project.finish_loading();
     let before = project.check_file(&PathBuf::from("f.php"));
     assert!(

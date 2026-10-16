@@ -1,4 +1,5 @@
 use super::super::*;
+use std::fs;
 use std::path::PathBuf;
 
 /// `missingType.*` (this project's `MissingTypehintCheck` family) fires

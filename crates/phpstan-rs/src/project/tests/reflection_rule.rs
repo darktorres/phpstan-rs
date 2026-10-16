@@ -1,6 +1,7 @@
 //! `reflection_rule::ReflectionRule` + `Project::run_reflection_rules`.
 
 use super::super::*;
+use crate::project::session::load_test_file;
 use crate::reflection_rule::ReflectionRule;
 use crate::registry::{ClassReflection, FunctionReflection};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
@@ -40,9 +41,12 @@ impl ReflectionRule for FlagsEveryFunction {
 #[test]
 fn a_reflection_rule_sees_every_class_the_registry_knows_about() {
     let mut project = Project::new();
-    project
-        .load_file(PathBuf::from("a.php"), "<?php class Foo {} class Bar {}")
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php class Foo {} class Bar {}",
+        false,
+    );
     project.finish_loading();
 
     let rules: Vec<Box<dyn ReflectionRule>> = vec![Box::new(FlagsEveryPublicClass)];
@@ -54,9 +58,12 @@ fn a_reflection_rule_sees_every_class_the_registry_knows_about() {
 #[test]
 fn a_reflection_rule_sees_every_top_level_function() {
     let mut project = Project::new();
-    project
-        .load_file(PathBuf::from("a.php"), "<?php function myOwnUniqueFn() {}")
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php function myOwnUniqueFn() {}",
+        false,
+    );
     project.finish_loading();
 
     let rules: Vec<Box<dyn ReflectionRule>> = vec![Box::new(FlagsEveryFunction)];
@@ -74,9 +81,12 @@ fn default_trait_methods_are_true_no_ops() {
     impl ReflectionRule for DoesNothing {}
 
     let mut project = Project::new();
-    project
-        .load_file(PathBuf::from("a.php"), "<?php class Foo {} function f() {}")
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php class Foo {} function f() {}",
+        false,
+    );
     project.finish_loading();
 
     let rules: Vec<Box<dyn ReflectionRule>> = vec![Box::new(DoesNothing)];

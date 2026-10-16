@@ -46,7 +46,8 @@ use lsp_types::{
 
 use crate::app::check_project::{self, CheckRequest};
 use crate::checker::Checker;
-use crate::project::session::ErrorPolicy;
+use crate::project::session::{ErrorPolicy, Session};
+use crate::project::source::{self, FileSource};
 use crate::project::use_sites;
 use crate::project::walk::{Listed, Role};
 use crate::project::{Project, ProjectSettings};
@@ -347,7 +348,7 @@ impl Server {
         &self,
         root: &Path,
         config_path: Option<&Path>,
-    ) -> Result<(Applied, Vec<String>), String> {
+    ) -> Result<(Applied, Session, Vec<String>), String> {
         let mut warnings = Vec::new();
         let config_path =
             config_path.map_or_else(|| root.join("phpstan-rs.toml"), Path::to_path_buf);
@@ -383,7 +384,7 @@ impl Server {
             ignore_error_entries: run.session.ignore_error_entries().to_vec(),
             listing: run.session.listing(),
         };
-        Ok((applied, warnings))
+        Ok((applied, run.session, warnings))
     }
 
     /// Applies the same severity-level cutoff / `ignore_errors` /
@@ -437,29 +438,6 @@ impl Server {
             .collect()
     }
 
-    /// Reads and parses `files` in parallel on the worker pool, inserting
-    /// each as context or analyzed, as `Project::load_files` does. A parse
-    /// failure is logged (both to stderr and as a `window/logMessage`
-    /// notification) and skipped, not fatal to the rest of the scan.
-    fn load_files(&mut self, files: &[(PathBuf, bool, bool)], messages: &mut Vec<Message>) {
-        for (path, e) in self
-            .project
-            .load_files(files, Some(&self.pool), &self.stubs)
-        {
-            eprintln!(
-                "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                path.display()
-            );
-            messages.push(log_message_notification(
-                MessageType::WARNING,
-                format!(
-                    "phpstan-rs: skipping {} - failed to parse: {e}",
-                    path.display()
-                ),
-            ));
-        }
-    }
-
     /// Applies `next` to `self.project` and `self`, then loads the files it
     /// lists that are not loaded yet, context first. `previous` is the listing
     /// the project was configured with before: a file it listed under another
@@ -479,7 +457,12 @@ impl Server {
     /// genuinely different `Project` state for the identical tree. A
     /// future refactor of this method must preserve this order
     /// explicitly.
-    fn apply_configuration(&mut self, next: Applied, previous: &[Listed]) -> (Vec<Message>, bool) {
+    fn apply_configuration(
+        &mut self,
+        next: Applied,
+        session: &Session,
+        previous: &[Listed],
+    ) -> (Vec<Message>, bool) {
         let mut messages = Vec::new();
         self.project.apply_settings(next.settings.clone());
 
@@ -508,37 +491,28 @@ impl Server {
             messages.extend(self.publish_diagnostics_for(results));
         }
 
-        let to_load: Vec<(PathBuf, bool, bool)> = {
+        let to_load: Vec<Listed> = {
             let loaded: FxHashSet<&Path> = self.project.loaded_paths().collect();
-            let mut context = Vec::new();
-            let mut analysed = Vec::new();
-            for listed in &next.listing {
-                if loaded.contains(listed.path.as_path()) {
-                    continue;
-                }
-                if listed.role == Role::Analysed {
-                    analysed.push(listed.path.clone());
-                } else {
-                    context.push(listed.path.clone());
-                }
-            }
-            // The order `Session::load` loads in.
-            composer::path_order::sort_paths(&mut context);
-            composer::path_order::sort_paths(&mut analysed);
-            context
-                .into_iter()
-                .map(|path| {
-                    let stub = current[path.as_path()].1;
-                    (path, false, stub)
-                })
-                .chain(analysed.into_iter().map(|path| {
-                    let stub = current[path.as_path()].1;
-                    (path, true, stub)
-                }))
+            next.listing
+                .iter()
+                .filter(|listed| !loaded.contains(listed.path.as_path()))
+                .cloned()
                 .collect()
         };
         let loaded = !to_load.is_empty();
-        self.load_files(&to_load, &mut messages);
+        for (path, reason) in session.load_listed(&mut self.project, &to_load) {
+            eprintln!(
+                "phpstan-rs lsp: skipping {} - failed to parse: {reason}",
+                path.display()
+            );
+            messages.push(log_message_notification(
+                MessageType::WARNING,
+                format!(
+                    "phpstan-rs: skipping {} - failed to parse: {reason}",
+                    path.display()
+                ),
+            ));
+        }
         self.applied = Some(next);
         (messages, loaded)
     }
@@ -566,10 +540,10 @@ impl Server {
             // scoping, only one shared instance for however many folders are
             // open.
             match self.resolve_workspace(root, self.config_path_override.as_deref()) {
-                Ok((next, warnings)) => {
+                Ok((next, session, warnings)) => {
                     messages.extend(configuration_warnings(warnings));
                     self.root = Some(root.clone());
-                    let (applied, loaded) = self.apply_configuration(next, &[]);
+                    let (applied, loaded) = self.apply_configuration(next, &session, &[]);
                     messages.extend(applied);
                     any_loaded |= loaded;
                     self.workspace_roots.push(root.clone());
@@ -744,9 +718,10 @@ impl Server {
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris.insert(path.clone(), (uri.clone(), version));
         self.latest_text.insert(path.clone(), text.to_string());
+        self.project.set_document(&path, text.as_bytes());
         // Opening a file exactly as it was loaded changes nothing in the
         // project, so only its own diagnostics need publishing.
-        if self.project.source(&path) == Some(text) {
+        if self.project.content_hash(&path) == Some(source::content_hash(text.as_bytes())) {
             let diags = match self.last_diagnostics.get(&path) {
                 Some(diags) => diags.clone(),
                 None => {
@@ -806,6 +781,7 @@ impl Server {
             .insert(path.to_path_buf(), (uri.clone(), Some(version)));
         self.latest_text
             .insert(path.to_path_buf(), text.to_string());
+        self.project.set_document(path, text.as_bytes());
         let results = match self
             .project
             .update_file_cancellable(path, text, should_abort)
@@ -856,6 +832,7 @@ impl Server {
                 self.open_uris.remove(&path);
                 self.last_diagnostics.remove(&path);
                 self.latest_text.remove(&path);
+                self.project.unset_document(&path);
                 let results = self.project.remove_file(&path);
                 messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
                 continue;
@@ -867,15 +844,17 @@ impl Server {
             // failure (raced with a subsequent delete before this ran, a
             // transient permission error, ...) is skipped silently: a
             // later Deleted event, if any, cleans it up properly.
-            let Ok(text) = std::fs::read_to_string(&path) else {
+            let Ok(bytes) = FileSource::read_disk(&path) else {
                 continue;
             };
             // No document version exists for an externally-observed
             // change (there is no didOpen/didChange behind it) - `None`
             // matches a file that was only ever loaded from disk.
             self.open_uris.insert(path.clone(), (uri, None));
-            self.latest_text.insert(path.clone(), text.clone());
-            match self.project.update_file(&path, &text) {
+            self.latest_text
+                .insert(path.clone(), String::from_utf8_lossy(&bytes).into_owned());
+            self.project.unset_document(&path);
+            match self.project.update_file(&path, &bytes) {
                 Ok(results) => {
                     messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
                 }
@@ -1977,7 +1956,7 @@ impl Server {
         let resolved = self.resolve_workspace(&root, config_path_override.as_deref());
         self.enabled = settings.enable;
         self.config_path_override = config_path_override;
-        let (next, warnings) = match resolved {
+        let (next, session, warnings) = match resolved {
             Ok(resolved) => resolved,
             Err(error) => {
                 return vec![show_message_notification(
@@ -1993,7 +1972,7 @@ impl Server {
         let mut messages = configuration_warnings(warnings);
         let previous = self.applied.take();
         let previous: &[Listed] = previous.as_ref().map_or(&[], |old| old.listing.as_slice());
-        let (applied, loaded) = self.apply_configuration(next, previous);
+        let (applied, loaded) = self.apply_configuration(next, &session, previous);
         messages.extend(applied);
         if loaded {
             self.project.finish_loading_with(&self.stubs);

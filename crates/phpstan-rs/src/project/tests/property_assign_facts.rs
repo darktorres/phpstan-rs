@@ -3,11 +3,12 @@
 //! fixtures under `tests/fixtures/project/property_assign_facts`.
 
 use super::super::*;
+use crate::project::session::load_test_file;
 
 fn load(files: &[(&str, &str)]) -> Project {
     let mut project = Project::new();
     for (path, source) in files {
-        project.load_file(PathBuf::from(path), source).unwrap();
+        load_test_file(&mut project, PathBuf::from(path), source, false);
     }
     project.finish_loading();
     project

@@ -2,6 +2,7 @@
 //! pipeline, counts as `@api`. The gate itself is covered by the fixtures
 //! under `tests/fixtures/project/phpstan_api_gating`.
 use super::super::*;
+use crate::project::session::load_test_file;
 
 /// Not a normal regression test (nothing in this project's own behavior
 /// is asserted beyond "the class exists") - a documented, deliberate
@@ -16,12 +17,12 @@ use super::super::*;
 #[test]
 fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipeline() {
     let mut project = Project::new();
-    project
-        .load_analyzed_file(
-            PathBuf::from("rule.php"),
-            "<?php function f(\\PHPStan\\Rules\\Rule $rule): void {}",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("rule.php"),
+        "<?php function f(\\PHPStan\\Rules\\Rule $rule): void {}",
+        true,
+    );
     project.finish_loading();
     let registry = project.registry();
 

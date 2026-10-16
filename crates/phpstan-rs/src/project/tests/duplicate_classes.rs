@@ -3,6 +3,7 @@
 //! `tests/fixtures/project/duplicate_classes`.
 
 use super::super::*;
+use crate::project::session::load_test_file;
 
 #[test]
 fn an_update_file_edit_introduces_then_removes_a_duplicate() {
@@ -14,9 +15,12 @@ fn an_update_file_edit_introduces_then_removes_a_duplicate() {
         },
         ..ProjectSettings::default()
     });
-    project
-        .load_file(PathBuf::from("a.php"), "<?php class Foo {}")
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php class Foo {}",
+        false,
+    );
     project.finish_loading();
 
     let results = project

@@ -2,16 +2,17 @@
 //! documented (not fixed by this item) trait/mixin staleness limitation.
 
 use super::super::*;
+use crate::project::session::load_test_file;
 
 #[test]
 fn removing_a_file_drops_its_declarations_from_the_registry() {
     let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function helperA(): int { return 1; } class Foo {}",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php function helperA(): int { return 1; } class Foo {}",
+        false,
+    );
     project.finish_loading();
     assert!(project.registry().functions.contains_key("helperA"));
     assert!(project.registry().classes.contains_key("Foo"));
@@ -25,18 +26,18 @@ fn removing_a_file_drops_its_declarations_from_the_registry() {
 #[test]
 fn removing_a_file_re_checks_its_former_dependents() {
     let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("thing.php"),
-            "<?php function thing(): int { return 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("caller.php"),
-            "<?php function useThing() { return thing(); }",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("thing.php"),
+        "<?php function thing(): int { return 1; }",
+        false,
+    );
+    load_test_file(
+        &mut project,
+        PathBuf::from("caller.php"),
+        "<?php function useThing() { return thing(); }",
+        false,
+    );
     project.finish_loading();
 
     let result = project.remove_file(&PathBuf::from("thing.php"));
@@ -55,12 +56,12 @@ fn removing_a_file_re_checks_its_former_dependents() {
 #[test]
 fn removing_a_file_returns_it_with_empty_diagnostics_so_the_editor_can_clear_it() {
     let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function helperA(): int { return 1; }",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php function helperA(): int { return 1; }",
+        false,
+    );
     project.finish_loading();
 
     let result = project.remove_file(&PathBuf::from("a.php"));
@@ -75,12 +76,12 @@ fn removing_a_file_returns_it_with_empty_diagnostics_so_the_editor_can_clear_it(
 #[test]
 fn removing_a_never_loaded_file_is_a_harmless_no_op() {
     let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function helperA(): int { return 1; }",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php function helperA(): int { return 1; }",
+        false,
+    );
     project.finish_loading();
 
     let result = project.remove_file(&PathBuf::from("never.php"));
@@ -107,15 +108,18 @@ fn removing_a_files_direct_ancestor_does_not_unstick_the_subclass_relationship_e
     // registry field. See the chain test below for the one real case
     // the finishing-pass rerun does fix.
     let mut project = Project::new();
-    project
-        .load_file(PathBuf::from("base.php"), "<?php class Base {}")
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("child.php"),
-            "<?php class Child extends Base {}",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("base.php"),
+        "<?php class Base {}",
+        false,
+    );
+    load_test_file(
+        &mut project,
+        PathBuf::from("child.php"),
+        "<?php class Child extends Base {}",
+        false,
+    );
     project.finish_loading();
     assert!(project.registry().is_subclass_of("Child", "Base"));
 
@@ -139,21 +143,24 @@ fn removing_a_files_class_does_stop_a_transitive_ancestor_relationship_through_i
     // `is_subclass_of("Grandchild","Child")` incorrectly stays `true`
     // (same direct-ancestor staleness the test above documents).
     let mut project = Project::new();
-    project
-        .load_file(PathBuf::from("base.php"), "<?php class Base {}")
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("child.php"),
-            "<?php class Child extends Base {}",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("grandchild.php"),
-            "<?php class Grandchild extends Child {}",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("base.php"),
+        "<?php class Base {}",
+        false,
+    );
+    load_test_file(
+        &mut project,
+        PathBuf::from("child.php"),
+        "<?php class Child extends Base {}",
+        false,
+    );
+    load_test_file(
+        &mut project,
+        PathBuf::from("grandchild.php"),
+        "<?php class Grandchild extends Child {}",
+        false,
+    );
     project.finish_loading();
     assert!(project.registry().is_subclass_of("Grandchild", "Base"));
 
@@ -166,18 +173,18 @@ fn removing_a_files_class_does_stop_a_transitive_ancestor_relationship_through_i
 #[test]
 fn removing_a_file_updates_file_count() {
     let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php function a(): int { return 1; }",
-        )
-        .unwrap();
-    project
-        .load_file(
-            PathBuf::from("b.php"),
-            "<?php function b(): int { return 2; }",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php function a(): int { return 1; }",
+        false,
+    );
+    load_test_file(
+        &mut project,
+        PathBuf::from("b.php"),
+        "<?php function b(): int { return 2; }",
+        false,
+    );
     project.finish_loading();
     assert_eq!(project.file_count(), 2);
 

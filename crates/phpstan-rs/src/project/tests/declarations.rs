@@ -3,16 +3,17 @@
 //! updated.
 
 use super::super::*;
+use crate::project::session::load_test_file;
 
 #[test]
 fn classes_and_members_are_recorded_without_retain_source() {
     let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php class Foo { public function bar(): void {} }",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php class Foo { public function bar(): void {} }",
+        false,
+    );
     project.finish_loading();
 
     let registry = project.registry();
@@ -32,12 +33,12 @@ fn classes_and_members_are_recorded_without_retain_source() {
 #[test]
 fn an_inherited_member_keeps_its_declaring_class() {
     let mut project = Project::new();
-    project
-        .load_file(
-            PathBuf::from("a.php"),
-            "<?php class P { public function run(): void {} }\nclass C extends P {}",
-        )
-        .unwrap();
+    load_test_file(
+        &mut project,
+        PathBuf::from("a.php"),
+        "<?php class P { public function run(): void {} }\nclass C extends P {}",
+        false,
+    );
     project.finish_loading();
 
     let (_, sig) = project
@@ -60,9 +61,7 @@ fn a_builtin_records_its_extension_and_no_file() {
 fn removing_a_file_drops_its_declarations() {
     let mut project = Project::new();
     let path = PathBuf::from("a.php");
-    project
-        .load_file(path.clone(), "<?php class Foo {}")
-        .unwrap();
+    load_test_file(&mut project, path.clone(), "<?php class Foo {}", false);
     project.finish_loading();
     assert!(project.registry().class_declaration("Foo").is_some());
 
@@ -74,9 +73,7 @@ fn removing_a_file_drops_its_declarations() {
 fn updating_a_file_records_its_new_declarations() {
     let mut project = Project::new();
     let path = PathBuf::from("a.php");
-    project
-        .load_file(path.clone(), "<?php class Foo {}")
-        .unwrap();
+    load_test_file(&mut project, path.clone(), "<?php class Foo {}", false);
     project.finish_loading();
     assert!(project.registry().class_declaration("Foo").is_some());
 

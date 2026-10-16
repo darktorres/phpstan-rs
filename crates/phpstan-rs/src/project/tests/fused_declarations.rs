@@ -30,6 +30,22 @@ fn summary(decl: &BuiltDecl) -> (u8, String, bool) {
     }
 }
 
+/// The global constants one file's parse tree declares, by the names the
+/// registry holds them under.
+fn declared_constants(stmts: &[syntax::ast::Stmt]) -> Vec<syntax::name::Name> {
+    let mut constants = Vec::new();
+    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
+        if let syntax::declarations::Declared::Constant(_)
+        | syntax::declarations::Declared::Define { .. } = declaration.declared
+        {
+            constants.push(syntax::name::Name::from(
+                declaration.name().trim_start_matches('\\'),
+            ));
+        }
+    });
+    constants
+}
+
 #[test]
 fn the_one_walk_finds_what_the_five_walks_found() {
     for (i, source) in SOURCES.iter().enumerate() {

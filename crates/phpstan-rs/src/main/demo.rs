@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use types::Name;
 
-use phpstan_rs::project::{Project, worker_pool};
+use phpstan_rs::project::session::{OverlayFile, Session};
+use phpstan_rs::project::worker_pool;
 use phpstan_rs::registry::stub_set::{StubSource, Stubs};
 use phpstan_rs::{output, registry};
 use registry::format_signature;
@@ -72,11 +73,18 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     // The file is an analysed file of a project on the built-in stubs,
     // loaded and checked as the project loads and checks any other.
     let stubs = Stubs::new(StubSource::from_environment(), worker_pool());
-    let mut project = Project::from_stubs(&stubs);
-    project
-        .load_analyzed_file(path.clone(), &String::from_utf8_lossy(&source))
-        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
-    project.finish_loading_with(&stubs);
+    let project = Session::for_overlay(
+        vec![OverlayFile {
+            path: path.clone(),
+            bytes: source.clone(),
+            analysed: true,
+            stub: false,
+        }],
+        stubs.clone(),
+    )
+    .load()
+    .unwrap_or_else(|e| panic!("failed to load {}: {e}", path.display()))
+    .project;
     let registry = project.registry();
 
     println!("\n-- resolved signatures (from source) --");

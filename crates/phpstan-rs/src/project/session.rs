@@ -31,6 +31,7 @@ use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
 use super::file_cache;
+use super::source::FileSource;
 use super::walk::{Listed, Role, Walk};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, ParsedFile, Project, ProjectSettings};
@@ -181,6 +182,21 @@ pub struct Session {
     /// Non-fatal problems found while resolving (e.g. SQL schema drift, an
     /// old config key, a section that degraded under `ErrorPolicy::Degrade`).
     pub warnings: Vec<String>,
+    /// The bytes the files are read from, in place of the disk's where it
+    /// has an entry: a session over files given in memory (`for_overlay`).
+    source: FileSource,
+    /// The files a session over files given in memory loads, in place of a
+    /// listing of the disk.
+    overlay_listing: Option<Vec<Listed>>,
+}
+
+/// A file a session over files given in memory loads: its path, its bytes,
+/// and whether it is analysed and parsed as a stub.
+pub struct OverlayFile {
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
+    pub analysed: bool,
+    pub stub: bool,
 }
 
 /// A configured `Project` with every file loaded, before any check ran.
@@ -337,6 +353,8 @@ struct ReadFile {
     len: usize,
     source: String,
     parsed: ParsedFile,
+    /// The digest of the bytes the file was read from.
+    content_hash: u128,
     /// Where the parse is stored once it is complete, for a file that was
     /// not read back from the per-file cache.
     cache_key: Option<file_cache::Key>,
@@ -625,6 +643,8 @@ impl Session {
         };
 
         Ok(Session {
+            source: FileSource::default(),
+            overlay_listing: None,
             pool: Arc::clone(stubs.pool()),
             stubs,
             root,
@@ -761,6 +781,9 @@ impl Session {
     /// it is a stub. The command line and the language server both load
     /// from this listing.
     pub(crate) fn listing(&self) -> Vec<Listed> {
+        if let Some(listed) = &self.overlay_listing {
+            return listed.clone();
+        }
         let mut walk = Walk::new();
         for dir in &self.dirs {
             let excluded: &'static [&'static str] = if self.promoted.contains(dir) {
@@ -795,6 +818,7 @@ impl Session {
 
     fn configure(&self, project: &mut Project) {
         project.apply_settings(self.settings.clone());
+        project.set_source(self.source.clone());
     }
 
     /// Whether `path` (relative to the root) is in a package promoted to an
@@ -810,19 +834,22 @@ impl Session {
     }
 
     /// `cacheable` is whether the file may be read from and stored in the
-    /// per-file cache, which a context file may; `index_use_sites` is
-    /// whether its use sites are indexed with its parse.
+    /// per-file cache, which a context file may be in a project built once;
+    /// `index_use_sites` is whether its use sites are indexed with its parse.
     fn read_and_parse_file(
         &self,
+        project: &Project,
         path: &Path,
         is_stub: bool,
         names: &mut syntax::name::NameCache,
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
-        let Ok(bytes) = std::fs::read(self.root.join(path)) else {
+        let Ok(bytes) = project.read_bytes(path) else {
             return Read::Unread;
         };
+        let bytes = bytes.into_owned();
+        let content_hash = super::source::content_hash(&bytes);
         let cache_key = if cacheable {
             file_cache::key(&bytes, path, is_stub, index_use_sites)
         } else {
@@ -831,10 +858,17 @@ impl Session {
         if let Some(key) = &cache_key
             && let Some(cached) = file_cache::load(key)
         {
+            // The text is kept as a parse keeps it, when the project retains source.
+            let source = if project.retain_source {
+                String::from_utf8_lossy(&bytes).into_owned()
+            } else {
+                String::new()
+            };
             return Read::Loaded(Box::new(ReadFile {
                 len: cached.len,
-                source: String::new(),
+                source,
                 parsed: cached.into_parsed(path, &bytes),
+                content_hash,
                 cache_key: None,
             }));
         }
@@ -883,18 +917,176 @@ impl Session {
         };
         // The text of the file is kept only when the project keeps it.
         let source = match text {
-            Ok(text) if self.settings.retain_source => text,
-            Err(bytes) if self.settings.retain_source => {
-                String::from_utf8_lossy(&bytes).into_owned()
-            }
+            Ok(text) if project.retain_source => text,
+            Err(bytes) if project.retain_source => String::from_utf8_lossy(&bytes).into_owned(),
             _ => String::new(),
         };
         Read::Loaded(Box::new(ReadFile {
             len,
             source,
             parsed,
+            content_hash,
             cache_key,
         }))
+    }
+
+    /// `read_and_parse_file`, then the parts of a file that are found beside
+    /// its parse, then its entry in the per-file cache.
+    fn read_indexed(
+        &self,
+        project: &Project,
+        path: &Path,
+        is_stub: bool,
+        names: &mut syntax::name::NameCache,
+        cacheable: bool,
+        index_use_sites: bool,
+    ) -> Read {
+        let mut read =
+            self.read_and_parse_file(project, path, is_stub, names, cacheable, index_use_sites);
+        if let Read::Loaded(file) = &mut read {
+            project.index_use_sites(&mut file.parsed, &file.source);
+            project.note_owner(&mut file.parsed, path);
+            if let Some(key) = file.cache_key.take()
+                && file_cache::can_store()
+            {
+                file_cache::store(&key, &file_cache::CachedFile::of(&file.parsed, file.len));
+            }
+        }
+        read
+    }
+
+    /// Reads, parses and inserts `listed` into `project`, which may hold
+    /// other files already: context files first and then analysed ones, each
+    /// group in path order, as `load` loads them. The files are read and
+    /// parsed in parallel on the pool. A file that cannot be read is skipped;
+    /// one that does not parse is skipped, and returned with its message.
+    pub(crate) fn load_listed(
+        &self,
+        project: &mut Project,
+        listed: &[Listed],
+    ) -> Vec<(PathBuf, String)> {
+        let mut paths: Vec<PathBuf> = listed.iter().map(|listed| listed.path.clone()).collect();
+        composer::path_order::sort_paths(&mut paths);
+        let by_path: FxHashMap<&Path, &Listed> = listed
+            .iter()
+            .map(|listed| (listed.path.as_path(), listed))
+            .collect();
+        let mut ordered: Vec<&Listed> = paths.iter().map(|path| by_path[path.as_path()]).collect();
+        ordered.sort_by_key(|listed| listed.role == Role::Analysed);
+        let files: Vec<(PathBuf, bool, bool)> = ordered
+            .into_iter()
+            .map(|listed| {
+                (
+                    listed.path.clone(),
+                    listed.role == Role::Analysed,
+                    listed.stub,
+                )
+            })
+            .collect();
+        let index_use_sites = project.check_settings().rules.check_dead_code;
+        // A cached file has no tree. A context file keeps its tree unless the
+        // project is built once, so only such a project reads the cache.
+        let built_once = project.built_once;
+        let shared: &Project = project;
+        let (parsed, numbering): (Vec<Read>, _) = self.pool.install(|| {
+            rayon::join(
+                || {
+                    files
+                        .par_iter()
+                        .map_init(
+                            syntax::name::NameCache::default,
+                            |names, (path, analysed, stub)| {
+                                self.read_indexed(
+                                    shared,
+                                    path,
+                                    *stub,
+                                    names,
+                                    built_once && !analysed,
+                                    index_use_sites,
+                                )
+                            },
+                        )
+                        .collect()
+                },
+                || {
+                    super::file_table::FileTable::with_paths(
+                        files.iter().map(|(path, _, _)| path.as_path()),
+                    )
+                },
+            )
+        });
+        file_cache::trim();
+        let numbers = project.number_files(numbering);
+        project.expect_files(
+            parsed.iter().filter_map(|read| match read {
+                Read::Loaded(file) => Some(&file.parsed),
+                _ => None,
+            }),
+            &self.stubs,
+        );
+        let mut failures = Vec::new();
+        for (((path, analysed, _), read), id) in files.iter().zip(parsed).zip(numbers) {
+            match read {
+                Read::Loaded(file) => {
+                    let ReadFile {
+                        source,
+                        parsed,
+                        content_hash,
+                        ..
+                    } = *file;
+                    project.insert_numbered_file(id, path, parsed, source, content_hash, *analysed);
+                }
+                Read::Unparsed(failure) => failures.push((path.clone(), failure.message)),
+                Read::Unread => {}
+            }
+        }
+        failures
+    }
+
+    /// Loads the files this session lists into `project`, which keeps its own
+    /// settings, then finishes its loading. A file that does not parse is an
+    /// error. The files are read from this session's source.
+    pub fn load_into(&self, project: &mut Project) -> Result<(), String> {
+        project.set_source(self.source.clone());
+        if let Some((path, message)) = self.load_listed(project, &self.listing()).first() {
+            return Err(format!("{} does not parse: {message}", path.display()));
+        }
+        project.finish_loading_with(&self.stubs);
+        Ok(())
+    }
+
+    /// A session over `files` alone, read from memory, with no listing of
+    /// the disk. Its configuration is the default one. The files load with
+    /// the roles they are given, which `load` does not require to include an
+    /// analysed one.
+    pub fn for_overlay(files: Vec<OverlayFile>, stubs: Stubs) -> Session {
+        let mut session = Session::resolve(
+            &ConfigFile::empty(),
+            None,
+            PathBuf::new(),
+            Overrides {
+                no_composer: true,
+                ..Overrides::default()
+            },
+            stubs,
+            ErrorPolicy::Degrade,
+        )
+        .expect("the default configuration resolves");
+        let mut listed = Vec::with_capacity(files.len());
+        for file in files {
+            session.source.set(&file.path, &file.bytes);
+            listed.push(Listed {
+                role: if file.analysed {
+                    Role::Analysed
+                } else {
+                    Role::Context
+                },
+                stub: file.stub,
+                path: file.path,
+            });
+        }
+        session.overlay_listing = Some(listed);
+        session
     }
 
     /// Loads and checks every analysed file, with the `--dump-types`
@@ -923,7 +1115,7 @@ impl Session {
         }
         composer::path_order::sort_paths(&mut analyze_files);
         composer::path_order::sort_paths(&mut context_files);
-        if analyze_files.is_empty() {
+        if analyze_files.is_empty() && self.overlay_listing.is_none() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
         }
@@ -946,27 +1138,15 @@ impl Session {
                         // The names a job meets are kept while it parses one
                         // file after another, and dropped with the load.
                         .map_init(syntax::name::NameCache::default, |names, (index, p)| {
-                            let mut read = self.read_and_parse_file(
+                            self.read_indexed(
+                                &project,
                                 p,
                                 stub_files.contains(p.as_path()),
                                 names,
                                 // The context files come first.
                                 index < context_files.len(),
                                 index_use_sites,
-                            );
-                            if let Read::Loaded(file) = &mut read {
-                                project.index_use_sites(&mut file.parsed, &file.source);
-                                project.note_owner(&mut file.parsed, p);
-                                if let Some(key) = file.cache_key.take()
-                                    && file_cache::can_store()
-                                {
-                                    file_cache::store(
-                                        &key,
-                                        &file_cache::CachedFile::of(&file.parsed, file.len),
-                                    );
-                                }
-                            }
-                            read
+                            )
                         })
                         .collect()
                 },
@@ -1016,9 +1196,14 @@ impl Session {
         {
             match parsed {
                 Read::Loaded(file) => {
-                    let ReadFile { source, parsed, .. } = *file;
+                    let ReadFile {
+                        source,
+                        parsed,
+                        content_hash,
+                        ..
+                    } = *file;
                     note_lex_warnings(path, &parsed);
-                    project.insert_numbered_file(id, path, parsed, source, false)
+                    project.insert_numbered_file(id, path, parsed, source, content_hash, false)
                 }
                 Read::Unparsed(failure) => {
                     skipped_context += 1;
@@ -1049,11 +1234,12 @@ impl Session {
                         len,
                         source,
                         parsed,
+                        content_hash,
                         cache_key: _,
                     } = *file;
                     note_lex_warnings(path, &parsed);
                     analyze_sizes[index] = len;
-                    project.insert_numbered_file(id, path, parsed, source, true)
+                    project.insert_numbered_file(id, path, parsed, source, content_hash, true)
                 }
                 Read::Unparsed(failure) => {
                     skipped_analyze += 1;
@@ -1189,5 +1375,38 @@ impl Session {
             lex_warnings,
             type_dump,
         }
+    }
+}
+
+/// Loads `files`, each `(path, source, analysed)`, into `project` as one
+/// batch, the way `Session::load` loads a listing. Returns the files that do
+/// not parse, with their messages.
+#[cfg(test)]
+pub(crate) fn load_test_files(
+    project: &mut Project,
+    files: &[(PathBuf, &str, bool)],
+) -> Vec<(PathBuf, String)> {
+    let mut listed = Vec::with_capacity(files.len());
+    for (path, source, analysed) in files {
+        project.set_document(path, source.as_bytes());
+        listed.push(Listed {
+            role: if *analysed {
+                Role::Analysed
+            } else {
+                Role::Context
+            },
+            stub: false,
+            path: path.clone(),
+        });
+    }
+    Session::for_overlay(Vec::new(), Stubs::shared().clone()).load_listed(project, &listed)
+}
+
+/// Loads `source` as the file at `path` into `project`: an analysed file when
+/// `analysed`, else a context file. The file must parse.
+#[cfg(test)]
+pub(crate) fn load_test_file(project: &mut Project, path: PathBuf, source: &str, analysed: bool) {
+    if let Some((path, message)) = load_test_files(project, &[(path, source, analysed)]).first() {
+        panic!("{} does not parse: {message}", path.display());
     }
 }
