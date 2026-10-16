@@ -234,6 +234,35 @@ impl Listing {
     }
 }
 
+/// The resolved path of `path`, which is the key its file has in a project.
+/// A spelling that resolves on disk is resolved by the disk, and is remembered
+/// in `aliases` when it differs from its resolved path. A spelling that does
+/// not resolve (its file deleted, or a link on the way removed) takes the
+/// resolved path it was last given, or else resolves through its nearest
+/// existing ancestor.
+pub(crate) fn identify_through(
+    aliases: &Mutex<FxHashMap<PathBuf, PathBuf>>,
+    path: &Path,
+) -> PathBuf {
+    match std::fs::canonicalize(path) {
+        Ok(resolved) => {
+            if resolved != path {
+                aliases
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(path.to_path_buf(), resolved.clone());
+            }
+            resolved
+        }
+        Err(_) => aliases
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| walk::resolve(path)),
+    }
+}
+
 impl Root<'_> {
     /// Whether the walk of this root lists `path`: it lies under the root's
     /// resolved path, and no directory below the root has an excluded name.
@@ -979,30 +1008,9 @@ impl Session {
     }
 
     /// The resolved path of `path`, which is the key its file has in the
-    /// project. A spelling that resolves on disk is resolved by the disk, and
-    /// is remembered when it differs from its resolved path. A spelling that
-    /// does not resolve (its file deleted, or a link on the way removed)
-    /// takes the resolved path it was last given, or else resolves through its
-    /// nearest existing ancestor.
+    /// project (see `identify_through`).
     pub(crate) fn identify(&self, path: &Path) -> PathBuf {
-        match std::fs::canonicalize(path) {
-            Ok(resolved) => {
-                if resolved != path {
-                    self.aliases
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .insert(path.to_path_buf(), resolved.clone());
-                }
-                resolved
-            }
-            Err(_) => self
-                .aliases
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get(path)
-                .cloned()
-                .unwrap_or_else(|| walk::resolve(path)),
-        }
+        identify_through(&self.aliases, path)
     }
 
     /// The file `path` names, resolved, and the role it plays. A file the
@@ -1034,6 +1042,14 @@ impl Session {
             role,
             is_stub,
         }
+    }
+
+    /// Whether the configuration reaches `path`, which is identified already:
+    /// the listing holds it, or a root the walk gave holds it, as a file
+    /// created since the walk is.
+    pub(crate) fn reaches(&self, path: &Path) -> bool {
+        let listing = self.listing_of();
+        listing.index.contains_key(path) || listing.roots.iter().any(|root| root.contains(path))
     }
 
     fn configure(&self, project: &mut Project) {

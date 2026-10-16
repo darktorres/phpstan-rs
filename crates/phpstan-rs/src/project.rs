@@ -2800,6 +2800,11 @@ impl Project {
     pub fn is_analyzed(&self, path: &Path) -> bool {
         self.files.get(path).is_some_and(|state| state.analyzed)
     }
+
+    /// `true` if `path` is loaded, analyzed or context alike.
+    pub fn is_loaded(&self, path: &Path) -> bool {
+        self.files.get(path).is_some()
+    }
 }
 
 #[cfg(test)]

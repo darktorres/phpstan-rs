@@ -345,10 +345,11 @@ fn a_reload_whose_config_drops_a_path_clears_the_files_it_no_longer_lists() {
         "a file the new config no longer lists must have its diagnostics cleared, got: {reload:?}"
     );
     assert!(
-        !server
+        !server.folders.iter().any(|folder| folder
+            .slot
             .project
             .loaded_paths()
-            .any(|p| p == lib_path.as_path()),
+            .any(|p| p == lib_path.as_path())),
         "a file the new config no longer lists must leave the project"
     );
 }

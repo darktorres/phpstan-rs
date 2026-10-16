@@ -49,7 +49,7 @@ use crate::app::check_project::{self, CheckRequest};
 use crate::checker::Checker;
 use crate::project::session::{
     Classified, DEFAULT_REPORT_LEVEL, DiagnosticOrder, ErrorPolicy, Finalize, Session,
-    classify_unlisted, finalize_results,
+    classify_unlisted, finalize_results, identify_through,
 };
 use crate::project::source::{self, FileSource};
 use crate::project::use_sites;
@@ -146,8 +146,7 @@ struct PendingWorkspaceScan {
 }
 
 struct Server {
-    project: Project,
-    // The built-in stubs, which the project takes its base from.
+    // The built-in stubs, which every project takes its base from.
     stubs: Stubs,
     // Every URI the client currently has open or has otherwise seen, so
     // the (now-deferred) workspace scan and `didOpen`/`didChange` share
@@ -159,7 +158,7 @@ struct Server {
     // `didChange` do), so `publishDiagnostics` can be stamped with it -
     // see `uri_and_version_for`.
     open_uris: FxHashMap<PathBuf, (Uri, Option<i32>)>,
-    // The last-computed, post-`finalize_for_publish` diagnostic set for
+    // The last-computed, post-`finalized` diagnostic set for
     // every path this server has ever checked - `code_actions` reads
     // this instead of re-running a whole-file checker pass per request
     // (a real editor's lightbulb fires `textDocument/codeAction` far
@@ -167,24 +166,13 @@ struct Server {
     // the editor was last sent for each path, and only a publish changes
     // it: a set that was not sent is never stored here, and
     // `publish_analysis` compares against it to decide what to send. A
-    // removed file's entry goes with its clearing notification
-    // (`publish_removal`). Safe under
+    // removed file's entry goes with the empty set that clears it
+    // (`publish_paths`). Safe under
     // today's fully synchronous, one-message-at-a-time `run_loop`: a
     // `codeAction` request can only ever see whatever the most recently
     // processed `didChange`/scan already committed, never a torn or
     // stale-relative-to-an-earlier-unprocessed-edit state.
     last_diagnostics: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
-    // The raw per-file checks of every analysed path: the last full
-    // analysis's, updated by the files each edit re-checked. These are what
-    // `finalize_for_publish` post-processes before anything is published.
-    file_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
-    // The raw project-wide diagnostics of the last full analysis, by the
-    // file each is reported in. An edit drops the edited file's own entry,
-    // whose spans do not fit the edited text, until the next save.
-    whole_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
-    // The session the project was configured from: a full analysis runs its
-    // checks with this session's configuration.
-    session: Option<Session>,
     // The exact current text `didOpen`/`didChange` last sent for a path,
     // regardless of whether it parses - `Project::source`/`Project::ast`
     // only ever reflect the last *successfully parsed* version, but
@@ -228,24 +216,20 @@ struct Server {
     // `PendingWorkspaceScan`'s own doc comment for why the scan itself
     // can't just run inline in `"initialize"`.
     pending_workspace_scan: Option<PendingWorkspaceScan>,
-    // Every workspace folder root already loaded, as the client named it and
-    // as it resolves - `add_workspace_folders`/`remove_workspace_folders`
-    // dedup/filter against the first, and the project keys the files a folder
-    // loaded by the second, which a folder whose link was since removed no
-    // longer resolves to.
-    workspace_roots: Vec<(PathBuf, PathBuf)>,
-    // The most recently configured workspace root, which `finalize_for_publish`
-    // rewrites a diagnostic's path against before consulting the applied
-    // `ignore_error_entries` and `baseline`. With more than one workspace
-    // folder, this and `applied` are last-root-wins: `Project`/`Registry`
-    // have no per-root config scoping.
-    root: Option<PathBuf>,
-    // What `root`'s configuration applies, once it has been applied.
-    applied: Option<Applied>,
-    // A `phpstan-rs.configPath` setting override, applied on top of
-    // `root`'s own default `phpstan-rs.toml` lookup by every subsequent
-    // `add_workspace_folders`/`reload_configuration` call. `None`
-    // until a `workspace/didChangeConfiguration` notification sets one.
+    // The workspace folders, in the order they were added. Each has its own
+    // configuration and project - see `Folder`.
+    folders: Vec<Folder>,
+    // The project of the open documents that no folder holds. It has no
+    // configuration: its files take the roles `classify_unlisted` gives them.
+    loose: Slot,
+    // The resolved path of each spelling that differs from it, as
+    // `identify_through` keeps them.
+    aliases: Mutex<FxHashMap<PathBuf, PathBuf>>,
+    // A `phpstan-rs.configPath` setting override, as the setting names it,
+    // applied on top of each folder's own default `phpstan-rs.toml` lookup
+    // by every subsequent `add_workspace_folders`/`reload_configuration`
+    // call. A relative override is resolved against each folder's root.
+    // `None` until a `workspace/didChangeConfiguration` notification sets one.
     config_path_override: Option<PathBuf>,
     // `phpstan-rs.enable` - "stop showing squiggles", not "stop the
     // language server": hover/definition/documentSymbol keep working
@@ -286,6 +270,68 @@ struct Server {
     config_schema: config::Schema,
 }
 
+/// What a project runs and reports from: the project itself, and the raw
+/// results of its last analysis, which publishing finalizes.
+struct Slot {
+    project: Project,
+    // The raw per-file checks of every analysed path: the last full
+    // analysis's, updated by the files each edit re-checked.
+    file_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    // The raw project-wide diagnostics of the last full analysis, by the
+    // file each is reported in. An edit drops the edited file's own entry,
+    // whose spans do not fit the edited text, until the next save.
+    whole_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+}
+
+impl Slot {
+    /// A slot whose project holds the built-in stubs and keeps each file's
+    /// source text.
+    fn new(stubs: &Stubs) -> Self {
+        let mut project = Project::from_stubs(stubs);
+        // hover/definition's own text-split technique needs each file's
+        // exact source text - see `Project::retain_source`'s own doc
+        // comment for why this is opt-in and off elsewhere.
+        project.apply_settings(ProjectSettings {
+            retain_source: true,
+            ..ProjectSettings::default()
+        });
+        Slot {
+            project,
+            file_results: FxHashMap::default(),
+            whole_results: FxHashMap::default(),
+        }
+    }
+
+    /// The raw diagnostics of `path`: its per-file checks, then its
+    /// project-wide ones.
+    fn raw(&self, path: &Path) -> Vec<diagnostics::Diagnostic> {
+        let mut diags = self.file_results.get(path).cloned().unwrap_or_default();
+        if let Some(whole) = self.whole_results.get(path) {
+            diags.extend(whole.iter().cloned());
+        }
+        diags
+    }
+}
+
+/// A workspace folder: the root as the client named it, the root with links
+/// followed (which the folder's files are keyed under), the configuration the
+/// folder runs with, and the project that configuration built.
+struct Folder {
+    spelled: PathBuf,
+    resolved: PathBuf,
+    session: Session,
+    applied: Applied,
+    slot: Slot,
+}
+
+/// The project that holds a file: a workspace folder's, by its index in
+/// `Server::folders`, or the loose project's.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Home {
+    Folder(usize),
+    Loose,
+}
+
 /// What a workspace's configuration applies to the server: the settings its
 /// project runs with, the post-filters its diagnostics pass through, and the
 /// files it lists. A reload compares the newly resolved one with the applied
@@ -309,28 +355,30 @@ fn configuration_warnings(warnings: Vec<String>) -> Vec<Message> {
         .collect()
 }
 
+/// The configuration file a folder's configuration is read from: the
+/// `configPath` setting, resolved against the folder's root when relative.
+/// `None` leaves the folder's own `phpstan-rs.toml` in place.
+fn config_path_for(root: &Path, setting: Option<&Path>) -> Option<PathBuf> {
+    setting.map(|candidate| {
+        if candidate.is_absolute() {
+            candidate.to_path_buf()
+        } else {
+            root.join(candidate)
+        }
+    })
+}
+
 impl Server {
     fn new(version: &str, config_schema: config::Schema) -> Self {
         let stubs = Stubs::new(
             StubSource::from_environment(),
             crate::project::worker_pool(),
         );
-        let mut project = Project::from_stubs(&stubs);
-        // hover/definition's own text-split technique needs each file's
-        // exact source text - see `Project::retain_source`'s own doc
-        // comment for why this is opt-in and off elsewhere.
-        project.apply_settings(ProjectSettings {
-            retain_source: true,
-            ..ProjectSettings::default()
-        });
         Server {
-            project,
+            loose: Slot::new(&stubs),
             stubs,
             open_uris: FxHashMap::default(),
             last_diagnostics: FxHashMap::default(),
-            file_results: FxHashMap::default(),
-            whole_results: FxHashMap::default(),
-            session: None,
             latest_text: FxHashMap::default(),
             unit: Unit::default(),
             shutdown_received: false,
@@ -343,9 +391,8 @@ impl Server {
             pending_incoming_requests: lsp_server::ReqQueue::<Arc<AtomicBool>, ()>::default()
                 .incoming,
             pending_workspace_scan: None,
-            workspace_roots: Vec::new(),
-            root: None,
-            applied: None,
+            folders: Vec::new(),
+            aliases: Mutex::default(),
             config_path_override: None,
             enabled: true,
             supports_configuration_pull: false,
@@ -355,6 +402,114 @@ impl Server {
             version: version.to_string(),
             config_schema,
         }
+    }
+
+    /// The slot of `home`.
+    fn slot(&self, home: Home) -> &Slot {
+        match home {
+            Home::Folder(index) => &self.folders[index].slot,
+            Home::Loose => &self.loose,
+        }
+    }
+
+    fn slot_mut(&mut self, home: Home) -> &mut Slot {
+        match home {
+            Home::Folder(index) => &mut self.folders[index].slot,
+            Home::Loose => &mut self.loose,
+        }
+    }
+
+    /// Every home: the folders in the order they were added, then the loose
+    /// project.
+    fn homes(&self) -> Vec<Home> {
+        (0..self.folders.len())
+            .map(Home::Folder)
+            .chain([Home::Loose])
+            .collect()
+    }
+
+    /// The folder whose root holds `path`: the deepest one when folders nest.
+    fn owner(&self, path: &Path) -> Option<usize> {
+        self.folders
+            .iter()
+            .enumerate()
+            .filter(|(_, folder)| path.starts_with(&folder.resolved))
+            .max_by_key(|(_, folder)| folder.resolved.components().count())
+            .map(|(index, _)| index)
+    }
+
+    /// The homes that can hold `path`, in the order they are tried for it: its
+    /// owner, the other folders, then the loose project.
+    fn order(&self, path: &Path) -> Vec<Home> {
+        let owner = self.owner(path);
+        owner
+            .map(Home::Folder)
+            .into_iter()
+            .chain(
+                (0..self.folders.len())
+                    .filter(|&index| Some(index) != owner)
+                    .map(Home::Folder),
+            )
+            .chain([Home::Loose])
+            .collect()
+    }
+
+    /// The home that publishes `path`'s diagnostics: the first in `order`
+    /// whose project analyses it.
+    fn publisher(&self, path: &Path) -> Option<Home> {
+        self.order(path)
+            .into_iter()
+            .find(|&home| self.slot(home).project.is_analyzed(path))
+    }
+
+    /// The home `path`'s queries run against: its publisher, else the first
+    /// home in `order` that loads it, else its owner or the loose project.
+    fn home_of(&self, path: &Path) -> Home {
+        let order = self.order(path);
+        order
+            .iter()
+            .copied()
+            .find(|&home| self.slot(home).project.is_analyzed(path))
+            .or_else(|| {
+                order
+                    .iter()
+                    .copied()
+                    .find(|&home| self.slot(home).project.is_loaded(path))
+            })
+            .unwrap_or_else(|| self.owner(path).map_or(Home::Loose, Home::Folder))
+    }
+
+    /// The project `path`'s queries run against (see `home_of`).
+    fn project_for(&self, path: &Path) -> &Project {
+        &self.slot(self.home_of(path)).project
+    }
+
+    /// The homes that hold the open document or the changed file `path`, each
+    /// with the classification its own configuration gives it: the owner
+    /// first, then the other folders whose configuration reaches it. The
+    /// loose project when no folder holds it.
+    fn holders(&self, path: &Path) -> Vec<(Home, Classified)> {
+        let owner = self.owner(path);
+        let mut holders: Vec<(Home, Classified)> =
+            owner
+                .into_iter()
+                .chain((0..self.folders.len()).filter(|&index| {
+                    Some(index) != owner && self.folders[index].session.reaches(path)
+                }))
+                .map(|index| {
+                    let classified = self.folders[index].session.classify(path);
+                    // The callers pass the identified path, which classification
+                    // keeps as the file's key.
+                    debug_assert_eq!(classified.path, path);
+                    (Home::Folder(index), classified)
+                })
+                .collect();
+        if holders.is_empty() {
+            let classified = classify_unlisted(path);
+            debug_assert_eq!(classified.path, path);
+            holders.push((Home::Loose, classified));
+        }
+        holders
     }
 
     /// Resolves `root`'s configuration into what the server applies: the
@@ -406,13 +561,14 @@ impl Server {
         Ok((applied, run.session, warnings))
     }
 
-    /// Applies `next` to `self.project` and `self`, then loads the files it
-    /// lists that are not loaded yet, context first. `previous` is the listing
-    /// the project was configured with before: a file it listed under another
-    /// role, or not at all, is removed first, unless the editor has it open.
-    /// Returns the messages of those removals and loads, and whether a file
-    /// was loaded, in which case the caller runs `finish_loading_with` once
-    /// for its batch.
+    /// Applies folder `index`'s configuration, which the folder already holds:
+    /// its project takes the settings, drops the files `previous` listed and
+    /// the configuration no longer lists or lists under another role (unless
+    /// the editor has them open), and loads the files it lists that the project
+    /// does not hold, context first. `previous` is the listing the project was
+    /// configured with before. Returns the messages of the loads that failed,
+    /// and whether a file was loaded, in which case the caller runs
+    /// `finish_loading_with` once for the batch.
     ///
     /// **Context-before-root load order is a correctness invariant, not
     /// just a dedup convenience**: `Registry::insert_built_decl`'s
@@ -425,52 +581,66 @@ impl Server {
     /// genuinely different `Project` state for the identical tree. A
     /// future refactor of this method must preserve this order
     /// explicitly.
-    fn apply_configuration(
-        &mut self,
-        next: Applied,
-        session: Session,
-        previous: &[Listed],
-    ) -> (Vec<Message>, bool) {
+    fn apply_configuration(&mut self, index: usize, previous: &[Listed]) -> (Vec<Message>, bool) {
         let mut messages = Vec::new();
-        self.project.apply_settings(next.settings.clone());
+        let open = &self.open_uris;
+        let folder = &mut self.folders[index];
+        folder
+            .slot
+            .project
+            .apply_settings(folder.applied.settings.clone());
 
-        let current: FxHashMap<&Path, (Role, bool)> = next
-            .listing
-            .iter()
-            .map(|listed| (listed.path.as_path(), (listed.role, listed.stub)))
-            .collect();
         let removed: Vec<PathBuf> = {
-            let loaded: FxHashSet<&Path> = self.project.loaded_paths().collect();
+            let current: FxHashMap<&Path, (Role, bool)> = folder
+                .applied
+                .listing
+                .iter()
+                .map(|listed| (listed.path.as_path(), (listed.role, listed.stub)))
+                .collect();
+            let loaded: FxHashSet<&Path> = folder.slot.project.loaded_paths().collect();
             previous
                 .iter()
                 .filter(|old| current.get(old.path.as_path()) != Some(&(old.role, old.stub)))
-                .filter(|old| {
-                    loaded.contains(old.path.as_path()) && !self.open_uris.contains_key(&old.path)
-                })
+                .filter(|old| loaded.contains(old.path.as_path()) && !open.contains_key(&old.path))
                 .map(|old| old.path.clone())
                 .collect()
         };
-        // Published once the new configuration is in place, so the dependents'
-        // diagnostics are finalized with it.
-        let removal = if removed.is_empty() {
-            None
-        } else {
+        if !removed.is_empty() {
             for path in &removed {
                 self.latest_text.remove(path);
+                folder.slot.file_results.remove(path);
+                folder.slot.whole_results.remove(path);
             }
-            Some(self.project.remove_files(&removed))
-        };
+            for (path, diags) in folder.slot.project.remove_files(&removed) {
+                folder.slot.file_results.insert(path, diags);
+            }
+        }
 
         let to_load: Vec<Listed> = {
-            let loaded: FxHashSet<&Path> = self.project.loaded_paths().collect();
-            next.listing
+            let loaded: FxHashSet<&Path> = folder.slot.project.loaded_paths().collect();
+            folder
+                .applied
+                .listing
                 .iter()
                 .filter(|listed| !loaded.contains(listed.path.as_path()))
                 .cloned()
                 .collect()
         };
+        // An open document is set to the editor's text before it is loaded,
+        // so the load reads that text rather than the disk's.
+        for listed in &to_load {
+            if let Some(text) = self.latest_text.get(&listed.path) {
+                folder
+                    .slot
+                    .project
+                    .set_document(&listed.path, text.as_bytes());
+            }
+        }
         let loaded = !to_load.is_empty();
-        for (path, reason) in session.load_listed(&mut self.project, &to_load) {
+        for (path, reason) in folder
+            .session
+            .load_listed(&mut folder.slot.project, &to_load)
+        {
             eprintln!(
                 "phpstan-rs lsp: skipping {} - failed to parse: {reason}",
                 path.display()
@@ -483,49 +653,41 @@ impl Server {
                 ),
             ));
         }
-        self.applied = Some(next);
-        self.session = Some(session);
-        if let Some(results) = removal {
-            messages.extend(self.publish_removal(&removed, results));
+        if !removed.is_empty() {
+            messages.extend(self.publish_paths(&removed));
         }
         (messages, loaded)
     }
 
-    /// Loads every not-yet-tracked root in `roots` (deduped against
-    /// `self.workspace_roots`), then runs `Project::finish_loading_with` at
-    /// most ONCE for the whole batch - not once per root, which would
-    /// pay N whole-registry recomputes for N roots (each re-scanning
-    /// every previously-loaded root's own files again) instead of one.
-    /// Called from both `"initialized"` (the `pending_workspace_scan`
-    /// roots resolved at `"initialize"`) and
-    /// `"workspace/didChangeWorkspaceFolders"`'s own `added` array -
-    /// every load path goes through this one method, even for a single
-    /// root, so there is exactly one place this batching discipline can
-    /// be violated.
+    /// Adds the folders `roots` name, each with the configuration it resolves
+    /// to, and loads them. A root that another folder already has, as spelled
+    /// or as resolved, is skipped. Each folder that loaded runs
+    /// `finish_loading_with` once, and then the open documents move to the
+    /// homes that hold them now.
     fn add_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
         let mut messages = Vec::new();
-        let mut any_loaded = false;
+        let mut added = Vec::new();
         for root in roots {
+            let resolved = walk::resolve(root);
             if self
-                .workspace_roots
+                .folders
                 .iter()
-                .any(|(spelled, _)| spelled == root)
+                .any(|folder| folder.spelled == *root || folder.resolved == resolved)
             {
                 continue;
             }
-            // What a root's configuration applies to `self`/`self.project` is
-            // last-root-wins: `Project`/`Registry` have no per-root config
-            // scoping, only one shared instance for however many folders are
-            // open.
-            match self.resolve_workspace(root, self.config_path_override.as_deref()) {
-                Ok((next, session, warnings)) => {
+            let config_path = config_path_for(root, self.config_path_override.as_deref());
+            match self.resolve_workspace(root, config_path.as_deref()) {
+                Ok((applied, session, warnings)) => {
                     messages.extend(configuration_warnings(warnings));
-                    self.root = Some(root.clone());
-                    let (applied, loaded) = self.apply_configuration(next, session, &[]);
-                    messages.extend(applied);
-                    any_loaded |= loaded;
-                    self.workspace_roots
-                        .push((root.clone(), walk::resolve(root)));
+                    self.folders.push(Folder {
+                        spelled: root.clone(),
+                        resolved,
+                        session,
+                        applied,
+                        slot: Slot::new(&self.stubs),
+                    });
+                    added.push(self.folders.len() - 1);
                 }
                 Err(error) => messages.push(show_message_notification(
                     MessageType::ERROR,
@@ -533,104 +695,169 @@ impl Server {
                 )),
             }
         }
-        if any_loaded {
-            self.project.finish_loading_with(&self.stubs);
+        if added.is_empty() {
+            return messages;
         }
+        for index in added {
+            let (applied, loaded) = self.apply_configuration(index, &[]);
+            messages.extend(applied);
+            if loaded {
+                self.folders[index]
+                    .slot
+                    .project
+                    .finish_loading_with(&self.stubs);
+            }
+        }
+        let (_, synced) = self.sync_open_documents();
+        messages.extend(synced);
         messages
     }
 
-    /// Batch counterpart to `add_workspace_folders`: drops every loaded
-    /// path under any of `roots` (`Project::remove_files`, one recompute
-    /// for the whole batch) and clears `open_uris`/publishes an empty
-    /// `publishDiagnostics` for any of them that was open in the editor -
-    /// otherwise a document whose backing folder just vanished would
-    /// keep showing stale squiggles indefinitely, since removing a
-    /// workspace folder is not itself a `textDocument/didClose`.
+    /// Drops the folders `roots` name, with their projects. The files they
+    /// held are published again from the homes that still hold them, and the
+    /// open documents move to the homes that hold them now.
     fn remove_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
-        let resolved: Vec<PathBuf> = roots
-            .iter()
-            .map(|root| {
-                self.workspace_roots
-                    .iter()
-                    .find(|(spelled, _)| spelled == root)
-                    .map_or_else(|| walk::resolve(root), |(_, resolved)| resolved.clone())
-            })
-            .collect();
-        self.workspace_roots
-            .retain(|(spelled, _)| !roots.contains(spelled));
-        let paths: Vec<PathBuf> = self
-            .project
-            .loaded_paths()
-            .filter(|p| resolved.iter().any(|root| p.starts_with(root)))
-            .map(Path::to_path_buf)
-            .collect();
-
-        let results = self.project.remove_files(&paths);
-        let messages = self.publish_removal(&paths, results);
-        for p in &paths {
-            self.open_uris.remove(p);
-            self.latest_text.remove(p);
+        let resolved_roots: Vec<PathBuf> = roots.iter().map(|root| walk::resolve(root)).collect();
+        let mut affected: Vec<PathBuf> = Vec::new();
+        let mut index = 0;
+        while index < self.folders.len() {
+            let folder = &self.folders[index];
+            if roots.contains(&folder.spelled) || resolved_roots.contains(&folder.resolved) {
+                let removed = self.folders.remove(index);
+                affected.extend(removed.slot.project.loaded_paths().map(Path::to_path_buf));
+            } else {
+                index += 1;
+            }
         }
+        let (changed, mut messages) = self.sync_open_documents();
+        affected.extend(changed);
+        affected.sort();
+        affected.dedup();
+        messages.extend(self.publish_paths(&affected));
         messages
     }
 
-    /// Runs the full analysis of the loaded project - every analysed file's
-    /// checks, then the project-wide passes, as `check-project` runs them -
-    /// and keeps its raw results for publishing. A file whose check panicked
-    /// keeps no results.
-    fn analyse_workspace(&mut self) {
-        let Some(session) = &self.session else {
-            self.file_results.clear();
-            self.whole_results.clear();
-            return;
-        };
-        let mut paths = self.project.analyzed_paths();
-        // Sorted, so repeated runs against an unchanged workspace check the
-        // same files in the same order.
-        paths.sort();
-        let checks = session.check_project(&mut self.project, &paths, false);
-        for (path, msg) in &checks.check_panics {
-            eprintln!(
-                "phpstan-rs lsp: checking {} panicked: {msg}",
-                path.display()
-            );
-        }
-        self.file_results = checks.per_file;
-        self.whole_results = checks.whole_program;
-    }
-
-    /// The raw diagnostics of `paths`: each path's per-file checks, then its
-    /// project-wide diagnostics.
-    fn raw_results_for(
-        &self,
-        paths: &[PathBuf],
-    ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        paths
-            .iter()
-            .map(|path| {
-                let mut diags = self.file_results.get(path).cloned().unwrap_or_default();
-                if let Some(whole) = self.whole_results.get(path) {
-                    diags.extend(whole.iter().cloned());
+    /// Brings every open document to the homes that hold it now, with the
+    /// editor's text. A home that holds one no longer drops it, and each home
+    /// that holds one is given the document. Returns the paths whose state
+    /// changed, and the warnings of the documents that failed to parse.
+    fn sync_open_documents(&mut self) -> (Vec<PathBuf>, Vec<Message>) {
+        let mut open: Vec<PathBuf> = self.open_uris.keys().cloned().collect();
+        open.sort();
+        let mut changed = Vec::new();
+        let mut messages = Vec::new();
+        for path in open {
+            let Some(text) = self.latest_text.get(&path).cloned() else {
+                continue;
+            };
+            let holders = self.holders(&path);
+            for home in self.homes() {
+                if holders.iter().any(|(held, _)| *held == home)
+                    || !self.slot(home).project.is_loaded(&path)
+                {
+                    continue;
                 }
-                (path.clone(), diags)
-            })
-            .collect()
+                let slot = self.slot_mut(home);
+                slot.project.unset_document(&path);
+                let results = slot.project.remove_file(&path);
+                slot.file_results.remove(&path);
+                changed.extend(self.record(home, &path, results));
+            }
+            for (home, classified) in holders {
+                let slot = self.slot_mut(home);
+                slot.project.set_document(&path, text.as_bytes());
+                match slot.project.update_file_as(
+                    &path,
+                    text.as_bytes(),
+                    classified.role == Role::Analysed,
+                    classified.is_stub,
+                    || false,
+                ) {
+                    Ok(results) => changed.extend(self.record(home, &path, results)),
+                    Err(error) => {
+                        eprintln!(
+                            "phpstan-rs lsp: skipping {} - failed to parse: {error}",
+                            path.display()
+                        );
+                        messages.push(log_message_notification(
+                            MessageType::WARNING,
+                            format!(
+                                "phpstan-rs: skipping {} - failed to parse: {error}",
+                                path.display()
+                            ),
+                        ));
+                    }
+                }
+            }
+            changed.push(path);
+        }
+        changed.sort();
+        changed.dedup();
+        (changed, messages)
     }
 
-    /// The post-processing a published diagnostic set gets: the one
-    /// `check-project` applies, except unmatched ignore comments, which the
-    /// server never reports.
-    fn finalize_for_publish(
+    /// Runs the full analysis of every folder's project - every analysed
+    /// file's checks, then the project-wide passes, as `check-project` runs
+    /// them - and of the loose project's files, and keeps the raw results for
+    /// publishing. A file whose check panicked keeps no results.
+    fn analyse_workspace(&mut self) {
+        for folder in &mut self.folders {
+            let mut paths = folder.slot.project.analyzed_paths();
+            // Sorted, so repeated runs against an unchanged workspace check the
+            // same files in the same order.
+            paths.sort();
+            let checks = folder
+                .session
+                .check_project(&mut folder.slot.project, &paths, false);
+            for (path, msg) in &checks.check_panics {
+                eprintln!(
+                    "phpstan-rs lsp: checking {} panicked: {msg}",
+                    path.display()
+                );
+            }
+            folder.slot.file_results = checks.per_file;
+            folder.slot.whole_results = checks.whole_program;
+        }
+        self.analyse_loose();
+    }
+
+    /// The per-file checks of the loose project's files. It has no
+    /// configuration, so it has no project-wide passes.
+    fn analyse_loose(&mut self) {
+        let mut paths = self.loose.project.analyzed_paths();
+        paths.sort();
+        let file_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> = paths
+            .into_iter()
+            .map(|path| {
+                let diags = self.loose.project.check_file(&path);
+                (path, diags)
+            })
+            .collect();
+        self.loose.file_results = file_results;
+        self.loose.whole_results.clear();
+    }
+
+    /// `results`, finalized as `home`'s configuration says: the filters, the
+    /// baseline, and the order its diagnostics are published in.
+    fn finalize_in(
         &self,
+        home: Home,
         results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
     ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        let options = match (&self.session, &self.applied) {
-            (Some(session), Some(applied)) => Finalize {
-                report_unmatched_ignores: false,
-                baseline: applied.baseline.clone(),
-                ..session.finalize_options()
-            },
-            _ => Finalize {
+        let slot = self.slot(home);
+        // The post-processing a published diagnostic set gets: the one
+        // `check-project` applies, except unmatched ignore comments, which the
+        // server never reports.
+        let options = match home {
+            Home::Folder(index) => {
+                let folder = &self.folders[index];
+                Finalize {
+                    report_unmatched_ignores: false,
+                    baseline: folder.applied.baseline.clone(),
+                    ..folder.session.finalize_options()
+                }
+            }
+            Home::Loose => Finalize {
                 level: DEFAULT_REPORT_LEVEL,
                 report_unmatched_ignores: false,
                 ignore_errors: Vec::new(),
@@ -639,28 +866,54 @@ impl Server {
             },
         };
         finalize_results(
-            &self.project,
+            &slot.project,
             results,
             &options,
-            self.project.absolute_root(),
+            slot.project.absolute_root(),
         )
         .results
     }
 
+    /// The post-processed diagnostics of `paths`. Each path is finalized by the
+    /// home that publishes it (see `publisher`), and a path no home publishes
+    /// has none.
+    fn finalized(&self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
+        let mut raw: FxHashMap<Home, FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>> =
+            FxHashMap::default();
+        for path in paths {
+            if let Some(home) = self.publisher(path) {
+                raw.entry(home)
+                    .or_default()
+                    .insert(path.clone(), self.slot(home).raw(path));
+            }
+        }
+        let mut out = FxHashMap::default();
+        for (home, results) in raw {
+            out.extend(self.finalize_in(home, results));
+        }
+        for path in paths {
+            out.entry(path.clone()).or_default();
+        }
+        out
+    }
+
     /// Publishes what the last analysis changed: each analysed path whose
-    /// finalized diagnostics differ from what the editor was last sent. A
-    /// path with nothing to report is published only when it had something
-    /// before, so the editor sees it cleared.
+    /// finalized diagnostics differ from what the editor was last sent. A path
+    /// with nothing to report is published only when it had something before,
+    /// so the editor sees it cleared.
     fn publish_analysis(&mut self) -> Vec<Message> {
-        let mut paths = self.project.analyzed_paths();
+        let mut paths: Vec<PathBuf> = self
+            .homes()
+            .into_iter()
+            .flat_map(|home| self.slot(home).project.analyzed_paths())
+            .collect();
+        paths.extend(self.last_diagnostics.keys().cloned());
         paths.sort();
-        let mut finalized = self.finalize_for_publish(self.raw_results_for(&paths));
+        paths.dedup();
+        let mut finalized = self.finalized(&paths);
         let previous = std::mem::take(&mut self.last_diagnostics);
-        let mut all: Vec<PathBuf> = previous.keys().chain(finalized.keys()).cloned().collect();
-        all.sort();
-        all.dedup();
         let mut messages = Vec::new();
-        for path in all {
+        for path in paths {
             let diags = finalized.remove(&path).unwrap_or_default();
             let changed = match previous.get(&path) {
                 Some(before) => *before != diags,
@@ -675,67 +928,11 @@ impl Server {
         messages
     }
 
-    /// The messages of an edit whose per-file checks are `results`: the
-    /// edited file's and its dependents'. The edited file's project-wide
-    /// diagnostics point at text that has since changed, so they are dropped
-    /// until the next save.
-    fn publish_edit(
-        &mut self,
-        edited: &Path,
-        results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
-    ) -> Vec<Message> {
-        let finalized = self.finalize_edit(edited, results);
+    /// The messages that send `paths`' current diagnostics, every one of them
+    /// (see `finalized`).
+    fn publish_paths(&mut self, paths: &[PathBuf]) -> Vec<Message> {
+        let finalized = self.finalized(paths);
         self.publish_diagnostics_for(finalized)
-    }
-
-    /// Records an edit's per-file checks and returns the finalized diagnostics
-    /// of the edited file and its dependents, without sending them. A debounced
-    /// run that ends up superseded still records the results it computed; the
-    /// caller decides whether they are sent.
-    fn finalize_edit(
-        &mut self,
-        edited: &Path,
-        results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
-    ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        self.whole_results.remove(edited);
-        let mut paths = Vec::with_capacity(results.len() + 1);
-        for (path, diags) in results {
-            self.file_results.insert(path.clone(), diags);
-            paths.push(path);
-        }
-        if !paths.iter().any(|path| path.as_path() == edited) {
-            paths.push(edited.to_path_buf());
-        }
-        self.finalize_for_publish(self.raw_results_for(&paths))
-    }
-
-    /// The messages of a removal of `removed` whose re-checked dependents
-    /// are `results`. Every removed file gets an empty set, which clears
-    /// whatever the editor shows for it.
-    fn publish_removal(
-        &mut self,
-        removed: &[PathBuf],
-        mut results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
-    ) -> Vec<Message> {
-        let mut messages = Vec::new();
-        for path in removed {
-            self.file_results.remove(path);
-            self.whole_results.remove(path);
-            self.last_diagnostics.remove(path);
-            let (uri, version) = self.uri_and_version_for(path);
-            messages.push(self.diagnostics_message(path, uri, version, &[]));
-        }
-        // The removed paths were cleared above, so they are not published again.
-        results.retain(|path, _| !removed.contains(path));
-        results.retain(|path, _| !removed.contains(path));
-        let mut paths = Vec::with_capacity(results.len());
-        for (path, diags) in results {
-            self.file_results.insert(path.clone(), diags);
-            paths.push(path);
-        }
-        let finalized = self.finalize_for_publish(self.raw_results_for(&paths));
-        messages.extend(self.publish_diagnostics_for(finalized));
-        messages
     }
 
     /// A save's own work: the full analysis, published where it changed.
@@ -760,22 +957,9 @@ impl Server {
             .unwrap_or_else(|| (path_to_uri(path), None))
     }
 
-    /// The key `path` has in the project: the path resolved through links,
-    /// by the session when one is configured.
+    /// The key `path` has in the projects: the path resolved through links.
     fn identify(&self, path: &Path) -> PathBuf {
-        match &self.session {
-            Some(session) => session.identify(path),
-            None => walk::resolve(path),
-        }
-    }
-
-    /// The file `path` names, as the project keys it, with the role and stub
-    /// status the configuration gives it.
-    fn classify(&self, path: &Path) -> Classified {
-        match &self.session {
-            Some(session) => session.classify(path),
-            None => classify_unlisted(path),
-        }
+        identify_through(&self.aliases, path)
     }
 
     /// The key of the file the document `uri` names, or `None` when the URI
@@ -793,7 +977,10 @@ impl Server {
         version: Option<i32>,
         diags: &[diagnostics::Diagnostic],
     ) -> Message {
-        let index = self.project.line_index(path).map(|index| &**index);
+        let index = self
+            .project_for(path)
+            .line_index(path)
+            .map(|index| &**index);
         publish_diagnostics_notification(uri, version, diags, index, self.unit)
     }
 
@@ -801,7 +988,7 @@ impl Server {
     /// columns.
     fn positions(&self, path: &Path) -> Option<Positions<'_>> {
         Some(Positions {
-            index: self.project.line_index(path)?,
+            index: self.project_for(path).line_index(path)?,
             unit: self.unit,
         })
     }
@@ -847,6 +1034,31 @@ impl Server {
         self.publish_analysis()
     }
 
+    /// Records the per-file checks of an edit of `edited` made in `home`. The
+    /// edited file's own project-wide diagnostics are dropped: their spans no
+    /// longer fit its text. Returns the paths recorded, the edited file among
+    /// them.
+    fn record(
+        &mut self,
+        home: Home,
+        edited: &Path,
+        results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    ) -> Vec<PathBuf> {
+        let slot = self.slot_mut(home);
+        slot.whole_results.remove(edited);
+        let mut paths: Vec<PathBuf> = results
+            .into_iter()
+            .map(|(path, diags)| {
+                slot.file_results.insert(path.clone(), diags);
+                path
+            })
+            .collect();
+        if !paths.iter().any(|path| path.as_path() == edited) {
+            paths.push(edited.to_path_buf());
+        }
+        paths
+    }
+
     fn handle_open_or_change(
         &mut self,
         uri: &Uri,
@@ -856,42 +1068,103 @@ impl Server {
         let Some(spelled) = uri_to_path(uri) else {
             return Vec::new();
         };
-        let Classified {
-            path,
-            role,
-            is_stub,
-        } = self.classify(&spelled);
+        let path = self.identify(&spelled);
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris.insert(path.clone(), (uri.clone(), version));
         self.latest_text.insert(path.clone(), text.to_string());
-        self.project.set_document(&path, text.as_bytes());
-        // Opening a file exactly as it was loaded changes nothing in the
-        // project, so only its own diagnostics need publishing.
-        if self.project.content_hash(&path) == Some(source::content_hash(text.as_bytes())) {
+        let mut recorded = Vec::new();
+        let mut content_changed = false;
+        for (home, classified) in self.holders(&path) {
+            let slot = self.slot_mut(home);
+            slot.project.set_document(&path, text.as_bytes());
+            // Opening a file exactly as it was loaded changes nothing in that
+            // project.
+            if slot.project.content_hash(&path) == Some(source::content_hash(text.as_bytes())) {
+                continue;
+            }
+            content_changed = true;
+            // Same graceful degradation as a file that fails to parse on load,
+            // and more exposed in practice here: momentarily-invalid syntax is
+            // the normal state while a file is being typed, not an edge case.
+            // `update_file_as`'s `Result` makes a parse failure here a plain,
+            // recoverable `Err` rather than unwinding and taking down the
+            // whole LSP server process.
+            match slot.project.update_file_as(
+                &path,
+                text,
+                classified.role == Role::Analysed,
+                classified.is_stub,
+                || false,
+            ) {
+                Ok(results) => recorded.extend(self.record(home, &path, results)),
+                Err(e) => {
+                    eprintln!(
+                        "phpstan-rs lsp: skipping {} - failed to parse: {e}",
+                        path.display()
+                    );
+                    return vec![log_message_notification(
+                        MessageType::WARNING,
+                        format!(
+                            "phpstan-rs: skipping {} - failed to parse: {e}",
+                            path.display()
+                        ),
+                    )];
+                }
+            }
+        }
+        if !content_changed {
+            // Only the document's own diagnostics need publishing.
             let diags = match self.last_diagnostics.get(&path) {
                 Some(diags) => diags.clone(),
                 None => {
-                    let checked =
-                        FxHashMap::from_iter([(path.clone(), self.project.check_file(&path))]);
-                    self.finalize_for_publish(checked)
+                    let home = self.home_of(&path);
+                    let checked = FxHashMap::from_iter([(
+                        path.clone(),
+                        self.slot(home).project.check_file(&path),
+                    )]);
+                    self.finalize_in(home, checked)
                         .remove(&path)
                         .unwrap_or_default()
                 }
             };
             return self.publish_diagnostics_for(FxHashMap::from_iter([(path, diags)]));
         }
-        // Same graceful degradation as a file that fails to parse on load,
-        // and more exposed
-        // in practice here: momentarily-invalid syntax is the normal
-        // state while a file is being typed, not an edge case.
-        // `update_file_as`'s `Result` makes a parse failure here a plain,
-        // recoverable `Err` rather than unwinding and taking down the
-        // whole LSP server process.
-        let results =
-            match self
-                .project
-                .update_file_as(&path, text, role == Role::Analysed, is_stub, || false)
-            {
+        self.publish_paths(&recorded)
+    }
+
+    /// The debounce worker's own counterpart to `handle_open_or_change` -
+    /// identical except it drives `Project::update_file_as` with a real
+    /// `should_abort` closure, and takes an already-resolved `path` (the
+    /// worker already has it as the `DebounceQueue` entry's own key) rather
+    /// than re-deriving it from `uri`. `version` is a plain `i32`, not
+    /// `Option<i32>` - a debounced edit always came from a real `didChange`,
+    /// which always carries one. A run that `should_abort` reports superseded
+    /// returns no messages: the newer edit's run sends the file's diagnostics
+    /// instead.
+    fn handle_debounced_change(
+        &mut self,
+        path: &Path,
+        uri: &Uri,
+        text: &str,
+        version: i32,
+        should_abort: &mut impl FnMut() -> bool,
+    ) -> Vec<Message> {
+        let path = self.identify(path);
+        *self.file_versions.entry(path.clone()).or_insert(0) += 1;
+        self.open_uris
+            .insert(path.clone(), (uri.clone(), Some(version)));
+        self.latest_text.insert(path.clone(), text.to_string());
+        let mut recorded = Vec::new();
+        for (home, classified) in self.holders(&path) {
+            let slot = self.slot_mut(home);
+            slot.project.set_document(&path, text.as_bytes());
+            let results = match slot.project.update_file_as(
+                &path,
+                text,
+                classified.role == Role::Analysed,
+                classified.is_stub,
+                &mut *should_abort,
+            ) {
                 Ok(results) => results,
                 Err(e) => {
                     eprintln!(
@@ -907,76 +1180,31 @@ impl Server {
                     )];
                 }
             };
-        self.publish_edit(&path, results)
-    }
-
-    /// The debounce worker's own counterpart to `handle_open_or_change`
-    /// (VSCode plan item 2.2) - identical except it drives `Project::
-    /// update_file_cancellable` with a real `should_abort` closure
-    /// instead of `update_file`, and takes an already-resolved `path`
-    /// (the worker already has it as the `DebounceQueue` entry's own
-    /// key) rather than re-deriving it from `uri`. `version` is a plain
-    /// `i32`, not `Option<i32>` - a debounced edit always came from a
-    /// real `didChange`, which always carries one. A run that `should_abort`
-    /// reports superseded returns no messages: the newer edit's run sends the
-    /// file's diagnostics instead.
-    fn handle_debounced_change(
-        &mut self,
-        path: &Path,
-        uri: &Uri,
-        text: &str,
-        version: i32,
-        should_abort: &mut impl FnMut() -> bool,
-    ) -> Vec<Message> {
-        let classified = self.classify(path);
-        let path = classified.path.as_path();
-        let analysed = classified.role == Role::Analysed;
-        *self.file_versions.entry(path.to_path_buf()).or_insert(0) += 1;
-        self.open_uris
-            .insert(path.to_path_buf(), (uri.clone(), Some(version)));
-        self.latest_text
-            .insert(path.to_path_buf(), text.to_string());
-        self.project.set_document(path, text.as_bytes());
-        let results = match self.project.update_file_as(
-            path,
-            text,
-            analysed,
-            classified.is_stub,
-            &mut *should_abort,
-        ) {
-            Ok(results) => results,
-            Err(e) => {
-                eprintln!(
-                    "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                    path.display()
-                );
-                return vec![log_message_notification(
-                    MessageType::WARNING,
-                    format!(
-                        "phpstan-rs: skipping {} - failed to parse: {e}",
-                        path.display()
-                    ),
-                )];
-            }
-        };
-        let finalized = self.finalize_edit(path, results);
+            recorded.extend(self.record(home, &path, results));
+        }
+        // A run that was superseded still records the results it computed; the
+        // caller decides whether they are sent.
+        let finalized = self.finalized(&recorded);
         if should_abort() {
             return Vec::new();
         }
         // Files an earlier cancelled check left unchecked keep the diagnostics
         // the editor was last sent. Their raw results are stale, so they
         // are dropped until a save's full analysis recomputes them.
-        for stale in self.project.take_unchecked() {
-            if !finalized.contains_key(&stale) {
-                self.file_results.remove(&stale);
-                self.whole_results.remove(&stale);
+        for home in self.homes() {
+            for stale in self.slot_mut(home).project.take_unchecked() {
+                if !finalized.contains_key(&stale) {
+                    let slot = self.slot_mut(home);
+                    slot.file_results.remove(&stale);
+                    slot.whole_results.remove(&stale);
+                }
             }
         }
         self.publish_diagnostics_for(finalized)
     }
 
     /// Routes a `workspace/didChangeWatchedFiles` batch through the same
-    /// `update_file`/`remove_file` machinery `didOpen`/`didChange` and
+    /// `update_file_as`/`remove_file` machinery `didOpen`/`didChange` and
     /// workspace-folder removal already use - an externally created,
     /// changed, or deleted file needs exactly the same recheck-and-
     /// republish treatment. Coalesces to the last event per path first: a
@@ -998,14 +1226,25 @@ impl Server {
         for (path, (uri, typ)) in last_by_path {
             if typ == lsp_types::FileChangeType::DELETED {
                 self.latest_text.remove(&path);
-                self.project.unset_document(&path);
-                let results = self.project.remove_file(&path);
-                messages.extend(self.publish_removal(std::slice::from_ref(&path), results));
+                let mut recorded = vec![path.clone()];
+                for home in self.homes() {
+                    let slot = self.slot_mut(home);
+                    if !slot.project.is_loaded(&path) {
+                        continue;
+                    }
+                    slot.project.unset_document(&path);
+                    let results = slot.project.remove_file(&path);
+                    slot.file_results.remove(&path);
+                    recorded.extend(self.record(home, &path, results));
+                }
+                recorded.sort();
+                recorded.dedup();
+                messages.extend(self.publish_paths(&recorded));
                 self.open_uris.remove(&path);
                 continue;
             }
             // Created and Changed both just need the path's current
-            // on-disk content reflected - `update_file` already tolerates
+            // on-disk content reflected - `update_file_as` already tolerates
             // a path with no prior entry (a brand-new file), so there is
             // no separate load-vs-update branch to make here. A read
             // failure (raced with a subsequent delete before this ran, a
@@ -1014,30 +1253,34 @@ impl Server {
             let Ok(bytes) = FileSource::read_disk(&path) else {
                 continue;
             };
-            let Classified { role, is_stub, .. } = self.classify(&path);
             // No document version exists for an externally-observed
             // change (there is no didOpen/didChange behind it) - `None`
             // matches a file that was only ever loaded from disk.
             self.open_uris.insert(path.clone(), (uri, None));
             self.latest_text
                 .insert(path.clone(), String::from_utf8_lossy(&bytes).into_owned());
-            self.project.unset_document(&path);
-            match self.project.update_file_as(
-                &path,
-                &bytes,
-                role == Role::Analysed,
-                is_stub,
-                || false,
-            ) {
-                Ok(results) => {
-                    messages.extend(self.publish_edit(&path, results));
+            let mut recorded = Vec::new();
+            for (home, classified) in self.holders(&path) {
+                let slot = self.slot_mut(home);
+                slot.project.unset_document(&path);
+                match slot.project.update_file_as(
+                    &path,
+                    &bytes,
+                    classified.role == Role::Analysed,
+                    classified.is_stub,
+                    || false,
+                ) {
+                    Ok(results) => recorded.extend(self.record(home, &path, results)),
+                    Err(e) => {
+                        eprintln!(
+                            "phpstan-rs lsp: skipping {} - failed to parse: {e}",
+                            path.display()
+                        );
+                    }
                 }
-                Err(e) => {
-                    eprintln!(
-                        "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                        path.display()
-                    );
-                }
+            }
+            if !recorded.is_empty() {
+                messages.extend(self.publish_paths(&recorded));
             }
         }
         messages
@@ -1048,8 +1291,7 @@ impl Server {
     /// used for it (a re-checked dependent might not itself be open in
     /// the editor - it still needs a fresh notification, using the
     /// workspace scan's own synthesized URI if nothing else ever opened
-    /// it). Shared by `handle_open_or_change` and
-    /// `remove_workspace_folders`'s own recheck step.
+    /// it). Shared by `handle_open_or_change` and the removal paths.
     fn publish_diagnostics_for(
         &mut self,
         results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
@@ -1073,17 +1315,17 @@ impl Server {
     /// the LSP spec, not an error.
     fn hover(&self, uri: &Uri, position: LspPosition) -> Option<Hover> {
         let path = self.document_path(uri)?;
-        let resolved =
-            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
-        let text = self.format_hover(&resolved)?;
+        let project = self.project_for(&path);
+        let resolved = navigation::resolve_at(project, &path, self.offset_at(&path, position)?)?;
+        let text = self.format_hover(project, &resolved)?;
         Some(Hover {
             contents: HoverContents::Scalar(MarkedString::String(text)),
             range: None,
         })
     }
 
-    fn format_hover(&self, resolved: &navigation::Resolved) -> Option<String> {
-        let registry = self.project.registry();
+    fn format_hover(&self, project: &Project, resolved: &navigation::Resolved) -> Option<String> {
+        let registry = project.registry();
         match resolved {
             navigation::Resolved::Function(fqn) => {
                 Some(format_signature(fqn, registry.lookup_function(fqn)?))
@@ -1111,7 +1353,9 @@ impl Server {
                 }
                 Some(text)
             }
-            navigation::Resolved::Member(owner, name) => self.format_member_hover(owner, name),
+            navigation::Resolved::Member(owner, name) => {
+                self.format_member_hover(project, owner, name)
+            }
             navigation::Resolved::Instance {
                 receiver_span,
                 member,
@@ -1120,10 +1364,15 @@ impl Server {
                 class,
                 ..
             } => {
-                let ty =
-                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
+                let ty = self.probe_receiver_type(
+                    project,
+                    *receiver_span,
+                    scope,
+                    *is_static,
+                    class.as_deref(),
+                )?;
                 let owners = resolve_member_owners(registry, &ty, member);
-                self.format_member_hover_multi(&owners, member)
+                self.format_member_hover_multi(project, &owners, member)
             }
             // A local variable's own declaration/read - no registry
             // signature exists for it, but its inferred type is
@@ -1145,14 +1394,15 @@ impl Server {
                 class,
                 ..
             } => {
-                let ty = self.probe_receiver_type(*span, scope, *is_static, class.as_deref())?;
+                let ty =
+                    self.probe_receiver_type(project, *span, scope, *is_static, class.as_deref())?;
                 Some(ty.to_string())
             }
         }
     }
 
-    fn format_member_hover(&self, owner: &str, name: &str) -> Option<String> {
-        let registry = self.project.registry();
+    fn format_member_hover(&self, project: &Project, owner: &str, name: &str) -> Option<String> {
+        let registry = project.registry();
         if let Some((_, sig)) = registry.lookup_method_with_owner(owner, name) {
             return Some(format_signature(&format!("{owner}::{name}"), sig));
         }
@@ -1172,10 +1422,15 @@ impl Server {
     /// than picking an arbitrary first, the same "don't guess, show
     /// everything real" principle `definition`'s own multi-location
     /// response applies below.
-    fn format_member_hover_multi(&self, owners: &[String], name: &str) -> Option<String> {
+    fn format_member_hover_multi(
+        &self,
+        project: &Project,
+        owners: &[String],
+        name: &str,
+    ) -> Option<String> {
         let texts: Vec<String> = owners
             .iter()
-            .filter_map(|o| self.format_member_hover(o, name))
+            .filter_map(|o| self.format_member_hover(project, o, name))
             .collect();
         match texts.len() {
             0 => None,
@@ -1199,15 +1454,16 @@ impl Server {
     /// statements via `check_program` instead.
     fn probe_receiver_type(
         &self,
+        project: &Project,
         receiver_span: Span,
         scope: &navigation::ProbeScope,
         is_static: bool,
         class: Option<&str>,
     ) -> Option<Type> {
-        let mut checker = Checker::new(self.project.registry())
-            .with_sql(self.project.sql())
-            .with_settings(self.project.check_settings())
-            .with_bodies(self.project.bodies());
+        let mut checker = Checker::new(project.registry())
+            .with_sql(project.sql())
+            .with_settings(project.check_settings())
+            .with_bodies(project.bodies());
         checker.probe_span.set(Some(receiver_span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker.probe_hit.into_inner()
@@ -1226,15 +1482,16 @@ impl Server {
     /// flagged).
     fn probe_variable_provenance(
         &self,
+        project: &Project,
         span: Span,
         scope: &navigation::ProbeScope,
         is_static: bool,
         class: Option<&str>,
     ) -> Vec<Span> {
-        let mut checker = Checker::new(self.project.registry())
-            .with_sql(self.project.sql())
-            .with_settings(self.project.check_settings())
-            .with_bodies(self.project.bodies());
+        let mut checker = Checker::new(project.registry())
+            .with_sql(project.sql())
+            .with_settings(project.check_settings())
+            .with_bodies(project.bodies());
         checker.probe_span.set(Some(span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker
@@ -1273,8 +1530,8 @@ impl Server {
     /// diagnostic, not this method's job to report again).
     fn definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
         let path = self.document_path(uri)?;
-        let resolved =
-            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
+        let project = self.project_for(&path);
+        let resolved = navigation::resolve_at(project, &path, self.offset_at(&path, position)?)?;
         // A local variable's own declaration site(s) are same-file and
         // never need a registry lookup at all, unlike every other
         // variant below.
@@ -1299,7 +1556,7 @@ impl Server {
                 ..
             } => {
                 let locs: Vec<Location> = self
-                    .probe_variable_provenance(*span, scope, *is_static, class.as_deref())
+                    .probe_variable_provenance(project, *span, scope, *is_static, class.as_deref())
                     .into_iter()
                     .map(|s| self.location(&path, s))
                     .collect();
@@ -1313,7 +1570,7 @@ impl Server {
             }
             _ => {}
         }
-        let registry = self.project.registry();
+        let registry = project.registry();
         match &resolved {
             navigation::Resolved::Class(fqn) => {
                 let (target_path, span) = registry.class_declaration(fqn)?;
@@ -1348,8 +1605,13 @@ impl Server {
                 class,
                 ..
             } => {
-                let ty =
-                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
+                let ty = self.probe_receiver_type(
+                    project,
+                    *receiver_span,
+                    scope,
+                    *is_static,
+                    class.as_deref(),
+                )?;
                 let owners = resolve_member_owners(registry, &ty, member);
                 let mut locs: Vec<Location> = Vec::new();
                 for owner in &owners {
@@ -1388,8 +1650,8 @@ impl Server {
     /// than every `Resolved` variant in its v1.
     fn type_definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
         let path = self.document_path(uri)?;
-        let resolved =
-            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
+        let project = self.project_for(&path);
+        let resolved = navigation::resolve_at(project, &path, self.offset_at(&path, position)?)?;
         let ty = match &resolved {
             navigation::Resolved::Instance {
                 receiver_span,
@@ -1397,7 +1659,13 @@ impl Server {
                 is_static,
                 class,
                 ..
-            } => self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?,
+            } => self.probe_receiver_type(
+                project,
+                *receiver_span,
+                scope,
+                *is_static,
+                class.as_deref(),
+            )?,
             navigation::Resolved::VariableSelf {
                 span,
                 scope,
@@ -1411,7 +1679,7 @@ impl Server {
                 is_static,
                 class,
                 ..
-            } => self.probe_receiver_type(*span, scope, *is_static, class.as_deref())?,
+            } => self.probe_receiver_type(project, *span, scope, *is_static, class.as_deref())?,
             navigation::Resolved::Class(_)
             | navigation::Resolved::Function(_)
             | navigation::Resolved::Member(_, _) => return None,
@@ -1421,7 +1689,7 @@ impl Server {
             .iter()
             .map(|c| c.to_string())
             .collect();
-        let registry = self.project.registry();
+        let registry = project.registry();
         let mut locs: Vec<Location> = Vec::new();
         for class in &classes {
             if let Some((target_path, span)) = registry.class_declaration(class) {
@@ -1439,7 +1707,8 @@ impl Server {
 
     fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
         let path = self.document_path(uri)?;
-        let stmts = self.project.ast(&path)?;
+        let project = self.project_for(&path);
+        let stmts = project.ast(&path)?;
         let index = self.positions(&path)?;
         Some(DocumentSymbolResponse::Nested(
             document_symbol::document_symbols(stmts, index),
@@ -1454,7 +1723,8 @@ impl Server {
     /// `semantic_tokens_full`'s own always-return-Tokens contract.
     fn semantic_tokens_full(&self, uri: &Uri) -> Option<lsp_types::SemanticTokensResult> {
         let path = self.document_path(uri)?;
-        let tokens = self.project.semantic_tokens_for_file(&path);
+        let project = self.project_for(&path);
+        let tokens = project.semantic_tokens_for_file(&path);
         let index = self.positions(&path)?;
         Some(lsp_types::SemanticTokensResult::Tokens(
             lsp_types::SemanticTokens {
@@ -1471,7 +1741,11 @@ impl Server {
     /// handling of the identical case. A local variable
     /// (`VariableSelf`/`VariableRead`) answers for nothing - local-
     /// variable references/rename are out of this item's own v1 scope.
-    fn ref_targets_for(&self, resolved: &navigation::Resolved) -> Vec<use_sites::RefTarget> {
+    fn ref_targets_for(
+        &self,
+        project: &Project,
+        resolved: &navigation::Resolved,
+    ) -> Vec<use_sites::RefTarget> {
         match resolved {
             navigation::Resolved::Class(fqn) => vec![use_sites::RefTarget::Class(fqn.clone())],
             navigation::Resolved::Function(fqn) => {
@@ -1487,12 +1761,16 @@ impl Server {
                 is_static,
                 class,
             } => {
-                let Some(ty) =
-                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())
-                else {
+                let Some(ty) = self.probe_receiver_type(
+                    project,
+                    *receiver_span,
+                    scope,
+                    *is_static,
+                    class.as_deref(),
+                ) else {
                     return Vec::new();
                 };
-                resolve_member_owners(self.project.registry(), &ty, member)
+                resolve_member_owners(project.registry(), &ty, member)
                     .into_iter()
                     .map(|owner| use_sites::RefTarget::Member(owner, member.clone()))
                     .collect()
@@ -1517,21 +1795,26 @@ impl Server {
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
         let path = self.document_path(uri)?;
-        let resolved =
-            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
-        let targets = self.ref_targets_for(&resolved);
+        let home = self.home_of(&path);
+        let resolved = navigation::resolve_at(
+            &self.slot(home).project,
+            &path,
+            self.offset_at(&path, position)?,
+        )?;
+        let targets = self.ref_targets_for(&self.slot(home).project, &resolved);
         if targets.is_empty() {
             return None;
         }
-        self.project.ensure_member_index_built();
+        self.slot_mut(home).project.ensure_member_index_built();
+        let project = &self.slot(home).project;
         let mut locations: Vec<Location> = Vec::new();
         for target in &targets {
-            for (p, span) in self.project.use_sites().references(target) {
+            for (p, span) in project.use_sites().references(target) {
                 locations.push(self.location(p, *span));
             }
         }
         if include_declaration {
-            let registry = self.project.registry();
+            let registry = project.registry();
             for target in &targets {
                 let decl = match target {
                     use_sites::RefTarget::Class(fqn) => registry.class_declaration(fqn),
@@ -1564,28 +1847,35 @@ impl Server {
         new_name: &str,
     ) -> Option<lsp_types::WorkspaceEdit> {
         let path = self.document_path(uri)?;
-        let resolved =
-            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
+        let home = self.home_of(&path);
+        let resolved = navigation::resolve_at(
+            &self.slot(home).project,
+            &path,
+            self.offset_at(&path, position)?,
+        )?;
         let (target, decl) = match &resolved {
             navigation::Resolved::Class(fqn) => (
                 use_sites::RefTarget::Class(fqn.clone()),
-                self.project
+                self.slot(home)
+                    .project
                     .registry()
                     .class_declaration(fqn)
                     .map(|(p, s)| (p.to_path_buf(), s)),
             ),
             navigation::Resolved::Function(fqn) => (
                 use_sites::RefTarget::Function(fqn.clone()),
-                self.project
+                self.slot(home)
+                    .project
                     .registry()
                     .function_declaration(fqn)
                     .map(|(p, s)| (p.to_path_buf(), s)),
             ),
             _ => return None,
         };
-        self.project.ensure_member_index_built();
+        self.slot_mut(home).project.ensure_member_index_built();
+        let project = &self.slot(home).project;
         let mut changes: FxHashMap<Uri, Vec<lsp_types::TextEdit>> = FxHashMap::default();
-        for (p, span) in self.project.use_sites().references(&target) {
+        for (p, span) in project.use_sites().references(&target) {
             let (edit_uri, _) = self.uri_and_version_for(p);
             changes
                 .entry(edit_uri)
@@ -1631,11 +1921,11 @@ impl Server {
         position: LspPosition,
     ) -> Option<Vec<DocumentHighlight>> {
         let path = self.document_path(uri)?;
-        let target =
-            navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
-        let mut spans: Vec<Span> = navigation::collect_all(&self.project, &path)
+        let project = self.project_for(&path);
+        let target = navigation::resolve_at(project, &path, self.offset_at(&path, position)?)?;
+        let mut spans: Vec<Span> = navigation::collect_all(project, &path)
             .into_iter()
-            .filter(|(_, r)| self.same_symbol(&target, r))
+            .filter(|(_, r)| self.same_symbol(project, &target, r))
             .map(|(span, _)| span)
             .collect();
         spans.sort_by_key(|s| (s.start, s.end));
@@ -1660,7 +1950,12 @@ impl Server {
     /// instance access - checked by name first as a cheap pre-filter
     /// before the owner-normalizing work, which for `Instance` includes a
     /// real checker probe.
-    fn same_symbol(&self, target: &navigation::Resolved, candidate: &navigation::Resolved) -> bool {
+    fn same_symbol(
+        &self,
+        project: &Project,
+        target: &navigation::Resolved,
+        candidate: &navigation::Resolved,
+    ) -> bool {
         use navigation::Resolved::{Class, Function, Instance, Member, VariableRead, VariableSelf};
         match (target, candidate) {
             (Class(a), Class(b)) => a == b,
@@ -1691,10 +1986,10 @@ impl Server {
                 if member_name_hint(target) != member_name_hint(candidate) {
                     return false;
                 }
-                let Some((owners_a, _)) = self.member_owners_of(target) else {
+                let Some((owners_a, _)) = self.member_owners_of(project, target) else {
                     return false;
                 };
-                let Some((owners_b, _)) = self.member_owners_of(candidate) else {
+                let Some((owners_b, _)) = self.member_owners_of(project, candidate) else {
                     return false;
                 };
                 owners_a.iter().any(|o| owners_b.contains(o))
@@ -1714,8 +2009,12 @@ impl Server {
     /// uses - without this, a call on a subclass and the same method's
     /// own declaration on its parent would compare as different owners
     /// and never highlight together.
-    fn member_owners_of<'a>(&self, r: &'a navigation::Resolved) -> Option<(Vec<String>, &'a str)> {
-        let registry = self.project.registry();
+    fn member_owners_of<'a>(
+        &self,
+        project: &Project,
+        r: &'a navigation::Resolved,
+    ) -> Option<(Vec<String>, &'a str)> {
+        let registry = project.registry();
         match r {
             navigation::Resolved::Member(owner, name) => {
                 let normalized = registry
@@ -1741,8 +2040,13 @@ impl Server {
                 is_static,
                 class,
             } => {
-                let ty =
-                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
+                let ty = self.probe_receiver_type(
+                    project,
+                    *receiver_span,
+                    scope,
+                    *is_static,
+                    class.as_deref(),
+                )?;
                 Some((
                     resolve_member_owners(registry, &ty, member),
                     member.as_str(),
@@ -1765,7 +2069,7 @@ impl Server {
                 (params.clone(), locals.clone())
             }
             _ => {
-                let (params, locals) = inlay_hints::collect(&self.project, &path)?;
+                let (params, locals) = inlay_hints::collect(self.project_for(&path), &path)?;
                 self.inlay_hint_cache
                     .insert(path.clone(), (version, params.clone(), locals.clone()));
                 (params, locals)
@@ -1781,8 +2085,13 @@ impl Server {
     /// and its documented member-collision limitation.
     #[allow(deprecated)] // SymbolInformation::deprecated: no replacement field exists yet
     fn workspace_symbol(&self, query: &str) -> Vec<SymbolInformation> {
-        workspace_symbol::workspace_symbols(&self.project, query)
+        self.homes()
             .into_iter()
+            .flat_map(|home| {
+                workspace_symbol::workspace_symbols(&self.slot(home).project, query)
+                    .into_iter()
+                    .filter(move |m| self.home_of(m.path) == home)
+            })
             .map(|m| SymbolInformation {
                 name: m.name,
                 kind: m.kind,
@@ -1799,9 +2108,10 @@ impl Server {
     /// module doc comment for the claim-and-clear walker this reads.
     fn signature_help(&self, uri: &Uri, position: LspPosition) -> Option<SignatureHelp> {
         let path = self.document_path(uri)?;
+        let project = self.project_for(&path);
         let pos = self.offset_at(&path, position)?;
-        let help = signature_help::resolve_at(&self.project, &path, pos)?;
-        self.build_signature_help(help)
+        let help = signature_help::resolve_at(project, &path, pos)?;
+        self.build_signature_help(project, help)
     }
 
     /// Resolves `help.target` into one or more real `FunctionReflection`s (more
@@ -1812,8 +2122,12 @@ impl Server {
     /// (not just the top-level `SignatureHelp.activeParameter`, which
     /// only ever describes signature 0) so a client honors it correctly
     /// regardless of which signature it's currently displaying.
-    fn build_signature_help(&self, help: signature_help::SigHelp) -> Option<SignatureHelp> {
-        let registry = self.project.registry();
+    fn build_signature_help(
+        &self,
+        project: &Project,
+        help: signature_help::SigHelp,
+    ) -> Option<SignatureHelp> {
+        let registry = project.registry();
         let signatures: Vec<(String, &FunctionReflection)> = match &help.target {
             signature_help::Target::Function(fqn) => {
                 vec![(fqn.clone(), registry.lookup_function(fqn)?)]
@@ -1833,8 +2147,13 @@ impl Server {
                 is_static,
                 class,
             } => {
-                let ty =
-                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
+                let ty = self.probe_receiver_type(
+                    project,
+                    *receiver_span,
+                    scope,
+                    *is_static,
+                    class.as_deref(),
+                )?;
                 let owners = resolve_member_owners(registry, &ty, member);
                 let sigs: Vec<(String, &FunctionReflection)> = owners
                     .iter()
@@ -1895,29 +2214,29 @@ impl Server {
     /// "last-good AST" precedent this whole request already leans on.
     fn completion(&self, uri: &Uri, position: LspPosition) -> Option<CompletionResponse> {
         let path = self.document_path(uri)?;
+        let project = self.project_for(&path);
         let text = self
             .latest_text
             .get(&path)
             .cloned()
-            .or_else(|| self.project.source(&path).map(str::to_string))?;
-        let stmts = self.project.ast(&path)?;
+            .or_else(|| project.source(&path).map(str::to_string))?;
+        let stmts = project.ast(&path)?;
         let tokens = completion::tokenize(&text);
         let live_index = LineIndex::new(text.as_bytes());
-        let stale_index = self.project.line_index(&path)?;
+        let stale_index = project.line_index(&path)?;
         let cursor = completion::Cursor {
             live: live_index.offset_in_clamped(position.line, position.character, self.unit),
             live_index: &live_index,
             stale: stale_index.offset_in_clamped(position.line, position.character, self.unit),
             stale_index,
         };
-        match completion::build_member_probe(&text, &tokens, cursor, stmts, self.project.registry())
-        {
+        match completion::build_member_probe(&text, &tokens, cursor, stmts, project.registry()) {
             Some(completion::MemberProbe::Resolved {
                 ty,
                 is_static,
                 class,
             }) => Some(CompletionResponse::Array(completion::enumerate_members(
-                self.project.registry(),
+                project.registry(),
                 &ty,
                 is_static,
                 class.as_deref(),
@@ -1930,20 +2249,21 @@ impl Server {
                 is_static,
             }) => {
                 let ty = self.probe_receiver_type(
+                    project,
                     probe_span,
                     &scope,
                     scope_is_static,
                     class.as_deref(),
                 )?;
                 Some(CompletionResponse::Array(completion::enumerate_members(
-                    self.project.registry(),
+                    project.registry(),
                     &ty,
                     is_static,
                     class.as_deref(),
                 )))
             }
             None => Some(CompletionResponse::Array(completion::enumerate_bare(
-                &self.project,
+                project,
                 &path,
                 stmts,
                 cursor.stale,
@@ -1960,22 +2280,23 @@ impl Server {
     /// `Project::check_file` and finalized the same way every published set
     /// is, but not cached: a miss means nothing was sent for the file, and
     /// the cache holds only what was sent.
-    fn code_actions(&mut self, uri: &Uri, range: LspRange) -> Option<CodeActionResponse> {
+    fn code_actions(&self, uri: &Uri, range: LspRange) -> Option<CodeActionResponse> {
         let path = self.document_path(uri)?;
+        let home = self.home_of(&path);
         let computed;
         let diagnostics = match self.last_diagnostics.get(&path) {
             Some(diags) => diags,
             None => {
-                let raw = self.project.check_file(&path);
+                let raw = self.slot(home).project.check_file(&path);
                 computed = self
-                    .finalize_for_publish(FxHashMap::from_iter([(path.clone(), raw)]))
+                    .finalize_in(home, FxHashMap::from_iter([(path.clone(), raw)]))
                     .into_values()
                     .next()
                     .unwrap_or_default();
                 &computed
             }
         };
-        let source = self.project.source(&path);
+        let source = self.slot(home).project.source(&path);
         let positions = self.positions(&path)?;
         Some(
             diagnostics
@@ -2002,13 +2323,17 @@ impl Server {
 
     /// The byte offset of `position` in the loaded file `path`.
     fn offset_at(&self, path: &Path, position: LspPosition) -> Option<u32> {
-        offset_from_lsp(self.project.line_index(path)?, self.unit, position)
+        offset_from_lsp(
+            self.project_for(path).line_index(path)?,
+            self.unit,
+            position,
+        )
     }
 
     /// The LSP range of `span` in the loaded file `path`; empty when the
     /// file isn't loaded.
     fn lsp_range(&self, path: &Path, span: Span) -> LspRange {
-        self.project
+        self.project_for(path)
             .line_index(path)
             .map_or_else(LspRange::default, |index| {
                 Positions {
@@ -2107,56 +2432,58 @@ impl Server {
     }
 
     /// The actual `workspace/didChangeConfiguration` work, shared by both
-    /// the direct-push and pull-response paths: re-resolves `self.root`'s
-    /// config (honoring `settings.config_path`, resolved against `root`
-    /// when relative) and applies what changed.
+    /// the direct-push and pull-response paths: re-resolves every workspace
+    /// folder's config (honoring `settings.config_path`, resolved against each
+    /// folder's root when relative) and applies what changed.
     ///
     /// A true no-op - the freshly resolved configuration and `enable` flag
-    /// both match what's already applied - returns `Vec::new()` without
-    /// re-checking anything, since this notification fires for ANY client
-    /// settings save under the registered section, not just a
-    /// `phpstan-rs` one; re-checking every analyzed file on every
-    /// unrelated settings.json save would be a real, common-case cost.
+    /// both match what's already applied - re-checks nothing, since this
+    /// notification fires for ANY client settings save under the registered
+    /// section, not just a `phpstan-rs` one; re-checking every analyzed file
+    /// on every unrelated settings.json save would be a real, common-case
+    /// cost. It reports only a folder's configuration that failed to resolve.
     ///
     /// Otherwise the file set changes by its difference from what was
     /// applied (`apply_configuration`), and the warnings about the
     /// configuration are reported.
     fn reload_configuration(&mut self, settings: settings::PhpstanRsSettings) -> Vec<Message> {
-        let Some(root) = self.root.clone() else {
-            return Vec::new();
-        };
         let was_enabled = self.enabled;
-        let config_path_override = settings.config_path.as_deref().map(|p| {
-            let candidate = PathBuf::from(p);
-            if candidate.is_absolute() {
-                candidate
-            } else {
-                root.join(candidate)
-            }
-        });
-        let resolved = self.resolve_workspace(&root, config_path_override.as_deref());
         self.enabled = settings.enable;
-        self.config_path_override = config_path_override;
-        let (next, session, warnings) = match resolved {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                return vec![show_message_notification(
+        self.config_path_override = settings.config_path.map(PathBuf::from);
+        let mut messages = Vec::new();
+        let mut resolved = Vec::new();
+        for index in 0..self.folders.len() {
+            let root = self.folders[index].spelled.clone();
+            let config_path = config_path_for(&root, self.config_path_override.as_deref());
+            match self.resolve_workspace(&root, config_path.as_deref()) {
+                Ok(resolution) => resolved.push((index, resolution)),
+                Err(error) => messages.push(show_message_notification(
                     MessageType::ERROR,
                     format!("phpstan-rs: {error}"),
-                )];
+                )),
             }
-        };
-        if settings.enable == was_enabled && self.applied.as_ref() == Some(&next) {
-            return Vec::new();
         }
-
-        let mut messages = configuration_warnings(warnings);
-        let previous = self.applied.take();
-        let previous: &[Listed] = previous.as_ref().map_or(&[], |old| old.listing.as_slice());
-        let (applied, loaded) = self.apply_configuration(next, session, previous);
-        messages.extend(applied);
-        if loaded {
-            self.project.finish_loading_with(&self.stubs);
+        let changed = resolved
+            .iter()
+            .any(|(index, (applied, _, _))| *applied != self.folders[*index].applied);
+        if settings.enable == was_enabled && !changed {
+            return messages;
+        }
+        for (index, (applied, session, warnings)) in resolved {
+            messages.extend(configuration_warnings(warnings));
+            if applied == self.folders[index].applied {
+                continue;
+            }
+            let previous = std::mem::replace(&mut self.folders[index].applied, applied).listing;
+            self.folders[index].session = session;
+            let (applied_messages, loaded) = self.apply_configuration(index, &previous);
+            messages.extend(applied_messages);
+            if loaded {
+                self.folders[index]
+                    .slot
+                    .project
+                    .finish_loading_with(&self.stubs);
+            }
         }
         messages.extend(self.republish_known_files());
         messages
