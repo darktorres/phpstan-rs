@@ -160,37 +160,29 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     }
     report(
         &run,
-        &analysis,
+        analysis,
         args.generate_baseline.as_deref(),
         args.fix,
         args.format.unwrap_or_default(),
     );
     // The process ends here: freeing the project's tables one by one, on
     // this thread, would only delay it.
-    std::mem::forget(analysis);
     std::mem::forget(run);
 }
 
 fn report(
     run: &CheckRun,
-    analysis: &AnalysisResult,
+    analysis: AnalysisResult,
     generate_baseline_path: Option<&Path>,
     apply_fixes: bool,
     format: OutputFormat,
 ) {
-    let AnalysisResult {
-        checked,
-        skipped_analyze,
-        skipped_context,
-        context_loaded,
-        check_panics,
-        ..
-    } = analysis;
+    let check_panics = analysis.check_panics.clone();
     let (checked, skipped_analyze, skipped_context, context_loaded) = (
-        *checked,
-        *skipped_analyze,
-        *skipped_context,
-        *context_loaded,
+        analysis.checked,
+        analysis.skipped_analyze,
+        analysis.skipped_context,
+        analysis.context_loaded,
     );
     let baseline_per_identifier = run.baseline_per_identifier;
     if let Some(generate_baseline_path) = generate_baseline_path {
@@ -291,7 +283,7 @@ fn report(
                     }
                 }
             }
-            for (path, msg) in check_panics {
+            for (path, msg) in &check_panics {
                 println!("{}: internal error while checking: {msg}", path.display());
             }
             let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");

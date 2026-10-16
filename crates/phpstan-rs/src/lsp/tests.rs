@@ -1,3 +1,4 @@
+mod analysis;
 mod code_action;
 mod completion;
 mod configuration;

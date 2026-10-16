@@ -120,3 +120,44 @@ fn drain_all_returns_an_unexpired_entry_that_drain_expired_would_not_have() {
     assert_eq!(drained.len(), 1);
     assert_eq!(drained[0].1.text, "a");
 }
+
+#[test]
+fn a_save_is_due_once_its_window_has_passed_and_only_once() {
+    let mut q = DebounceQueue::new(Duration::from_millis(200));
+    let now = Instant::now();
+    q.record_save(now);
+
+    assert!(!q.take_due_save(now + Duration::from_millis(199)));
+    assert!(q.take_due_save(now + Duration::from_millis(200)));
+    assert!(!q.take_due_save(now + Duration::from_millis(400)));
+}
+
+#[test]
+fn a_burst_of_saves_moves_the_due_time_to_the_last_save_plus_the_window() {
+    let mut q = DebounceQueue::new(Duration::from_millis(200));
+    let now = Instant::now();
+    q.record_save(now);
+    q.record_save(now + Duration::from_millis(150));
+
+    assert!(!q.take_due_save(now + Duration::from_millis(200)));
+    assert!(q.take_due_save(now + Duration::from_millis(350)));
+}
+
+#[test]
+fn next_deadline_counts_a_pending_save_alongside_the_pending_edits() {
+    let mut q = DebounceQueue::new(Duration::from_millis(200));
+    let now = Instant::now();
+    assert_eq!(q.next_deadline(), None);
+
+    q.record_save(now + Duration::from_millis(100));
+    assert_eq!(q.next_deadline(), Some(now + Duration::from_millis(300)));
+
+    q.record_edit(
+        PathBuf::from("a.php"),
+        uri(),
+        "a".to_string(),
+        1,
+        now + Duration::from_millis(50),
+    );
+    assert_eq!(q.next_deadline(), Some(now + Duration::from_millis(250)));
+}

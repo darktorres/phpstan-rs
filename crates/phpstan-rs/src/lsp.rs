@@ -38,15 +38,18 @@ use lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, InlayHintParams, Location, MarkedString, MessageType,
     OneOf, ParameterInformation, ParameterLabel, Position as LspPosition, PositionEncodingKind,
-    Range as LspRange, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SignatureInformation, SymbolInformation, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Uri, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
+    Range as LspRange, SaveOptions, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, Uri, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
     WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 
 use crate::app::check_project::{self, CheckRequest};
 use crate::checker::Checker;
-use crate::project::session::{ErrorPolicy, Session};
+use crate::project::session::{
+    DEFAULT_REPORT_LEVEL, DiagnosticOrder, ErrorPolicy, Finalize, Session, finalize_results,
+};
 use crate::project::source::{self, FileSource};
 use crate::project::use_sites;
 use crate::project::walk::{Listed, Role};
@@ -143,9 +146,6 @@ struct PendingWorkspaceScan {
 
 struct Server {
     project: Project,
-    // The process's worker pool (`project::worker_pool`), which every
-    // workspace check runs on.
-    pool: Arc<rayon::ThreadPool>,
     // The built-in stubs, which the project takes its base from.
     stubs: Stubs,
     // Every URI the client currently has open or has otherwise seen, so
@@ -158,19 +158,32 @@ struct Server {
     // `didChange` do), so `publishDiagnostics` can be stamped with it -
     // see `uri_and_version_for`.
     open_uris: FxHashMap<PathBuf, (Uri, Option<i32>)>,
-    // The last-computed, post-`apply_post_filters` diagnostic set for
+    // The last-computed, post-`finalize_for_publish` diagnostic set for
     // every path this server has ever checked - `code_actions` reads
     // this instead of re-running a whole-file checker pass per request
     // (a real editor's lightbulb fires `textDocument/codeAction` far
-    // more often than actual edits, e.g. on cursor movement). Kept in
-    // sync by every diagnostic-producing path (`check_all_analyzed_paths`,
-    // `publish_diagnostics_for`), cleared for a path `remove_workspace_folders`/
-    // `handle_watched_files_changed`'s Deleted branch drop. Safe under
+    // more often than actual edits, e.g. on cursor movement). Holds what
+    // the editor was last sent for each path, and only a publish changes
+    // it: a set that was not sent is never stored here, and
+    // `publish_analysis` compares against it to decide what to send. A
+    // removed file's entry goes with its clearing notification
+    // (`publish_removal`). Safe under
     // today's fully synchronous, one-message-at-a-time `run_loop`: a
     // `codeAction` request can only ever see whatever the most recently
     // processed `didChange`/scan already committed, never a torn or
     // stale-relative-to-an-earlier-unprocessed-edit state.
     last_diagnostics: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    // The raw per-file checks of every analysed path: the last full
+    // analysis's, updated by the files each edit re-checked. These are what
+    // `finalize_for_publish` post-processes before anything is published.
+    file_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    // The raw project-wide diagnostics of the last full analysis, by the
+    // file each is reported in. An edit drops the edited file's own entry,
+    // whose spans do not fit the edited text, until the next save.
+    whole_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    // The session the project was configured from: a full analysis runs its
+    // checks with this session's configuration.
+    session: Option<Session>,
     // The exact current text `didOpen`/`didChange` last sent for a path,
     // regardless of whether it parses - `Project::source`/`Project::ast`
     // only ever reflect the last *successfully parsed* version, but
@@ -217,7 +230,7 @@ struct Server {
     // Every workspace folder root already loaded - `add_workspace_folders`/
     // `remove_workspace_folders` dedup/filter against this.
     workspace_roots: Vec<PathBuf>,
-    // The most recently configured workspace root, which `apply_post_filters`
+    // The most recently configured workspace root, which `finalize_for_publish`
     // rewrites a diagnostic's path against before consulting the applied
     // `ignore_error_entries` and `baseline`. With more than one workspace
     // folder, this and `applied` are last-root-wins: `Project`/`Registry`
@@ -308,10 +321,12 @@ impl Server {
         });
         Server {
             project,
-            pool: Arc::clone(stubs.pool()),
             stubs,
             open_uris: FxHashMap::default(),
             last_diagnostics: FxHashMap::default(),
+            file_results: FxHashMap::default(),
+            whole_results: FxHashMap::default(),
+            session: None,
             latest_text: FxHashMap::default(),
             unit: Unit::default(),
             shutdown_received: false,
@@ -387,57 +402,6 @@ impl Server {
         Ok((applied, run.session, warnings))
     }
 
-    /// Applies the same severity-level cutoff / `ignore_errors` /
-    /// baseline post-filters `check-project` applies (in that order),
-    /// but scoped to whatever partial result set `update_file`'s own
-    /// transitive-dependents pass just produced. Never surfaces
-    /// `baseline::filter`'s stale-entry report here: its staleness
-    /// detection assumes it's run against the whole project's
-    /// diagnostics at once, and treating every other baselined file as
-    /// "no longer matches" on every keystroke would be a constant
-    /// false-positive warning storm. `ignore_errors`/`baseline` both
-    /// match against a root-relative path string, so results are
-    /// rewritten to root-relative and back around each - a reasonable
-    /// default, not a provable-correct one, for either.
-    fn apply_post_filters(
-        &self,
-        mut results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
-    ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        let Some(applied) = &self.applied else {
-            return results;
-        };
-        if let Some(cutoff) = applied.settings.configured_level {
-            for diagnostics in results.values_mut() {
-                diagnostics.retain(|d| d.level <= cutoff);
-            }
-        }
-        if applied.ignore_error_entries.is_empty() && applied.baseline.is_none() {
-            return results;
-        }
-        let Some(root) = &self.root else {
-            return results;
-        };
-        let to_relative = |path: PathBuf| -> PathBuf {
-            path.strip_prefix(root)
-                .map(Path::to_path_buf)
-                .unwrap_or(path)
-        };
-        let mut relative: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> = results
-            .into_iter()
-            .map(|(path, diags)| (to_relative(path), diags))
-            .collect();
-        if !applied.ignore_error_entries.is_empty() {
-            ignore_errors::filter(&mut relative, &applied.ignore_error_entries);
-        }
-        if let Some(baseline) = &applied.baseline {
-            let _stale = baseline::filter(&mut relative, baseline);
-        }
-        relative
-            .into_iter()
-            .map(|(path, diags)| (root.join(path), diags))
-            .collect()
-    }
-
     /// Applies `next` to `self.project` and `self`, then loads the files it
     /// lists that are not loaded yet, context first. `previous` is the listing
     /// the project was configured with before: a file it listed under another
@@ -460,7 +424,7 @@ impl Server {
     fn apply_configuration(
         &mut self,
         next: Applied,
-        session: &Session,
+        session: Session,
         previous: &[Listed],
     ) -> (Vec<Message>, bool) {
         let mut messages = Vec::new();
@@ -482,14 +446,16 @@ impl Server {
                 .map(|old| old.path.clone())
                 .collect()
         };
-        if !removed.is_empty() {
+        // Published once the new configuration is in place, so the dependents'
+        // diagnostics are finalized with it.
+        let removal = if removed.is_empty() {
+            None
+        } else {
             for path in &removed {
-                self.last_diagnostics.remove(path);
                 self.latest_text.remove(path);
             }
-            let results = self.project.remove_files(&removed);
-            messages.extend(self.publish_diagnostics_for(results));
-        }
+            Some(self.project.remove_files(&removed))
+        };
 
         let to_load: Vec<Listed> = {
             let loaded: FxHashSet<&Path> = self.project.loaded_paths().collect();
@@ -514,6 +480,10 @@ impl Server {
             ));
         }
         self.applied = Some(next);
+        self.session = Some(session);
+        if let Some(results) = removal {
+            messages.extend(self.publish_removal(&removed, results));
+        }
         (messages, loaded)
     }
 
@@ -543,7 +513,7 @@ impl Server {
                 Ok((next, session, warnings)) => {
                     messages.extend(configuration_warnings(warnings));
                     self.root = Some(root.clone());
-                    let (applied, loaded) = self.apply_configuration(next, &session, &[]);
+                    let (applied, loaded) = self.apply_configuration(next, session, &[]);
                     messages.extend(applied);
                     any_loaded |= loaded;
                     self.workspace_roots.push(root.clone());
@@ -576,52 +546,180 @@ impl Server {
             .map(Path::to_path_buf)
             .collect();
 
-        let unit = self.unit;
-        let mut messages: Vec<Message> = paths
-            .iter()
-            .filter_map(|p| self.open_uris.remove(p))
-            .map(|(uri, _version)| publish_diagnostics_notification(uri, None, &[], None, unit))
-            .collect();
+        let results = self.project.remove_files(&paths);
+        let messages = self.publish_removal(&paths, results);
         for p in &paths {
-            self.last_diagnostics.remove(p);
+            self.open_uris.remove(p);
             self.latest_text.remove(p);
         }
-
-        let results = self.project.remove_files(&paths);
-        messages.extend(self.publish_diagnostics_for(results));
         messages
     }
 
-    /// Runs the checker over every analyzed (first-party) file currently
-    /// loaded, post-filtered the same way any other published diagnostic
-    /// set is. Runs on the worker pool, and through
-    /// `Project::check_paths_isolating_panics` (not `check_paths`) so one
-    /// file's latent checker bug can't take down the whole push. Shared by `publish_workspace_diagnostics`
-    /// (which then drops empty results) and `republish_known_files`
-    /// (which must not, so a file previously flagged and now clean gets
-    /// an explicit clearing notification).
-    fn check_all_analyzed_paths(&mut self) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
+    /// Runs the full analysis of the loaded project - every analysed file's
+    /// checks, then the project-wide passes, as `check-project` runs them -
+    /// and keeps its raw results for publishing. A file whose check panicked
+    /// keeps no results.
+    fn analyse_workspace(&mut self) {
+        let Some(session) = &self.session else {
+            self.file_results.clear();
+            self.whole_results.clear();
+            return;
+        };
         let mut paths = self.project.analyzed_paths();
-        if paths.is_empty() {
-            return FxHashMap::default();
-        }
-        // Deterministic order - HashMap/HashSet iteration order would
-        // otherwise make repeated runs against an unchanged workspace look
-        // like a spurious diff to anyone comparing published-message order.
+        // Sorted, so repeated runs against an unchanged workspace check the
+        // same files in the same order.
         paths.sort();
-        let (results, panics) = self
-            .project
-            .check_paths_isolating_panics(&paths, &self.pool);
-        for (path, msg) in &panics {
+        let checks = session.check_project(&mut self.project, &paths, false);
+        for (path, msg) in &checks.check_panics {
             eprintln!(
                 "phpstan-rs lsp: checking {} panicked: {msg}",
                 path.display()
             );
         }
-        let results = self.apply_post_filters(results);
-        self.last_diagnostics
-            .extend(results.iter().map(|(p, diags)| (p.clone(), diags.clone())));
-        results
+        self.file_results = checks.per_file;
+        self.whole_results = checks.whole_program;
+    }
+
+    /// The raw diagnostics of `paths`: each path's per-file checks, then its
+    /// project-wide diagnostics.
+    fn raw_results_for(
+        &self,
+        paths: &[PathBuf],
+    ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
+        paths
+            .iter()
+            .map(|path| {
+                let mut diags = self.file_results.get(path).cloned().unwrap_or_default();
+                if let Some(whole) = self.whole_results.get(path) {
+                    diags.extend(whole.iter().cloned());
+                }
+                (path.clone(), diags)
+            })
+            .collect()
+    }
+
+    /// The post-processing a published diagnostic set gets: the one
+    /// `check-project` applies, except unmatched ignore comments, which the
+    /// server never reports.
+    fn finalize_for_publish(
+        &self,
+        results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
+        let options = match (&self.session, &self.applied) {
+            (Some(session), Some(applied)) => Finalize {
+                report_unmatched_ignores: false,
+                baseline: applied.baseline.clone(),
+                ..session.finalize_options()
+            },
+            _ => Finalize {
+                level: DEFAULT_REPORT_LEVEL,
+                report_unmatched_ignores: false,
+                ignore_errors: Vec::new(),
+                baseline: None,
+                order: DiagnosticOrder::Sorted,
+            },
+        };
+        finalize_results(&self.project, results, &options, self.root.as_deref()).results
+    }
+
+    /// Publishes what the last analysis changed: each analysed path whose
+    /// finalized diagnostics differ from what the editor was last sent. A
+    /// path with nothing to report is published only when it had something
+    /// before, so the editor sees it cleared.
+    fn publish_analysis(&mut self) -> Vec<Message> {
+        let mut paths = self.project.analyzed_paths();
+        paths.sort();
+        let mut finalized = self.finalize_for_publish(self.raw_results_for(&paths));
+        let previous = std::mem::take(&mut self.last_diagnostics);
+        let mut all: Vec<PathBuf> = previous.keys().chain(finalized.keys()).cloned().collect();
+        all.sort();
+        all.dedup();
+        let mut messages = Vec::new();
+        for path in all {
+            let diags = finalized.remove(&path).unwrap_or_default();
+            let changed = match previous.get(&path) {
+                Some(before) => *before != diags,
+                None => !diags.is_empty(),
+            };
+            if changed {
+                let (uri, version) = self.uri_and_version_for(&path);
+                messages.push(self.diagnostics_message(&path, uri, version, &diags));
+            }
+            self.last_diagnostics.insert(path, diags);
+        }
+        messages
+    }
+
+    /// The messages of an edit whose per-file checks are `results`: the
+    /// edited file's and its dependents'. The edited file's project-wide
+    /// diagnostics point at text that has since changed, so they are dropped
+    /// until the next save.
+    fn publish_edit(
+        &mut self,
+        edited: &Path,
+        results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    ) -> Vec<Message> {
+        let finalized = self.finalize_edit(edited, results);
+        self.publish_diagnostics_for(finalized)
+    }
+
+    /// Records an edit's per-file checks and returns the finalized diagnostics
+    /// of the edited file and its dependents, without sending them. A debounced
+    /// run that ends up superseded still records the results it computed; the
+    /// caller decides whether they are sent.
+    fn finalize_edit(
+        &mut self,
+        edited: &Path,
+        results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
+        self.whole_results.remove(edited);
+        let mut paths = Vec::with_capacity(results.len() + 1);
+        for (path, diags) in results {
+            self.file_results.insert(path.clone(), diags);
+            paths.push(path);
+        }
+        if !paths.iter().any(|path| path.as_path() == edited) {
+            paths.push(edited.to_path_buf());
+        }
+        self.finalize_for_publish(self.raw_results_for(&paths))
+    }
+
+    /// The messages of a removal of `removed` whose re-checked dependents
+    /// are `results`. Every removed file gets an empty set, which clears
+    /// whatever the editor shows for it.
+    fn publish_removal(
+        &mut self,
+        removed: &[PathBuf],
+        mut results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    ) -> Vec<Message> {
+        let mut messages = Vec::new();
+        for path in removed {
+            self.file_results.remove(path);
+            self.whole_results.remove(path);
+            self.last_diagnostics.remove(path);
+            let (uri, version) = self.uri_and_version_for(path);
+            messages.push(self.diagnostics_message(path, uri, version, &[]));
+        }
+        // The removed paths were cleared above, so they are not published again.
+        results.retain(|path, _| !removed.contains(path));
+        results.retain(|path, _| !removed.contains(path));
+        let mut paths = Vec::with_capacity(results.len());
+        for (path, diags) in results {
+            self.file_results.insert(path.clone(), diags);
+            paths.push(path);
+        }
+        let finalized = self.finalize_for_publish(self.raw_results_for(&paths));
+        messages.extend(self.publish_diagnostics_for(finalized));
+        messages
+    }
+
+    /// A save's own work: the full analysis, published where it changed.
+    fn analyse_on_save(&mut self) -> Vec<Message> {
+        if !self.enabled {
+            return Vec::new();
+        }
+        self.analyse_workspace();
+        self.publish_analysis()
     }
 
     /// Looks up the last known `(Uri, document version)` for `path` -
@@ -667,26 +765,25 @@ impl Server {
     /// initial load nothing has been published for these paths yet, so
     /// there is nothing to clear.
     fn publish_workspace_diagnostics(&mut self) -> Vec<Message> {
-        self.check_all_analyzed_paths()
-            .into_iter()
-            .filter(|(_, diags)| !diags.is_empty())
-            .map(|(p, diags)| {
-                let (uri, version) = self.uri_and_version_for(&p);
-                self.diagnostics_message(&p, uri, version, &diags)
-            })
-            .collect()
+        self.analyse_workspace();
+        self.publish_analysis()
     }
 
     /// `reload_configuration`'s own republish step, once it decides
-    /// something actually changed. Unlike `publish_workspace_diagnostics`,
-    /// this never drops an empty result: a file that had diagnostics
-    /// under the old config and none under the new one needs an explicit
-    /// empty `publishDiagnostics` to actually clear them client-side, not
-    /// silence. While `!self.enabled`, skips rechecking entirely and just
-    /// clears every currently-open file - phpstan-rs.enable means "stop
-    /// showing squiggles", not "stop the language server".
+    /// something actually changed. Publishes each file whose diagnostics
+    /// differ from what the editor was last sent, so a file that had
+    /// diagnostics under the old config and none under the new one gets an
+    /// explicit empty `publishDiagnostics` that clears them client-side.
+    /// While `!self.enabled`, skips rechecking entirely and just clears every
+    /// currently-open file - phpstan-rs.enable means "stop showing squiggles",
+    /// not "stop the language server".
     fn republish_known_files(&mut self) -> Vec<Message> {
         if !self.enabled {
+            // The editor now shows nothing for an open file, which the next
+            // publish has to change from.
+            for path in self.open_uris.keys() {
+                self.last_diagnostics.insert(path.clone(), Vec::new());
+            }
             let unit = self.unit;
             return self
                 .open_uris
@@ -697,13 +794,8 @@ impl Server {
                 })
                 .collect();
         }
-        self.check_all_analyzed_paths()
-            .into_iter()
-            .map(|(p, diags)| {
-                let (uri, version) = self.uri_and_version_for(&p);
-                self.diagnostics_message(&p, uri, version, &diags)
-            })
-            .collect()
+        self.analyse_workspace();
+        self.publish_analysis()
     }
 
     fn handle_open_or_change(
@@ -727,7 +819,7 @@ impl Server {
                 None => {
                     let checked =
                         FxHashMap::from_iter([(path.clone(), self.project.check_file(&path))]);
-                    self.apply_post_filters(checked)
+                    self.finalize_for_publish(checked)
                         .remove(&path)
                         .unwrap_or_default()
                 }
@@ -757,7 +849,7 @@ impl Server {
                 )];
             }
         };
-        self.publish_diagnostics_for(self.apply_post_filters(results))
+        self.publish_edit(&path, results)
     }
 
     /// The debounce worker's own counterpart to `handle_open_or_change`
@@ -767,14 +859,16 @@ impl Server {
     /// (the worker already has it as the `DebounceQueue` entry's own
     /// key) rather than re-deriving it from `uri`. `version` is a plain
     /// `i32`, not `Option<i32>` - a debounced edit always came from a
-    /// real `didChange`, which always carries one.
+    /// real `didChange`, which always carries one. A run that `should_abort`
+    /// reports superseded returns no messages: the newer edit's run sends the
+    /// file's diagnostics instead.
     fn handle_debounced_change(
         &mut self,
         path: &Path,
         uri: &Uri,
         text: &str,
         version: i32,
-        should_abort: impl FnMut() -> bool,
+        should_abort: &mut impl FnMut() -> bool,
     ) -> Vec<Message> {
         *self.file_versions.entry(path.to_path_buf()).or_insert(0) += 1;
         self.open_uris
@@ -784,7 +878,7 @@ impl Server {
         self.project.set_document(path, text.as_bytes());
         let results = match self
             .project
-            .update_file_cancellable(path, text, should_abort)
+            .update_file_cancellable(path, text, &mut *should_abort)
         {
             Ok(results) => results,
             Err(e) => {
@@ -801,10 +895,20 @@ impl Server {
                 )];
             }
         };
-        for stale in self.project.take_unchecked() {
-            self.last_diagnostics.remove(&stale);
+        let finalized = self.finalize_edit(path, results);
+        if should_abort() {
+            return Vec::new();
         }
-        self.publish_diagnostics_for(self.apply_post_filters(results))
+        // Files an earlier cancelled check left unchecked keep the diagnostics
+        // the editor was last sent. Their raw results are stale, so they
+        // are dropped until a save's full analysis recomputes them.
+        for stale in self.project.take_unchecked() {
+            if !finalized.contains_key(&stale) {
+                self.file_results.remove(&stale);
+                self.whole_results.remove(&stale);
+            }
+        }
+        self.publish_diagnostics_for(finalized)
     }
 
     /// Routes a `workspace/didChangeWatchedFiles` batch through the same
@@ -829,12 +933,11 @@ impl Server {
         let mut messages = Vec::new();
         for (path, (uri, typ)) in last_by_path {
             if typ == lsp_types::FileChangeType::DELETED {
-                self.open_uris.remove(&path);
-                self.last_diagnostics.remove(&path);
                 self.latest_text.remove(&path);
                 self.project.unset_document(&path);
                 let results = self.project.remove_file(&path);
-                messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
+                messages.extend(self.publish_removal(std::slice::from_ref(&path), results));
+                self.open_uris.remove(&path);
                 continue;
             }
             // Created and Changed both just need the path's current
@@ -856,7 +959,7 @@ impl Server {
             self.project.unset_document(&path);
             match self.project.update_file(&path, &bytes) {
                 Ok(results) => {
-                    messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
+                    messages.extend(self.publish_edit(&path, results));
                 }
                 Err(e) => {
                     eprintln!(
@@ -1782,18 +1885,25 @@ impl Server {
     /// carry a `DiagnosticFix`. Reads `self.last_diagnostics` rather than
     /// re-running the checker - see that field's own doc comment for why.
     /// A cache miss (a workspace file requested before any `didOpen`/
-    /// `didChange`/scan ever populated it) is a one-time, self-healing
-    /// fallback: computed once via `Project::check_file`, post-filtered
-    /// the same way every other diagnostic set is, then cached.
+    /// `didChange`/scan ever populated it) is computed via
+    /// `Project::check_file` and finalized the same way every published set
+    /// is, but not cached: a miss means nothing was sent for the file, and
+    /// the cache holds only what was sent.
     fn code_actions(&mut self, uri: &Uri, range: LspRange) -> Option<CodeActionResponse> {
         let path = uri_to_path(uri)?;
-        if !self.last_diagnostics.contains_key(&path) {
-            let raw = self.project.check_file(&path);
-            let filtered = self.apply_post_filters(FxHashMap::from_iter([(path.clone(), raw)]));
-            let diags = filtered.into_values().next().unwrap_or_default();
-            self.last_diagnostics.insert(path.clone(), diags);
-        }
-        let diagnostics = self.last_diagnostics.get(&path)?;
+        let computed;
+        let diagnostics = match self.last_diagnostics.get(&path) {
+            Some(diags) => diags,
+            None => {
+                let raw = self.project.check_file(&path);
+                computed = self
+                    .finalize_for_publish(FxHashMap::from_iter([(path.clone(), raw)]))
+                    .into_values()
+                    .next()
+                    .unwrap_or_default();
+                &computed
+            }
+        };
         let source = self.project.source(&path);
         let positions = self.positions(&path)?;
         Some(
@@ -1972,7 +2082,7 @@ impl Server {
         let mut messages = configuration_warnings(warnings);
         let previous = self.applied.take();
         let previous: &[Listed] = previous.as_ref().map_or(&[], |old| old.listing.as_slice());
-        let (applied, loaded) = self.apply_configuration(next, &session, previous);
+        let (applied, loaded) = self.apply_configuration(next, session, previous);
         messages.extend(applied);
         if loaded {
             self.project.finish_loading_with(&self.stubs);
@@ -2233,6 +2343,14 @@ fn run_dispatch_loop<W: Write>(
                     }
                     continue;
                 }
+                // A save queues the project's full analysis for the debounce
+                // worker, which runs it once no further save has arrived within
+                // the debounce window, after any edits due by then.
+                if not.method == "textDocument/didSave" {
+                    debounce.queue.lock().unwrap().record_save(Instant::now());
+                    debounce.cv.notify_one();
+                    continue;
+                }
                 // A pending or in-flight debounced edit for a now-closed
                 // file must not fire/publish - `cancel` drops both its
                 // pending entry and its generation, so an in-flight
@@ -2294,10 +2412,15 @@ fn spawn_debounce_worker<W: Write + Send + 'static>(
                 if shutdown.load(Ordering::Acquire) {
                     return flush_and_publish_all(&server, &debounce, &writer, guard);
                 }
-                let expired = guard.drain_expired(Instant::now());
+                let now = Instant::now();
+                let expired = guard.drain_expired(now);
+                let save_due = guard.take_due_save(now);
                 drop(guard);
                 if !expired.is_empty() {
                     run_pending_edits(&server, &debounce, &writer, expired);
+                }
+                if save_due {
+                    run_pending_save(&server, &writer);
                 }
             }
         })
@@ -2323,14 +2446,14 @@ fn flush_and_publish_all<W: Write>(
 
 /// Runs each drained edit's own recheck (holding `server`'s lock for the
 /// whole cascade - see `DebounceHandle`'s own doc comment on the accepted
-/// "hover/definition block behind a slow recheck" tradeoff), then
-/// re-confirms against `debounce.queue` that this edit is STILL the
-/// freshest one recorded for its path before publishing - covers the
-/// small window between the cascade's own last per-file `should_abort`
-/// check and its actual return. A `should_abort` closure captures the
-/// edit's own generation and re-locks `debounce.queue` (never `server`)
-/// on each per-file check - the single point where this worker thread
-/// nests both locks, always in the same Server-then-Debounce order.
+/// "hover/definition block behind a slow recheck" tradeoff), then writes
+/// what it sends. A `should_abort` closure captures the edit's own
+/// generation and re-locks `debounce.queue` (never `server`) on each
+/// per-file check - the single point where this worker thread nests both
+/// locks, always in the same Server-then-Debounce order. Whether to send is
+/// decided by `handle_debounced_change` after the cascade, under the same
+/// server lock, so a superseded run never changes what the editor was last
+/// sent.
 fn run_pending_edits<W: Write>(
     server: &Arc<Mutex<Server>>,
     debounce: &Arc<DebounceHandle>,
@@ -2341,7 +2464,7 @@ fn run_pending_edits<W: Write>(
         let my_generation = pending.generation;
         let abort_debounce = Arc::clone(debounce);
         let abort_path = path.clone();
-        let should_abort = move || {
+        let mut should_abort = move || {
             abort_debounce
                 .queue
                 .lock()
@@ -2349,21 +2472,31 @@ fn run_pending_edits<W: Write>(
                 .current_generation(&abort_path)
                 != my_generation
         };
-        let messages = server.lock().unwrap().handle_debounced_change(
+        // The write happens while `server` is still held: a save's publish
+        // can then never be overtaken by this older one.
+        let mut server = server.lock().unwrap();
+        let messages = server.handle_debounced_change(
             &path,
             &pending.uri,
             &pending.text,
             pending.version,
-            should_abort,
+            &mut should_abort,
         );
-        let still_current =
-            debounce.queue.lock().unwrap().current_generation(&path) == my_generation;
-        if still_current {
-            let mut w = writer.lock().unwrap();
-            for message in messages {
-                let _ = write_message(&mut *w, &message);
-            }
+        let mut w = writer.lock().unwrap();
+        for message in messages {
+            let _ = write_message(&mut *w, &message);
         }
+    }
+}
+
+/// Runs a save's full analysis on the debounce worker and writes what it
+/// changed, holding `server` across the write as `run_pending_edits` does.
+fn run_pending_save<W: Write>(server: &Arc<Mutex<Server>>, writer: &Arc<Mutex<W>>) {
+    let mut server = server.lock().unwrap();
+    let messages = server.analyse_on_save();
+    let mut w = writer.lock().unwrap();
+    for message in messages {
+        let _ = write_message(&mut *w, &message);
     }
 }
 
@@ -2488,8 +2621,17 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     // document text, not incremental ranges - simplest
                     // correct choice, and update_file already takes a
                     // full source string anyway.
-                    text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                        TextDocumentSyncKind::FULL,
+                    // Saves carry no text: the project already holds the saved file's
+                    // latest text from the edits that preceded the save.
+                    text_document_sync: Some(TextDocumentSyncCapability::Options(
+                        TextDocumentSyncOptions {
+                            open_close: Some(true),
+                            change: Some(TextDocumentSyncKind::FULL),
+                            save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                                include_text: Some(false),
+                            })),
+                            ..Default::default()
+                        },
                     )),
                     hover_provider: Some(HoverProviderCapability::Simple(true)),
                     definition_provider: Some(OneOf::Left(true)),

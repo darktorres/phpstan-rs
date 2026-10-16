@@ -276,9 +276,6 @@ pub struct Project {
     packages: composer::PackageIndex,
     // What the checks are configured with (`apply_settings`).
     settings: CheckSettings,
-    // When set, per-file and whole-program checks leave inline
-    // `@phpstan-ignore*` suppression to `apply_inline_ignores`.
-    defer_inline_ignores: bool,
     // Whether `Session::load`/`update_file` keep each file's own raw source
     // text around in its `FileState` (see that field's own doc comment) -
     // off by default. Only `lsp.rs`'s `Server` turns this on:
@@ -321,18 +318,14 @@ pub struct Project {
     duplicate_class_sites: DuplicateClassSites,
     // `textDocument/references`/`textDocument/rename`'s own whole-project
     // use-site index - see `use_sites`'s own module doc comment for the
-    // two-tier split. Tier 1 (class/function references) is indexed
-    // when `retain_source` is on (the LSP; real, narrow per-identifier
-    // spans) at the first `ensure_member_index_built`, or eagerly as files
-    // load when `check_dead_code` is on (a batch
-    // `check-project` run with no retained source; real but less
-    // narrowly-scoped AST-node spans instead - see `use_sites::
-    // index_class_fn_refs_without_source`'s own doc comment) - NOT
-    // unconditionally: measured on a real
-    // corpus, this walk is too expensive to run for every loaded file
-    // when nothing in batch mode consumes it. Tier 2 (member references)
-    // is NOT populated by ordinary indexing at all - see
-    // `member_index_built`.
+    // two-tier split. Tier 1 (class/function references) is indexed for
+    // each loaded file while `indexes_class_fn_sites` holds, with real,
+    // narrow per-identifier spans when `retain_source` is on and AST-node
+    // spans otherwise (see `use_sites::index_class_fn_refs_without_source`'s
+    // own doc comment). NOT unconditionally: measured on a real corpus,
+    // this walk is too expensive to run for every loaded file when nothing
+    // consumes it. Tier 2 (member references) is NOT populated by ordinary
+    // indexing at all - see `member_index_built`.
     use_sites: UseSiteIndex,
     // Whether Tier 2 (member references) of `use_sites` has ever been
     // built for this project - `false` until the first
@@ -504,9 +497,6 @@ pub struct ProjectSettings {
     /// Whether the project consumes PHPStan as a library, which the
     /// PHPStan-API rules apply to.
     pub phpstan_api_check_enabled: bool,
-    /// Leaves inline `@phpstan-ignore*` suppression to
-    /// `apply_inline_ignores`.
-    pub defer_inline_ignores: bool,
     /// Keeps each file's source text (the language server's hover and
     /// definition need it).
     pub retain_source: bool,
@@ -621,7 +611,6 @@ impl Project {
             absolute_root: None,
             packages: composer::PackageIndex::default(),
             settings: CheckSettings::default(),
-            defer_inline_ignores: false,
             retain_source: false,
             built_once: false,
             finished: false,
@@ -641,7 +630,9 @@ impl Project {
     }
 
     /// Configures the project with `settings`, replacing what it had.
-    /// Each loaded file's package owner is recomputed.
+    /// Each loaded file's package owner is recomputed. The loaded files' class
+    /// and function use sites are re-derived when whether they are indexed
+    /// changes.
     pub fn apply_settings(&mut self, settings: ProjectSettings) {
         let ProjectSettings {
             working_dir,
@@ -650,7 +641,6 @@ impl Project {
             php_versions,
             configured_level,
             phpstan_api_check_enabled,
-            defer_inline_ignores,
             retain_source,
             built_once,
             rules,
@@ -670,9 +660,9 @@ impl Project {
             sql_reflection,
             sql_schema,
         } = settings;
+        let class_fn_sites_before = self.indexes_class_fn_sites();
         self.working_dir = working_dir;
         self.absolute_root = absolute_root;
-        self.defer_inline_ignores = defer_inline_ignores;
         self.retain_source = retain_source;
         self.built_once = built_once;
 
@@ -725,6 +715,9 @@ impl Project {
             if let Some(file) = self.files.get_mut(&path) {
                 file.owner = owner;
             }
+        }
+        if !self.member_index_built && class_fn_sites_before != self.indexes_class_fn_sites() {
+            self.reindex_class_fn_sites();
         }
     }
 
@@ -795,6 +788,8 @@ impl Project {
             let mut matched_ids: FxHashSet<(u32, &str)> = FxHashSet::default();
             if let Some(diagnostics) = results.get_mut(path) {
                 diagnostics.retain(|d| {
+                    // Reserved for diagnostics about an ignore comment itself,
+                    // which no ignore comment may suppress, as in PHPStan.
                     if d.non_ignorable {
                         return true;
                     }
@@ -1081,24 +1076,25 @@ impl Project {
     /// measured on a real corpus (Piwigo, ~14k loaded files including
     /// vendor context): running it for every loaded file regardless of
     /// whether anything consumes it roughly doubled `check-project`'s
-    /// own wall time. Gated on `check_dead_code` (its only batch-mode
-    /// consumer) for exactly that reason - a run with the check left
-    /// off, the default, pays nothing extra here at all.
+    /// own wall time. Gated on `indexes_class_fn_sites` for exactly that
+    /// reason - with the check left off, the default, a run pays nothing
+    /// extra here until an editor session builds Tier 2.
     fn class_fn_refs_of(&self, ast: &[Stmt], source: &str) -> Vec<(Span, use_sites::RefTarget)> {
-        if self.retain_source {
-            // Until the first request that reads the index
-            // (`ensure_member_index_built`), a loaded workspace pays
-            // nothing for it.
-            if self.member_index_built {
-                use_sites::index_class_fn_refs(ast, source)
-            } else {
-                Vec::new()
-            }
-        } else if self.settings.rules.check_dead_code {
-            use_sites::index_class_fn_refs_without_source(ast)
-        } else {
+        if !self.indexes_class_fn_sites() {
             Vec::new()
+        } else if self.retain_source {
+            use_sites::index_class_fn_refs(ast, source)
+        } else {
+            use_sites::index_class_fn_refs_without_source(ast)
         }
+    }
+
+    /// Whether the class and function use sites of the loaded files are in
+    /// the index. They are while the dead-code check is on, which reads them,
+    /// and once an editor session has built the member index, whose per-file
+    /// re-index drops every entry a file has, so these are re-derived too.
+    pub(crate) fn indexes_class_fn_sites(&self) -> bool {
+        self.settings.rules.check_dead_code || (self.retain_source && self.member_index_built)
     }
 
     /// Indexes `parsed`'s use sites ahead of its insertion, so a
@@ -1680,8 +1676,8 @@ impl Project {
     /// Recomputes `path`'s own Tier-1 (class/function) use-sites from its
     /// currently-loaded `FileState`, replacing whatever was previously
     /// indexed for it - a no-op past the initial `use_sites.remove_file`
-    /// when `retain_source` is off or `path` isn't currently loaded at
-    /// all. Called for EVERY
+    /// when `retain_source` is off, while `indexes_class_fn_sites` is off,
+    /// or when `path` isn't currently loaded at all. Called for EVERY
     /// file `update_file`'s own affected-file loop re-checks, not just
     /// the one that was directly edited: a dependent file's own bare-
     /// `Name`/`ClassConstFetch`/`StaticPropertyFetch` resolution can change (e.g. registry-wide
@@ -1705,7 +1701,7 @@ impl Project {
     ) {
         self.use_sites.remove_file(path);
         if self.retain_source
-            && self.member_index_built
+            && self.indexes_class_fn_sites()
             && let Some(file) = self.files.get(path)
             && let Some(source) = &file.source
         {
@@ -1718,6 +1714,17 @@ impl Project {
                 self.use_sites
                     .insert(path, use_sites::RefTarget::Member(owner, member), span);
             }
+        }
+    }
+
+    /// Re-indexes every loaded file's class and function use sites under the
+    /// current settings, for a change to whether they are indexed. Valid only
+    /// while the member index is unbuilt: the per-file re-index replaces every
+    /// entry a file has, Tier 2 included.
+    fn reindex_class_fn_sites(&mut self) {
+        let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
+        for path in paths {
+            self.reindex_use_sites_for_file(&path, None);
         }
     }
 
@@ -1737,9 +1744,9 @@ impl Project {
         if self.member_index_built {
             return;
         }
-        if self.retain_source {
-            // The class and function sites weren't indexed as the files
-            // loaded (`class_fn_refs_of`).
+        if self.retain_source && !self.indexes_class_fn_sites() {
+            // The files were loaded without their class and function sites
+            // (`class_fn_refs_of`), so those are indexed here.
             let indexed: Vec<(&PathBuf, Vec<(Span, use_sites::RefTarget)>)> = worker_pool()
                 .install(|| {
                     self.files
@@ -2376,8 +2383,8 @@ impl Project {
         }
     }
 
-    /// `path`'s checker `diagnostics` with the project-level ones added,
-    /// sorted, and its inline ignore comments applied.
+    /// `path`'s checker `diagnostics` with the project-level ones added and
+    /// sorted.
     fn finish_diagnostics(&self, path: &Path, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         let Some(file) = self.files.get(path) else {
             return diagnostics;
@@ -2426,29 +2433,6 @@ impl Project {
             // consistent, fully span-ordered list regardless of whether
             // this gate is on.
             diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-        }
-        // `@phpstan-ignore-line`/`-next-line` - `non_ignorable`
-        // diagnostics are exempt, mirroring real PHPStan's own identical
-        // exemption (reserved for a handful of its own rules, e.g.
-        // flagging a malformed `@phpstan-ignore` comment itself -
-        // nonsensical to let another ignore comment suppress).
-        if !self.defer_inline_ignores && !file.ignores.lines.is_empty() {
-            diagnostics
-                .retain(|d| d.non_ignorable || !file.ignores.lines.contains(&d.span.start.line));
-        }
-        // The fuller bare `@phpstan-ignore <identifier list>` form -
-        // unlike the two line markers above, this only suppresses a
-        // diagnostic whose own `identifier` exactly matches one named on
-        // that line.
-        if !self.defer_inline_ignores && !file.ignores.identifiers.is_empty() {
-            diagnostics.retain(|d| {
-                d.non_ignorable
-                    || !file
-                        .ignores
-                        .identifiers
-                        .get(&d.span.start.line)
-                        .is_some_and(|ids| ids.iter().any(|id| **id == *d.identifier))
-            });
         }
         diagnostics
     }
@@ -2552,18 +2536,13 @@ impl Project {
     }
 
     /// Resolves one whole-program finding's own reportable location and
-    /// applies the same two things every per-file diagnostic already
-    /// gets for free, that a diagnostic built entirely outside
-    /// `check_files` would otherwise never see at all: "only report
-    /// first-party files, never vendor/context ones swept in only
-    /// because the registry records every loaded file's declarations, analyzed or
-    /// not" (a real bug on an earlier pass of this exact method - a
-    /// vendor-only dead enum case used to create a brand new, never-
-    /// otherwise-checked entry in `check-project`'s own `results` map),
-    /// and `@phpstan-ignore-line`/`-next-line`/`@phpstan-ignore
-    /// <identifiers>` suppression (`finish_diagnostics`' own identical
-    /// `retain` calls only ever see the per-file diagnostics). `None` for an unloaded/context path, or one whose own
-    /// ignore-comment already covers `identifier` on `span`'s line.
+    /// applies what every per-file diagnostic already gets for free, which
+    /// a diagnostic built entirely outside `check_files` would otherwise
+    /// never see: only first-party files are reported, never vendor or
+    /// context ones swept in only because the registry records every
+    /// loaded file's declarations, analyzed or not. `None` for an unloaded
+    /// or context path. Inline ignore comments apply when the results are
+    /// reported.
     fn whole_program_diagnostic(
         &self,
         path: &Path,
@@ -2573,17 +2552,6 @@ impl Project {
     ) -> Option<Diagnostic> {
         let file = self.files.get(path)?;
         if !file.analyzed {
-            return None;
-        }
-        let line = file.line_index.line(span.start);
-        if !self.defer_inline_ignores && file.ignores.lines.contains(&line)
-            || !self.defer_inline_ignores
-                && file
-                    .ignores
-                    .identifiers
-                    .get(&line)
-                    .is_some_and(|ids| ids.iter().any(|id| id == identifier))
-        {
             return None;
         }
         Some(DiagnosticBuilder::new(message, span, 5, identifier).build(&file.line_index))

@@ -94,7 +94,7 @@ impl PartialEq<&str> for Identifier {
 /// generics are baked into its core type engine, not level-gated - placed
 /// here as this project's own "advanced, opt-in" tier, alongside real
 /// PHPStan's missing-typehints level).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
     pub message: String,
     pub span: Range,

@@ -7,7 +7,7 @@
 //! after (not sharing code with) `lsp::navigation::Walker` - the same
 //! proven traversal shape, reused for "record every match", never "find
 //! the one match at a cursor". Real caret-precision spans need the
-//! file's retained source text (`index_class_fn_refs`, LSP-only, gated
+//! file's retained source text (`index_class_fn_refs`, gated
 //! behind `retain_source`); a
 //! batch `check-project` run has no retained source but, when `project::
 //! whole_program::dead_code` is enabled, still needs to know *whether* a
@@ -20,7 +20,7 @@
 //! expensive to pay
 //! for every loaded file (including every vendor/context one) when
 //! nothing consumes it - `Project::class_fn_refs_of` gates it on
-//! `check_dead_code` specifically, its only batch-mode consumer.
+//! `Project::indexes_class_fn_sites`, see there.
 //!
 //! Tier 2 (member reference sites - method/property/class-constant
 //! access) needs a real, checker-driven resolution of the receiver's

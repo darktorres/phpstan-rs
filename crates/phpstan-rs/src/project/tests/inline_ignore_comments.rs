@@ -3,9 +3,17 @@
 //! `tests/fixtures/project/inline_ignore_comments`.
 
 use crate::project::session::load_test_file;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::super::*;
+
+/// `path`'s diagnostics as the project reports them: its inline ignore
+/// comments applied.
+fn reported(project: &Project, path: &Path) -> Vec<Diagnostic> {
+    let mut results = FxHashMap::from_iter([(path.to_path_buf(), project.check_file(path))]);
+    project.apply_inline_ignores(&mut results, false);
+    results.remove(path).unwrap_or_default()
+}
 
 #[test]
 fn update_file_recomputes_ignore_lines_too() {
@@ -19,10 +27,10 @@ fn update_file_recomputes_ignore_lines_too() {
         &mut project,
         PathBuf::from("f.php"),
         "<?php\nfunction f() {\n    totallyUndefinedFunction();\n}\n",
-        false,
+        true,
     );
     project.finish_loading();
-    let before = project.check_file(&PathBuf::from("f.php"));
+    let before = reported(&project, Path::new("f.php"));
     assert!(
         before
             .iter()
@@ -36,7 +44,7 @@ fn update_file_recomputes_ignore_lines_too() {
             "<?php\nfunction f() {\n    totallyUndefinedFunction(); // @phpstan-ignore-line\n}\n",
         )
         .unwrap();
-    let after = project.check_file(&PathBuf::from("f.php"));
+    let after = reported(&project, Path::new("f.php"));
     assert!(
         !after
             .iter()

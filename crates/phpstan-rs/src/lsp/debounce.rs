@@ -1,4 +1,5 @@
-//! `textDocument/didChange`'s own coalescing/cancellation bookkeeping -
+//! `textDocument/didChange`'s and `textDocument/didSave`'s own coalescing and
+//! cancellation bookkeeping -
 //! a pure, clock-injected state machine with zero locking/threading of
 //! its own. The `Arc<Mutex<...>>`/`Condvar` wrapping that makes this
 //! safe to share between the reader thread (which only ever calls
@@ -30,6 +31,10 @@ pub(super) struct PendingEdit {
 pub(super) struct DebounceQueue {
     pending: FxHashMap<PathBuf, PendingEdit>,
     generations: FxHashMap<PathBuf, u64>,
+    // When the save waiting for the project's full analysis is due. A save
+    // arriving while one waits moves it out, so a burst of saves runs the
+    // analysis once.
+    save_deadline: Option<Instant>,
     debounce: Duration,
 }
 
@@ -38,6 +43,7 @@ impl DebounceQueue {
         DebounceQueue {
             pending: FxHashMap::default(),
             generations: FxHashMap::default(),
+            save_deadline: None,
             debounce,
         }
     }
@@ -77,7 +83,28 @@ impl DebounceQueue {
     /// when nothing is pending at all, letting the worker wait
     /// indefinitely (up to its own idle cap) rather than busy-poll.
     pub(super) fn next_deadline(&self) -> Option<Instant> {
-        self.pending.values().map(|p| p.deadline).min()
+        self.pending
+            .values()
+            .map(|p| p.deadline)
+            .chain(self.save_deadline)
+            .min()
+    }
+
+    /// Records a save: its full analysis runs once the debounce window has
+    /// passed with no further save.
+    pub(super) fn record_save(&mut self, now: Instant) {
+        self.save_deadline = Some(now + self.debounce);
+    }
+
+    /// Whether a recorded save is due at `now`; a due save is taken.
+    pub(super) fn take_due_save(&mut self, now: Instant) -> bool {
+        match self.save_deadline {
+            Some(deadline) if deadline <= now => {
+                self.save_deadline = None;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Drains and returns every entry whose deadline is at or before

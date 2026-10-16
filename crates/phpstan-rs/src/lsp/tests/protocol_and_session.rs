@@ -122,7 +122,7 @@ fn initialize_loads_the_workspace_and_returns_server_capabilities() {
     assert_eq!(responses[0]["id"], 1);
     assert_eq!(
         responses[0]["result"]["capabilities"]["textDocumentSync"],
-        1
+        json!({"openClose": true, "change": 1, "save": {"includeText": false}})
     );
 }
 
@@ -172,7 +172,7 @@ fn initialize_tolerates_unrecognized_initialization_options() {
     assert_eq!(responses[0]["id"], 1);
     assert_eq!(
         responses[0]["result"]["capabilities"]["textDocumentSync"],
-        1
+        json!({"openClose": true, "change": 1, "save": {"includeText": false}})
     );
 }
 
@@ -937,7 +937,10 @@ fn a_malformed_message_body_is_skipped_without_terminating_the_session() {
         .iter()
         .find(|m| m["id"] == json!(1))
         .unwrap_or_else(|| panic!("expected the initialize response, got: {messages:?}"));
-    assert_eq!(response["result"]["capabilities"]["textDocumentSync"], 1);
+    assert_eq!(
+        response["result"]["capabilities"]["textDocumentSync"],
+        json!({"openClose": true, "change": 1, "save": {"includeText": false}})
+    );
     let log_notification = messages
         .iter()
         .find(|m| m["method"] == "window/logMessage")

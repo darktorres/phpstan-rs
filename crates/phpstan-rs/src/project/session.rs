@@ -213,10 +213,22 @@ pub struct Loaded {
     pub lex_warnings: Vec<String>,
 }
 
+/// What the checks of a project's analysed files produced, split by the
+/// pass that produced it.
+pub(crate) struct ProjectChecks {
+    /// Each analysed file's own checks.
+    pub(crate) per_file: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    /// The project-wide passes' diagnostics, by the file each is reported in.
+    pub(crate) whole_program: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    /// Files whose check panicked, with the panic message, sorted.
+    pub(crate) check_panics: Vec<(PathBuf, String)>,
+    /// The `--dump-types` output when requested.
+    pub(crate) type_dump: Option<String>,
+}
+
 /// What one run's analysis produced, before post-processing: every
 /// check's diagnostics, and the project they came from, which
-/// `finalize` needs for inline ignores. Finalizing doesn't consume it,
-/// so one analysis can be finalized several ways.
+/// `finalize` needs for inline ignores.
 pub struct AnalysisResult {
     project: Project,
     /// Per-file diagnostics as the checks emitted them.
@@ -280,28 +292,67 @@ impl AnalysisResult {
         self.lex_warnings.clone()
     }
 
-    /// The report `options` make of this analysis.
-    pub fn finalize(&self, options: &Finalize) -> Report {
-        let mut results = self.results.clone();
+    /// The report `options` make of this analysis, which its results move
+    /// into. The project is leaked: a process that prints a report is about
+    /// to end, and freeing the project's tables one by one would only delay
+    /// it.
+    pub fn finalize(self, options: &Finalize) -> Report {
+        let AnalysisResult {
+            project, results, ..
+        } = self;
+        let report = finalize_results(&project, results, options, None);
+        std::mem::forget(project);
+        report
+    }
+}
+
+/// The report `options` make of `results`, checked in `project`: the level
+/// filter, inline ignores, `ignore_errors`, the baseline, then the order.
+/// The project's own keys name the files inline ignores apply to. The
+/// ignore entries and the baseline name files relative to `root`, which
+/// the keys may carry as a prefix; the report's keys carry it again.
+pub(crate) fn finalize_results(
+    project: &Project,
+    mut results: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    options: &Finalize,
+    root: Option<&Path>,
+) -> Report {
+    for diagnostics in results.values_mut() {
+        diagnostics.retain(|d| d.level <= options.level);
+    }
+    project.apply_inline_ignores(&mut results, options.report_unmatched_ignores);
+    let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = match root {
+        Some(root) => results
+            .into_iter()
+            .map(|(path, diagnostics)| {
+                let relative = path
+                    .strip_prefix(root)
+                    .map_or_else(|_| path.clone(), Path::to_path_buf);
+                (relative, diagnostics)
+            })
+            .collect(),
+        None => results,
+    };
+    ignore_errors::filter(&mut results, &options.ignore_errors);
+    let stale_baseline_entries = match &options.baseline {
+        Some(baseline) => crate::baseline::filter(&mut results, baseline),
+        None => Vec::new(),
+    };
+    if options.order == DiagnosticOrder::Sorted {
         for diagnostics in results.values_mut() {
-            diagnostics.retain(|d| d.level <= options.level);
+            diagnostics::sort_diagnostics(diagnostics);
         }
-        self.project
-            .apply_inline_ignores(&mut results, options.report_unmatched_ignores);
-        ignore_errors::filter(&mut results, &options.ignore_errors);
-        let stale_baseline_entries = match &options.baseline {
-            Some(baseline) => crate::baseline::filter(&mut results, baseline),
-            None => Vec::new(),
-        };
-        if options.order == DiagnosticOrder::Sorted {
-            for diagnostics in results.values_mut() {
-                diagnostics::sort_diagnostics(diagnostics);
-            }
-        }
-        Report {
-            results,
-            stale_baseline_entries,
-        }
+    }
+    let results = match root {
+        Some(root) => results
+            .into_iter()
+            .map(|(path, diagnostics)| (root.join(path), diagnostics))
+            .collect(),
+        None => results,
+    };
+    Report {
+        results,
+        stale_baseline_entries,
     }
 }
 
@@ -617,7 +668,6 @@ impl Session {
             php_versions,
             configured_level,
             phpstan_api_check_enabled,
-            defer_inline_ignores: true,
             retain_source: false,
             built_once: true,
             rules,
@@ -765,12 +815,11 @@ impl Session {
     }
 
     /// The settings a language server's project is configured with: this
-    /// session's, except for the three that describe how the server keeps
+    /// session's, except for the two that describe how the server keeps
     /// its files. The server keeps each file's source and its context
     /// trees, and applies inline ignores when it publishes.
     pub(crate) fn editor_settings(&self) -> ProjectSettings {
         ProjectSettings {
-            defer_inline_ignores: false,
             retain_source: true,
             built_once: false,
             ..self.settings.clone()
@@ -983,7 +1032,7 @@ impl Session {
                 )
             })
             .collect();
-        let index_use_sites = project.check_settings().rules.check_dead_code;
+        let index_use_sites = project.indexes_class_fn_sites();
         // A cached file has no tree. A context file keeps its tree unless the
         // project is built once, so only such a project reads the cache.
         let built_once = project.built_once;
@@ -1125,7 +1174,7 @@ impl Session {
 
         let pool = &self.pool;
 
-        let index_use_sites = project.check_settings().rules.check_dead_code;
+        let index_use_sites = project.indexes_class_fn_sites();
         let combined_files: Vec<&PathBuf> =
             context_files.iter().chain(analyze_files.iter()).collect();
         // The files are numbered while they parse.
@@ -1283,16 +1332,54 @@ impl Session {
             lex_warnings,
         } = loaded;
 
+        let checks = self.check_project(&mut project, &analyze_files_by_size, dump_types);
+
+        let mut results = checks.per_file;
+        // A file that does not parse is reported where it fails: PHP
+        // refuses to run it.
+        for (path, failure) in parse_failures {
+            let at = syntax::span::LineCol {
+                line: failure.line,
+                col: failure.col,
+            };
+            results.entry(path).or_default().push(
+                DiagnosticBuilder::new(failure.message, Span::default(), 0, "parse.error")
+                    .non_ignorable()
+                    .build_at(syntax::span::Range { start: at, end: at }),
+            );
+        }
+        for (path, diags) in checks.whole_program {
+            results.entry(path).or_default().extend(diags);
+        }
+
+        AnalysisResult {
+            project,
+            results,
+            checked: analyze_files_by_size.len() - skipped_analyze - checks.check_panics.len(),
+            skipped_analyze,
+            skipped_context,
+            context_loaded,
+            check_panics: checks.check_panics,
+            lex_warnings,
+            type_dump: checks.type_dump,
+        }
+    }
+
+    /// Checks `files`, the analysed paths of `project`, then runs the
+    /// project-wide passes over what they found. `project` must be loaded
+    /// and finished.
+    pub(crate) fn check_project(
+        &self,
+        project: &mut Project,
+        files: &[PathBuf],
+        dump_types: bool,
+    ) -> ProjectChecks {
         let needs_tier_2 =
             self.settings.rules.check_dead_enum_cases || self.settings.rules.check_dead_members;
-        let checked_results = project.check_files(
-            &analyze_files_by_size,
-            Some(&self.pool),
-            needs_tier_2,
-            dump_types,
-        );
+        let checked_results =
+            project.check_files(files, Some(&self.pool), needs_tier_2, dump_types);
 
-        let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
+        let mut per_file: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
         let mut named_argument_calls = Vec::new();
         let mut type_dumps = Vec::new();
@@ -1311,7 +1398,7 @@ impl Session {
                     if dump_types {
                         type_dumps.push((path.clone(), check.type_dump));
                     }
-                    results.insert(path, check.diagnostics);
+                    per_file.insert(path, check.diagnostics);
                 }
                 Err(msg) => check_panics.push((path, msg)),
             }
@@ -1333,22 +1420,10 @@ impl Session {
             project.mark_member_index_built();
         }
 
-        // A file that does not parse is reported where it fails: PHP
-        // refuses to run it.
-        for (path, failure) in parse_failures {
-            let at = syntax::span::LineCol {
-                line: failure.line,
-                col: failure.col,
-            };
-            results.entry(path).or_default().push(
-                DiagnosticBuilder::new(failure.message, Span::default(), 0, "parse.error")
-                    .non_ignorable()
-                    .build_at(syntax::span::Range { start: at, end: at }),
-            );
-        }
+        let mut whole_program: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut extend = |found: FxHashMap<PathBuf, Vec<Diagnostic>>| {
             for (path, diags) in found {
-                results.entry(path).or_default().extend(diags);
+                whole_program.entry(path).or_default().extend(diags);
             }
         };
         extend(project.check_whole_program(&named_argument_calls));
@@ -1364,15 +1439,10 @@ impl Session {
             }
         }
 
-        AnalysisResult {
-            project,
-            results,
-            checked: analyze_files_by_size.len() - skipped_analyze - check_panics.len(),
-            skipped_analyze,
-            skipped_context,
-            context_loaded,
+        ProjectChecks {
+            per_file,
+            whole_program,
             check_panics,
-            lex_warnings,
             type_dump,
         }
     }
