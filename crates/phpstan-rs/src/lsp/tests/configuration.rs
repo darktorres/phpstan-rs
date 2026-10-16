@@ -9,7 +9,7 @@ use super::helpers::run;
 use super::helpers::*;
 use serde_json::{Value, json};
 
-const DEPRECATED_FIXTURE: &str =
+pub(super) const DEPRECATED_FIXTURE: &str =
     "<?php\n/** @deprecated use newFunc() instead */\nfunction oldFunc(): void {}\noldFunc();\n";
 
 fn did_open(uri: &str, text: &str) -> Value {

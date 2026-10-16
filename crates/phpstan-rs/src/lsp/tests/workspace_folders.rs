@@ -5,9 +5,11 @@
 //! this item exists to fix).
 
 use super::super::*;
+use super::configuration::DEPRECATED_FIXTURE;
 use super::helpers::run_multi;
 use super::helpers::*;
-use serde_json::json;
+use serde_json::{Value, json};
+use std::fs;
 
 #[test]
 fn initialize_with_multiple_workspace_folders_loads_every_folder() {
@@ -165,5 +167,158 @@ fn did_change_workspace_folders_removed_clears_its_files_and_keeps_the_others() 
     assert!(
         b_diagnostics.contains("nope"),
         "the surviving folder must keep its own diagnostics, got: {b_diagnostics}"
+    );
+}
+
+fn reports_deprecation(messages: &[Value], uri: &str) -> bool {
+    messages.iter().any(|m| {
+        m["method"] == "textDocument/publishDiagnostics"
+            && m["params"]["uri"] == uri
+            && m["params"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "function.deprecated")
+    })
+}
+
+#[test]
+fn nested_folders_publish_a_file_from_the_folder_that_owns_it() {
+    let outer = TempDir::new("nested_outer");
+    outer.write(
+        "phpstan-rs.toml",
+        "[ext.deprecation-rules]\nenabled = true\n",
+    );
+    let control = outer.write(
+        "Control.php",
+        "<?php\n/** @deprecated use newControl() instead */\nfunction controlOld(): void {}\ncontrolOld();\n",
+    );
+    let inner = outer.write("inner/Use.php", DEPRECATED_FIXTURE);
+    let control_uri = path_to_uri(&control).to_string();
+    let inner_uri = path_to_uri(&inner).to_string();
+
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(&[outer.0.clone(), outer.0.join("inner")]);
+    let messages: Vec<Value> = server
+        .publish_workspace_diagnostics()
+        .iter()
+        .map(|m| serde_json::to_value(m).unwrap())
+        .collect();
+
+    // The outer folder enables the deprecation rule and lists `inner/Use.php`
+    // too, but the inner folder owns the file and does not enable the rule.
+    assert!(
+        reports_deprecation(&messages, &control_uri),
+        "the outer folder's own file must report the deprecated call, got: {messages:?}"
+    );
+    assert!(
+        !reports_deprecation(&messages, &inner_uri),
+        "the owning folder's configuration must decide the file's diagnostics, got: {messages:?}"
+    );
+}
+
+#[test]
+fn removing_a_folder_keeps_checking_its_open_document() {
+    let a = TempDir::new("open_remove_a");
+    let b = TempDir::new("open_remove_b");
+    let text = "<?php function useMissing() { missing_function(); }";
+    let b_use = b.write("Use.php", text);
+    let uri = path_to_uri(&b_use).to_string();
+
+    let messages = run_multi(
+        &[&a, &b],
+        &[
+            notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": uri, "languageId": "php", "version": 1, "text": text}}),
+            ),
+            did_change_workspace_folders(vec![], vec![workspace_folder(&b)]),
+        ],
+    );
+
+    // The editor still has the document open, so it stays checked outside
+    // every folder.
+    let last = last_publish_diagnostics_for(&messages, &uri);
+    assert!(
+        last["params"]["diagnostics"]
+            .to_string()
+            .contains("missing_function"),
+        "an open document outside every folder must keep its diagnostics, got: {last:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_document_opened_through_a_link_into_another_folder_is_checked_by_that_folder() {
+    // `a/link` names `b/real`, so the document belongs to `b`, and `b`'s
+    // configuration decides its diagnostics.
+    let a = TempDir::new("link_owner_a");
+    let b = TempDir::new("link_owner_b");
+    b.write(
+        "phpstan-rs.toml",
+        "[ext.deprecation-rules]\nenabled = true\n",
+    );
+    b.write("real/Use.php", DEPRECATED_FIXTURE);
+    std::os::unix::fs::symlink(b.0.join("real"), a.0.join("link")).unwrap();
+    let link_uri = path_to_uri(&a.0.join("link/Use.php")).to_string();
+
+    let messages = run_multi(
+        &[&a, &b],
+        &[notification(
+            "textDocument/didOpen",
+            json!({"textDocument": {"uri": link_uri, "languageId": "php", "version": 1, "text": DEPRECATED_FIXTURE}}),
+        )],
+    );
+
+    assert!(
+        reports_deprecation(&messages, &link_uri),
+        "the folder that owns the link's target must check the document, got: {messages:?}"
+    );
+}
+
+#[test]
+fn a_reload_that_changes_one_folders_file_set_leaves_the_other_folder_alone() {
+    let a = TempDir::new("reload_set_a");
+    let a_base = fs::canonicalize(&a.0).unwrap();
+    a.write("src/Kept.php", "<?php class Kept {}");
+    a.write("lib/Dropped.php", "<?php class Dropped {}");
+    let b = TempDir::new("reload_set_b");
+    let b_base = fs::canonicalize(&b.0).unwrap();
+    b.write("Other.php", "<?php class Other {}");
+
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(&[a.0.clone(), b.0.clone()]);
+    assert!(
+        server.folders[0]
+            .slot
+            .project
+            .is_loaded(&a_base.join("lib/Dropped.php"))
+    );
+
+    a.write("phpstan-rs.toml", "paths = [\"src\"]\n");
+    server.reload_configuration(settings::PhpstanRsSettings {
+        enable: true,
+        config_path: None,
+    });
+
+    assert!(
+        !server.folders[0]
+            .slot
+            .project
+            .is_loaded(&a_base.join("lib/Dropped.php")),
+        "a file the reloaded configuration no longer lists must leave its folder's project"
+    );
+    assert!(
+        server.folders[0]
+            .slot
+            .project
+            .is_loaded(&a_base.join("src/Kept.php"))
+    );
+    assert!(
+        server.folders[1]
+            .slot
+            .project
+            .is_loaded(&b_base.join("Other.php")),
+        "the other folder's files must stay loaded"
     );
 }
