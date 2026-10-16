@@ -91,7 +91,7 @@ Inside a record, ids and section numbers are those of the record's source, as wr
 - A row that changes behaviour or layout keeps the Piwigo output byte-identical to the base's (`LC_ALL=C sort` both before diffing), unless the row says why it cannot.
 - A saving is claimed only from a measurement:
   - callgrind `Ir` summed over threads, against the previous row's commit, in off mode, on the `dhat` profile with frame pointers;
-  - a run's total also holds work that follows the threads' schedule and not the code: mimalloc's cross-thread reclaim and the per-thread caches moved by −6.4 M and then +22.4 M across the runs of P7, LOAD-6 and CHECK-4, none of which touches them (CHECK-4's record). So a change of that size is judged by the inclusive `Ir` of the functions it changes, in its own profile against the base's, with the total beside it. MEAS-3 measures the spread;
+  - a run's total also holds work that follows the threads' schedule and not the code: mimalloc's cross-thread reclaim and the per-thread caches moved by −6.4 M and then +22.4 M across the runs of P7, LOAD-6 and CHECK-4, none of which touches them (CHECK-4's record). So a change of that size is judged by the inclusive `Ir` of the functions it changes, in its own profile against the base's, with the total beside it. MEAS-3 measured the spread: three runs of one binary at the default thread count differ by up to 16.9 M, and two at one thread (`PHPSTAN_RS_THREADS=1`) by 1.1 M. So a change under ≈20 M is also measured at one thread, where the total resolves about 1 M;
   - wall time by `hyperfine -N`, alternating A B A B, under `nice -n 19`, with `/proc/loadavg` noted.
 - Builds, profiling runs and `check-project` probes need the user's go-ahead. Heavy jobs run one at a time.
 
@@ -1519,13 +1519,13 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 
 ## 14. MEAS: the measurements that set targets
 
-MEAS-1 and MEAS-2 measured `791d29cb`'s code.
+MEAS-1, MEAS-2 and MEAS-3 measured `791d29cb`'s code.
 
 | id | measurement | state | used by |
 |---|---|---|---|
 | MEAS-1 | Warm-mode costs at this branch's code | DONE | the targets of item 6 (REG-7.2, STUB-8, STUB-9, CACHE-9, CACHE-10), CACHE-11, CACHE-12, CACHE-13 |
 | MEAS-2 | Memory at this branch's code | DONE | the memory claims of LOAD-3, REG-13, SYN-1, DOC-2, NAME-2, LOAD-5 |
-| MEAS-3 | **The spread of one off run's total:** two callgrind runs of one binary, and two at one thread (`PHPSTAN_RS_THREADS=1`), each split by function as CHECK-4's record splits P7's run from the build's | OPEN; profiling runs, which need the user's go-ahead | the rule on what a total can resolve (Conventions); the changes of §1's table that are tens of M: CHECK-1 (−54.7 M), CHECK-2 (−27.1 M), TYPE-1 (−59.9 M), TYPE-2 (−23.2 M), TYPE-3 (−29.9 M), CHECK-3 (−52.5 M) |
+| MEAS-3 | **The spread of one off run's total:** two callgrind runs of one binary, and two at one thread (`PHPSTAN_RS_THREADS=1`), each split by function as CHECK-4's record splits P7's run from the build's | DONE (2026-10-15): up to 16.9 M at the default thread count, 1.1 M at one thread (its section below) | the rule on what a total can resolve (Conventions); the changes of §1's table that are tens of M: CHECK-1 (−54.7 M), CHECK-2 (−27.1 M), TYPE-1 (−59.9 M), TYPE-2 (−23.2 M), TYPE-3 (−29.9 M), CHECK-3 (−52.5 M) |
 
 ### MEAS-1: the warm run, 13.18 G Ir
 
@@ -1555,6 +1555,25 @@ Targets this run reads:
   - The item's weight is syscalls and I/O, which Ir does not count.
   - The decode (≈1,260 M above) is not what a `stat` index removes.
   - Its soundness concern (the mtime shortcut) is settled on the row (decision 13).
+
+### MEAS-3: the spread of one off run's total
+
+The P8b binary (`791d29cb`), off mode, Piwigo, callgrind, one run after another under `nice -n 19` (load average 3.6-7.6, from other work on the machine). The runs and the split are in `~/.cache/prs-profile/meas3/`, and the scripts in `~/.cache/prs-ledger/meas3/`.
+
+| run | threads | Ir |
+|---|---|---:|
+| P8b (`p8b/cg`) | default | 20,928,053,254 |
+| t-a | default | 20,925,124,097 |
+| t-b | default | 20,911,186,921 |
+| one-a | 1 | 20,884,565,808 |
+| one-b | 1 | 20,883,509,523 |
+
+- **At the default thread count** the three totals span 16.9 M (sample standard deviation 11.4 M). What moves, split by function as CHECK-4's record does:
+  - mimalloc, up to 20 M between two runs: its cross-thread frees and page reclaim (`mi_free_try_collect_mt`, `mi_abandoned_page_try_reclaim`) and its page and arena searches;
+  - the per-thread caches: `Interner::name_hashed` ±3.7 M, and the work whose share depends on which thread meets an item first (`DocBlock::merge_from` ±1.5 M, the memo tables' rehashes ±0.8 M).
+- **At one thread** the two totals differ by 1.1 M, all of it mimalloc's. Such a run is ≈40 M lower: no thread repeats another's cache fills (`name_hashed` −16.8 M, `NameCache::insert` −21 M), though mimalloc's own page searches cost ≈57 M more.
+- **Every run gave the same output**, 581 diagnostics over 2,792 files.
+- **What a total resolves.** All six rows of §1's table that are tens of M exceed the spread. CHECK-2 (−27.1 M) and TYPE-2 (−23.2 M) exceed it by less than twice, so each one-run total gives their sign but not their size; the functions each changed are what their records measured.
 
 ### MEAS-2: the heap
 
