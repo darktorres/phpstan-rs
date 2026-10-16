@@ -158,7 +158,7 @@ Six of the off drill's rows are open:
 - STUB-10, whose measurements (STUB-10.1) are left, and STUB-11, which waits on them and on the reflection crate;
 - CACHE-11 and CACHE-12, which wait on CACHE-9 and CACHE-10.
 
-E9's cut is CHECK-6.16's (READY). The off drill's questions (U1-U9) and D6's unbuilt policy are §15's Q-1 to Q-10, of which Q-6 is done. The rest of its rows are done or skipped.
+E9's cut is CHECK-6.16's (READY). The off drill's questions (U1-U9) and D6's unbuilt policy are §15's Q-1 to Q-10: Q-6 is done, and Q-8 is superseded by STUB-10.1 and STUB-11. The rest of its rows are done or skipped.
 
 None of the 20 G items is built whole. Four of the off drill's rows changed what some of them would save:
 
@@ -437,7 +437,7 @@ Merging the sources into one list found six places where two of them disagree, o
      - STUB-10.2 is decided (yes), and STUB-10.1 is the measurements;
      - STUB-11 is re-specified;
      - STUB-13 is new, its phar locator in STUB-7.4's chain;
-     - Q-8 follows;
+     - Q-8 is superseded: B9's timings and the build script's cost are STUB-10.1's, and B10's backstop is STUB-11's equality test;
      - the off drill's D3 is decided again (§1).
 8. **A PHPDoc type refines the kinds its native type admits; it never removes one.**
    - *The question was* REG-7.5. The crate split's text takes PHPStan's `TypehintHelper::decideType` (2.2.16; the latest, 2.3.1, adds one rule) whole, and nothing had checked that against PHP.
@@ -1105,7 +1105,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | STUB-8 | **Guards decided by the stubs' availability,** on run-time evidence only: built into PHP, tested by Composer's platform check, or named by the configuration. A guard is `Never` or `Always` only on that evidence; otherwise both declarations stay. Availability is decision 6's range query, and whether an extension is loaded is read from the extension each declaration records. New: a check that a polyfill matches the declaration it replaces | 20 G 6.2; 25 G F2; decision 6 | OPEN; a delta, approved, both parts (VAL-2.4) | STUB-7 (STUB-7.1's ranges and extensions); overlaps STUB-7.9 and 7.10 |
 | STUB-9 | **F2's count as a diagnostic:** a debug-only report of the stub keys in the passes' scope, by the changed name that pulled each in | 20 G 6.4; 25 G F2 step 4 | BLOCKED: what it counts is the passes' scope, which REG-7 replaces; its form, if any, follows REG-7 and the engine (REG-16) | REG-7 |
 | STUB-10 | How a binary carries the stub data: at compile time or not | off D3 | PART: decided (STUB-10.2); STUB-10.1's measurements are left | — |
-| STUB-10.1 | **The measurements the embedding is built on,** at the layer, not estimated: the records' size; whether the stub sources can leave the binary; the build time; and what a cold run still pays. After C4 and C5 only each stub file's declarations are left, and a run reaches 6-43% of the stub bytes. The off report's C8 estimates ≈0.2-1.5 G per cold run, against 5.05 G in the old code | off D3; decision 7 | OPEN | REG-12, STUB-7 |
+| STUB-10.1 | **The measurements the embedding is built on,** at the layer, not estimated: the records' size; whether the stub sources can leave the binary; the build time, clean and after an edit to the reflection crate, with the build script's stub build and the data crate's compile and relink (B9's timings, which were read off the console and not kept); and what a cold run still pays. After C4 and C5 only each stub file's declarations are left, and a run reaches 6-43% of the stub bytes. The off report's C8 estimates ≈0.2-1.5 G per cold run, against 5.05 G in the old code | off D3; decision 7 | OPEN | REG-12, STUB-7 |
 | STUB-10.2 | **The decision:** embed the data at compile time or not. If yes, the build script must run the code the runtime runs (the `reflection` crate, REG-15), `.rodata` grows from 18.2 to ≈50 MB per binary, and checked-in binary data is out | off D3 | DONE (decided 2026-10-15, §2.4 decision 7): yes, for PHP's declarations and PHPStan's function map and `.stub` files; PHPStan's own classes are read from the project (STUB-13) | — |
 | STUB-11 | **The builtin knowledge built at compile time.** Per-file records of PHP's declarations, PHPStan's function map and PHPStan's `.stub` files are made by the build script with the code the runtime runs (the `reflection` crate, REG-15). They are a read-only layer: no run builds them, and the stub disk cache goes. `**` is folded deterministically, by a pure-Rust `pow` (`types/src/arithmetic.rs:715-717` calls `powf` today), and a test asserts that the embedded records equal a runtime build. The data crate is linked only into the final binaries | off P6; decision 7 | OPEN | STUB-10.1, REG-15 |
 | STUB-12 | **The sources of the builtin knowledge,** read as decision 6's data and combined by decision 10's rule: what php-src verifies bounds a type, and the other sources' claims are intersected within that bound | decision 6; decision 10 | OPEN | STUB-7.1 |
@@ -1531,7 +1531,7 @@ Kept for the record. None is built from this ledger.
 | Q-5 | E10: which facts that outlive an `extract()` body (property assignments, class-level sites) a dropped body still needs. | off U5 | OPEN | Trace in `function_decl.rs` and `checker.rs` before widening E10 past the report calls. |
 | Q-6 | Which truncation holds the 33 `offsetAccess.mightNotExist` reports that `finalize` does not drop (B3 counts them among the discarded reports but not by site). Decides whether P11a's truncation saving is "well under 1 M" or ≈13 M. | off U6 | DONE (2026-10-15): 30 in a convergence pass's `rewind_to`, 3 in bodies that call `extract()`, so ≈12.3 M. Settled from the counts in the CHECK-4 build's profile, with no probe build (CHECK-4's record) | — |
 | Q-7 | Readers left out of d: the uninitialized-property rules on, or a tree with test classes whose built-in parent-call hook rules fire, add the ancestors' bodies to d. | off U7 | OPEN | Re-run B1's probe on such a tree; needs a probe build. |
-| Q-8 | B9's embed and edit timings were read off the console and not kept; the build script's cost under C8's form (every stub file parsed, no base) is not measured; nothing ran on aarch64 or macOS (B10's backstop is designed, not run). | off U8 | OPEN | Decision 7 revives P6 in C8's form. The build script's cost is measured at STUB-10.1. B10's backstop is STUB-11's equality test, run on each target the binaries are built for. |
+| Q-8 | B9's embed and edit timings were read off the console and not kept; the build script's cost under C8's form (every stub file parsed, no base) is not measured; nothing ran on aarch64 or macOS (B10's backstop is designed, not run). | off U8 | SUPERSEDED (decision 7, which revives P6 in C8's form): B9's timings and the build script's cost are measured at STUB-10.1, and B10's backstop is STUB-11's equality test, run on each target the binaries are built for | — |
 | Q-9 | A third pass on the report's claims the review workflow could not check (102 items). | off U9 | OPEN | Hand check against the code and the profiles, as the 104 confirmed and the 17 split findings were. |
 | Q-10 | D6's parse-failure policy beyond the skim is not built: a context file that fails to parse keeps what it declares (what parses is recovered, what failed is unknown), validity follows the configured PHP version, and one rule holds for the batch run and the language server (the off report's §10.8). | off D6 | OPEN | Built with the parser, on SYN-1.9's error nodes: recovery points, a registry entry of unknown shape for what failed, marks for syntax the configured version removed (Q-2's `(real)` and `(unset)`), one rule for both entry points. Since decision 6 the configured version is a range. |
 | Q-11 | The crate split's C1-C3 follow-ups were not audited on this branch. The plan counts `phpstan_class_files` as gone by C3's follow-up, and it is still a field (`registry.rs:276`). | split C3 | OPEN | Read each C1-C3 follow-up against the code before REG-8.4 counts `Registry`'s 22 fields. |
@@ -1740,7 +1740,8 @@ The ids in the first column are the 25 G report's.
   - REG-13 and its nine sub-tasks;
   - SYN-1.6;
   - LOAD-1.6, LOAD-4.1, LOAD-4.2, LOAD-4.6 and LOAD-5.3;
-  - REG-8.2.
+  - REG-8.2;
+  - Q-8, whose parts are STUB-10.1's and STUB-11's.
 - **Rewritten:**
   - SYN-1 to SYN-1.8 (SYN-1.6 aside), SYN-2's needs, LOAD-3.5 and CHECK-6.3;
   - PROD-5, PROD-5.1, PROD-5.4 and PROD-5.7;
@@ -1749,7 +1750,8 @@ The ids in the first column are the 25 G report's.
   - STUB-7.1, STUB-7.3, STUB-7.4, STUB-7.6, STUB-7.9, STUB-7.10, STUB-8, STUB-10 to STUB-11;
   - CACHE-9, CACHE-10, CACHE-13 and CACHE-13.2;
   - VAL-2.3, VAL-2.5, VAL-2.6 and VAL-2.9;
-  - Q-8 and Q-10.
+  - STUB-10.1, which names B9's timings;
+  - Q-10.
 - **New:**
   - SYN-1.9 and SYN-1.10;
   - PROD-5.8 and DOC-2.9;
