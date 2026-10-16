@@ -11,20 +11,19 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-16, `2fef09dd` on branch `callgrind-20g`. Counts below were
+State as of 2026-10-16, `67682219` on branch `callgrind-20g`. Counts below were
 read from the files on that date. This file covers this branch only.
 
 ## Where to resume
 
 Levels 1 to 7 are deferred, decided on 2026-10-16, and will be reevaluated
-together later. Their sections below keep the content they had that day.
+together later. Their sections below keep the content they had that day. The one
+exception is level 7's designs, which are rows of the 20 G plan and are worked in
+level 8's order; DOC-2.1 stays deferred.
 
-Level 2 has started: C4 is under way (REG-3, 4.1, 4.3, 4.4, 4.6, 4.8 and 16.1
-are done) and REG-2 is ready.
-
-Level 8 is the one active level. Its own ready rows are CACHE-8 and CHECK-4.2.
-CHECK-4.1 waits on CHECK-6.10, which is READY in
-`PROFILE_DRILL_PIWIGO_LEDGER.md`.
+Level 8 is the one active level. It holds the 20 G plan and the off drill, and
+its order is in its section below. Work the lowest item that has a READY row
+(item 1 on 2026-10-16).
 
 ## The stack
 
@@ -66,7 +65,8 @@ noted):
 Remaining after C1–C3 (`gates/module-graph.txt` line 218, the `finished` line):
 
 - **C4**, REG-2 to REG-12, in the ledger's order (`PROFILE_DRILL_PIWIGO_LEDGER.md`
-  §2.1 and §2.2):
+  §2.1 and §2.2). Part-built: REG-3, 4.1, 4.3, 4.4, 4.6, 4.8 and 16.1 are done,
+  and REG-2 is ready.
   - ready: REG-2; REG-4.2, 4.5, 4.7, 4.9, 4.10, 4.12, 4.13 and 4.14; REG-5 (a
     delta left); REG-6; REG-16.2 (interned identity);
   - open: REG-4.11 (needs REG-8.1, 8.5 and REG-10) and REG-4.15 (needs 4.2 and
@@ -136,7 +136,9 @@ kept because the reports cite level 7.
 
 Validated up to `1892b477`. What was built after that point is validated only by
 VAL-1 (below). Remaining designs, each with its ledger row (the mapping is the
-ledger's Appendix B.2). Code counts are references in `.rs` files on this branch:
+ledger's Appendix B.2). Every row below except DOC-2.1 is also a row of the 20 G
+plan, so it is worked in level 8's order (section 8). Code counts are references
+in `.rs` files on this branch:
 
 | remaining | code now | row | state |
 |---|---|---|---|
@@ -168,12 +170,41 @@ Notes:
   `5fb858c9`, not HEAD. Before it starts: measure at HEAD, and settle the
   statement `@var` memo, which overlaps DOC-2.2.
 
-### 8. The off-run drill — `PROFILE_DRILL_PIWIGO_OFF.md`, `_OFF_HEAP.md`, `_20G.md`
+### 8. The 20 G plan and the off-run drill — `PROFILE_DRILL_PIWIGO_20G.md`, `PROFILE_DRILL_PIWIGO_OFF.md`, `_OFF_HEAP.md`
 
 Every row and what blocks it is in `PROFILE_DRILL_PIWIGO_LEDGER.md`: §2.1 is the
-ready list, §2.2 the chains, §2.3 the biggest targets. The 20 G plan's rows
-(LOAD, SYN, PROD, DOC, NAME, TYPE, REG, CHECK) are in that ledger. The off-run
-rows still open:
+ready list, §2.2 the chains, §2.3 the biggest targets. The ledger lists rows by
+area, which is not the order of work.
+
+**The order.** The 20 G plan builds its items one at a time, in number order (its
+§9). Within an item a row starts when it is READY. A row whose need sits in a
+later item waits for that need. The READY rows, item by item:
+
+- Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
+- Item 1: LOAD-1.1, 1.3, 1.4 and 1.5, then 1.2, 1.7 and 1.8.
+- Item 2: LOAD-2.1 and 2.8, then 2.2 to 2.7.
+- Item 3: LOAD-3.2 (3.1 waits on REG-16.4, level 2).
+- Item 5: LOAD-4.3, 4.5 and 4.7 (4.4 waits on LOAD-2.5).
+- Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).
+- Item 9: SYN-1.1 and 1.2, then 1.3, 1.4, 1.5, 1.7 and 1.8.
+- Item 11: SYN-3.1 and 3.2, then 3.3 and 3.4.
+- Item 12: SYN-4.2, 4.4, 4.5, 4.6, 4.8, 4.9 and 4.10.
+- Item 13: PROD-5.2, 5.3, 5.5, 5.6, and PROD-5.8 (decision 2).
+- Item 14: DOC-2.3, 2.4, 2.7 and 2.8. DOC-2.1 is deferred.
+- Item 15: NAME-1.1, 1.2, 1.5 and 1.6.
+- Item 16: NAME-2.1, 2.2 and 2.3.
+- Item 18: CHECK-6.1, 6.2, 6.4 to 6.6, 6.8 to 6.12, and 6.16 to 6.18. CHECK-4.1 is
+  built with CHECK-6.10.
+- Item 19: LOAD-5.4.
+
+Items 4, 6, 7, 10 and 17 have no READY row in level 8. Item 4's two are C4 rows
+(level 2). Items 6 and 7 wait on level 2 and the C5 rows. Item 10 (SYN-2) waits
+on SYN-1 (item 9). Item 17 (CACHE-13) waits on LOAD-1.4 and on REG-16.4 (level 2).
+
+Outside the items, with no item number, CACHE-8 and CHECK-4.2 (off drill) and
+TYPE-5 and CHECK-9 (decisions 8 and 9) are READY now.
+
+The off-run rows still open:
 
 - **Stub embedding** (proposal 6): STUB-11, OPEN, needs STUB-10.1 (its
   measurements, OPEN) and REG-15. The stub build still embeds `include_str!`
