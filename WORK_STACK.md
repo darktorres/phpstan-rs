@@ -6,320 +6,205 @@ plan; this file keeps the chain so none of it is forgotten.
 
 **Rule:** when work is paused for a fix, add the fix to the top of the stack
 below (what it is, why it was started, where its plan lives) instead of
-starting a new tracking file. When a level is finished, mark it done here
-and say which level to resume. Per-item progress stays in the level's own
-documents; this file holds only the order and the pointers.
+starting a new tracking file. When a task is finished, delete it from this
+file; the level's own documents keep the record. Per-item progress stays in
+the level's own documents; this file holds only the order, the tasks still
+open and the pointers.
 
-State as of 2026-10-01, `f0babecf`. Counts below were read from the files on
-that date.
+State as of 2026-10-16, `2fef09dd` on branch `callgrind-20g`. Counts below were
+read from the files on that date. This file covers this branch only.
 
 ## Where to resume
 
-1. Finish **level 6**: recreate master's 87 commits on `master2`, one row
-   at a time (`MASTER_REIMPLEMENTATION_LEDGER.md`: 86 open, 1 skipped, none
-   done).
-2. Then pop back, in this order: **level 3** (the 140 open review tasks, and
-   the A/B ledger's open steps 19 and 21 on `master`), then **level 2** (the
-   crate split from Stage C on), then **level 1** (the lanes).
+Two decisions come first:
 
-## The two checkouts
+1. **Level 6:** keep its 86 open rows, rebuild the list, or drop the ledger.
+   Level 5's carry-over waits on this.
+2. **Level 2 or level 3 first.** The stack paused Stage C for the level-3
+   review, but Stage C has started on this branch: C4 is under way (REG-3, 4.1,
+   4.3, 4.4, 4.6, 4.8 and 16.1 are done) and REG-2 is ready. Continue C4, or
+   review first.
 
-| | branch | directory | holds |
-|---|---|---|---|
-| main | `master` | `/home/torres/projects/phpstan-rs` | the fixes to the stage A/B review findings: 87 commits `master2` lacks, and their ledger, `AB_LEDGER.md` |
-| second | `master2` | `/home/torres/projects/phpstan-rs-master2` | the crate split, the stage reviews, the gate speed-up, the start-up and build cost work |
+Without a decision, the ready rows of levels 7 and 8 can be started
+(`PROFILE_DRILL_PIWIGO_LEDGER.md` §2.1). DOC-2.1 needs a measurement first, and
+CHECK-6.1 is approved in principle but large. Level 1 waits for levels 2 and 3,
+as before. Level 4's two experiments stay parked unless asked for.
 
-Merge base `5d86aac1`. A rebase or a cherry-pick of master's commits onto
-`master2` conflicts with the registry rework, so they are written again
-(level 6).
-
-## The stack, oldest first
+## The stack
 
 ### 1. The roadmap, in two lanes — `ROADMAP.md`
 
-The main plan: phases toward PHPStan-level checking, split between two Claude
-sessions working in parallel on separate checkouts, one lane each (ground
-rules for both: build the complete, correct version, and treat PHPStan's
-behaviour as the minimum, not the target). **Paused** on 2026-09-23 (Lane B
-reported "paused with a clean tree" at `47ca5bb`; the branches converged at
-`ab4c2b5`) to split the codebase into crates.
+Paused on 2026-09-23 to split the codebase into crates. `ROADMAP.md` lines
+1783–1785 assign Lane A to Phases 87, 91, 94 and Part 11, and Lane B to Part 10,
+Phase 89 and Phase 97 (AA). Phases 186, 187 and 188 are PLANNED, and no lane is
+named for them; the 2026-09-23 report predates them.
 
-- **Lane A** (the `master` checkout): PHPDoc, the type system, narrowing.
-- **Lane B** (the `master2` checkout): declaration and OOP rules, and tooling
-  (Composer, baseline, codemods, output formats).
-- `ROADMAP.md` names which lane owns which phase (around line 1810).
-- Where it stopped, from the report written at the pause (2026-09-23, so
-  check `ROADMAP.md`'s phase statuses for anything newer):
-  - Lane A, remaining: Phase 130 (the PHPDoc-versus-native check for
-    properties and hooks was next; `*.unresolvableType`; template checks on
-    callable shapes; `@phpstan-self-out`; assert and `@var`-family checks;
-    conditional-return declarations), Phase 131 (templates on `@method`, the
-    rest of `@use<...>`), Phase 134 (`nullCoalesce`/`isset`/`empty`,
-    `compact()`, `unset()`), items 173, 140d, A4, A6, O1, 180, and a
-    known limit with narrowing on two correlated conditions.
-  - Lane B, remaining: Phase 139 (`InvalidTypesInUnionRule`, malformed
-    `@phpstan-ignore`), Composer phases 113-120, baseline Phase 122
-    (N1, N2, N4), output formats (Phase 154), codemods (Phase 111, I1-I4).
-  - Unassigned, whoever frees up first: Phase 87 (whole-program value
-    flow), 89 (structural duplication), 91 (parameter narrowing from call
-    sites), 94 (closed-world precision), AA, and Parts 10 and 11 (the
-    Packagist extension survey, the Psalm-derived findings).
-- The report itself is in the session transcript
-  `~/.claude/projects/-home-torres-projects-phpstan-rs/5b4ed89e-44f2-40ee-b852-a4162eb0bae8.jsonl`
-  (message at 2026-09-23T03:15); the lane sessions' exchanges are in that file
-  and in `-home-torres-projects-phpstan-rs-master2/ddf6301a-50ab-484b-9119-41a790c6f310.jsonl`.
-- Resume: when levels 2-6 are done. Edits `GATE_SPEED_PLAN.md` §5 lists for
-  `ROADMAP.md` are recorded there.
+Remaining from the report's list (not re-checked item by item, except where
+noted):
+
+- Lane A, Phase 130: the PHPDoc-versus-native check for properties and hooks;
+  `*.unresolvableType` (9 references in code); template checks on callable
+  shapes; `@phpstan-self-out`; assert and `@var`-family checks; conditional-return
+  declarations. Phase 130 has no heading on this branch.
+- Lane A, Phase 131 (templates on `@method`, the rest of `@use<...>`) and Phase
+  134 (`nullCoalesce`/`isset`/`empty`, `compact()`, `unset()`).
+- Lane A, items 173, 140d (a sub-item of Phase 140, the "Known but not yet
+  scheduled" bucket), A4, the A6 remainder ("mostly shipped"), O1 ("narrowed,
+  partly shipped"), Phase 180 (`treatPhpDocTypesAsCertain: false`, 0 references
+  in code), and the narrowing limit with two correlated conditions.
+- U1's beyond-parity half (`ROADMAP.md` line 2110, "the parity half is built").
+  The report did not list it.
+- Lane B: the two named items of Phase 139 are dropped. `InvalidTypesInUnionRule`
+  and `ignore.parseError` are in the code, and the rule catalog describes both as
+  built (`ROADMAP.md` lines 665 and 1253). Its receiver half is built too (line 289).
+- Lane B: Composer phases 113–120, baseline Phase 122 (N1, N2, N4), output
+  formats (Phase 154) and codemods (Phase 111, I1–I4). This branch's roadmap has
+  no heading or item for any of them, so their text is not in this checkout.
+- Phases 87, 89, 91, 94, 97 (AA), Parts 10 and 11 have headings but no
+  `**Status**` marker in their sections. The lane lists above assign them.
 
 ### 2. The crate split — `CRATE_SPLIT_PLAN.md` and its companions
 
-Moves the package into a workspace of crates (stages A to G). **Paused** at
-Stage C to review what stages A, B and C had produced (level 3).
+Remaining after C1–C3 (`gates/module-graph.txt` line 218, the `finished` line):
 
-- Done: stages A and B, Stage C's C1-C3 (the module graph's `finished`
-  line: A0 A1 A2 B1-B9 C1 C2 C3). Open: the rest of C, then D, E, F, G.
-- Companions: `CRATE_SPLIT_AUDIT.md` (item-by-item check of stages A-B7
-  against the code), `CRATE_SPLIT_EVIDENCE.md` (the measurements behind each
-  stage item, not kept current), `CRATE_SPLIT_CAUSES.md` (cause lists of the
-  oracle mismatches, regenerated, not edited).
-- Resume: Stage C, after level 3.
+- **C4**, REG-2 to REG-12, in the ledger's order (`PROFILE_DRILL_PIWIGO_LEDGER.md`
+  §2.1 and §2.2):
+  - ready: REG-2; REG-4.2, 4.5, 4.7, 4.9, 4.10, 4.12, 4.13 and 4.14; REG-5 (a
+    delta left); REG-6; REG-16.2 (interned identity);
+  - open: REG-4.11 (needs REG-8.1, 8.5 and REG-10) and REG-4.15 (needs 4.2 and
+    4.12); REG-7 (its five levels, 7.1 to 7.12; needs REG-16.3); REG-8 (needs
+    REG-7); REG-9 and REG-10 (need REG-8); REG-11 (behaviour fixes; 11.14 is
+    superseded); REG-12, C4's gate;
+  - the engine, decision 3: 16.3 needs 16.2; 16.4 needs 16.3, SYN-1.2 and LOAD-1.4;
+    16.5 (the query trace) needs 16.3.
+- **C5**: STUB-7 (needs REG-12). Its sub-steps hold dependents: STUB-7.1 for
+  STUB-12 and CHECK-10, STUB-7.3 for PROD-5.4, STUB-7.6 for CACHE-9 and CACHE-10.
+- **C10**: REG-15 (15.1 first, then 15.2).
+- **C1–C3 follow-ups (Q-11)**: LOAD-7.1, LOAD-7.3 to 7.7, REG-18.1 to 18.6 and
+  CHECK-11, all ready.
+- **Stages D to G** (`CRATE_SPLIT_PLAN.md` lines 2878, 4504, 6578 and 7491): open.
+- The seven `[>]` tasks moved out of the reviews (level 3) belong to this plan.
+- Companions: `CRATE_SPLIT_AUDIT.md`; `CRATE_SPLIT_EVIDENCE.md` (not kept
+  current); `CRATE_SPLIT_CAUSES.md` (regenerated, not edited).
 
 ### 3. The reviews of stages A, B and C — `STAGE_*_REVIEW.md`
 
-Reading every commit of the stages against the code, with findings as tasks.
-**Paused** because the test suites took too long to run (level 4).
+Its pause reason, the slow test suites (level 4), is finished, so this level can
+run. Open tasks, counted as `- [ ]` lines:
 
-| file | covers | open | done |
-|---|---|---|---|
-| `STAGE_B_REVIEW.md` | Stage B follow-ups | 17 | 220 |
-| `STAGE_B_FIX_REVIEW.md` | the fixes to that review | 107 | 241 |
-| `STAGE_C_REVIEW.md` | Stage C so far | 16 | 14 |
+| file | open |
+|---|---|
+| `STAGE_B_REVIEW.md` | 16 |
+| `STAGE_B_FIX_REVIEW.md` | 105 |
+| `STAGE_C_REVIEW.md` | 15 |
 
-- `AB_LEDGER.md` (on `master` only) tracks the plan that fixes the stage A/B
-  review findings, at `~/.claude/plans/peppy-drifting-coral.md` (outside the
-  repo): the 87 commits of level 6 are that work. At the last look: steps 1-18
-  and 20 (the test pass) done; step 19 (summary-mode tuning) and step 21
-  (finishing the second version of the plan) open, 16 unticked boxes.
-- Resume: work the open tasks in each file; tick them there; finish the A/B
-  ledger's steps 19 and 21 on `master`.
+136 in all. Work the open tasks in each file and tick them there. The seven
+`[>]` tasks (4 in `STAGE_B_REVIEW.md`, 3 in `STAGE_C_REVIEW.md`) are not counted
+here; they are in the crate-split plan (level 2).
 
 ### 4. Faster gates — `GATE_SPEED_PLAN.md`
 
-Cut `cargo xtask gates` from 37.5 to 13.6 minutes without weakening any gate.
-**Done** (steps S0-S15, result at `39a4d07c`). Two parts of it grew beyond
-the plan:
+Still open:
 
-- the start-up cost of one fixture, folded into
-  `PROJECT_BUILD_COST_INVESTIGATION.md` §12 and §12.1 (the plan file for it,
-  `STARTUP_COST_PLAN.md`, is in the history, `441f9366`);
-- the Project build cost (below).
+- S11's two experiments, stopped at the user's request in favour of the
+  profiling work (S13–S15): the dev-profile `opt-level` setting, and the lib tests
+  under an optimized profile. Parked.
+- §4's deferred costs, which the crate split removes: the per-fixture stub setup
+  (C4 and C5); the cli tests' per-process stub parse (C5); `check_paths`
+  recomputing property-assign facts (the Summaries API, crate-split §3.8); the
+  `--full` run's 22 per-level runs (F1's `reconfigure`); the facts pass running
+  the whole checker (Stage D).
+- §5's wording for the C4 and C5 gates (`gatetime` wall times lower than at the
+  phase's start). It goes into those stages.
+- `tools/gate-runner` is deleted when Phase 181 ships `report --export`
+  (`ROADMAP.md` lines 4458–4459). The code has only `--export-json`, so the
+  runner stays.
 
-### 5. The Project build cost — `PROJECT_BUILD_COST_INVESTIGATION.md`
+### 5. The project build cost — `PROJECT_BUILD_COST_INVESTIGATION.md`
 
-Why building a `Project` and a test cost so much, and the fixes: shared
-resolved stub base, scoped incremental finishing, a stored stub cache,
-precise rechecks and more. **Done**; the measurements and what was decided
-against are in §12. The profiling method is in `CLAUDE.md` and the README.
+One carry-over, waiting on level 6. `gates/test-renames/build-cost.txt` (23
+renames) overlaps the master commit `0ad9589b` (the ledger's row 86), so one set
+of renames is dropped when that row is worked. The module-graph edges in
+`gates/module-graph.txt` may also meet that commit's own edits to the file.
 
-- Two things to carry into level 6: the 23 renames mapped in
-  `gates/test-renames/build-cost.txt` overlap master's `0ad9589b` (which
-  records 22 of them), so drop one set when that commit is recreated; and
-  the module-graph edges added here (`gates/module-graph.txt`) may meet
-  master's own edits to that file.
+### 6. Recreate master's commits here — `MASTER_REIMPLEMENTATION_LEDGER.md` ← blocked
 
-### 6. Recreate master's commits here — `MASTER_REIMPLEMENTATION_LEDGER.md`  ← current
+86 rows OPEN and 1 SKIP, checked 2026-10-16. Each row is one of the 87 commits
+that master has and this branch lacks, to be written again here with master's
+subject line. The ledger also lists what this branch changed that those commits
+meet: stored types need serde and `PartialEq`, passes must run in scope, and
+`project.rs`.
 
-The 87 commits `master` has that `master2` lacks, each written again against
-this branch with master's subject line, one row each. 86 open, 1 skipped.
-The ledger also lists what `master2` changed that those commits meet (stored
-types need serde and `PartialEq`, passes must run in scope, `project.rs`).
+Blocked on a decision. Checked earlier on 2026-10-16, not re-run here (this
+review covers this branch only): the 87 source commits are no longer reachable
+from `master` or `master2`, so the rows cannot be checked against them.
 
-### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md` (implemented, validated at `1892b477`)
+### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md`
 
-Validated: `cargo test --workspace` and the fixtures (3,818) pass; the Piwigo
-O2 checksum equals the baseline's (`6e5fa444…`, from `7a3f3f99`); both binaries
-parse all 17,393 vendor files with no parse error; `hyperfine` on Piwigo,
-alternating, warm, load average 6-7: 2.46 s to 2.20 s wall (user 10.2 s to
-8.4 s). Not run: callgrind (about 25 G Ir under valgrind) and the O1
-front-end dumps (the dump hashes the whole `ParsedFile`, which changed, so no
-baseline compares).
+Validated up to `1892b477`. What was built after that point is validated only by
+VAL-1 (below). Remaining designs, each with its ledger row (the mapping is the
+ledger's Appendix B.2). Code counts are references in `.rs` files on this branch:
 
-Validation found and fixed: a `new` class counted as a constant in the
-dependency walk; a completion cursor past the end of a stale line; `if
-(false)` declarations treated as never run; the resolution memo answering a
-type written `\stdClass` with the one written `\StdClass`; and two wrong
-tests of mine. The vendor-tree report differs from the baseline's in
-improvements only (read: loops with no `break` end, so `return.missing` goes and
-`deadCode.unreachable` appears; an arrow function's body takes `xor`; a method's
-docblock is inherited across case-different names; union member order).
+| remaining | code now | row | state |
+|---|---|---|---|
+| §12.10 observers; `statement_method_call` (5) goes | 5 | CHECK-6.1 | READY, approved in principle |
+| C1 step 5's tail: `expr_side_effects` (4) and `collect_throws` (2) go | 6 | CHECK-6.2 | READY |
+| P7, lowering: `parse_written_type` (58) goes | 58 | DOC-2.1 | READY |
+| P11 step 1, tag effects | — | DOC-2.3 | READY |
+| tag tokens borrowed (the pull-parsing is built, DOC-1) | — | DOC-2.5 | OPEN, needs NAME-1 |
+| P12 step 3, declarations as the tree's own vectors | — | PROD-5.1 | OPEN, needs SYN-1.2 |
+| `InitFlow` fused into one walk (16) | 16 | PROD-5.3 | READY |
+| P12 step 4, `deps::Collector` goes | — | PROD-5.4 | OPEN, needs STUB-7.3 |
+| C3 step 6, `String` keys to `Name`; `Borrow<str>` on `ImportKey` (1) | 1 | NAME-1.2 | READY |
+| C3 step 7, the checker's method memo | — | NAME-1.1 | READY |
+| §14: trees dropped in the serial insert loop (267.8 M serial) | — | LOAD-3 | OPEN |
+| the sorted traversal's k-way merge | — | LOAD-2.5 | OPEN, needs LOAD-2.2 |
+| P6(d), the streaming lexer's plumbing | — | SYN-2 | OPEN |
+| P4, column tables for every file | — | SYN-3 | OPEN |
+| F1, the guards on `class_exists`-style tests | — | STUB-8 | OPEN, needs STUB-7 |
+| the end validation; the O1 dumps; reading the diffs | — | VAL-1.5, VAL-1.13, VAL-1 | OPEN |
 
-- Built after that validation, each with a debug-build oracle, not yet
-  validated together: tests and fixtures pass, O2 equals the baseline, callgrind
-  20.57 G Ir (from 25.14 G), warm 1.79 s with the file cache and 2.48 s
-  without:
-  F3 member-level and map-level sharing; the C3 tail except step 6 (identity
-  `Name` equality, one interner, `Borrow<str>` removed); C4's structured
-  `LocalKey` with a dependents index; C1's exit and throw points and the
-  shared completion rules; the P11 byte lexer for tags; `FileId`
-  pre-assignment; §14 (body summaries for purity, property writes, assigned
-  properties and the uninitialized-property flow, declarations, Pest facts
-  and declared classes kept per file, context trees dropped in a batch run
-  and parsed again on demand, and the per-file cache under
-  `~/.cache/phpstan-rs/files/<build>/`, keyed by the file's bytes, path,
-  parse options and the build, checksummed, size-capped); P12 step 2 (the
-  parser records references and doc sites) and facts-gated declaration and
-  body walks.
-- Not built:
-  - P7 direct lowering and retiring the text grammar: a sampling profile of
-    Piwigo at this state puts `parse_written_type` at 0.18% inclusive and
-    `to_source_string` at 0.09%, so the saving the plan counted is gone (the
-    docblock, text and resolution memos).
-  - §12.10 (observers, record and replay): a rewrite of the checker's 335
-    rule entry points, family by family, each needing its O2 diff read; not
-    started.
-  - C3 step 6 (`String` keys to `Name` by module), C1's effects and yields
-    as traversal products, `collect_throws`, pull-parsing for the tag lexer.
-  - P12 step 3 as written (the declaration list from the parser: it cannot
-    hold references into a tree still being built) and the fusion of
-    `InitFlow` into the summary walk (its builder follows statement
-    structure and evaluation order).
-  - Guards on `class_exists`-style tests: the stubs carry no per-version
-    availability; it needs `@since`/`@removed` read into the stub index.
-- Behaviour changes to read in the O2 diff: the Pratt parser's rejection of
-  nested unparenthesized ternaries and chained comparisons, `__halt_compiler`
-  ending the lex, kind-exact dependency keys, a hyphenated non-keyword word in
-  a docblock being no class name, declarations ruled out by the configured PHP
-  versions not being indexed, and UTF-16/UTF-8 columns in the language server.
-- Two tests of `syntax::span` were wrong and are fixed; expect a few more.
+Notes:
 
-### 8. The off-run drill — `PROFILE_DRILL_PIWIGO_OFF.md` (rows built through P8b and P9; every row and what blocks it is in `PROFILE_DRILL_PIWIGO_LEDGER.md`)
+- `has_yield`, which CHECK-6.2's text says goes, has no references in the code
+  now. Correct the row before it is worked.
+- F2's count (STUB-9) is superseded by REG-16.5, so it is not pending.
+- DOC-2.1 conflicts with the report: the 25 G report said its saving is gone
+  (`parse_written_type` at 0.18% inclusive), and the ledger lists the row READY.
+  Measure before starting it.
 
-On branch `callgrind-20g` (cut from `d520c9fd`, the code of `5fb858c9`). Three
-callgrind runs of one binary on Piwigo:
+### 8. The off-run drill — `PROFILE_DRILL_PIWIGO_OFF.md`, `_OFF_HEAP.md`, `_20G.md`
 
-- off (stub cache and per-file cache off): 25.63 G;
-- cold (stub cache empty): 25.68 G;
-- warm: 20.57 G, the 20 G plan's run.
+Every row and what blocks it is in `PROFILE_DRILL_PIWIGO_LEDGER.md`: §2.1 is the
+ready list, §2.2 the chains, §2.3 the biggest targets. The 20 G plan's rows
+(LOAD, SYN, PROD, DOC, NAME, TYPE, REG, CHECK) are in that ledger. The off-run
+rows still open:
 
-The stub build is the whole 5.05 G between off and warm. 3.50 G of it
-parses the stub files on a second rayon pool; 1.60 G runs serially on the
-main thread before the parse, with the other cores idle. Every other phase
-matches the warm run, and the 20 G plan's items reach every block of it.
-
-Proposals (§10), numbered as in the report:
-
-- For the stub build (off and cold runs):
-  - 1: resolve only the stub base the files need, −355 M serial;
-  - 2: serialize only what a store keeps, −1.0 G serial, off only;
-  - 3: a hash index for bases built in memory, ≈ −0.29 G;
-  - 4: `build_closures`' dependents looked up once, ≥ −0.2 G serial.
-
-  1-4 overlap, together ≈ −1.6 G.
-  - 5: the stub corpus built beside the parse, on the worker pool.
-  - 6: the stub data built at compile time into every binary, −5.05 G. It
-    needs level 2's reflection layer, since the build script must run the
-    code the runtime runs. `.rodata` grows from 18.2 to ≈50 MB per binary.
-    Once it lands, 1-5 speed only the off mode and the reflection crate's
-    own tests (and 4 the build script). After level 2's C4 and C5 only each
-    stub file's declarations are left to carry, ≈0.2-1.5 G per cold run
-    (C8).
-- For every run:
-  - 7: a PHPDoc tag's description tokenized only when read, measured
-    ≈0.08 G warm, ≈0.04 G after item 14;
-  - 8: skim context files' function bodies (≈48% of the parse job's
-    tokens) and parse one on demand. Built as P8a and P8b; D6 decided
-    (2026-10-15) that a skimmed body is not checked, so there is no check
-    pass and no verdict cache. Measured: −0.35 G, −0.24 G and −0.85 G
-    in three rows;
-  - 9: purity and property writes on demand, exact (a least fixed point),
-    ≈0.3-0.4 G beyond item 4, on the finishing thread;
-  - 10: `simdutf8`, ≈50 M;
-  - 11: text made only when read: a reported message at display (55
-    level-7 messages are formatted and then dropped, 22.5 M) and no
-    class-constant key without dynamic constants (6.6 M).
-- Rejected: one rayon pool as a speed-up by itself, a narrower cache key,
-  a dedicated autoload reader.
-
-With the plan, proposals 6-11 and the off report's cuts (E2-E13), both modes
-end at ≈9.6-10.0 G with the files' parse verdicts cached, ≈11.0-11.4 G
-without; without 6, the off run ends at ≈12.9-13.3 G. With both caches
-warm today's floor is 14.34 G and 1.60 s (B5, B4).
-
-Decided on 2026-10-13 (the off report's D1-D5): the stub data is built at compile
-time (reopened by C8, below); a skimmed body's text is copied from the bytes the load
-reads; each cache checks once, at its first store, whether it can write. D1
-(every skimmed body checked, verdicts cached) was replaced by D6 on 2026-10-15.
-
-Decided on 2026-10-15: **D6**, a context file that fails to parse keeps what
-it declares (what parses is recovered, what failed is unknown), and a skimmed
-body is not checked: a syntax error inside one is not found at load, and a
-body that does not parse when read is unknown. **D7** is moot: proposals 1-5
-are built.
-
-C7 is settled: of PHP 8.5's 268 compile-time errors the parser rejects 30.
-C8 is settled: D3's form does not survive level 2. After C4 and C5 no
-stub bases are left to embed, only each stub file's declarations, and a
-run reaches 6-43% of the stub bytes, so proposal 6 saves ≈0.2-1.5 G per
-cold run instead of 5.05 G. C5's version key should keep the gates as data
-(one parse per file), or the data stops being a function of the source.
-Checked-in binary data is unfit. D3 was decided again on 2026-10-15 (the
-ledger's §2.4, decision 7). The builtin knowledge (PHP's declarations, PHPStan's
-function map and `.stub` files) is embedded as per-file records built by the
-runtime's code. PHPStan's own classes are read from the PHPStan the project
-installs. C5's gates are data, with no version in any key (decision 6). These
-and the investigations are in `PROFILE_DRILL_PIWIGO_OFF.md` (§10,
-§13 lists each item's method and data); the ledger that tracked them was
-retired, and is in git at `72cac936`.
-
-The crate split's Stage C is worked on this branch from C4 on. In the ledger its C4 is
-REG-2 to REG-12, its C5 is STUB-7 and its C10 is REG-15, each split into sub-tasks
-with their states.
-
-State: `PROFILE_DRILL_PIWIGO_LEDGER.md` is one list of every task on this branch: the
-rows of this drill, the 20 G plan's items, the 25 G report's unbuilt designs and the
-crate split from C4 on, grouped by the part of the program each changes, with what
-blocks each. Its §2.4 records seven decisions taken on 2026-10-15, with their
-evidence and the rows each changed:
-
-1. a constant's evaluation yields a value type and its throws, which every place PHP
-   evaluates it inherits;
-2. one record per file of the names it writes replaces the case references;
-3. the 20 G plan's item 4 is retired, and the crate split's memo and snapshots run on
-   one incremental query engine over the whole pipeline, with persistence (REG-16;
-   salsa by default, measured first);
-4. the tree is flat and immutable, with no `unsafe`;
-5. declarations are the tree's own vectors;
-6. the stubs' gates are data;
-7. the builtin knowledge is embedded.
-
-On this branch E1,
-D5 (proposal 2), proposals 1-5, 7, 8 and 9, and the cuts E2, E3, E5-E7, E10, E13-E16
-are built; the off run went from 25.63 G to 20.93 G Ir, output byte-identical at each
-row. Proposal 6 (STUB-11) is decided; it waits on its measurements (STUB-10.1) and the
-crate split. H1 (CACHE-8) is the one row
-of this drill nothing blocks. The 20 G plan's items are open on this branch, except
-item 8's explicit-mixed part, which the crate split's C4 delivered; the ledger
-re-evaluates each against the code and the profile, splits it into its steps, and
-lists what blocks each. Each row's saving is a callgrind run against the previous
-row's commit; tests, clippy and fixtures were run only as each row's text says.
-
-The ledger's items were checked one by one on 2026-10-14 and the report corrected.
-The check found two bugs, both fixed: E14 (`instanceof` with a static property as the
-class, `6dd06124`) and E15 (the source hash left out `vendor/phpstan-src/stubs`, `efe621ad`);
-a third, E16 (maps of names written in table order), came from a debug oracle, `480107e3`.
-Running the parser over all of `vendor/` against `php -l` (U1) would find any other such
-gap; that run has not been made.
-
-The heap drill of the same three runs, with whole stacks, is
-`PROFILE_DRILL_PIWIGO_OFF_HEAP.md` (done). Every allocation maps to a 20 G
-item or to proposal 6, and the peak falls in `expect_files` with every tree
-live. It adds H1: write the stub cache file from one buffer, −15.3 MB at
-the cold run's peak. H1 is not implemented. The profiles are taken with the
-patched dhat-rs in `patches/dhat`.
+- **Stub embedding** (proposal 6): STUB-11, OPEN, needs STUB-10.1 (its
+  measurements, OPEN) and REG-15. The stub build still embeds `include_str!`
+  paths (`crates/stub-sources/build.rs:37`).
+- **Cache**:
+  - CACHE-8 (heap H1, READY): `Writer::finish`
+    (`crates/phpstan-rs/src/registry/container.rs:120`) still builds `directory`
+    and a second `file` buffer.
+  - CACHE-9 and CACHE-10 are BLOCKED: they need STUB-7.6 and the persistence
+    format of CACHE-13.2.
+  - CACHE-11 (E8) and CACHE-12 (E11) follow them.
+  - CACHE-13 (warm runs) is OPEN; its persistence part needs REG-16.4.
+- **Text made when read** (proposal 11): CHECK-4.1, messages formatted when
+  displayed, is OPEN and needs CHECK-6.10 (READY). `report_missing_offset`
+  (`crates/phpstan-rs/src/checker/assignment.rs:743`) still formats eagerly.
+  CHECK-4.2, class-constant keys, is READY.
+- **Parser gaps** (from the probes): SYN-6 is OPEN and needs SYN-1.9 (OPEN, needs
+  SYN-1.2) and Q-10 (OPEN, partly probed). Q-2 is probed, and its fix is SYN-6.
+  Q-1, the corpus run, is done; its three parse-error files join Q-2.
+- Settled, not pending: proposal 10 (`simdutf8`, LOAD-6 is SKIP); E4 (CACHE-6),
+  E9 (CHECK-5, folded into CHECK-6.16) and E12 (CACHE-7) are SKIP; D3, D6, C7 and
+  C8 are decided.
 
 ## Documents with no place in the stack
 
-Standalone research and plans; none blocks anything:
+Standalone research and plans; none blocks anything. Still at the repository root:
 
 - `CRASH_REPORTING_PLAN.md`
 - `MAGO_ARCHITECTURE_COMPARISON.md`
@@ -327,6 +212,5 @@ Standalone research and plans; none blocks anything:
 - `TOP100_PHPSTAN_EXTENSIONS.md`, `TOP100_RESEARCH_NOTES.md`
 - `UNSAFE_PLAN.md`
 
-Proposed: move them under `docs/research/` so the repository root holds only
-the stack's files. Not done yet; `master` carries the same files, so a move
-here is a rename there on merge.
+Proposed: move them under `docs/research/` so the root holds only the stack's
+files. Not done; `docs/` does not exist yet.
