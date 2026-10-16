@@ -190,6 +190,8 @@ On 2026-10-15 the ten decisions of §2.4 were taken. They:
 - re-specify how a declaration's native and PHPDoc types combine (REG-7.5, REG-7.12), and how a builtin's sources combine (STUB-12);
 - unblock SYN-1, PROD-5.1, TYPE-4, REG-7.6, REG-7.7, REG-11.1, REG-14.1, REG-14.3, STUB-7.1, STUB-10 and STUB-11.
 
+Four questions the decisions leave open are §15's Q-12 to Q-15: a file's syntax judged against a version range, a builtin's result before PHP 8.0 when its arguments fail to parse, an inferred return's literals, and the oldest version the builtin knowledge covers.
+
 ## 2. At a glance
 
 ### 2.1 Ready now
@@ -1778,3 +1780,9 @@ The ids in the first column are the 25 G report's.
   - the 2,612 `ExprKind::`/`StmtKind::` match sites in 135 files;
   - for decisions 8 and 9 and their rows, the lines they cite in `types/src/decide.rs`, `types/src/parse.rs`, `registry/function_sig/type_resolution.rs`, `registry/function_sig.rs`, `checker/phpdoc_type_compat.rs`, `checker/function_decl.rs`, `checker/throws.rs`, `checker/stmt/try_catch.rs`, `checker/expr.rs`, `registry/summaries.rs`, `registry/purity.rs` and `project/session.rs`.
 - **PHP's behaviour** was read from PHP 8.5.4, not from the sources' texts (§2.4, decisions 1, 8 and 9). Decision 10 read php-src 8.5.4's sources and PHPStan 2.3.1's.
+
+**What a reading after the decisions found**, on 2026-10-15, reading the whole ledger again:
+
+- Q-2's policy question was decided with D6 (the off report's §10.8), so only the parser work is left.
+- Q-8's parts are STUB-10.1's and STUB-11's, so it is superseded, and STUB-10.1 names B9's timings.
+- Four questions the decisions leave open are new rows: Q-12 to Q-15. Q-13 read php-src 7.4.33's sources (`~/.cache/prs-ledger/php-src-7.4.33/`).
