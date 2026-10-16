@@ -16,21 +16,19 @@ read from the files on that date. This file covers this branch only.
 
 ## Where to resume
 
-Two decisions come first:
+Levels 1 to 7 are deferred, decided on 2026-10-16, and will be reevaluated
+together later. Their sections below keep the content they had that day.
 
-1. **Level 6:** keep its 86 open rows, rebuild the list, or drop the ledger.
-   Level 5's carry-over waits on this.
-2. **Level 2 or level 3 first.** The stack paused Stage C for the level-3
-   review, but Stage C has started on this branch: C4 is under way (REG-3, 4.1,
-   4.3, 4.4, 4.6, 4.8 and 16.1 are done) and REG-2 is ready. Continue C4, or
-   review first.
+Level 2 has started: C4 is under way (REG-3, 4.1, 4.3, 4.4, 4.6, 4.8 and 16.1
+are done) and REG-2 is ready.
 
-Without a decision, the ready rows of levels 7 and 8 can be started
-(`PROFILE_DRILL_PIWIGO_LEDGER.md` §2.1). DOC-2.1 needs a measurement first, and
-CHECK-6.1 is approved in principle but large. Level 1 waits for levels 2 and 3,
-as before. Level 4's two experiments stay parked unless asked for.
+Level 8 is the one active level. Its own ready rows are CACHE-8 and CHECK-4.2.
+CHECK-4.1 waits on CHECK-6.10, which is READY in
+`PROFILE_DRILL_PIWIGO_LEDGER.md`.
 
 ## The stack
+
+Levels 1 to 7 are deferred; see Where to resume.
 
 ### 1. The roadmap, in two lanes — `ROADMAP.md`
 
@@ -122,22 +120,17 @@ Still open:
 
 ### 5. The project build cost — `PROJECT_BUILD_COST_INVESTIGATION.md`
 
-One carry-over, waiting on level 6. `gates/test-renames/build-cost.txt` (23
-renames) overlaps the master commit `0ad9589b` (the ledger's row 86), so one set
-of renames is dropped when that row is worked. The module-graph edges in
-`gates/module-graph.txt` may also meet that commit's own edits to the file.
+One carry-over, parked. `gates/test-renames/build-cost.txt` (23 renames)
+overlaps the master commit `0ad9589b` (row 86 of
+`MASTER_REIMPLEMENTATION_LEDGER.md`). If that commit is ever recreated on this
+branch, one set of renames is dropped when its row is worked. The module-graph
+edges in `gates/module-graph.txt` may also meet that commit's own edits to the
+file.
 
-### 6. Recreate master's commits here — `MASTER_REIMPLEMENTATION_LEDGER.md` ← blocked
+### 6. Dropped on 2026-10-16 — `MASTER_REIMPLEMENTATION_LEDGER.md`
 
-86 rows OPEN and 1 SKIP, checked 2026-10-16. Each row is one of the 87 commits
-that master has and this branch lacks, to be written again here with master's
-subject line. The ledger also lists what this branch changed that those commits
-meet: stored types need serde and `PartialEq`, passes must run in scope, and
-`project.rs`.
-
-Blocked on a decision. Checked earlier on 2026-10-16, not re-run here (this
-review covers this branch only): the 87 source commits are no longer reachable
-from `master` or `master2`, so the rows cannot be checked against them.
+Not tracked here. The file stays in the repository, listed below. The number is
+kept because the reports cite level 7.
 
 ### 7. The 25 G Piwigo profile — `PROFILE_DRILL_PIWIGO_25G.md`
 
@@ -149,7 +142,7 @@ ledger's Appendix B.2). Code counts are references in `.rs` files on this branch
 |---|---|---|---|
 | §12.10 observers; `statement_method_call` (5) goes | 5 | CHECK-6.1 | READY, approved in principle |
 | C1 step 5's tail: `expr_side_effects` (4) and `collect_throws` (2) go | 6 | CHECK-6.2 | READY |
-| P7, lowering: `parse_written_type` (58) goes | 58 | DOC-2.1 | READY |
+| P7, lowering: `parse_written_type` (58) goes | 58 | DOC-2.1 | DEFERRED with levels 1 to 7 |
 | P11 step 1, tag effects | — | DOC-2.3 | READY |
 | tag tokens borrowed (the pull-parsing is built, DOC-1) | — | DOC-2.5 | OPEN, needs NAME-1 |
 | P12 step 3, declarations as the tree's own vectors | — | PROD-5.1 | OPEN, needs SYN-1.2 |
@@ -169,9 +162,11 @@ Notes:
 - `has_yield`, which CHECK-6.2's text says goes, has no references in the code
   now. Correct the row before it is worked.
 - F2's count (STUB-9) is superseded by REG-16.5, so it is not pending.
-- DOC-2.1 conflicts with the report: the 25 G report said its saving is gone
-  (`parse_written_type` at 0.18% inclusive), and the ledger lists the row READY.
-  Measure before starting it.
+- DOC-2.1 is deferred. The 25 G report's opening summary says its saving is gone
+  (`parse_written_type` at 0.18% inclusive in a sampling profile), but its P7
+  section estimates 0.35–0.45 G. The 20 G figure (about 0.2 G) is for
+  `5fb858c9`, not HEAD. Before it starts: measure at HEAD, and settle the
+  statement `@var` memo, which overlaps DOC-2.2.
 
 ### 8. The off-run drill — `PROFILE_DRILL_PIWIGO_OFF.md`, `_OFF_HEAP.md`, `_20G.md`
 
@@ -208,6 +203,7 @@ Standalone research and plans; none blocks anything. Still at the repository roo
 
 - `CRASH_REPORTING_PLAN.md`
 - `MAGO_ARCHITECTURE_COMPARISON.md`
+- `MASTER_REIMPLEMENTATION_LEDGER.md` (level 6, dropped)
 - `PIWIGO_CORPUS_TRIAGE_ab4c2b5.md`
 - `TOP100_PHPSTAN_EXTENSIONS.md`, `TOP100_RESEARCH_NOTES.md`
 - `UNSAFE_PLAN.md`

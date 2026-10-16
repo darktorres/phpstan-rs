@@ -213,7 +213,7 @@ These rows are open with every need met:
   - SYN-3.1 and 3.2;
   - SYN-4.2, 4.4, 4.5, 4.6, 4.8, 4.9 and 4.10.
 - **PROD:** PROD-5.2, 5.3, 5.5 and 5.6; PROD-5.8 (the record of written names, decision 2).
-- **DOC:** DOC-2.1, 2.3, 2.4, 2.7 and 2.8.
+- **DOC:** DOC-2.3, 2.4, 2.7 and 2.8. DOC-2.1 is ready but deferred (2026-10-16).
 - **NAME:** NAME-1.1, 1.2, 1.5 and 1.6; NAME-2.1, 2.2 and 2.3.
 - **TYPE:** TYPE-5 (`iterable<K, V>`'s array keys, decision 8).
 - **REG:**
@@ -917,7 +917,7 @@ Merging the sources into one list found six places where two of them disagree, o
 |---|---|---|---|---|
 | DOC-1 | Tokenize a PHPDoc tag's description only when it is read | off P7 | DONE `a4035361` | — |
 | DOC-2 | PHPDoc finished: tag effects, eager lowering, two memos, nodes in one vector, doc blocks as a per-file product | 20 G 14; decision 2 | OPEN | — |
-| DOC-2.1 | **Lowering replaces the lazy round trip.** `DocType`'s type comes from `phpdoc::lower(&TypeNode)`, eagerly in `docblock::parse`. The text grammar's other callers move to `phpdoc::parse_type`, and the text grammar is deleted. The statement `@var` memo goes in | 20 G 14.1; 25 G P7 | READY | — |
+| DOC-2.1 | **Lowering replaces the lazy round trip.** `DocType`'s type comes from `phpdoc::lower(&TypeNode)`, eagerly in `docblock::parse`. The text grammar's other callers move to `phpdoc::parse_type`, and the text grammar is deleted. The statement `@var` memo goes in | 20 G 14.1; 25 G P7 | READY, deferred 2026-10-16 (see WORK_STACK level 7) | — |
 | DOC-2.2 | **Resolution memoized per file,** keyed by the type node and an interned resolution context (PROD-5.2's `ImportScope`, the template names, the type aliases, the class `self` names). The memo holds the whole resolved type | 20 G 14.2 | OPEN | PROD-5.2 |
 | DOC-2.3 | **Tag effects.** `parse_tag -> Arc<TagEffect>` and `apply(&mut DocBlock, &TagEffect)`, with no scratch block and no `merge_from` | 20 G 14.3; 25 G P11 step 1 | READY | — |
 | DOC-2.4 | The tag memo is keyed in place, by the borrowed pair `(tag, rest)` in a `hashbrown::HashTable`, not by a `format!` | 20 G 14.4 | READY | — |
