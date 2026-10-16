@@ -521,7 +521,7 @@ impl Project {
         }
         // Compared against the manifest's paths resolved; reported as the
         // file's own spelling.
-        let shown = path;
+        let shown = super::shown_path(self.absolute_root(), path);
         let path = self.absolute_path(path);
         let path = path.as_path();
         let sections = [&manifest.autoload, &manifest.autoload_dev];

@@ -422,7 +422,7 @@ impl<'a> Checker<'a> {
     fn project_relative_path(&self) -> Option<String> {
         let file = self.current_file.as_deref()?;
         let relative = self
-            .working_dir
+            .root
             .as_deref()
             .and_then(|dir| file.strip_prefix(dir).ok())
             .unwrap_or(file);

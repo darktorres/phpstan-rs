@@ -7,8 +7,8 @@
 //! exercises exactly what `check-project` runs.
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use syntax::span::Span;
 
@@ -32,7 +32,7 @@ use crate::{ext, ignore_errors};
 
 use super::file_cache;
 use super::source::FileSource;
-use super::walk::{Listed, Role, Walk};
+use super::walk::{self, Listed, Role, Root, Walk, Walked};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
@@ -185,6 +185,16 @@ pub struct Session {
     /// The bytes the files are read from, in place of the disk's where it
     /// has an entry: a session over files given in memory (`for_overlay`).
     source: FileSource,
+    /// The root as it resolves on disk, with links followed: the key every
+    /// file the session lists is under, and the root `finalize` names files
+    /// relative to.
+    absolute_root: PathBuf,
+    /// What the configuration lists, walked on first use and kept.
+    listing: OnceLock<Listing>,
+    /// The resolved path of each spelling that differs from it, kept so a
+    /// spelling whose file no longer resolves (deleted, or behind a link that
+    /// was removed) still names the file it named.
+    aliases: Mutex<FxHashMap<PathBuf, PathBuf>>,
     /// The files a session over files given in memory loads, in place of a
     /// listing of the disk.
     overlay_listing: Option<Vec<Listed>>,
@@ -197,6 +207,82 @@ pub struct OverlayFile {
     pub bytes: Vec<u8>,
     pub analysed: bool,
     pub stub: bool,
+}
+
+/// What a session lists, walked once: each file once under its resolved
+/// path, and the roots the walk was given, which classify a path the walk
+/// did not list.
+pub(crate) struct Listing {
+    files: Vec<Listed>,
+    /// Where each file is in `files`, by its path.
+    index: FxHashMap<PathBuf, usize>,
+    roots: Vec<Root<'static>>,
+}
+
+impl Listing {
+    fn new(files: Vec<Listed>, roots: Vec<Root<'static>>) -> Listing {
+        let index = files
+            .iter()
+            .enumerate()
+            .map(|(at, listed)| (listed.path.clone(), at))
+            .collect();
+        Listing {
+            files,
+            index,
+            roots,
+        }
+    }
+}
+
+impl Root<'_> {
+    /// Whether the walk of this root lists `path`: it lies under the root's
+    /// resolved path, and no directory below the root has an excluded name.
+    fn contains(&self, path: &Path) -> bool {
+        let Ok(rest) = path.strip_prefix(&self.path) else {
+            return false;
+        };
+        let mut directories = rest.parent().into_iter().flat_map(Path::components);
+        !directories.any(|component| match component {
+            Component::Normal(name) => self
+                .excluded
+                .iter()
+                .any(|e| std::ffi::OsStr::new(e) == name),
+            _ => false,
+        })
+    }
+}
+
+/// A path a client names, as the project keys it, and the role the
+/// configuration gives its file.
+pub(crate) struct Classified {
+    /// The file's resolved path: its key in the project.
+    pub(crate) path: PathBuf,
+    pub(crate) role: Role,
+    /// Whether the file is parsed as a stub.
+    pub(crate) is_stub: bool,
+}
+
+/// The role of a file no root lists: context when a directory the walk
+/// excludes by default holds it below `root`, analysed otherwise.
+fn unlisted_role(path: &Path, root: Option<&Path>) -> Role {
+    let shown = super::shown_path(root, path);
+    if super::path_under_excluded_dir(shown, DEFAULT_SCAN_EXCLUDED_DIR_NAMES) {
+        Role::Context
+    } else {
+        Role::Analysed
+    }
+}
+
+/// How `path` is classified when no session lists the project: its resolved
+/// path, with the role `unlisted_role` gives it, and not a stub.
+pub(crate) fn classify_unlisted(path: &Path) -> Classified {
+    let path = walk::resolve(path);
+    let role = unlisted_role(&path, None);
+    Classified {
+        path,
+        role,
+        is_stub: false,
+    }
 }
 
 /// A configured `Project` with every file loaded, before any check ran.
@@ -238,7 +324,8 @@ pub struct AnalysisResult {
     pub skipped_analyze: usize,
     pub skipped_context: usize,
     pub context_loaded: usize,
-    /// Files whose check panicked, with the panic message, sorted.
+    /// Files whose check panicked, named as the report names them, with the
+    /// panic message, sorted.
     pub check_panics: Vec<(PathBuf, String)>,
     /// What the lexer skipped over in the loaded files, one line each.
     pub lex_warnings: Vec<String>,
@@ -300,9 +387,30 @@ impl AnalysisResult {
         let AnalysisResult {
             project, results, ..
         } = self;
-        let report = finalize_results(&project, results, options, None);
+        let root = project.absolute_root().map(Path::to_path_buf);
+        let Report {
+            results,
+            stale_baseline_entries,
+        } = finalize_results(&project, results, options, root.as_deref());
         std::mem::forget(project);
-        report
+        // A file is named relative to the root, as the report has always named
+        // it; a file outside the root keeps its path.
+        let results = match &root {
+            Some(root) => results
+                .into_iter()
+                .map(|(path, diagnostics)| {
+                    let relative = path
+                        .strip_prefix(root)
+                        .map_or_else(|_| path.clone(), Path::to_path_buf);
+                    (relative, diagnostics)
+                })
+                .collect(),
+            None => results,
+        };
+        Report {
+            results,
+            stale_baseline_entries,
+        }
     }
 }
 
@@ -593,22 +701,15 @@ impl Session {
         let mut promoted: Vec<PathBuf> = Vec::new();
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
-        let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+        let absolute_root = walk::resolve(&root);
         let mut composer_php_versions = None;
         let mut root_manifest = None;
         if !no_composer {
-            let canonical_root = absolute_root.clone();
-            for composer_root in composer_roots(&dirs, &canonical_root) {
-                // The root itself keeps its own spelling (`.` for the CLI),
-                // so the manifest's paths compare against analysed paths
-                // spelled the same way.
-                let manifest_root = if composer_root == canonical_root {
-                    root.clone()
-                } else {
-                    composer_root.clone()
-                };
-                let package = composer::PackageContext::load(&composer_root, &manifest_root);
-                if composer_root == canonical_root {
+            for composer_root in composer_roots(&dirs, &absolute_root) {
+                // The manifest's paths are resolved, as the files they are
+                // compared with are.
+                let package = composer::PackageContext::load(&composer_root, &composer_root);
+                if composer_root == absolute_root {
                     composer_php_versions = declared_php_versions(&package);
                     root_manifest = package.manifest.clone();
                 }
@@ -627,7 +728,7 @@ impl Session {
             if !promoted.is_empty() {
                 // Relative scan paths are relative to the root.
                 let is_promoted = |p: &Path| {
-                    let p = root.join(p);
+                    let p = absolute_root.join(p);
                     promoted
                         .iter()
                         .any(|dir| composer::manifest::path_starts_with(&p, dir))
@@ -662,8 +763,7 @@ impl Session {
             overrides.baseline_per_identifier || session.baseline_per_identifier;
 
         let settings = ProjectSettings {
-            working_dir: Some(root.clone()),
-            absolute_root: Some(absolute_root),
+            absolute_root: Some(absolute_root.clone()),
             packages: composer::PackageIndex::new(composer_manifests),
             php_versions,
             configured_level,
@@ -698,6 +798,9 @@ impl Session {
             pool: Arc::clone(stubs.pool()),
             stubs,
             root,
+            absolute_root,
+            listing: OnceLock::new(),
+            aliases: Mutex::default(),
             session,
             settings,
             dirs,
@@ -826,12 +929,21 @@ impl Session {
         }
     }
 
-    /// Every file the configuration lists, once, with its role and whether
-    /// it is a stub. The command line and the language server both load
-    /// from this listing.
+    /// Every file the configuration lists, once, under its resolved path,
+    /// with its role and whether it is a stub. The command line and the
+    /// language server both load from this listing.
     pub(crate) fn listing(&self) -> Vec<Listed> {
+        self.listing_of().files.clone()
+    }
+
+    /// The listing, walked on first use and kept for the session.
+    fn listing_of(&self) -> &Listing {
+        self.listing.get_or_init(|| self.walk_listing())
+    }
+
+    fn walk_listing(&self) -> Listing {
         if let Some(listed) = &self.overlay_listing {
-            return listed.clone();
+            return Listing::new(listed.clone(), Vec::new());
         }
         let mut walk = Walk::new();
         for dir in &self.dirs {
@@ -840,29 +952,88 @@ impl Session {
             } else {
                 self.excluded_dir_names
             };
-            walk.add(&self.root.join(dir), dir, Role::Analysed, excluded);
+            walk.add(&self.root.join(dir), Role::Analysed, excluded);
         }
         // The vendor context was being found while the analysed files were
         // listed.
         for vendor in &self.vendors {
             let found = vendor.get();
             for dir in found.dirs.iter().filter(|d| !self.is_promoted(d)) {
-                walk.add(&self.root.join(dir), dir, Role::Context, &[]);
+                walk.add(&self.root.join(dir), Role::Context, &[]);
             }
             for file in found.files.iter().filter(|f| !self.is_promoted(f)) {
-                walk.add_file(&self.root.join(file), file, Role::Context);
+                walk.add_file(&self.root.join(file), Role::Context);
             }
         }
         for file in &self.scan_files {
-            walk.add_file(&self.root.join(file), file, Role::Context);
+            walk.add_file(&self.root.join(file), Role::Context);
         }
         for dir in &self.scan_dirs {
-            walk.add(&self.root.join(dir), dir, Role::Context, &[]);
+            walk.add(&self.root.join(dir), Role::Context, &[]);
         }
         for dir in &self.stub_dirs {
-            walk.add(&self.root.join(dir), dir, Role::Stub, &[]);
+            walk.add(&self.root.join(dir), Role::Stub, &[]);
         }
-        walk.finish()
+        let Walked { files, roots } = walk.finish();
+        Listing::new(files, roots)
+    }
+
+    /// The resolved path of `path`, which is the key its file has in the
+    /// project. A spelling that resolves on disk is resolved by the disk, and
+    /// is remembered when it differs from its resolved path. A spelling that
+    /// does not resolve (its file deleted, or a link on the way removed)
+    /// takes the resolved path it was last given, or else resolves through its
+    /// nearest existing ancestor.
+    pub(crate) fn identify(&self, path: &Path) -> PathBuf {
+        match std::fs::canonicalize(path) {
+            Ok(resolved) => {
+                if resolved != path {
+                    self.aliases
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .insert(path.to_path_buf(), resolved.clone());
+                }
+                resolved
+            }
+            Err(_) => self
+                .aliases
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(path)
+                .cloned()
+                .unwrap_or_else(|| walk::resolve(path)),
+        }
+    }
+
+    /// The file `path` names, resolved, and the role it plays. A file the
+    /// listing holds has the role the walk gave it. Otherwise it has the
+    /// strongest role of the roots that list it, a root listing it only when
+    /// none of the directories between the root and the file is excluded
+    /// there. A file no root lists is analysed, unless a directory the walk
+    /// excludes by default holds it.
+    pub(crate) fn classify(&self, path: &Path) -> Classified {
+        let path = self.identify(path);
+        let listing = self.listing_of();
+        if let Some(&at) = listing.index.get(&path) {
+            let listed = &listing.files[at];
+            return Classified {
+                path,
+                role: listed.role,
+                is_stub: listed.stub,
+            };
+        }
+        let mut role = None;
+        let mut is_stub = false;
+        for root in listing.roots.iter().filter(|root| root.contains(&path)) {
+            role = Some(role.map_or(root.role, |role: Role| role.max(root.role)));
+            is_stub |= root.stub;
+        }
+        let role = role.unwrap_or_else(|| unlisted_role(&path, Some(self.absolute_root.as_path())));
+        Classified {
+            path,
+            role,
+            is_stub,
+        }
     }
 
     fn configure(&self, project: &mut Project) {
@@ -876,7 +1047,7 @@ impl Session {
         if self.promoted.is_empty() {
             return false;
         }
-        let path = self.root.join(path);
+        let path = self.absolute_root.join(path);
         self.promoted
             .iter()
             .any(|dir| composer::manifest::path_starts_with(&path, dir))
@@ -899,8 +1070,9 @@ impl Session {
         };
         let bytes = bytes.into_owned();
         let content_hash = super::source::content_hash(&bytes);
+        let shown = super::shown_path(Some(self.absolute_root.as_path()), path);
         let cache_key = if cacheable {
-            file_cache::key(&bytes, path, is_stub, index_use_sites)
+            file_cache::key(&bytes, path, shown, is_stub, index_use_sites)
         } else {
             None
         };
@@ -942,9 +1114,11 @@ impl Session {
             (true, false) => super::BodyText::Skipped,
         };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
-            Ok(text) => super::parse_file_with_names(path, text, is_stub, body_text, Some(names)),
+            Ok(text) => {
+                super::parse_file_with_names(path, shown, text, is_stub, body_text, Some(names))
+            }
             Err(bytes) => {
-                super::parse_file_with_names(path, bytes, is_stub, body_text, Some(names))
+                super::parse_file_with_names(path, shown, bytes, is_stub, body_text, Some(names))
             }
         })) else {
             return Read::Unread;
@@ -1098,7 +1272,8 @@ impl Session {
     pub fn load_into(&self, project: &mut Project) -> Result<(), String> {
         project.set_source(self.source.clone());
         if let Some((path, message)) = self.load_listed(project, &self.listing()).first() {
-            return Err(format!("{} does not parse: {message}", path.display()));
+            let shown = super::shown_path(Some(self.absolute_root.as_path()), path);
+            return Err(format!("{} does not parse: {message}", shown.display()));
         }
         project.finish_loading_with(&self.stubs);
         Ok(())
@@ -1229,7 +1404,7 @@ impl Session {
             lex_warnings.extend(parsed.lex_warnings().iter().map(|w| {
                 format!(
                     "warning: {}:{}:{}: {}",
-                    path.display(),
+                    super::shown_path(Some(self.absolute_root.as_path()), path).display(),
                     parsed.line_index.line_col(w.span.start).line,
                     parsed.line_index.line_col(w.span.start).col,
                     w.message
@@ -1258,7 +1433,7 @@ impl Session {
                     skipped_context += 1;
                     parse_failure_lines.push(format!(
                         "warning: {}:{}:{}: {}",
-                        path.display(),
+                        super::shown_path(Some(self.absolute_root.as_path()), path).display(),
                         failure.line,
                         failure.col,
                         failure.message
@@ -1359,7 +1534,14 @@ impl Session {
             skipped_analyze,
             skipped_context,
             context_loaded,
-            check_panics: checks.check_panics,
+            check_panics: checks
+                .check_panics
+                .into_iter()
+                .map(|(path, message)| {
+                    let shown = super::shown_path(Some(self.absolute_root.as_path()), &path);
+                    (shown.to_path_buf(), message)
+                })
+                .collect(),
             lex_warnings,
             type_dump: checks.type_dump,
         }
@@ -1409,8 +1591,9 @@ impl Session {
             type_dumps.sort_by(|a, b| a.0.cmp(&b.0));
             let mut text = String::new();
             for (path, lines) in type_dumps {
+                let shown = super::shown_path(Some(self.absolute_root.as_path()), &path);
                 for line in lines {
-                    text.push_str(&format!("{}:{line}\n", path.display()));
+                    text.push_str(&format!("{}:{line}\n", shown.display()));
                 }
             }
             text

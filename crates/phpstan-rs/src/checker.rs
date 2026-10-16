@@ -610,9 +610,10 @@ pub struct Checker<'a> {
     pub(crate) include_guarded_paths: FxHashSet<String>,
     // `include_path` directories for the file being checked.
     pub(crate) include_path_dirs: Vec<String>,
-    // What relative include paths resolve against first (see
-    // `Project::working_dir`); `None` is the process's working directory.
-    pub(crate) working_dir: Option<std::path::PathBuf>,
+    // The project's root, which relative include paths resolve against
+    // first (see `Project::absolute_root`); `None` is the process's working
+    // directory.
+    pub(crate) root: Option<std::path::PathBuf>,
     // `includes::file_constant_initializers` for the file being checked.
     pub(crate) include_constant_initializers: FxHashMap<String, Expr>,
     // `if` statements already reported as the tail of an enum `if`/`elseif`
@@ -1168,7 +1169,7 @@ impl<'a> Checker<'a> {
             current_file_absolute: None,
             include_guarded_paths: FxHashSet::default(),
             include_path_dirs: Vec::new(),
-            working_dir: None,
+            root: None,
             include_constant_initializers: FxHashMap::default(),
             enum_chain_tails: FxHashSet::default(),
             constant_facts: Default::default(),
@@ -1309,8 +1310,8 @@ impl<'a> Checker<'a> {
         std::mem::take(&mut self.semantic_tokens)
     }
 
-    pub(crate) fn set_working_dir(&mut self, dir: Option<std::path::PathBuf>) {
-        self.working_dir = dir;
+    pub(crate) fn set_root(&mut self, root: Option<std::path::PathBuf>) {
+        self.root = root;
     }
 
     pub(crate) fn set_dump_types(&mut self, enabled: bool) {

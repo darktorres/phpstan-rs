@@ -1,4 +1,4 @@
-//! The walk lists each file once, under the path it is reached by. A link is
+//! The walk lists each file once, under its resolved path. A link is
 //! followed to its target, a target under a root is left to that root's walk,
 //! and a target no root holds is listed once, with the strongest role of the
 //! links that reach it.
@@ -6,16 +6,16 @@
 use super::super::walk::{Listed, Role, Walk};
 use super::helpers::*;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Lists each `(root, role, excluded)` in order, and returns the listing
 /// sorted by path as `(path, role, stub)`.
 fn listing(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
     let mut walk = Walk::new();
     for (path, role, excluded) in roots {
-        walk.add(path, path, *role, excluded);
+        walk.add(path, *role, excluded);
     }
-    sorted(walk.finish())
+    sorted(walk.finish().files)
 }
 
 fn sorted(listed: Vec<Listed>) -> Vec<(PathBuf, Role, bool)> {
@@ -33,7 +33,7 @@ fn resolved(dir: &TempDir) -> PathBuf {
 }
 
 #[test]
-fn a_tree_without_links_is_listed_under_its_roots_spelling() {
+fn a_tree_without_links_is_listed_under_its_resolved_path() {
     let dir = TempDir::new("walk_plain");
     dir.write("proj/a.php", "<?php");
     dir.write("proj/nested/b.php", "<?php");
@@ -50,27 +50,35 @@ fn a_tree_without_links_is_listed_under_its_roots_spelling() {
 }
 
 #[test]
-fn a_directory_root_is_spelled_as_it_was_given() {
-    let dir = TempDir::new("walk_spelling");
+fn a_file_under_two_roots_is_listed_once_under_its_resolved_path() {
+    let dir = TempDir::new("walk_two_roots");
     dir.write("proj/src/a.php", "<?php");
     dir.write("proj/top.php", "<?php");
     let base = resolved(&dir);
     let mut walk = Walk::new();
-    walk.add(
-        &base.join("proj/src"),
-        Path::new("src"),
-        Role::Analysed,
-        &[],
-    );
-    walk.add(&base.join("proj"), Path::new("proj"), Role::Analysed, &[]);
+    walk.add(&base.join("proj/src"), Role::Analysed, &[]);
+    walk.add(&base.join("proj"), Role::Analysed, &[]);
 
-    // The file under both roots is listed once, under the first root's spelling.
     assert_eq!(
-        sorted(walk.finish()),
+        sorted(walk.finish().files),
         vec![
-            (PathBuf::from("proj/top.php"), Role::Analysed, false),
-            (PathBuf::from("src/a.php"), Role::Analysed, false),
+            (base.join("proj/src/a.php"), Role::Analysed, false),
+            (base.join("proj/top.php"), Role::Analysed, false),
         ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_given_through_a_link_is_listed_under_its_target() {
+    let dir = TempDir::new("walk_root_link");
+    dir.write("proj/a.php", "<?php");
+    let base = resolved(&dir);
+    std::os::unix::fs::symlink("proj", base.join("link")).unwrap();
+
+    assert_eq!(
+        listing(&[(base.join("link"), Role::Analysed, &[])]),
+        vec![(base.join("proj/a.php"), Role::Analysed, false)]
     );
 }
 
@@ -134,13 +142,13 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
     let file = resolved(&dir).join("config/bootstrap.inc");
 
     let mut by_walk = Walk::new();
-    by_walk.add(&file, &file, Role::Context, &[]);
-    assert!(by_walk.finish().is_empty());
+    by_walk.add(&file, Role::Context, &[]);
+    assert!(by_walk.finish().files.is_empty());
 
     let mut explicit = Walk::new();
-    explicit.add_file(&file, &file, Role::Context);
+    explicit.add_file(&file, Role::Context);
     assert_eq!(
-        sorted(explicit.finish()),
+        sorted(explicit.finish().files),
         vec![(file.clone(), Role::Context, false)]
     );
 }

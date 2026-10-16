@@ -246,7 +246,7 @@ const INSTANCEOF_DEPRECATED_CLASSES: &[(&str, Option<&str>)] = &[
 /// check. Deliberately does NOT replicate real PHPStan's own
 /// `ParentDirectoryRelativePathHelper` relative-path walk - this project
 /// only ever deals with plain on-disk paths, so "does the declaring
-/// file's own absolute path have any component literally named `vendor`"
+/// file's own path, relative to the project root, have any component literally named `vendor`"
 /// is an exact, simpler equivalent for every case that matters here. A
 /// free function (not a `Walker`/`Checker` method) so both the standalone
 /// `Walker` pass and the main `Checker`'s own `check_phpstan_api_method_
@@ -507,9 +507,9 @@ impl<'a> Walker<'a> {
     /// vendor-evidence check. Deliberately does NOT replicate real
     /// PHPStan's own `ParentDirectoryRelativePathHelper` relative-path
     /// walk - this project only ever deals with plain on-disk paths, so
-    /// "does the declaring file's own absolute path have any component
-    /// literally named `vendor`" is an exact, simpler equivalent for
-    /// every case that matters here.
+    /// "does the declaring file's own path, relative to the project root,
+    /// have any component literally named `vendor`" is an exact, simpler
+    /// equivalent for every case that matters here.
     fn is_phpstan_code(&self, scope_namespace: &str, target_fqn: &str) -> bool {
         is_phpstan_code(scope_namespace, target_fqn, self.registry)
     }

@@ -37,6 +37,7 @@ use syntax::span::LineIndex;
 
 pub(crate) fn check_duplicate_class_declarations(
     path: &Path,
+    root: Option<&Path>,
     index: &LineIndex,
     line_in: &dyn Fn(&Path, u32) -> u32,
     sites: &DuplicateClassSites,
@@ -58,7 +59,13 @@ pub(crate) fn check_duplicate_class_declarations(
 
         let location_list = real_sites
             .iter()
-            .map(|s| format!("- {}:{}", s.path.display(), line_in(&s.path, s.span.start)))
+            .map(|s| {
+                format!(
+                    "- {}:{}",
+                    super::shown_path(root, &s.path).display(),
+                    line_in(&s.path, s.span.start)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
         // Every real site's own `kind` is expected to agree in practice

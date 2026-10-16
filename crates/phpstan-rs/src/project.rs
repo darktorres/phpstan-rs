@@ -261,15 +261,12 @@ pub struct Project {
     // have changed (`finish_loading`/`update_file`) - see `pest_config`'s
     // own module doc comment for the full resolution algorithm.
     pest_config: PestConfig,
-    // The directory relative include paths resolve against first, as PHP
-    // resolves them against the working directory. `None` means the
-    // process's own working directory.
-    working_dir: Option<PathBuf>,
     // The bytes the loads and the edits read a file's text from, in place
     // of the disk's where it has an entry (see `source`).
     source: source::FileSource,
-    // `working_dir` canonicalized, which
-    // `absolute_path` resolves analysed paths against.
+    // The root as it resolves on disk, links followed. Every file's key is
+    // under it, and relative paths, include paths included, resolve against
+    // it. `None` for a project whose files are given in memory.
     absolute_root: Option<PathBuf>,
     // The composer packages and which directories they own; each file's
     // owner is kept in its `FileState`.
@@ -483,11 +480,8 @@ fn map_on_pool_largest_first<T: Sync, R: Send>(
 /// (`Project::apply_settings`).
 #[derive(Default, Clone, PartialEq)]
 pub struct ProjectSettings {
-    /// The directory relative include paths resolve against first, as PHP
-    /// resolves them against the working directory; `None` means the
-    /// process's own.
-    pub working_dir: Option<PathBuf>,
-    /// `working_dir` canonicalized, which analysed paths resolve against.
+    /// The root as it resolves on disk, links followed. Every file's key is
+    /// under it; `None` for a project whose files are given in memory.
     pub absolute_root: Option<PathBuf>,
     /// The composer packages, and which directories each owns.
     pub packages: composer::PackageIndex,
@@ -606,7 +600,6 @@ impl Project {
             registry,
             sql: sql::context::SqlContext::default(),
             pest_config: PestConfig::default(),
-            working_dir: None,
             source: source::FileSource::default(),
             absolute_root: None,
             packages: composer::PackageIndex::default(),
@@ -635,7 +628,6 @@ impl Project {
     /// changes.
     pub fn apply_settings(&mut self, settings: ProjectSettings) {
         let ProjectSettings {
-            working_dir,
             absolute_root,
             packages,
             php_versions,
@@ -661,7 +653,6 @@ impl Project {
             sql_schema,
         } = settings;
         let class_fn_sites_before = self.indexes_class_fn_sites();
-        self.working_dir = working_dir;
         self.absolute_root = absolute_root;
         self.retain_source = retain_source;
         self.built_once = built_once;
@@ -857,19 +848,19 @@ impl Project {
         }
     }
 
-    /// `path`, spelled from the working directory, as an absolute path:
-    /// the working directory swapped for `absolute_root`, then `.` and
-    /// `..` resolved lexically. Without an absolute root, only the latter.
+    /// `path` as an absolute path: a relative path joined to the root, then
+    /// `.` and `..` resolved lexically. Without a root, only the latter.
     pub(crate) fn absolute_path(&self, path: &Path) -> PathBuf {
-        let joined = match (&self.absolute_root, &self.working_dir) {
-            (Some(absolute_root), Some(working_dir)) => match path.strip_prefix(working_dir) {
-                Ok(rest) => absolute_root.join(rest),
-                Err(_) => absolute_root.join(path),
-            },
-            (Some(absolute_root), None) => absolute_root.join(path),
-            (None, _) => path.to_path_buf(),
+        let joined = match &self.absolute_root {
+            Some(root) => root.join(path),
+            None => path.to_path_buf(),
         };
         composer::manifest::lexically_normalized(&joined)
+    }
+
+    /// The root every file's key is under, as it resolves on disk.
+    pub fn absolute_root(&self) -> Option<&Path> {
+        self.absolute_root.as_deref()
     }
 
     /// The name of the composer package `path` belongs to.
@@ -914,9 +905,9 @@ impl Project {
         self.source.read(&self.full_path(path))
     }
 
-    /// `path` as the disk names it: under `working_dir`, when there is one.
+    /// `path` as the disk names it: under the root, when there is one.
     fn full_path(&self, path: &Path) -> PathBuf {
-        match &self.working_dir {
+        match &self.absolute_root {
             Some(root) => root.join(path),
             None => path.to_path_buf(),
         }
@@ -1022,7 +1013,8 @@ impl Project {
         // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
         // ordinary corpus.
         for name in &classes {
-            self.registry.record_phpstan_class_file(name, path);
+            self.registry
+                .record_phpstan_class_file(name, shown_path(self.absolute_root.as_deref(), path));
         }
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
         self.duplicate_class_sites.merge(duplicate_class_sites);
@@ -1217,7 +1209,10 @@ impl Project {
         for (analyzed, _, path, decls) in sources {
             for decl in decls {
                 if let BuiltDecl::Class { name, .. } = decl {
-                    self.registry.record_phpstan_class_file(name, path);
+                    self.registry.record_phpstan_class_file(
+                        name,
+                        shown_path(self.absolute_root.as_deref(), path),
+                    );
                 }
                 self.registry.insert_built_decl(decl.clone(), analyzed);
             }
@@ -1666,7 +1661,10 @@ impl Project {
                     continue;
                 }
                 if let BuiltDecl::Class { name, .. } = decl {
-                    self.registry.record_phpstan_class_file(name, path);
+                    self.registry.record_phpstan_class_file(
+                        name,
+                        shown_path(self.absolute_root.as_deref(), path),
+                    );
                 }
                 self.registry.insert_built_decl(decl.clone(), analyzed);
             }
@@ -1834,6 +1832,24 @@ impl Project {
         &mut self,
         path: &Path,
         source: impl AsRef<[u8]>,
+        should_abort: impl FnMut() -> bool,
+    ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+        let analysed = !path_under_excluded_dir(
+            shown_path(self.absolute_root(), path),
+            DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
+        );
+        self.update_file_as(path, source, analysed, false, should_abort)
+    }
+
+    /// `update_file_cancellable` with the role the configuration gives the
+    /// file: `analysed` is its role when the project has not seen it before,
+    /// and `stub` says whether it is parsed as a stub.
+    pub fn update_file_as(
+        &mut self,
+        path: &Path,
+        source: impl AsRef<[u8]>,
+        analysed: bool,
+        stub: bool,
         mut should_abort: impl FnMut() -> bool,
     ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         // Parse BEFORE unindexing anything - on a parse failure (the
@@ -1853,9 +1869,10 @@ impl Project {
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
         let bytes = source.as_ref();
+        let shown = shown_path(self.absolute_root(), path);
         let parsed = match std::str::from_utf8(bytes) {
-            Ok(text) => parse_file(path, text, false),
-            Err(_) => parse_file(path, bytes, false),
+            Ok(text) => parse_file_with_names(path, shown, text, stub, BodyText::Parsed, None),
+            Err(_) => parse_file_with_names(path, shown, bytes, stub, BodyText::Parsed, None),
         }?;
         let previous = self.unindex_file(path);
         let ParsedFile {
@@ -1883,25 +1900,11 @@ impl Project {
         } = parsed;
         let ast = ast.expect("a parse keeps its tree");
 
-        // A file `update_file` has already seen keeps its own recorded
-        // `analyzed` flag (an edit doesn't change what kind of file it
-        // is). A never-before-seen path - reachable via `textDocument/
-        // didOpen` for ANY URI the editor opens, including one
-        // `discover_vendor_context`'s and `Session::listing`'s own excluded-
-        // dir walk never touched (a vendor file outside any discovered
-        // autoload entry, or with no composer.json at all) - defaults
-        // to context (`analyzed: false`) when it's under a directory
-        // name `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` lists, matching
-        // `Session::listing`'s own walk; otherwise `true`, the same "a
-        // brand-new first-party file is analyzed by default" behavior
-        // this had before this distinction existed. Without this, a
-        // same-name collision (`insert_built_decl`'s own doc comment)
-        // would let an opened-but-never-discovered vendor file outright
-        // overwrite a real declaration instead of merging into it.
-        let analyzed = previous.as_ref().map_or_else(
-            || !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES),
-            |previous| previous.analyzed,
-        );
+        // A file the project has seen keeps its analysed flag: an edit does
+        // not change what kind of file it is.
+        let analyzed = previous
+            .as_ref()
+            .map_or(analysed, |previous| previous.analyzed);
         let load_order = previous.as_ref().map_or_else(
             || {
                 let order = self.next_load_order;
@@ -2331,7 +2334,7 @@ impl Project {
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_current_file(path);
         checker.set_current_file_absolute(self.absolute_path(path));
-        checker.set_working_dir(self.working_dir.clone());
+        checker.set_root(self.absolute_root.clone());
         checker.set_closure_rebind_possible(
             file.facts.mentions & checker::unused::MENTIONS_REBIND != 0,
         );
@@ -2392,6 +2395,7 @@ impl Project {
         if self.settings.rules.check_duplicate_function_declarations {
             diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
                 path,
+                self.absolute_root(),
                 &file.line_index,
                 &|path, offset| self.line_in(path, offset),
                 &self.duplicate_fn_sites,
@@ -2400,6 +2404,7 @@ impl Project {
         if self.settings.rules.check_duplicate_class_declarations {
             diagnostics.extend(duplicate_classes::check_duplicate_class_declarations(
                 path,
+                self.absolute_root(),
                 &file.line_index,
                 &|path, offset| self.line_in(path, offset),
                 &self.duplicate_class_sites,
@@ -2893,7 +2898,7 @@ struct Parsed {
 }
 
 fn parse_with_ignores<'a>(
-    path: &Path,
+    shown: &Path,
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
     skim_bodies: bool,
@@ -2912,7 +2917,7 @@ fn parse_with_ignores<'a>(
     if parsed.facts.has_anonymous_class {
         crate::registry::name_anonymous_classes(
             &mut ast,
-            &path.display().to_string(),
+            &shown.display().to_string(),
             &parsed.line_index,
         );
     }
@@ -2997,10 +3002,10 @@ pub struct ParsedFile {
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
 /// comment. Safe to call concurrently for many files at once (no shared
-/// state touched at all). `path` is used only to tag
-/// `duplicate_fn_sites`'s own records (see `ParsedFile`'s doc comment on
-/// that field) - never read to make any decision, so it's fine that a
-/// caller building many `ParsedFile`s concurrently passes a different
+/// state touched at all). `path` tags `duplicate_fn_sites`'s own records
+/// (see `ParsedFile`'s doc comment on that field) and names the file's
+/// anonymous classes; neither is read to make a decision, so it's fine that
+/// a caller building many `ParsedFile`s concurrently passes a different
 /// `path` to each call with no coordination needed between them.
 #[hotpath::measure]
 pub fn parse_file<'a>(
@@ -3008,7 +3013,7 @@ pub fn parse_file<'a>(
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
 ) -> Result<ParsedFile, ParseError> {
-    parse_file_with_names(path, source, is_stub, BodyText::Parsed, None)
+    parse_file_with_names(path, path, source, is_stub, BodyText::Parsed, None)
 }
 
 /// What a parse keeps of the function and method bodies of a file.
@@ -3026,11 +3031,13 @@ pub enum BodyText {
 }
 
 /// `parse_file`, with the names the files of a load share: the cache is
-/// asked for a name before the interner is. `body_text` is what is kept of
-/// the file's function bodies, which a context file's may be text read when
-/// a pass asks.
+/// asked for a name before the interner is. `shown` is the file as the
+/// reports spell it (see `shown_path`), which its anonymous classes are
+/// named by. `body_text` is what is kept of the file's function bodies,
+/// which a context file's may be text read when a pass asks.
 pub fn parse_file_with_names<'a>(
     path: &Path,
+    shown: &Path,
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
     body_text: BodyText,
@@ -3044,7 +3051,7 @@ pub fn parse_file_with_names<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_with_ignores(path, source, names, body_text == BodyText::Skipped)?;
+    } = parse_with_ignores(shown, source, names, body_text == BodyText::Skipped)?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
@@ -3108,7 +3115,8 @@ pub fn parse_file_with_names<'a>(
     // found by the skip.
     #[cfg(debug_assertions)]
     if parsed.facts.has_skimmed_bodies
-        && let Ok(full) = parse_file_with_names(path, source, is_stub, BodyText::AsText, None)
+        && let Ok(full) =
+            parse_file_with_names(path, shown, source, is_stub, BodyText::AsText, None)
     {
         file_cache::assert_same_but_bodies(&parsed, &full);
     }
@@ -3157,6 +3165,13 @@ pub fn path_under_excluded_dir(path: &Path, excluded_dir_names: &[&str]) -> bool
     })
 }
 
+/// `path` as the reports spell it: relative to `root` when it lies under it,
+/// else as given. Keys are absolute, so name-based checks read this instead.
+pub fn shown_path<'p>(root: Option<&Path>, path: &'p Path) -> &'p Path {
+    root.and_then(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path)
+}
+
 /// Same as `collect_php_files`, but prunes any directory whose name
 /// appears in `excluded_dir_names` before recursing into it - see
 /// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`.
@@ -3166,8 +3181,8 @@ pub fn collect_php_files_excluding(
     out: &mut Vec<PathBuf>,
 ) {
     let mut walk = walk::Walk::new();
-    walk.add(path, path, walk::Role::Analysed, excluded_dir_names);
-    out.extend(walk.finish().into_iter().map(|listed| listed.path));
+    walk.add(path, walk::Role::Analysed, excluded_dir_names);
+    out.extend(walk.finish().files.into_iter().map(|listed| listed.path));
 }
 
 /// What `Project::unindex_file` removed.

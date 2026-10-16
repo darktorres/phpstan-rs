@@ -230,10 +230,17 @@ pub(super) struct Key {
     file: PathBuf,
 }
 
-/// The entry of a file with these `bytes`, named `path`, parsed as
-/// `is_stub` says and with use sites indexed as `index_use_sites` says;
-/// `None` when the cache is off.
-pub(super) fn key(bytes: &[u8], path: &Path, is_stub: bool, index_use_sites: bool) -> Option<Key> {
+/// The entry of a file with these `bytes`, named `path` and spelled `shown`
+/// (its anonymous classes carry that spelling), parsed as `is_stub` says and
+/// with use sites indexed as `index_use_sites` says; `None` when the cache
+/// is off.
+pub(super) fn key(
+    bytes: &[u8],
+    path: &Path,
+    shown: &Path,
+    is_stub: bool,
+    index_use_sites: bool,
+) -> Option<Key> {
     let directory = directory()?;
     let mut hasher = twox_hash::XxHash3_128::new();
     hasher.write(bytes);
@@ -243,6 +250,9 @@ pub(super) fn key(bytes: &[u8], path: &Path, is_stub: bool, index_use_sites: boo
     let path_bytes = path.as_os_str().as_encoded_bytes();
     hasher.write(path_bytes);
     hasher.write(&(path_bytes.len() as u64).to_le_bytes());
+    let shown_bytes = shown.as_os_str().as_encoded_bytes();
+    hasher.write(shown_bytes);
+    hasher.write(&(shown_bytes.len() as u64).to_le_bytes());
     hasher.write(&[u8::from(is_stub), u8::from(index_use_sites)]);
     let digest = hasher.finish_128();
     let hex = format!("{digest:032x}");

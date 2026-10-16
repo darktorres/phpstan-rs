@@ -35,14 +35,15 @@ fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
 /// Real PHPStan's own message format (`vendor/phpstan-src/src/Rules/
 /// Functions/DuplicateFunctionDeclarationRule.php`): `"Function %s
 /// declared multiple times:\n%s"`, with a newline-joined `- {path}:{line}`
-/// list of every declaration site. This project has no
-/// `RelativePathHelper` equivalent, so the location list uses each site's
-/// absolute path - a disclosed adaptation, not a silent difference.
+/// list of every declaration site. Each site is named relative to `root`, the
+/// project's root, as the report names files; a site outside `root` keeps its
+/// path.
 ///
 /// `index` holds the lines of `path`, and `line_in` answers for any loaded
 /// file the line of an offset.
 pub(crate) fn check_duplicate_function_declarations(
     path: &Path,
+    root: Option<&Path>,
     index: &LineIndex,
     line_in: &dyn Fn(&Path, u32) -> u32,
     sites: &DuplicateFunctionSites,
@@ -75,7 +76,13 @@ pub(crate) fn check_duplicate_function_declarations(
             }
             let location_list = group
                 .iter()
-                .map(|s| format!("- {}:{}", s.path.display(), line_in(&s.path, s.span.start)))
+                .map(|s| {
+                    format!(
+                        "- {}:{}",
+                        super::shown_path(root, &s.path).display(),
+                        line_in(&s.path, s.span.start)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             let message = format!("Function {name} declared multiple times:\n{location_list}");

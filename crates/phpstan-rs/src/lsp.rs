@@ -48,11 +48,12 @@ use lsp_types::{
 use crate::app::check_project::{self, CheckRequest};
 use crate::checker::Checker;
 use crate::project::session::{
-    DEFAULT_REPORT_LEVEL, DiagnosticOrder, ErrorPolicy, Finalize, Session, finalize_results,
+    Classified, DEFAULT_REPORT_LEVEL, DiagnosticOrder, ErrorPolicy, Finalize, Session,
+    classify_unlisted, finalize_results,
 };
 use crate::project::source::{self, FileSource};
 use crate::project::use_sites;
-use crate::project::walk::{Listed, Role};
+use crate::project::walk::{self, Listed, Role};
 use crate::project::{Project, ProjectSettings};
 use crate::registry::stub_set::{StubSource, Stubs};
 use crate::registry::{FunctionReflection, format_signature, param_label};
@@ -227,9 +228,12 @@ struct Server {
     // `PendingWorkspaceScan`'s own doc comment for why the scan itself
     // can't just run inline in `"initialize"`.
     pending_workspace_scan: Option<PendingWorkspaceScan>,
-    // Every workspace folder root already loaded - `add_workspace_folders`/
-    // `remove_workspace_folders` dedup/filter against this.
-    workspace_roots: Vec<PathBuf>,
+    // Every workspace folder root already loaded, as the client named it and
+    // as it resolves - `add_workspace_folders`/`remove_workspace_folders`
+    // dedup/filter against the first, and the project keys the files a folder
+    // loaded by the second, which a folder whose link was since removed no
+    // longer resolves to.
+    workspace_roots: Vec<(PathBuf, PathBuf)>,
     // The most recently configured workspace root, which `finalize_for_publish`
     // rewrites a diagnostic's path against before consulting the applied
     // `ignore_error_entries` and `baseline`. With more than one workspace
@@ -502,7 +506,11 @@ impl Server {
         let mut messages = Vec::new();
         let mut any_loaded = false;
         for root in roots {
-            if self.workspace_roots.contains(root) {
+            if self
+                .workspace_roots
+                .iter()
+                .any(|(spelled, _)| spelled == root)
+            {
                 continue;
             }
             // What a root's configuration applies to `self`/`self.project` is
@@ -516,7 +524,8 @@ impl Server {
                     let (applied, loaded) = self.apply_configuration(next, session, &[]);
                     messages.extend(applied);
                     any_loaded |= loaded;
-                    self.workspace_roots.push(root.clone());
+                    self.workspace_roots
+                        .push((root.clone(), walk::resolve(root)));
                 }
                 Err(error) => messages.push(show_message_notification(
                     MessageType::ERROR,
@@ -538,11 +547,21 @@ impl Server {
     /// keep showing stale squiggles indefinitely, since removing a
     /// workspace folder is not itself a `textDocument/didClose`.
     fn remove_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
-        self.workspace_roots.retain(|r| !roots.contains(r));
+        let resolved: Vec<PathBuf> = roots
+            .iter()
+            .map(|root| {
+                self.workspace_roots
+                    .iter()
+                    .find(|(spelled, _)| spelled == root)
+                    .map_or_else(|| walk::resolve(root), |(_, resolved)| resolved.clone())
+            })
+            .collect();
+        self.workspace_roots
+            .retain(|(spelled, _)| !roots.contains(spelled));
         let paths: Vec<PathBuf> = self
             .project
             .loaded_paths()
-            .filter(|p| roots.iter().any(|root| p.starts_with(root)))
+            .filter(|p| resolved.iter().any(|root| p.starts_with(root)))
             .map(Path::to_path_buf)
             .collect();
 
@@ -619,7 +638,13 @@ impl Server {
                 order: DiagnosticOrder::Sorted,
             },
         };
-        finalize_results(&self.project, results, &options, self.root.as_deref()).results
+        finalize_results(
+            &self.project,
+            results,
+            &options,
+            self.project.absolute_root(),
+        )
+        .results
     }
 
     /// Publishes what the last analysis changed: each analysed path whose
@@ -735,6 +760,30 @@ impl Server {
             .unwrap_or_else(|| (path_to_uri(path), None))
     }
 
+    /// The key `path` has in the project: the path resolved through links,
+    /// by the session when one is configured.
+    fn identify(&self, path: &Path) -> PathBuf {
+        match &self.session {
+            Some(session) => session.identify(path),
+            None => walk::resolve(path),
+        }
+    }
+
+    /// The file `path` names, as the project keys it, with the role and stub
+    /// status the configuration gives it.
+    fn classify(&self, path: &Path) -> Classified {
+        match &self.session {
+            Some(session) => session.classify(path),
+            None => classify_unlisted(path),
+        }
+    }
+
+    /// The key of the file the document `uri` names, or `None` when the URI
+    /// names no file.
+    fn document_path(&self, uri: &Uri) -> Option<PathBuf> {
+        Some(self.identify(&uri_to_path(uri)?))
+    }
+
     /// The `publishDiagnostics` notification of `diags`, found in `path`,
     /// with the columns of the file's lines in the negotiated unit.
     fn diagnostics_message(
@@ -804,9 +853,14 @@ impl Server {
         text: &str,
         version: Option<i32>,
     ) -> Vec<Message> {
-        let Some(path) = uri_to_path(uri) else {
+        let Some(spelled) = uri_to_path(uri) else {
             return Vec::new();
         };
+        let Classified {
+            path,
+            role,
+            is_stub,
+        } = self.classify(&spelled);
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris.insert(path.clone(), (uri.clone(), version));
         self.latest_text.insert(path.clone(), text.to_string());
@@ -830,25 +884,29 @@ impl Server {
         // and more exposed
         // in practice here: momentarily-invalid syntax is the normal
         // state while a file is being typed, not an edge case.
-        // `update_file`'s `Result` makes a parse failure here a plain,
+        // `update_file_as`'s `Result` makes a parse failure here a plain,
         // recoverable `Err` rather than unwinding and taking down the
         // whole LSP server process.
-        let results = match self.project.update_file(&path, text) {
-            Ok(results) => results,
-            Err(e) => {
-                eprintln!(
-                    "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                    path.display()
-                );
-                return vec![log_message_notification(
-                    MessageType::WARNING,
-                    format!(
-                        "phpstan-rs: skipping {} - failed to parse: {e}",
+        let results =
+            match self
+                .project
+                .update_file_as(&path, text, role == Role::Analysed, is_stub, || false)
+            {
+                Ok(results) => results,
+                Err(e) => {
+                    eprintln!(
+                        "phpstan-rs lsp: skipping {} - failed to parse: {e}",
                         path.display()
-                    ),
-                )];
-            }
-        };
+                    );
+                    return vec![log_message_notification(
+                        MessageType::WARNING,
+                        format!(
+                            "phpstan-rs: skipping {} - failed to parse: {e}",
+                            path.display()
+                        ),
+                    )];
+                }
+            };
         self.publish_edit(&path, results)
     }
 
@@ -870,16 +928,22 @@ impl Server {
         version: i32,
         should_abort: &mut impl FnMut() -> bool,
     ) -> Vec<Message> {
+        let classified = self.classify(path);
+        let path = classified.path.as_path();
+        let analysed = classified.role == Role::Analysed;
         *self.file_versions.entry(path.to_path_buf()).or_insert(0) += 1;
         self.open_uris
             .insert(path.to_path_buf(), (uri.clone(), Some(version)));
         self.latest_text
             .insert(path.to_path_buf(), text.to_string());
         self.project.set_document(path, text.as_bytes());
-        let results = match self
-            .project
-            .update_file_cancellable(path, text, &mut *should_abort)
-        {
+        let results = match self.project.update_file_as(
+            path,
+            text,
+            analysed,
+            classified.is_stub,
+            &mut *should_abort,
+        ) {
             Ok(results) => results,
             Err(e) => {
                 eprintln!(
@@ -927,7 +991,7 @@ impl Server {
             let Some(path) = uri_to_path(&change.uri) else {
                 continue;
             };
-            last_by_path.insert(path, (change.uri, change.typ));
+            last_by_path.insert(self.identify(&path), (change.uri, change.typ));
         }
 
         let mut messages = Vec::new();
@@ -950,6 +1014,7 @@ impl Server {
             let Ok(bytes) = FileSource::read_disk(&path) else {
                 continue;
             };
+            let Classified { role, is_stub, .. } = self.classify(&path);
             // No document version exists for an externally-observed
             // change (there is no didOpen/didChange behind it) - `None`
             // matches a file that was only ever loaded from disk.
@@ -957,7 +1022,13 @@ impl Server {
             self.latest_text
                 .insert(path.clone(), String::from_utf8_lossy(&bytes).into_owned());
             self.project.unset_document(&path);
-            match self.project.update_file(&path, &bytes) {
+            match self.project.update_file_as(
+                &path,
+                &bytes,
+                role == Role::Analysed,
+                is_stub,
+                || false,
+            ) {
                 Ok(results) => {
                     messages.extend(self.publish_edit(&path, results));
                 }
@@ -1001,7 +1072,7 @@ impl Server {
     /// has anything useful to say about) - a valid "no hover here" per
     /// the LSP spec, not an error.
     fn hover(&self, uri: &Uri, position: LspPosition) -> Option<Hover> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let resolved =
             navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let text = self.format_hover(&resolved)?;
@@ -1201,7 +1272,7 @@ impl Server {
     /// loaded (an undefined reference - already flagged by an ordinary
     /// diagnostic, not this method's job to report again).
     fn definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let resolved =
             navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         // A local variable's own declaration site(s) are same-file and
@@ -1316,7 +1387,7 @@ impl Server {
     /// `rename`'s own precedent of scoping a new capability narrower
     /// than every `Resolved` variant in its v1.
     fn type_definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let resolved =
             navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let ty = match &resolved {
@@ -1367,7 +1438,7 @@ impl Server {
     }
 
     fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let stmts = self.project.ast(&path)?;
         let index = self.positions(&path)?;
         Some(DocumentSymbolResponse::Nested(
@@ -1382,7 +1453,7 @@ impl Server {
     /// which the LSP spec treats as a different signal), matching
     /// `semantic_tokens_full`'s own always-return-Tokens contract.
     fn semantic_tokens_full(&self, uri: &Uri) -> Option<lsp_types::SemanticTokensResult> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let tokens = self.project.semantic_tokens_for_file(&path);
         let index = self.positions(&path)?;
         Some(lsp_types::SemanticTokensResult::Tokens(
@@ -1445,7 +1516,7 @@ impl Server {
         position: LspPosition,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let resolved =
             navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let targets = self.ref_targets_for(&resolved);
@@ -1492,7 +1563,7 @@ impl Server {
         position: LspPosition,
         new_name: &str,
     ) -> Option<lsp_types::WorkspaceEdit> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let resolved =
             navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let (target, decl) = match &resolved {
@@ -1559,7 +1630,7 @@ impl Server {
         uri: &Uri,
         position: LspPosition,
     ) -> Option<Vec<DocumentHighlight>> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let target =
             navigation::resolve_at(&self.project, &path, self.offset_at(&path, position)?)?;
         let mut spans: Vec<Span> = navigation::collect_all(&self.project, &path)
@@ -1687,7 +1758,7 @@ impl Server {
     /// See `inlay_hints`'s own module doc comment for why the cache
     /// exists at all.
     fn inlay_hints(&mut self, uri: &Uri, range: LspRange) -> Option<Vec<lsp_types::InlayHint>> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let version = *self.file_versions.get(&path).unwrap_or(&0);
         let cached = match self.inlay_hint_cache.get(&path) {
             Some((cached_version, params, locals)) if *cached_version == version => {
@@ -1727,7 +1798,7 @@ impl Server {
     /// inside the parens of - see `signature_help::resolve_at`'s own
     /// module doc comment for the claim-and-clear walker this reads.
     fn signature_help(&self, uri: &Uri, position: LspPosition) -> Option<SignatureHelp> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let pos = self.offset_at(&path, position)?;
         let help = signature_help::resolve_at(&self.project, &path, pos)?;
         self.build_signature_help(help)
@@ -1823,7 +1894,7 @@ impl Server {
     /// context from the live, possibly-unparseable buffer) is the same
     /// "last-good AST" precedent this whole request already leans on.
     fn completion(&self, uri: &Uri, position: LspPosition) -> Option<CompletionResponse> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let text = self
             .latest_text
             .get(&path)
@@ -1890,7 +1961,7 @@ impl Server {
     /// is, but not cached: a miss means nothing was sent for the file, and
     /// the cache holds only what was sent.
     fn code_actions(&mut self, uri: &Uri, range: LspRange) -> Option<CodeActionResponse> {
-        let path = uri_to_path(uri)?;
+        let path = self.document_path(uri)?;
         let computed;
         let diagnostics = match self.last_diagnostics.get(&path) {
             Some(diags) => diags,
@@ -2161,6 +2232,13 @@ struct DebounceHandle {
     cv: Condvar,
 }
 
+/// The key the project has for the file `uri` names, for the reader thread,
+/// which holds no session and must not wait for the server's lock. It is
+/// the path `Session::identify` gives a file that exists.
+fn document_key(uri: &Uri) -> Option<PathBuf> {
+    Some(walk::resolve(&uri_to_path(uri)?))
+}
+
 /// Records `path`'s new edit and wakes the debounce worker - a handful
 /// of instructions guarded by a briefly-held, uncontended lock, never
 /// blocked by anything `Project`-related. This is the reader thread's
@@ -2330,7 +2408,7 @@ fn run_dispatch_loop<W: Write>(
                 if not.method == "textDocument/didChange" {
                     if let Ok(params) =
                         serde_json::from_value::<DidChangeTextDocumentParams>(not.params)
-                        && let Some(path) = uri_to_path(&params.text_document.uri)
+                        && let Some(path) = document_key(&params.text_document.uri)
                         && let Some(change) = params.content_changes.into_iter().next()
                     {
                         queue_change(
@@ -2361,7 +2439,7 @@ fn run_dispatch_loop<W: Write>(
                     && let Ok(params) = serde_json::from_value::<
                         lsp_types::DidCloseTextDocumentParams,
                     >(not.params.clone())
-                    && let Some(path) = uri_to_path(&params.text_document.uri)
+                    && let Some(path) = document_key(&params.text_document.uri)
                 {
                     debounce.queue.lock().unwrap().cancel(&path);
                 }

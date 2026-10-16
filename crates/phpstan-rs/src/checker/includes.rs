@@ -158,7 +158,7 @@ impl<'a> Checker<'a> {
             return Some(file.clone());
         }
         let file = self.current_file.as_ref()?;
-        Some(match &self.working_dir {
+        Some(match &self.root {
             Some(dir) => dir.join(file),
             None => file.to_path_buf(),
         })
@@ -287,7 +287,7 @@ impl<'a> Checker<'a> {
         }
         // Without a working directory, the relative path itself: the
         // filesystem resolves it against the process's.
-        let from_cwd = Some(match &self.working_dir {
+        let from_cwd = Some(match &self.root {
             Some(dir) => dir.join(path),
             None => path.to_path_buf(),
         });
