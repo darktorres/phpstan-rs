@@ -4,10 +4,16 @@
 //! `config.platform.php`, path repositories, and which installed package
 //! owns a given file.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt;
+use std::marker::PhantomData;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+use serde_json::value::RawValue;
 
 /// One `composer.json` entry and the 1-based line it's written on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,42 +34,32 @@ pub struct Autoload {
 }
 
 impl Autoload {
-    fn read(section: Option<&Value>, root: &Path) -> Autoload {
+    fn read(section: Option<Members<'_>>, root: &Path) -> Autoload {
         let Some(section) = section else {
             return Autoload::default();
         };
-        let paths = |v: &Value| -> Vec<PathBuf> {
-            match v {
-                Value::String(s) => vec![root.join(s)],
-                Value::Array(items) => items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(|s| root.join(s))
-                    .collect(),
-                _ => Vec::new(),
-            }
+        let paths = |raw: &RawValue| -> Vec<PathBuf> {
+            strings(raw).iter().map(|s| root.join(s)).collect()
         };
         let psr4 = section
-            .get("psr-4")
-            .and_then(Value::as_object)
+            .read::<Members>("psr-4")
             .map(|map| {
                 map.iter()
-                    .map(|(prefix, dirs)| (prefix.clone(), paths(dirs)))
+                    .map(|(prefix, dirs)| (prefix.to_string(), paths(dirs)))
                     .collect()
             })
             .unwrap_or_default();
-        let excluded = match section.get("exclude-from-classmap") {
-            Some(Value::String(s)) => vec![s.as_str()],
-            Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
-            _ => Vec::new(),
-        }
-        .into_iter()
-        .map(|p| root.join(p.trim_start_matches('/').trim_end_matches(['/', '*'])))
-        .collect();
+        let excluded = section
+            .raw("exclude-from-classmap")
+            .map(strings)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| root.join(p.trim_start_matches('/').trim_end_matches(['/', '*'])))
+            .collect();
         Autoload {
             psr4,
-            classmap: section.get("classmap").map(paths).unwrap_or_default(),
-            files: section.get("files").map(paths).unwrap_or_default(),
+            classmap: section.raw("classmap").map(paths).unwrap_or_default(),
+            files: section.raw("files").map(paths).unwrap_or_default(),
             excluded,
         }
     }
@@ -129,89 +125,74 @@ impl ComposerManifest {
     pub fn load(root: &Path, absolute_root: &Path) -> Option<ComposerManifest> {
         let path = root.join("composer.json");
         let text = std::fs::read_to_string(&path).ok()?;
-        let json: Value = serde_json::from_str(&text).ok()?;
+        let json: Members = parse_document(&text)?;
         let lines = LineFinder::new(&text);
         let mut manifest = ComposerManifest {
             root: root.to_path_buf(),
             absolute_root: absolute_root.to_path_buf(),
             path,
-            name: json.get("name").and_then(Value::as_str).map(str::to_string),
+            name: json.read("name"),
             ..ComposerManifest::default()
         };
         for (section, out) in [
             ("require", &mut manifest.require),
             ("require-dev", &mut manifest.require_dev),
         ] {
-            if let Some(map) = json.get(section).and_then(Value::as_object) {
-                for (package, constraint) in map {
+            if let Some(members) = json.read::<Members>(section) {
+                for (package, constraint) in members.iter() {
                     out.push(Located {
-                        value: package.clone(),
+                        value: package.to_string(),
                         line: lines.key_in_section(section, package),
                     });
-                    if let Some(c) = constraint.as_str() {
-                        manifest
-                            .constraints
-                            .insert(package.to_ascii_lowercase(), c.to_string());
+                    if let Some(c) = read_raw::<String>(constraint) {
+                        manifest.constraints.insert(package.to_ascii_lowercase(), c);
                     }
                 }
             }
         }
-        manifest.autoload = Autoload::read(json.get("autoload"), root);
-        manifest.autoload_dev = Autoload::read(json.get("autoload-dev"), root);
-        if let Some(map) = json.get("provide").and_then(Value::as_object) {
-            for package in map.keys() {
+        manifest.autoload = Autoload::read(json.read("autoload"), root);
+        manifest.autoload_dev = Autoload::read(json.read("autoload-dev"), root);
+        if let Some(members) = json.read::<Members>("provide") {
+            for package in members.keys() {
                 manifest.provide.push(Located {
-                    value: package.clone(),
+                    value: package.to_string(),
                     line: lines.key_in_section("provide", package),
                 });
             }
         }
-        if let Some(map) = json.get("suggest").and_then(Value::as_object) {
-            manifest.suggest = map.keys().cloned().collect();
-        }
-        if let Some(map) = json.get("scripts").and_then(Value::as_object) {
-            for (name, commands) in map {
+        manifest.suggest = keys(json.read("suggest"));
+        if let Some(members) = json.read::<Members>("scripts") {
+            for (name, commands) in members.iter() {
                 let line = lines.key_in_section("scripts", name);
-                let commands: Vec<&str> = match commands {
-                    Value::String(s) => vec![s.as_str()],
-                    Value::Array(items) => items.iter().filter_map(Value::as_str).collect(),
-                    _ => Vec::new(),
-                };
-                for command in commands {
+                for command in strings(commands) {
+                    let command_line = lines.line_of_string_after(&command, line);
                     manifest.scripts.push(Located {
-                        value: (name.clone(), command.to_string()),
-                        line: lines.line_of_string_after(command, line),
+                        value: (name.to_string(), command),
+                        line: command_line,
                     });
                 }
             }
         }
         if let Some(php) = json
-            .get("config")
-            .and_then(|c| c.get("platform"))
-            .and_then(|p| p.get("php"))
-            .and_then(Value::as_str)
+            .read::<Members>("config")
+            .and_then(|config| config.read::<Members>("platform"))
+            .and_then(|platform| platform.read::<String>("php"))
         {
             manifest.platform_php = Some(Located {
-                value: php.to_string(),
+                value: php,
                 line: lines.key_in_section("platform", "php"),
             });
         }
-        if let Some(repos) = json.get("repositories") {
-            let entries: Vec<&Value> = match repos {
-                Value::Array(items) => items.iter().collect(),
-                Value::Object(map) => map.values().collect(),
-                _ => Vec::new(),
-            };
-            for repo in entries {
-                if let (Some(kind), Some(url)) = (
-                    repo.get("type").and_then(Value::as_str),
-                    repo.get("url").and_then(Value::as_str),
-                ) {
-                    manifest.repositories.push(Repository {
-                        kind: kind.to_string(),
-                        url: url.to_string(),
-                    });
-                }
+        let repositories: Vec<Members> = json
+            .read::<Vec<Members>>("repositories")
+            .or_else(|| {
+                json.read::<BTreeMap<Cow<str>, Members>>("repositories")
+                    .map(|map| map.into_values().collect())
+            })
+            .unwrap_or_default();
+        for repo in &repositories {
+            if let (Some(kind), Some(url)) = (repo.read("type"), repo.read("url")) {
+                manifest.repositories.push(Repository { kind, url });
             }
         }
         manifest.installed = read_installed(root);
@@ -303,54 +284,33 @@ fn read_installed(root: &Path) -> Vec<InstalledPackage> {
     let Ok(text) = std::fs::read_to_string(composer_dir.join("installed.json")) else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+    let Some(Installed(packages)) = parse_document::<Installed>(&text) else {
         return Vec::new();
     };
-    let packages: Vec<&Value> = match &json {
-        Value::Array(items) => items.iter().collect(),
-        Value::Object(map) => map
-            .get("packages")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().collect())
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    };
-    let names = |v: Option<&Value>| -> Vec<String> {
-        v.and_then(Value::as_object)
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default()
-    };
     packages
-        .into_iter()
-        .filter_map(|p| {
-            let name = p.get("name")?.as_str()?.to_string();
+        .iter()
+        .filter_map(|package| {
+            let name: String = package.read("name")?;
             let vendor_dir = root.join("vendor").join(&name);
-            let install_dir = p
-                .get("install-path")
-                .and_then(Value::as_str)
+            let install_dir = package
+                .read::<String>("install-path")
                 .map(|rel| composer_dir.join(rel))
                 .unwrap_or_else(|| vendor_dir.clone());
             let install_dir = std::fs::canonicalize(&install_dir).unwrap_or(install_dir);
             Some(InstalledPackage {
-                kind: p
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("library")
-                    .to_string(),
-                auto_discovered: p
-                    .get("extra")
-                    .and_then(Value::as_object)
-                    .is_some_and(|extra| {
-                        ["pest", "laravel", "phpstan", "psalm"]
-                            .iter()
-                            .any(|key| extra.contains_key(*key))
-                    }),
-                has_bin: p
-                    .get("bin")
-                    .and_then(Value::as_array)
-                    .is_some_and(|b| !b.is_empty()),
-                provide: names(p.get("provide")),
-                replace: names(p.get("replace")),
+                kind: package
+                    .read("type")
+                    .unwrap_or_else(|| "library".to_string()),
+                auto_discovered: package.read::<Members>("extra").is_some_and(|extra| {
+                    ["pest", "laravel", "phpstan", "psalm"]
+                        .iter()
+                        .any(|key| extra.contains_key(*key))
+                }),
+                has_bin: package
+                    .read::<Vec<&RawValue>>("bin")
+                    .is_some_and(|bin| !bin.is_empty()),
+                provide: keys(package.read("provide")),
+                replace: keys(package.read("replace")),
                 name,
                 install_dir,
                 vendor_dir,
@@ -380,6 +340,234 @@ pub fn lexically_normalized(path: &Path) -> PathBuf {
 /// and `..` lexically.
 pub fn path_starts_with(path: &Path, prefix: &Path) -> bool {
     path.starts_with(prefix) || lexically_normalized(path).starts_with(lexically_normalized(prefix))
+}
+
+/// The members of a JSON object, each as the raw text of its value, in key
+/// order, with a repeated key keeping its last value. A member is read as a
+/// type only where it is used, and is otherwise only scanned.
+#[derive(Default)]
+struct Members<'de>(BTreeMap<Cow<'de, str>, &'de RawValue>);
+
+impl<'de> Members<'de> {
+    /// The raw text of member `key`, if the object has it.
+    fn raw(&self, key: &str) -> Option<&'de RawValue> {
+        self.0.get(key).copied()
+    }
+
+    /// Member `key` read as `T`; `None` when it is absent or of another shape.
+    fn read<T: Deserialize<'de>>(&self, key: &str) -> Option<T> {
+        self.raw(key).and_then(read_raw)
+    }
+}
+
+impl<'de> Deref for Members<'de> {
+    type Target = BTreeMap<Cow<'de, str>, &'de RawValue>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'de> Shape<'de> for Members<'de> {
+    fn seq<A: SeqAccess<'de>>(mut seq: A) -> Result<Self, A::Error> {
+        while seq.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(Members::default())
+    }
+
+    fn map<A: MapAccess<'de>>(mut map: A) -> Result<Self, A::Error> {
+        let mut members = BTreeMap::new();
+        while let Some((key, raw)) = map.next_entry::<Cow<'de, str>, &'de RawValue>()? {
+            members.insert(key, raw);
+        }
+        Ok(Members(members))
+    }
+}
+
+impl<'de> Deserialize<'de> for Members<'de> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_shape(deserializer)
+    }
+}
+
+/// `raw` read as `T`; `None` when it is not a `T`.
+fn read_raw<'de, T: Deserialize<'de>>(raw: &'de RawValue) -> Option<T> {
+    serde_json::from_str(raw.get()).ok()
+}
+
+/// The deepest nesting of arrays and objects that `json_decode` reads at its
+/// default depth of 512.
+const MAX_NESTING: usize = 511;
+
+/// Parses a whole JSON document. Invalid JSON, and nesting deeper than
+/// `MAX_NESTING`, give `None`.
+fn parse_document<'de, T: Deserialize<'de>>(text: &'de str) -> Option<T> {
+    if !nests_within(text, MAX_NESTING) {
+        return None;
+    }
+    serde_json::from_str(text).ok()
+}
+
+/// Whether no array or object in `text` nests deeper than `limit`. Brackets
+/// inside strings do not count.
+fn nests_within(text: &str, limit: usize) -> bool {
+    let mut depth: usize = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    for byte in text.bytes() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > limit {
+                    return false;
+                }
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    true
+}
+
+/// The strings of a `string | string[]` value: the string itself, or the
+/// strings of an array, with other items skipped.
+fn strings(raw: &RawValue) -> Vec<String> {
+    if let Some(one) = read_raw::<String>(raw) {
+        return vec![one];
+    }
+    read_raw::<Vec<&RawValue>>(raw)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(read_raw::<String>)
+        .collect()
+}
+
+/// The keys of an object in key order; a value that is not an object has none.
+fn keys(members: Option<Members<'_>>) -> Vec<String> {
+    members
+        .map(|members| members.keys().map(|key| key.to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// A type read from any JSON value. `seq` and `map` read an array or an
+/// object and consume it whole; any other value reads as the default. A
+/// value read in the middle of a stream goes through this, so a value of the
+/// wrong shape is skipped rather than failing the whole file.
+trait Shape<'de>: Default + Sized {
+    fn seq<A: SeqAccess<'de>>(seq: A) -> Result<Self, A::Error>;
+    fn map<A: MapAccess<'de>>(map: A) -> Result<Self, A::Error>;
+}
+
+fn deserialize_shape<'de, D: Deserializer<'de>, T: Shape<'de>>(
+    deserializer: D,
+) -> Result<T, D::Error> {
+    deserializer.deserialize_any(ShapeVisitor(PhantomData))
+}
+
+struct ShapeVisitor<T>(PhantomData<T>);
+
+impl<'de, T: Shape<'de>> Visitor<'de> for ShapeVisitor<T> {
+    type Value = T;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("any JSON value")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<T, A::Error> {
+        T::seq(seq)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<T, A::Error> {
+        T::map(map)
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<T, E> {
+        Ok(T::default())
+    }
+
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<T, E> {
+        Ok(T::default())
+    }
+
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<T, E> {
+        Ok(T::default())
+    }
+
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<T, E> {
+        Ok(T::default())
+    }
+
+    fn visit_str<E: de::Error>(self, _: &str) -> Result<T, E> {
+        Ok(T::default())
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<T, E> {
+        Ok(T::default())
+    }
+}
+
+/// The entries of a `packages` list; any other value has none.
+#[derive(Default)]
+struct Packages<'de>(Vec<Members<'de>>);
+
+impl<'de> Shape<'de> for Packages<'de> {
+    fn seq<A: SeqAccess<'de>>(mut seq: A) -> Result<Self, A::Error> {
+        let mut packages = Vec::new();
+        while let Some(package) = seq.next_element::<Members<'de>>()? {
+            packages.push(package);
+        }
+        Ok(Packages(packages))
+    }
+
+    fn map<A: MapAccess<'de>>(mut map: A) -> Result<Self, A::Error> {
+        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(Packages::default())
+    }
+}
+
+impl<'de> Deserialize<'de> for Packages<'de> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_shape(deserializer)
+    }
+}
+
+/// `vendor/composer/installed.json`: a list of packages, or an object whose
+/// `packages` is one. Any other value has none.
+#[derive(Default)]
+struct Installed<'de>(Vec<Members<'de>>);
+
+impl<'de> Shape<'de> for Installed<'de> {
+    fn seq<A: SeqAccess<'de>>(seq: A) -> Result<Self, A::Error> {
+        Ok(Installed(Packages::seq(seq)?.0))
+    }
+
+    fn map<A: MapAccess<'de>>(mut map: A) -> Result<Self, A::Error> {
+        let mut packages = Vec::new();
+        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+            if key == "packages" {
+                packages = map.next_value::<Packages<'de>>()?.0;
+            } else {
+                map.next_value::<IgnoredAny>()?;
+            }
+        }
+        Ok(Installed(packages))
+    }
+}
+
+impl<'de> Deserialize<'de> for Installed<'de> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_shape(deserializer)
+    }
 }
 
 /// Finds the line a key is written on in the raw JSON text.
@@ -472,5 +660,15 @@ mod tests {
             assert_eq!(index.name(owner), Some("acme/b"), "{file}");
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn nesting_counts_only_brackets_outside_strings() {
+        assert!(nests_within("[[]]", 2));
+        assert!(!nests_within("[[]]", 1));
+        assert!(nests_within(r#"{"a": "[[[[", "b": "\"[\""}"#, 1));
+        assert!(nests_within(r#"{"a": "\\", "b": [1]}"#, 2));
+        assert!(!nests_within(r#"{"a": "\\", "b": [1]}"#, 1));
+        assert!(nests_within("]]]", 0));
     }
 }
