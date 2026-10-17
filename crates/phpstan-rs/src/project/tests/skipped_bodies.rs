@@ -38,6 +38,10 @@ fn insert_context(project: &mut Project, skip: BodyText) {
             .retain_source
             .then(|| crate::project::source::content_hash(CONTEXT.as_bytes())),
     };
+    project.insert_declarations(
+        &worker_pool(),
+        [(path.as_path(), false, file.built_decls())],
+    );
     project.insert_numbered_file(id, &path, file, text, false);
 }
 

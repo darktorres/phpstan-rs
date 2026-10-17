@@ -9,6 +9,7 @@ use syntax::name::Name;
 
 use super::container::{Reader, Stored, Writer};
 use super::name_table::{Base, load_base, store_entries};
+use crate::shard::{SHARDS, shard_of_hash};
 
 /// Values by an exact name. A map can sit over a shared, immutable base
 /// (`freeze`, `load`): cloning it then shares the base, and a change copies
@@ -177,6 +178,56 @@ impl<V: Clone> NameMap<V> {
         all.extend(std::mem::take(&mut self.entries));
         self.hidden.clear();
         self.base = Some(Arc::new(Base::built(all, false)));
+    }
+}
+
+impl<V> NameMap<V> {
+    /// Splits the map into `SHARDS` maps, each holding the own entries and
+    /// hidden names whose name `shard_of_hash` routes to it, and each sharing
+    /// the base. See `NameTable::split_shards`.
+    pub(crate) fn split_shards(mut self) -> Vec<NameMap<V>> {
+        let mut shards: Vec<NameMap<V>> = (0..SHARDS)
+            .map(|_| NameMap {
+                entries: Default::default(),
+                base: self.base.clone(),
+                hidden: Default::default(),
+            })
+            .collect();
+        for (name, value) in self.entries.drain() {
+            shards[shard_of_hash(name.folded_hash())]
+                .entries
+                .insert(name, value);
+        }
+        for name in self.hidden.drain() {
+            shards[shard_of_hash(name.folded_hash())]
+                .hidden
+                .insert(name);
+        }
+        shards
+    }
+
+    /// Joins shards made by `split_shards` back into one map.
+    pub(crate) fn join_shards(shards: Vec<NameMap<V>>) -> NameMap<V> {
+        let base = shards.first().and_then(|shard| shard.base.clone());
+        let mut joined = NameMap {
+            entries: Default::default(),
+            base,
+            hidden: Default::default(),
+        };
+        for mut shard in shards {
+            debug_assert!(
+                shard.base.as_ref().map(Arc::as_ptr) == joined.base.as_ref().map(Arc::as_ptr),
+                "the shards of a map share its base"
+            );
+            for (name, value) in shard.entries.drain() {
+                let replaced = joined.entries.insert(name, value);
+                debug_assert!(replaced.is_none(), "a name is in one shard only");
+            }
+            for name in shard.hidden.drain() {
+                joined.hidden.insert(name);
+            }
+        }
+        joined
     }
 }
 
@@ -358,6 +409,20 @@ impl NameSet {
     }
 }
 
+impl NameSet {
+    /// Splits the set into `SHARDS` sets. See `NameMap::split_shards`.
+    pub(crate) fn split_shards(self) -> Vec<NameSet> {
+        self.0.split_shards().into_iter().map(NameSet).collect()
+    }
+
+    /// Joins sets made by `split_shards` back into one set.
+    pub(crate) fn join_shards(shards: Vec<NameSet>) -> NameSet {
+        NameSet(NameMap::join_shards(
+            shards.into_iter().map(|shard| shard.0).collect(),
+        ))
+    }
+}
+
 impl<N: Into<Name>> Extend<N> for NameSet {
     fn extend<I: IntoIterator<Item = N>>(&mut self, iter: I) {
         for name in iter {
@@ -466,5 +531,109 @@ mod tests {
         assert!(!stored.contains("bar"));
         set.freeze();
         assert!(set.contains("Baz"));
+    }
+
+    /// 200 names over a frozen base, with 103 own entries and three hidden
+    /// names: a removed one, a replaced one and a copied-up one.
+    fn split_fixture() -> NameMap<u32> {
+        let mut map: NameMap<u32> = (0..200)
+            .map(|i| (Name::from(format!("CONST_{i}").as_str()), i))
+            .collect();
+        map.freeze();
+        for i in 0..100 {
+            map.insert(Name::from(format!("NEW_{i}").as_str()), 1000 + i);
+        }
+        map.insert(Name::from("const_6"), 60);
+        map.remove("CONST_5");
+        map.insert(Name::from("CONST_6"), 106);
+        *map.get_mut("CONST_7").unwrap() = 107;
+        map
+    }
+
+    /// The shard a name routes to, found from its text.
+    fn shard_of(name: &str) -> usize {
+        shard_of_hash(syntax::name::folded_hash(name.as_bytes()))
+    }
+
+    /// The names and values of a map.
+    fn contents(map: &NameMap<u32>) -> std::collections::BTreeMap<String, u32> {
+        map.iter()
+            .map(|(name, value)| (name.as_str().to_owned(), *value))
+            .collect()
+    }
+
+    #[test]
+    fn splitting_and_joining_a_map_keeps_its_entries_and_hidden_names() {
+        let map = split_fixture();
+        let len = map.len();
+        let before = contents(&map);
+        assert_eq!(before.len(), len);
+        let joined = NameMap::join_shards(map.split_shards());
+        assert_eq!(joined.len(), len);
+        assert_eq!(contents(&joined), before);
+        assert_eq!(joined.get("CONST_5"), None);
+        assert_eq!(joined.get("CONST_6"), Some(&106));
+        assert_eq!(joined.get("const_6"), Some(&60));
+        assert_eq!(joined.get("CONST_7"), Some(&107));
+        assert_eq!(joined.get("CONST_8"), Some(&8));
+    }
+
+    #[test]
+    fn each_shard_of_a_map_holds_the_names_its_hash_routes_to() {
+        let shards = split_fixture().split_shards();
+        assert_eq!(shards.len(), SHARDS);
+        let mut own = 0;
+        for (index, shard) in shards.iter().enumerate() {
+            for (name, _) in shard.entries.iter() {
+                assert_eq!(shard_of(name.as_str()), index, "{}", name.as_str());
+                own += 1;
+            }
+            for name in shard.hidden.iter() {
+                assert_eq!(shard_of(name.as_str()), index, "{}", name.as_str());
+            }
+        }
+        assert_eq!(own, 100 + 3);
+    }
+
+    #[test]
+    fn every_shard_of_a_map_shares_its_base() {
+        let map = split_fixture();
+        let base = Arc::clone(map.base.as_ref().expect("a frozen map has a base"));
+        for shard in map.split_shards() {
+            let shared = shard.base.as_ref().expect("each shard has the base");
+            assert!(Arc::ptr_eq(shared, &base));
+        }
+    }
+
+    #[test]
+    fn a_change_made_in_its_shard_reaches_the_joined_map() {
+        let map = split_fixture();
+        let len = map.len();
+        let mut shards = map.split_shards();
+        assert!(shards[shard_of("CONST_9")].remove("CONST_9"));
+        let added = Name::from("NEW_NAME");
+        shards[shard_of(added.as_str())].insert(added.clone(), 77);
+        let joined = NameMap::join_shards(shards);
+        assert_eq!(joined.get("CONST_9"), None);
+        assert_eq!(joined.get("NEW_NAME"), Some(&77));
+        assert_eq!(joined.len(), len);
+    }
+
+    #[test]
+    fn a_set_splits_and_joins_with_its_names() {
+        let mut set: NameSet = (0..100)
+            .map(|i| Name::from(format!("Name{i}").as_str()))
+            .collect();
+        set.freeze();
+        set.remove("Name3");
+        set.insert(Name::from("Added"));
+        let mut before: Vec<String> = set.iter().map(|name| name.as_str().to_owned()).collect();
+        before.sort();
+        let joined = NameSet::join_shards(set.split_shards());
+        let mut after: Vec<String> = joined.iter().map(|name| name.as_str().to_owned()).collect();
+        after.sort();
+        assert_eq!(after, before);
+        assert_eq!(joined.len(), 100);
+        assert!(joined.contains("Added") && !joined.contains("Name3") && joined.contains("Name4"));
     }
 }

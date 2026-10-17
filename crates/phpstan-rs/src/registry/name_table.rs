@@ -9,6 +9,8 @@ use rustc_hash::FxHashSet;
 use std::sync::{Arc, OnceLock};
 use syntax::name::{FoldKey, FoldedMap, FoldedSet, Name};
 
+use crate::shard::{SHARDS, shard_of_hash};
+
 use super::container::{Buffer, Reader, Stored, Writer};
 
 /// A name's lookup key: the name ASCII-lowercased, as PHP compares class
@@ -928,6 +930,62 @@ impl<V: Clone> NameTable<V> {
     }
 }
 
+impl<V> NameTable<V> {
+    /// Splits the table into `SHARDS` tables, each holding the own entries
+    /// and hidden names whose name `shard_of_hash` routes to it. Every shard
+    /// shares the base. A shard does not see the own entries of another
+    /// shard, so a name is read and changed in the shard it routes to. A
+    /// shard's `len` counts the base whole, so join before asking for the
+    /// length of a table.
+    pub(crate) fn split_shards(mut self) -> Vec<NameTable<V>> {
+        let mut shards: Vec<NameTable<V>> = (0..SHARDS)
+            .map(|_| NameTable {
+                entries: FoldedMap::default(),
+                base: self.base.clone(),
+                hidden: FoldedSet::default(),
+                version: next_version(),
+            })
+            .collect();
+        for (name, value) in self.entries.drain() {
+            shards[shard_of_hash(name.folded_hash())]
+                .entries
+                .insert(name, value);
+        }
+        for name in self.hidden.drain() {
+            shards[shard_of_hash(name.folded_hash())]
+                .hidden
+                .insert(name);
+        }
+        shards
+    }
+
+    /// Joins shards made by `split_shards` back into one table, with the
+    /// entries and hidden names they hold, and a version no part had.
+    pub(crate) fn join_shards(shards: Vec<NameTable<V>>) -> NameTable<V> {
+        let base = shards.first().and_then(|shard| shard.base.clone());
+        let mut joined = NameTable {
+            entries: FoldedMap::default(),
+            base,
+            hidden: FoldedSet::default(),
+            version: next_version(),
+        };
+        for mut shard in shards {
+            debug_assert!(
+                shard.base.as_ref().map(Arc::as_ptr) == joined.base.as_ref().map(Arc::as_ptr),
+                "the shards of a table share its base"
+            );
+            for (name, value) in shard.entries.drain() {
+                let replaced = joined.entries.insert(name, value);
+                debug_assert!(replaced.is_none(), "a name is in one shard only");
+            }
+            for name in shard.hidden.drain() {
+                joined.hidden.insert(name);
+            }
+        }
+        joined
+    }
+}
+
 impl<V> std::ops::Index<&str> for NameTable<V> {
     type Output = V;
 
@@ -1530,6 +1588,127 @@ mod tests {
         }
         assert_eq!(table.get("two"), Some(&3));
         assert_eq!(table.own_iter().count(), 3);
+    }
+
+    /// A table over a frozen base of 200 names, with 102 own entries and
+    /// three hidden names: a removed one, a replaced one and a copied-up one.
+    fn split_fixture() -> NameTable<u32> {
+        let mut table: NameTable<u32> = (0..200)
+            .map(|i| (Name::from(format!("Base\\Name{i}").as_str()), i))
+            .collect();
+        table.freeze();
+        for i in 0..100 {
+            table.insert(Name::from(format!("Own\\Fresh{i}").as_str()), 1000 + i);
+        }
+        table.remove("base\\name5");
+        table.insert(Name::from("BASE\\NAME6"), 1006);
+        *table.get_mut("Base\\Name7").unwrap() = 1007;
+        table
+    }
+
+    /// The shard a name routes to, found from its text.
+    fn shard_of(name: &str) -> usize {
+        shard_of_hash(syntax::name::folded_hash(name.as_bytes()))
+    }
+
+    /// The names and values of a table, by lowercased name.
+    fn contents(table: &NameTable<u32>) -> std::collections::BTreeMap<String, (String, u32)> {
+        table
+            .iter()
+            .map(|(name, value)| (name.lower().to_owned(), (name.as_str().to_owned(), *value)))
+            .collect()
+    }
+
+    #[test]
+    fn splitting_and_joining_a_table_keeps_its_entries_and_hidden_names() {
+        let table = split_fixture();
+        let len = table.len();
+        let before = contents(&table);
+        assert_eq!(before.len(), len);
+        let joined = NameTable::join_shards(table.split_shards());
+        assert_eq!(joined.len(), len);
+        assert_eq!(contents(&joined), before);
+        assert_eq!(joined.get("base\\name5"), None);
+        assert_eq!(joined.get("BASE\\NAME6"), Some(&1006));
+        assert_eq!(joined.get("base\\name7"), Some(&1007));
+        assert_eq!(joined.get("Base\\Name8"), Some(&8));
+    }
+
+    #[test]
+    fn a_stored_table_splits_and_joins_with_its_lazy_base() {
+        let reader = stored(&[("One", 1), ("Two", 2), ("Three", 3)]);
+        let mut table: NameTable<u32> = NameTable::load(&reader, "t").unwrap();
+        table.remove("two");
+        table.insert(Name::from("Four"), 4);
+        let before = contents(&table);
+        let joined = NameTable::join_shards(table.split_shards());
+        assert_eq!(contents(&joined), before);
+        assert_eq!(joined.get("one"), Some(&1));
+        assert_eq!(joined.get("two"), None);
+        assert_eq!(joined.get("FOUR"), Some(&4));
+    }
+
+    #[test]
+    fn each_shard_of_a_table_holds_the_names_its_hash_routes_to() {
+        let shards = split_fixture().split_shards();
+        assert_eq!(shards.len(), SHARDS);
+        let mut own = 0;
+        for (index, shard) in shards.iter().enumerate() {
+            for (name, _) in shard.own_iter() {
+                assert_eq!(
+                    shard_of_hash(name.folded_hash()),
+                    index,
+                    "{}",
+                    name.as_str()
+                );
+                own += 1;
+            }
+            for name in shard.hidden.iter() {
+                assert_eq!(
+                    shard_of_hash(name.folded_hash()),
+                    index,
+                    "{}",
+                    name.as_str()
+                );
+            }
+        }
+        assert_eq!(own, 100 + 2);
+    }
+
+    #[test]
+    fn every_shard_of_a_table_shares_its_base() {
+        let table = split_fixture();
+        let base = Arc::clone(table.base.as_ref().expect("a frozen table has a base"));
+        for shard in table.split_shards() {
+            let shared = shard.base.as_ref().expect("each shard has the base");
+            assert!(Arc::ptr_eq(shared, &base));
+        }
+    }
+
+    #[test]
+    fn joining_gives_a_table_a_version_no_part_had() {
+        let table = split_fixture();
+        let version = table.version();
+        let shards = table.split_shards();
+        let parts: Vec<u64> = shards.iter().map(|shard| shard.version()).collect();
+        assert!(!parts.contains(&version));
+        let joined = NameTable::join_shards(shards);
+        assert!(!parts.contains(&joined.version()));
+        assert_ne!(joined.version(), version);
+    }
+
+    #[test]
+    fn a_change_made_in_its_shard_reaches_the_joined_table() {
+        let table = split_fixture();
+        let len = table.len();
+        let mut shards = table.split_shards();
+        assert!(shards[shard_of("Base\\Name9")].remove("Base\\Name9"));
+        let added = Name::from("Added\\Name");
+        shards[shard_of(added.as_str())].insert(added.clone(), 77);
+        let joined = NameTable::join_shards(shards);
+        assert_eq!(joined.get("base\\name9"), None);
+        assert_eq!(joined.get("ADDED\\NAME"), Some(&77));
+        assert_eq!(joined.len(), len);
     }
 
     #[test]

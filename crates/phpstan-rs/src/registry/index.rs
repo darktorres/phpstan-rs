@@ -47,6 +47,15 @@ pub(crate) enum BuiltDecl {
 }
 
 impl BuiltDecl {
+    /// The name the declaration declares.
+    pub(crate) fn name(&self) -> &Name {
+        match self {
+            BuiltDecl::Class { name, .. }
+            | BuiltDecl::Function { name, .. }
+            | BuiltDecl::GlobalConst { name, .. } => name,
+        }
+    }
+
     /// What the declaration declares: its kind and name.
     pub(crate) fn kind_and_name(&self) -> (DeclKind, &str) {
         match self {
@@ -65,6 +74,18 @@ impl BuiltDecl {
             | BuiltDecl::GlobalConst { guard, .. } => guard,
         };
         guard.as_ref().map_or(Guard::Maybe, |g| g.on(versions))
+    }
+
+    /// The declaration as it takes effect on `versions`: `None` for one whose
+    /// guard the versions rule out, which never runs and changes nothing, and
+    /// otherwise the declaration itself, made unconditional when its guard
+    /// always holds.
+    pub(crate) fn in_effect(self, versions: Option<types::PhpVersions>) -> Option<BuiltDecl> {
+        match self.guard_on(versions) {
+            Guard::Never => None,
+            Guard::Always => Some(self.made_unconditional()),
+            Guard::Maybe => Some(self),
+        }
     }
 
     /// The declaration as one that always runs.
@@ -90,13 +111,11 @@ impl Registry {
     /// this file contributes as an already-built, registry-independent
     /// `BuiltDecl`, in depth-first order; this just feeds each one to
     /// `insert_built_decl` in that same order. Kept as one function
-    /// (rather than inlining this loop at every call site) so `Project::
-    /// insert_numbered_file`'s and `update_file`'s existing single-file callers need
-    /// no changes at all - `check_project.rs`'s parallel batch path calls
-    /// `build_declarations` directly instead (once per file, concurrently,
-    /// no `&mut self`/registry access needed for that half at all), then
-    /// runs this same `insert_built_decl` sequentially, in whatever file
-    /// order its own collision-resolution policy needs. See
+    /// (rather than inlining this loop at every call site) so the
+    /// single-file callers need no changes at all. A load's batch path
+    /// builds each file's declarations as the files parse, and merges them
+    /// with `Registry::merge_declarations`, which applies the same
+    /// `DeclTables::insert` to each name in the same order. See
     /// `insert_built_decl`'s own doc comment for why splitting it out
     /// this way - rather than writing a second, independent tree-walker
     /// for the parallel path - matters here specifically.
@@ -110,6 +129,12 @@ impl Registry {
     /// Applies one already-built declaration to the registry's tables, the
     /// way `DeclTables::insert` does over the tables it is given.
     pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
+        let Some(decl) = decl.in_effect(self.php_versions) else {
+            return;
+        };
+        for_each_assert_tagged_name(&decl, |name| {
+            self.names_with_assert_tags.insert(name);
+        });
         let recording = self.raw.is_some();
         DeclTables {
             classes: &mut self.classes,
@@ -120,8 +145,6 @@ impl Registry {
             unconditionally_declared_functions: &mut self.unconditionally_declared_functions,
             stub_provided_functions: &mut self.stub_provided_functions,
             function_decl_sites: &mut self.function_decl_sites,
-            names_with_assert_tags: &mut self.names_with_assert_tags,
-            php_versions: self.php_versions,
             changed: recording.then_some(&mut self.changed),
         }
         .insert(decl, analyzed);
@@ -141,20 +164,16 @@ pub(crate) struct DeclTables<'a> {
     pub(crate) unconditionally_declared_functions: &'a mut super::NameSet,
     pub(crate) stub_provided_functions: &'a mut super::NameSet,
     pub(crate) function_decl_sites: &'a mut super::NameMap<Option<u32>>,
-    pub(crate) names_with_assert_tags: &'a mut super::NameSet,
-    pub(crate) php_versions: Option<types::PhpVersions>,
     pub(crate) changed: Option<&'a mut super::ChangedNames>,
 }
 
 impl DeclTables<'_> {
     /// Applies one already-built declaration (see `BuiltDecl`/
-    /// `build_declarations`) to the registry - factored out so both the
-    /// sequential single-file path above and the parallel-parse batch
-    /// path in `Session::load`'s `insert_numbered_file` call site share
-    /// one implementation of every FQN-collision decision below, rather
-    /// than risking two independently maintained copies of this dense
-    /// logic (documented per-branch below) silently drifting apart from
-    /// each other over time.
+    /// `build_declarations`) that takes effect (`BuiltDecl::in_effect`) to
+    /// the registry. The sequential path (`insert_built_decl`) and the batch
+    /// merge (`declaration_merge`) both apply declarations through this one
+    /// implementation of every FQN-collision decision below, which is
+    /// documented per-branch.
     ///
     /// `conditional` is `true` once inside any `if`/`else` branch
     /// (tracked by `build_declarations`) - a declaration found there only
@@ -182,15 +201,6 @@ impl DeclTables<'_> {
     /// collision outright, never merge with a pre-existing context/stub
     /// entry the way two context-only declarations legitimately do.
     pub(crate) fn insert(&mut self, decl: BuiltDecl, analyzed: bool) {
-        // A guard the configured PHP versions rule out is a declaration that
-        // never runs: it changes nothing, and is not a change. One they
-        // always satisfy declares as if it stood unguarded.
-        let decl = match decl.guard_on(self.php_versions) {
-            Guard::Never => return,
-            Guard::Always => decl.made_unconditional(),
-            Guard::Maybe => decl,
-        };
-        self.record_assert_tagged_names(&decl);
         // A name is changed when its entry is: a conditional declaration the
         // existing entry outranks leaves the table as it was.
         let leaves_entry = match &decl {
@@ -490,42 +500,6 @@ impl DeclTables<'_> {
         }
     }
 
-    /// Populates `names_with_assert_tags` from `decl`'s signature(s) -
-    /// see that field's doc comment. Reads `decl` only, never the
-    /// collision-resolution decision `insert_built_decl` goes on to make
-    /// right after this call - a name is recorded whenever any indexed
-    /// declaration under that name ever had a non-empty `assert` list,
-    /// whether or not it ends up winning the registry slot (a losing
-    /// declaration's `assert` info being recorded anyway is a harmless,
-    /// rare over-approximation, never a missed real one).
-    fn record_assert_tagged_names(&mut self, decl: &BuiltDecl) {
-        match decl {
-            BuiltDecl::Function { name, sig, .. } => {
-                if !sig.assert.is_empty() {
-                    // `name` is the fully-qualified name
-                    // (`Registry::functions`' key shape); store just
-                    // the bare, unqualified tail so a bare-statement
-                    // `Call`'s as-written callee text - not yet FQN-
-                    // resolved at that point, see
-                    // `apply_bare_statement_assert_narrowing`'s Call
-                    // arm - can check membership without resolving it
-                    // first, the same bare-name shape method names
-                    // already are.
-                    let bare = name.rsplit('\\').next().unwrap_or(name);
-                    self.names_with_assert_tags.insert(Name::from(bare));
-                }
-            }
-            BuiltDecl::Class { info, .. } => {
-                for (method_name, sig) in info.methods.iter() {
-                    if !sig.assert.is_empty() {
-                        self.names_with_assert_tags.insert(method_name.clone());
-                    }
-                }
-            }
-            BuiltDecl::GlobalConst { .. } => {}
-        }
-    }
-
     fn record_changed_class(&mut self, name: &str) {
         if let Some(changed) = &mut self.changed {
             changed.record_class(name);
@@ -542,6 +516,40 @@ impl DeclTables<'_> {
         if let Some(changed) = &mut self.changed {
             changed.record_constant(name, || self.global_constants.get(name).cloned());
         }
+    }
+}
+
+/// Calls `record` with each name `decl` puts in `names_with_assert_tags`.
+/// Reads `decl` only, never the collision decision `DeclTables::insert` goes
+/// on to make: a name is recorded whenever any indexed declaration under it
+/// had a non-empty `assert` list, whether or not that declaration wins the
+/// registry slot (a losing declaration's `assert` info being recorded anyway
+/// is a harmless, rare over-approximation, never a missed real one).
+pub(crate) fn for_each_assert_tagged_name(decl: &BuiltDecl, mut record: impl FnMut(Name)) {
+    match decl {
+        BuiltDecl::Function { name, sig, .. } => {
+            if !sig.assert.is_empty() {
+                // `name` is the fully-qualified name
+                // (`Registry::functions`' key shape); store just
+                // the bare, unqualified tail so a bare-statement
+                // `Call`'s as-written callee text - not yet FQN-
+                // resolved at that point, see
+                // `apply_bare_statement_assert_narrowing`'s Call
+                // arm - can check membership without resolving it
+                // first, the same bare-name shape method names
+                // already are.
+                let bare = name.rsplit('\\').next().unwrap_or(name);
+                record(Name::from(bare));
+            }
+        }
+        BuiltDecl::Class { info, .. } => {
+            for (method_name, sig) in info.methods.iter() {
+                if !sig.assert.is_empty() {
+                    record(method_name.clone());
+                }
+            }
+        }
+        BuiltDecl::GlobalConst { .. } => {}
     }
 }
 
@@ -701,10 +709,9 @@ impl Registry {
 /// Returns every declaration `stmts` contributes, in depth-first order,
 /// then its anonymous classes (`anonymous_class_decls`) -
 /// `Registry::insert_built_decl` must see them fed back in this order
-/// (single-file callers get that for free from `Registry::index`'s own
-/// loop; the parallel batch path must preserve per-file order too,
-/// though it may interleave whole files in any order relative to each
-/// other - see `insert_numbered_file`'s doc comment).
+/// (`Registry::index`'s own loop gives that, and `Registry::merge_declarations`
+/// gives it over a batch of files, file by file in the order
+/// `Project::insert_declarations` is given them).
 ///
 /// Each declaration's PHPDoc resolves in the name context in effect where
 /// it sits (`for_each_declaration`).

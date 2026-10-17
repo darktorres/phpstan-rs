@@ -6,6 +6,7 @@ mod assignability;
 mod class_hierarchy;
 mod class_object_type;
 mod declaration_guards;
+mod declaration_merge;
 mod demand;
 mod doctrine_entities;
 mod enums;

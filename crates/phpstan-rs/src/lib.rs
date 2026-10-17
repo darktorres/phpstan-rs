@@ -53,6 +53,7 @@ pub mod registry;
 pub mod restricted_symbols;
 pub mod rule;
 pub mod rules_settings;
+pub(crate) mod shard;
 pub(crate) mod stub_attributes;
 
 pub use checker::Checker;

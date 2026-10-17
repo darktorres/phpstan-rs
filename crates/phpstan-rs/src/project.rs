@@ -16,7 +16,8 @@ use crate::registry::scope::Scope;
 use crate::registry::stub_set::Stubs;
 use crate::registry::stubs::Corpus;
 use crate::registry::{
-    BodySource, BuiltDecl, DeclKind, FileBodies, GlobalFacts, Origin, Provenance, Registry,
+    BodySource, BuiltDecl, DeclKind, DeclaredFile, FileBodies, GlobalFacts, Origin, Provenance,
+    Registry,
 };
 #[cfg(debug_assertions)]
 use crate::registry::{Keep, build_declarations_where};
@@ -1031,9 +1032,39 @@ impl Project {
         self.files.set_path_order(ids);
     }
 
-    /// Inserts `parsed` as the file `path`, which `id` numbers. The reader of
-    /// the file indexed its use sites from its text (`index_use_sites`)
-    /// before the insert: only the reader holds the text.
+    /// Inserts the declarations of `files`, each with its path, whether it is
+    /// analysed, and its declarations, in the order given: a name that more
+    /// than one of them declares resolves as the sequential inserts of those
+    /// declarations, in that order, leave it (`Registry::merge_declarations`).
+    /// `insert_numbered_file` does not insert declarations, so a caller
+    /// inserts a file's declarations here before it hands the file over.
+    /// An empty batch changes nothing.
+    pub(crate) fn insert_declarations<'a>(
+        &mut self,
+        pool: &rayon::ThreadPool,
+        files: impl IntoIterator<Item = (&'a Path, bool, &'a [BuiltDecl])>,
+    ) {
+        let root = self.absolute_root.as_deref();
+        let declared: Vec<DeclaredFile<'a>> = files
+            .into_iter()
+            .map(|(path, analyzed, decls)| DeclaredFile {
+                decls,
+                analyzed,
+                shown: shown_path(root, path),
+            })
+            .collect();
+        if declared.is_empty() {
+            return;
+        }
+        self.begin_declaration_changes();
+        self.registry
+            .merge_declarations(pool, |merge| merge.insert(declared));
+    }
+
+    /// Inserts `parsed` as the file `path`, which `id` numbers, without its
+    /// declarations: `insert_declarations` inserts those, and a caller runs it
+    /// first. The reader of the file indexed its use sites from its text
+    /// (`index_use_sites`) before the insert: only the reader holds the text.
     pub(crate) fn insert_numbered_file(
         &mut self,
         id: FileId,
@@ -1070,10 +1101,6 @@ impl Project {
             source,
             content_hash,
         } = text;
-        self.begin_declaration_changes();
-        for decl in &built_decls {
-            self.registry.insert_built_decl(decl.clone(), analyzed);
-        }
         debug_assert!(
             ast.is_some() || (!analyzed && self.built_once),
             "a file whose tree is needed was read back from the cache"
@@ -1084,11 +1111,6 @@ impl Project {
         );
         for (span, target) in class_fn_refs.unwrap_or_default() {
             self.use_sites.insert(path, target, span);
-        }
-        for name in &classes {
-            self.registry.record_phpstan_class_file(name, || {
-                shown_path(self.absolute_root.as_deref(), path).to_path_buf()
-            });
         }
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
         self.duplicate_class_sites.merge(duplicate_class_sites);
@@ -3018,10 +3040,9 @@ fn parse_with_ignores<'a>(
 /// Everything about loading one file that's pure - parsing, plus every
 /// fact derived only from the parsed AST or the raw source text, with no
 /// dependency on (or mutation of) a `Project`'s shared registry. Computing
-/// this for many files is embarrassingly parallel - `insert_numbered_file`
-/// below does the remaining, order-sensitive registry-mutating half,
-/// meant to stay sequential and run in whatever order a caller's own
-/// collision-resolution policy needs (see that method's own doc comment).
+/// this for many files is embarrassingly parallel - `insert_declarations`
+/// and `insert_numbered_file` below do the remaining registry-mutating
+/// half, in the order of the files (see their own doc comments).
 #[cfg_attr(test, derive(Clone))]
 pub struct ParsedFile {
     // The tree; none for a file read back from the per-file cache, which
@@ -3040,11 +3061,11 @@ pub struct ParsedFile {
     // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
     // `registry::build_declarations`'s own doc comment for why that
     // split is pure and safe to compute here, alongside everything else
-    // in this struct) - `insert_numbered_file` feeds these into
-    // `Registry::insert_built_decl` one at a time instead of re-deriving
-    // them from `ast` via `Registry::index`, so the expensive "turn an
-    // AST node into a ClassReflection/FunctionReflection" work runs here, in
-    // parallel, rather than in the sequential insert loop.
+    // in this struct) - `Project::insert_declarations` feeds these to the
+    // registry's batch merge instead of re-deriving them from `ast` via
+    // `Registry::index`, so the expensive "turn an AST node into a
+    // ClassReflection/FunctionReflection" work runs here, in parallel,
+    // rather than in the insert.
     built_decls: Vec<crate::registry::BuiltDecl>,
     // What the file binds, when it is a `Pest.php`.
     pest_facts: Option<PestFacts>,
@@ -3229,6 +3250,11 @@ impl ParsedFile {
     /// What the lexer skipped over rather than failing on.
     pub fn lex_warnings(&self) -> &[LexWarning] {
         &self.lex_warnings
+    }
+
+    /// The declarations the file builds, in the order of the file.
+    pub(crate) fn built_decls(&self) -> &[BuiltDecl] {
+        &self.built_decls
     }
 }
 

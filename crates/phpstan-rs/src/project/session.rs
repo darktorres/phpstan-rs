@@ -28,6 +28,7 @@ use crate::ext::mockstan::MockstanSettings;
 use crate::ext::sql::SqlSettings;
 use crate::file_id::FileId;
 use crate::parent_calls::{self, ClassShapeSettings};
+use crate::registry::BuiltDecl;
 use crate::registry::settings::ReflectionSettings;
 use crate::registry::stub_set::Stubs;
 use crate::rules_settings::RulesSettings;
@@ -613,6 +614,19 @@ enum Read {
     Unparsed(ParseFailure),
     /// The file could not be read, or the parser failed internally.
     Unread,
+}
+
+/// The declarations of a file that was read, as `Project::insert_declarations`
+/// takes them: none for a file that did not load.
+fn declaration_of<'a>(
+    path: &'a Path,
+    analyzed: bool,
+    read: &'a Read,
+) -> Option<(&'a Path, bool, &'a [BuiltDecl])> {
+    match read {
+        Read::Loaded(file) => Some((path, analyzed, file.parsed.built_decls())),
+        Read::Unparsed(_) | Read::Unread => None,
+    }
 }
 
 impl Session {
@@ -1345,6 +1359,12 @@ impl Session {
             }),
             &self.stubs,
         );
+        project.insert_declarations(
+            &self.pool,
+            ordered.iter().zip(&parsed).filter_map(|(file, read)| {
+                declaration_of(&file.path, file.role == Role::Analysed, read)
+            }),
+        );
         let mut failures = Vec::new();
         for ((file, read), id) in ordered.iter().zip(parsed).zip(numbers) {
             match read {
@@ -1529,6 +1549,19 @@ impl Session {
 
         // Context files first, so an analysed file's declaration wins a
         // name collision.
+        project.insert_declarations(
+            pool,
+            context_files
+                .iter()
+                .zip(&context_parsed)
+                .filter_map(|(file, read)| declaration_of(&file.path, false, read))
+                .chain(
+                    analyze_files
+                        .iter()
+                        .zip(&analyze_parsed)
+                        .filter_map(|(file, read)| declaration_of(&file.path, true, read)),
+                ),
+        );
         let mut lex_warnings = Vec::new();
         let mut note_lex_warnings = |path: &Path, parsed: &ParsedFile| {
             lex_warnings.extend(parsed.lex_warnings().iter().map(|w| {

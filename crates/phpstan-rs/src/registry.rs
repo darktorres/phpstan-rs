@@ -12,6 +12,7 @@ mod assertion_table;
 pub mod bodies;
 mod class_info;
 mod container;
+mod declaration_merge;
 mod demand;
 mod function_sig;
 mod generics;
@@ -50,6 +51,7 @@ pub(crate) use anonymous_class::{anonymous_class_decls, name_anonymous_classes};
 pub use bodies::{BodySource, FileBodies, NoBodies};
 pub use class_info::{ClassReflection, ConstantReflection, PropertyReflection};
 pub(crate) use class_info::{hook_body_calls_parent_hook, hook_body_references_property};
+pub(crate) use declaration_merge::DeclaredFile;
 pub(crate) use function_sig::apply_implicit_nullable_default;
 pub use function_sig::format_signature;
 pub(crate) use function_sig::is_allow_dynamic_properties_attribute_name;
@@ -143,6 +145,16 @@ impl ChangedNames {
     pub(crate) fn record_constant(&mut self, name: &str, before: impl FnOnce() -> Option<Type>) {
         if !self.constants.contains_key(name) {
             self.constants.insert(name.to_string(), before());
+        }
+    }
+
+    /// Adds the names `other` recorded. Each constant keeps the type it had
+    /// before its first change, from either side.
+    pub(crate) fn merge(&mut self, other: ChangedNames) {
+        self.classes.extend(other.classes);
+        self.functions.extend(other.functions);
+        for (name, before) in other.constants {
+            self.constants.entry(name).or_insert(before);
         }
     }
 }
