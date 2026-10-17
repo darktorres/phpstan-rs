@@ -441,12 +441,13 @@ before the output.
   touched again. R11 lowers the footprint; R15 removes the purges' TLB shootdowns and
   about 5% of the off run's wall time (Kernel time; decision 2).
 
-**Decisions for the user** (from these measurements). Each names the option recommended as
-the most proper, with its reason; none is decided until the user rules on it.
+**Decisions** (from these measurements). Each names the option found the most proper, with
+its reason. The user ruled on 2026-10-17: every recommendation is adopted, and decision 7
+is confirmed.
 
 1. **The finishing passes** (the largest unused stretch, about 0.27 s): a row here, or their
    utilization recorded in REG-7's record and left there.
-   - *Recommended: REG-7's record.* REG-7's per-class resolution replaces these passes
+   - *Decided: REG-7's record.* REG-7's per-class resolution replaces these passes
      (`flatten_phpdoc_inheritance`, `precompute_ancestor_names`,
      `precompute_member_owners`, `drop_doc_members_excluded_by_native`,
      `resolve_deferred_value_of`, `flatten_traits`; ledger line 1178).
@@ -458,17 +459,17 @@ the most proper, with its reason; none is decided until the user rules on it.
      constant-named types. REG-4.2 (READY) deletes `canonicalize_class_name_case`. Only
      `infer_global_variables_of` stays: it is the one whole-program pass REG-7.8 keeps.
 2. **The page zeroing and the purging** (measured; Kernel time).
-   - *Recommended: R15, and no change to the huge pages.* The zeroing is the first touch
+   - *Decided: R15, and no change to the huge pages.* The zeroing is the first touch
      of the footprint, which only a smaller footprint lowers (R11).
    - The huge pages stay: without them the run takes 3.6 to 4.1 s, against 2.7 to 2.9 s.
    - Purging costs a batch run about 5% and every TLB-shootdown IPI, and gains it nothing.
 3. **R14**: its own row or folded into R6; before R10 or after it.
-   - *Recommended: its own row, after R2 and R6 and before R10.* R14 changes the walk's
+   - *Decided: its own row, after R2 and R6 and before R10.* R14 changes the walk's
      entry point (a `Resolved` path that is not resolved again), not discovery. It builds
      on R2's hashed path and on the listing kinds R6 reads.
    - Its 14 to 16 ms can be measured only before R10 hides them.
 4. **The row order.**
-   - *Recommended:* R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7.
+   - *Decided:* R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7.
    - The contained rows come first, with R11 before R15, since R11 changes what is freed
      and when.
    - R2 comes before the rows that use its type (R3, R4, R6, R7, R14).
@@ -477,14 +478,14 @@ the most proper, with its reason; none is decided until the user rules on it.
    - The `FileId` rows (R5, R8) go together.
    - R7 is last, read from a fresh profile, since R2 to R6 remove part of what it lists.
 5. **The stub-base wait** (89 ms, cold stub cache only): a row here, or the STUB rows'.
-   - *Recommended: the STUB rows'.* STUB-11 (no run builds the builtin knowledge, and the
+   - *Decided: the STUB rows'.* STUB-11 (no run builds the builtin knowledge, and the
      stub disk cache goes) removes what a cold run waits for. STUB-13.2 (`Project::loading`
      goes, and with it `expect_files`' choice of base) removes the wait.
    - Record the 89 ms and the cold stub build (0 to 0.21 s off, at 4.7 cores) in
      STUB-10.1's "what a cold run still pays".
 6. **The rows whose costs predate items 1 to 3** (R8, R11 to R15): keep them in this batch
    or drop them.
-   - *Recommended: keep all.* R11 is item 3's own open row (LOAD-3.3), and R14 completes
+   - *Decided: keep all.* R11 is item 3's own open row (LOAD-3.3), and R14 completes
      item 1's LOAD-1.1 ("each link is resolved once"), so both are items 1 to 3's
      unfinished work.
    - R8, R12, R13 and R15 sit on the measured critical path or in the Ir total. R12's
@@ -495,12 +496,15 @@ the most proper, with its reason; none is decided until the user rules on it.
    resolved path now, and the `.git` and `node_modules` names until `exclude_paths` exists.
    - On 2026-10-17 this combination of item 2's options a and b was offered as the most
      proper.
-   - It waits on the user's confirmation before the ledger and WORK_STACK record it.
+   - *Decided:* the user confirmed it the same day, and the ledger's LOAD-2.2 and
+     WORK_STACK's item 2 record it. Once `exclude_paths` (the ledger's LOAD-7.8) exists,
+     the two names go, and with them `path_under_excluded_dir` and
+     `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`.
 
 ## Rows
 
-One commit each, with a pathspec (the checkout is shared). Proposed order after the second
-"go" (decision 4): R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7. R3,
+One commit each, with a pathspec (the checkout is shared). The order (decision 4), from
+the second "go": R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7. R3,
 R4, R6, R7 and R14 use R2's type; R5 and R8 use `FileId`.
 
 Where the rows come from (decision 6):

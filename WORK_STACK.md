@@ -22,12 +22,12 @@ exception is level 7's designs, which are rows of the 20 G plan and are worked i
 level 8's order; DOC-2.1 stays deferred.
 
 Level 9 is the one active level: the fixes for the costs that the attribution of
-the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done; its rows wait
-on the user's second "go" and on the plan's decisions 1 to 7.
+the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done and its decisions
+were ruled on 2026-10-17; its rows wait on the user's second "go".
 
-Level 8 waits under it, before item 8. It holds the 20 G plan and the off drill,
-and its order is in its section below. When level 9 is done, work the lowest item
-that has a READY row (item 8 as of 2026-10-17, after item 5).
+Level 8 waits under it. It holds the 20 G plan and the off drill, and its order is
+in its section below. When level 9 is done, work the lowest item that has a READY
+row: item 2 as of 2026-10-17 (LOAD-2.2's last part, decided that day), then item 8.
 
 ## The stack
 
@@ -184,19 +184,17 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 2: none ready. LOAD-2.3 to 2.8 are in: `07595369`, `8590ff55`,
-  `c1db8372`, `c7ff651c`, `2cd13c8e`, `47adfd19` and `df804239` (LOAD-2.4). LOAD-2.2's
-  walk is in (`85a4ecad`). Its last part, deleting
-  `path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`, waits on a
-  decision: what replaces the name floor for the editor's degrade root (no
-  `paths`), for a file under no configured root, and for a never-seen path.
-  Options: (a) keep `.git` and `node_modules` as names, and skip the Composer
-  vendor directory by its resolved path, as MAGO does (recommended; a `vendor/`
-  outside Composer is then walked); (b) keep all three names until
-  `exclude_paths` exists; (c) delete all three now, so an editor with no
-  `paths` analyses `vendor/`. Until the decision is made, the walk keeps its
-  name list. The Piwigo gate and the measurements of items 2's rows (wall time,
-  instructions) have not run; they need approval.
+- Item 2: LOAD-2.2's last part is READY. LOAD-2.3 to 2.8 are in: `07595369`,
+  `8590ff55`, `c1db8372`, `c7ff651c`, `2cd13c8e`, `47adfd19` and `df804239`
+  (LOAD-2.4). LOAD-2.2's walk is in (`85a4ecad`). Its last part replaces the name
+  floor (`path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`) for the
+  editor's degrade root (no `paths`), for a file under no configured root, and for
+  a never-seen path. The user decided it on 2026-10-17 (the items 1 to 3 fixes
+  plan's decision 7): Composer's vendor directory is skipped by its resolved path,
+  so a `vendor/` outside Composer is walked, and the `.git` and `node_modules` names
+  stay until `exclude_paths` (the ledger's LOAD-7.8) exists, when the function and
+  the constant go. The Piwigo gate and the measurements of item 2's rows (wall
+  time, instructions) have not run.
 - Item 3: LOAD-3.2 is in (`001bd4f2`), LOAD-3.4 (`845efaab`) and LOAD-3.6
   (`11f03ec9`). 3.1 waits on REG-16.4, level 2; 3.3 on 3.1; 3.5 on SYN-1.2, which
   is item 9's. No row of item 3 is READY.
@@ -261,15 +259,17 @@ the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
 - Rows R1 to R15, one commit each. R1 to R9 and R13 save Ir; R10 to R12, R14 and
   R15 shorten serial stretches or the run. R8 and R11 to R15 are older costs than
   items 1 to 3. R15 (a batch run does not purge) came from the allocator runs.
-- No row starts before the user's second "go". The plan's decisions 1 to 7 are open,
-  each with a recommendation:
+- No row starts before the user's second "go". The plan's decisions 1 to 7 were
+  ruled on 2026-10-17, each as the plan recommended:
   1. the finishing passes' unused cores: REG-7's record;
   2. the zeroing and purging: R15, and the huge pages stay;
-  3. R14: its own row, before R10;
+  3. R14: its own row, after R2 and R6 and before R10;
   4. the order: R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7;
   5. the stub-base wait: the STUB rows;
   6. the older rows: kept;
-  7. LOAD-2.2's name floor: waits on the user's confirmation.
+  7. LOAD-2.2's name floor: Composer's vendor directory by its resolved path, and
+     the `.git` and `node_modules` names until `exclude_paths` exists (level 8's
+     item 2).
 - Builds and measurement runs need no approval (since 2026-10-17).
 - Bookkeeping still open:
   - the ledger rows for the rows that have none (R11 is LOAD-3.3, R12 is CACHE-12's
