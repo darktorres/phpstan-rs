@@ -425,14 +425,24 @@ fn append_concat(
     })
 }
 
-/// Sorts and deduplicates both lists, then leaves out the files that a
-/// directory of the lists loads.
+/// Deduplicates both lists, then leaves out the files that a directory of the
+/// lists loads. The lists keep their order: nothing here needs one, as the
+/// walk's output does not depend on the order of its roots.
 fn dedup(ctx: &mut VendorContext, table: &DirListings) {
-    crate::path_order::sort_paths(&mut ctx.dirs);
-    ctx.dirs.dedup();
+    keep_first(&mut ctx.dirs);
     drop_files_under_dirs(ctx, table);
-    crate::path_order::sort_paths(&mut ctx.files);
-    ctx.files.dedup();
+    keep_first(&mut ctx.files);
+}
+
+/// Keeps the first of each path in `paths`, in their order.
+fn keep_first(paths: &mut Vec<PathBuf>) {
+    let mut seen = FxHashSet::default();
+    let first: Vec<bool> = paths
+        .iter()
+        .map(|path| seen.insert(path.as_path()))
+        .collect();
+    let mut first = first.into_iter();
+    paths.retain(|_| first.next() == Some(true));
 }
 
 /// Drops the PHP files that the walk of a directory of `ctx.dirs` is sure to

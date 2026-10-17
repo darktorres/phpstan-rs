@@ -6,12 +6,18 @@
 //!
 //! `Walk::finish` walks the roots, then the targets of the links they met.
 //! Each directory is walked by a task of its own on the pool, and the results
-//! are merged in listing order, so the listing does not depend on the number
-//! of threads. A link met on the way is recorded, and the targets no root
-//! holds are walked strongest role first. A target under a root is left to
-//! that root's walk. A file's role is the strongest of the roots and links
-//! that list it. A context directory under a stronger root that excludes no
-//! names is not walked: that root lists its files.
+//! are placed the same way whatever the number of threads. A link met on the
+//! way is recorded, and the targets no root holds are walked strongest role
+//! first. A target under a root is left to that root's walk. A file's role is
+//! the strongest of the roots and links that list it. A context directory under
+//! a stronger root that excludes no names is not walked: that root lists its
+//! files.
+//!
+//! The listed files are placed in a tree of the directories that hold them.
+//! Each directory has one slot per entry of its listing, in the listing's
+//! order, and a depth-first walk of the tree lists the files in path order.
+//! Nothing is sorted: a listing is sorted by name bytes, which is the order
+//! `Path` compares components in.
 
 use std::collections::VecDeque;
 use std::ffi::OsStr;
@@ -20,7 +26,7 @@ use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use composer::dir_listings::DirListings;
+use composer::dir_listings::{DirListings, Listing};
 use composer::manifest::resolve;
 use hashbrown::hash_map::EntryRef;
 use hashbrown::hash_table::Entry;
@@ -142,8 +148,11 @@ pub(crate) struct Walk<'a, 'p> {
     /// The targets of the links met so far, by the role of the walk that met
     /// each link, with the names that walk excludes.
     targets: [VecDeque<(PathBuf, &'a [&'a str])>; 3],
-    listed: Vec<Listed>,
-    index: FileIndex,
+    /// The directories that hold the listed files, with the files in them.
+    tree: Tree,
+    /// The listed files the tree cannot place: a file whose directory, or one
+    /// of the directories above it, cannot be listed.
+    unplaced: Vec<Listed>,
     /// The resolved path of each directory an explicit file was listed in, by
     /// the directory as it was given.
     directories: hashbrown::HashMap<PathBuf, PathBuf, FxBuildHasher>,
@@ -209,6 +218,170 @@ impl Ancestors<'_> {
     }
 }
 
+/// The directories that hold the listed files: a node for each directory with a
+/// listed file, and for each directory above it, up to the top, with one slot
+/// per entry of its listing. A depth-first walk of the nodes, in each listing's
+/// order, lists the files in path order, with no comparison. A file has one
+/// slot, so a file listed twice is merged there.
+struct Tree {
+    listings: Arc<DirListings>,
+    nodes: Vec<Node>,
+    /// The nodes by the hash of their directory's path.
+    by_path: hashbrown::HashTable<usize>,
+    /// The nodes whose directory has no parent, where a walk starts.
+    tops: Vec<usize>,
+    /// The listed files, each taken out once it is emitted.
+    files: Vec<Option<Listed>>,
+}
+
+/// A directory with listed files, or one above such a directory.
+struct Node {
+    path: PathBuf,
+    hash: PathHash,
+    listing: Arc<Listing>,
+    /// One slot for each entry of `listing`, in its order.
+    slots: Vec<Slot>,
+}
+
+/// What an entry of a directory is, in the tree.
+#[derive(Clone, Copy)]
+enum Slot {
+    Empty,
+    /// A listed file, by its index in `Tree::files`.
+    File(usize),
+    /// A subdirectory, by its index in `Tree::nodes`.
+    Dir(usize),
+}
+
+impl Tree {
+    fn new(listings: Arc<DirListings>) -> Self {
+        Tree {
+            listings,
+            nodes: Vec::new(),
+            by_path: hashbrown::HashTable::new(),
+            tops: Vec::new(),
+            files: Vec::new(),
+        }
+    }
+
+    /// Puts `listed` in the slot of its entry. A file already there keeps its
+    /// slot, with the strongest role and the stub mark of its listings. Gives
+    /// the file back when the tree cannot place it.
+    fn attach(&mut self, listed: Listed) -> Result<(), Listed> {
+        let Some((node, at)) = self.slot_of(&listed.path) else {
+            return Err(listed);
+        };
+        match self.nodes[node].slots[at] {
+            Slot::Empty => {
+                self.nodes[node].slots[at] = Slot::File(self.files.len());
+                self.files.push(Some(listed));
+            }
+            Slot::File(file) => {
+                let kept = self.files[file]
+                    .as_mut()
+                    .expect("a listed file is kept until the walk ends");
+                kept.role = kept.role.max(listed.role);
+                kept.stub |= listed.stub;
+            }
+            Slot::Dir(_) => return Err(listed),
+        }
+        Ok(())
+    }
+
+    /// The node and slot of the entry at `path`, or `None` when its directory
+    /// cannot be placed.
+    fn slot_of(&mut self, path: &Path) -> Option<(usize, usize)> {
+        let node = self.node(path.parent()?)?;
+        let at = self.nodes[node].listing.position(path.file_name()?)?;
+        Some((node, at))
+    }
+
+    /// The node of the directory `dir`, made with the nodes above it when it is
+    /// new. `None` when `dir` is relative, or when `dir` or a directory above it
+    /// cannot be listed.
+    fn node(&mut self, dir: &Path) -> Option<usize> {
+        if !dir.is_absolute() {
+            return None;
+        }
+        let hash = path_hash(dir);
+        if let Some(&node) = self
+            .by_path
+            .find(hash, |&node| self.nodes[node].path.as_path() == dir)
+        {
+            return Some(node);
+        }
+        let listing = self.listings.listing(dir)?;
+        let link = match dir.parent() {
+            Some(parent) => {
+                let up = self.node(parent)?;
+                let at = self.nodes[up].listing.position(dir.file_name()?)?;
+                if !matches!(self.nodes[up].slots[at], Slot::Empty) {
+                    return None;
+                }
+                Some((up, at))
+            }
+            None => None,
+        };
+        let node = self.nodes.len();
+        let nodes = &self.nodes;
+        self.by_path
+            .insert_unique(hash, node, |&node| nodes[node].hash);
+        self.nodes.push(Node {
+            path: dir.to_path_buf(),
+            hash,
+            slots: vec![Slot::Empty; listing.entries.len()],
+            listing,
+        });
+        match link {
+            Some((up, at)) => self.nodes[up].slots[at] = Slot::Dir(node),
+            None => self.tops.push(node),
+        }
+        Some(node)
+    }
+
+    /// The listed files, in path order.
+    fn emit(&mut self) -> Vec<Listed> {
+        let mut tops = std::mem::take(&mut self.tops);
+        tops.sort_by(|&a, &b| self.nodes[a].path.cmp(&self.nodes[b].path));
+        let mut out = Vec::with_capacity(self.files.len());
+        for top in tops {
+            self.emit_node(top, &mut out);
+        }
+        out
+    }
+
+    /// Emits the files under `node`, in the order of its slots.
+    fn emit_node(&mut self, node: usize, out: &mut Vec<Listed>) {
+        for slot in std::mem::take(&mut self.nodes[node].slots) {
+            match slot {
+                Slot::Empty => {}
+                Slot::File(file) => {
+                    out.push(self.files[file].take().expect("a file is emitted once"));
+                }
+                Slot::Dir(child) => self.emit_node(child, out),
+            }
+        }
+    }
+}
+
+/// Merges the files the tree could not place into `files`, which are in path
+/// order, and sorts the result. Only a walk with such a file sorts.
+fn merge_unplaced(mut files: Vec<Listed>, unplaced: Vec<Listed>) -> Vec<Listed> {
+    files.extend(unplaced);
+    composer::path_order::sort_by_path(&mut files, |listed| listed.path.as_path());
+    let mut merged: Vec<Listed> = Vec::with_capacity(files.len());
+    for listed in files {
+        match merged.last_mut() {
+            Some(last) if last.path == listed.path => {
+                last.role = last.role.max(listed.role);
+                last.stub |= listed.stub;
+            }
+            _ => merged.push(listed),
+        }
+    }
+    merged
+}
+
 impl<'a, 'p> Walk<'a, 'p> {
     /// A walk that reads its directories through `listings`, and finds each
     /// directory's owner in `packages`.
@@ -218,8 +391,8 @@ impl<'a, 'p> Walk<'a, 'p> {
             jobs: Vec::new(),
             covering: FxHashSet::default(),
             targets: Default::default(),
-            listed: Vec::new(),
-            index: FileIndex::default(),
+            tree: Tree::new(Arc::clone(&listings)),
+            unplaced: Vec::new(),
             directories: Default::default(),
             listings,
             packages,
@@ -310,10 +483,27 @@ impl<'a, 'p> Walk<'a, 'p> {
                 self.merge(found, role, excluded);
             }
         });
+        let Walk {
+            mut tree,
+            unplaced,
+            roots,
+            ..
+        } = self;
+        let files = tree.emit();
+        let files = if unplaced.is_empty() {
+            files
+        } else {
+            merge_unplaced(files, unplaced)
+        };
+        debug_assert!(
+            files.windows(2).all(|pair| pair[0].path < pair[1].path),
+            "a walk lists each file once, in path order"
+        );
+        let index = FileIndex::of(&files);
         Walked {
-            files: self.listed,
-            index: self.index,
-            roots: self.roots,
+            files,
+            index,
+            roots,
         }
     }
 
@@ -497,43 +687,32 @@ impl<'a, 'p> Walk<'a, 'p> {
     fn merge(&mut self, found: Vec<Found>, role: Role, excluded: &'a [&'a str]) {
         for item in found {
             match item {
-                Found::File(path, hash, owner) => self.list(path, hash, role, owner),
+                Found::File(path, hash, owner) => self.place(path, hash, role, owner),
                 Found::Link(target) => self.targets[role.index()].push_back((target, excluded)),
             }
         }
     }
 
-    /// Records a listed file at its resolved path, whose hash is `hash` and
-    /// whose owner is `owner`. A file listed again keeps the strongest role of
-    /// its listings; its owner is the same, as the owner depends on the path.
-    fn list(
+    /// Places a listed file at its resolved path, whose hash is `hash` and
+    /// whose owner is `owner`, under the walk's role. A file listed again keeps
+    /// the strongest role of its listings; its owner is the same, as the owner
+    /// depends on the path. A file the tree cannot place is kept aside.
+    fn place(
         &mut self,
         path: PathBuf,
         hash: PathHash,
         role: Role,
         owner: Option<composer::PackageOwner>,
     ) {
-        let stub = role == Role::Stub;
-        match self.index.0.entry(
+        let listed = Listed {
+            path,
             hash,
-            |&at| self.listed[at].path == path,
-            |&at| self.listed[at].hash,
-        ) {
-            Entry::Occupied(entry) => {
-                let listed = &mut self.listed[*entry.get()];
-                listed.stub |= stub;
-                listed.role = listed.role.max(role);
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(self.listed.len());
-                self.listed.push(Listed {
-                    path,
-                    hash,
-                    role,
-                    stub,
-                    owner: Some(owner),
-                });
-            }
+            role,
+            stub: role == Role::Stub,
+            owner: Some(owner),
+        };
+        if let Err(listed) = self.tree.attach(listed) {
+            self.unplaced.push(listed);
         }
     }
 

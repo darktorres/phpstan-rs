@@ -8,7 +8,7 @@
 //! no file name holds: comparing keys as bytes is comparing the component
 //! sequences.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 /// The key `Path`'s order is the byte order of.
 fn key(path: &Path) -> Vec<u8> {
@@ -27,21 +27,14 @@ fn key(path: &Path) -> Vec<u8> {
     key
 }
 
-/// How many runs of paths already in order `sort_paths` merges instead of
-/// making a key for each path.
+/// How many out-of-order neighbours a list may have and still be sorted by the
+/// paths themselves, which merges its runs, rather than by a key for each path.
 const MERGED_RUNS: usize = 16;
 
-/// `paths.sort()`, stable, without comparing component walks more than it
-/// needs to: a list that is already in order, or is a few lists in order
-/// one after the other (a walk of each directory, with its entries in
-/// order, gives one), is merged by the paths themselves, and any other is
-/// sorted by a key made once for each.
-pub fn sort_paths(paths: &mut [PathBuf]) {
-    sort_by_path(paths, PathBuf::as_path);
-}
-
-/// `sort_paths` for items that hold a path: sorts `items` stably by the path
-/// `path` gives each.
+/// Sorts `items` stably by the path `path` gives each, in the order `Path`
+/// compares paths. A list already in order is left alone; a few runs in order
+/// are merged by the paths themselves; any other list is sorted by a key made
+/// once for each path.
 pub fn sort_by_path<T>(items: &mut [T], path: impl Fn(&T) -> &Path) {
     let descents = items
         .windows(2)
@@ -60,6 +53,7 @@ pub fn sort_by_path<T>(items: &mut [T], path: impl Fn(&T) -> &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     /// A repeatable mix of paths that differ where byte order and component
     /// order differ: separators against `-`, `.` and a space, doubled and
@@ -109,7 +103,7 @@ mod tests {
     fn sorted_by_key_is_sorted_by_path() {
         let all = paths(3000);
         let mut by_key = all.clone();
-        sort_paths(&mut by_key);
+        sort_by_path(&mut by_key, PathBuf::as_path);
         let mut by_path = all;
         by_path.sort();
         assert_eq!(by_key, by_path);
@@ -134,7 +128,7 @@ mod tests {
     #[test]
     fn a_separator_orders_before_a_dash_as_a_path_does() {
         let mut list = vec![PathBuf::from("a-b"), PathBuf::from("a/b")];
-        sort_paths(&mut list);
+        sort_by_path(&mut list, PathBuf::as_path);
         assert_eq!(list, [PathBuf::from("a/b"), PathBuf::from("a-b")]);
     }
 }

@@ -18,11 +18,23 @@ static NO_PACKAGES: LazyLock<composer::PackageIndex> =
 /// Lists each `(root, role, excluded)` in order, and returns the listing
 /// sorted by path as `(path, role, stub)`.
 fn listing(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
+    let mut listed = in_walk_order(roots);
+    listed.sort();
+    listed
+}
+
+/// Lists each `(root, role, excluded)` in order, and returns the listing as
+/// `(path, role, stub)` in the order the walk gives it, without a sort.
+fn in_walk_order(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
     for (path, role, excluded) in roots {
         walk.add(path, *role, excluded);
     }
-    sorted(walk.finish(&crate::project::worker_pool()).files)
+    walk.finish(&crate::project::worker_pool())
+        .files
+        .into_iter()
+        .map(|listed| (listed.path, listed.role, listed.stub))
+        .collect()
 }
 
 fn sorted(listed: Vec<Listed>) -> Vec<(PathBuf, Role, bool)> {
@@ -678,4 +690,112 @@ fn a_listed_file_carries_the_package_that_owns_its_directory() {
     assert_eq!(owner("B.php"), Some("acme/app"));
     assert_eq!(owner("Dangling.php"), Some("acme/app"));
     assert_eq!(owner("A.php"), Some("acme/lib"));
+}
+
+/// The walk gives its files in path order, which compares components, not the
+/// text: `a/x.php` comes before `a-b.php`. That holds across nested roots (a
+/// context root inside an excluding root, a stub root inside an analysed one),
+/// a link whose target holds a root, and a dangling link. A file's role is the
+/// strongest that lists it.
+#[cfg(unix)]
+#[test]
+fn the_listing_is_in_path_order_across_nested_roots_links_and_stubs() {
+    let dir = TempDir::new("walk_order");
+    dir.write("app/a/x.php", "<?php");
+    dir.write("app/a-b.php", "<?php");
+    dir.write("app/a.php", "<?php");
+    dir.write("app/stubs/s.php", "<?php");
+    dir.write("app/vendor/lib/v.php", "<?php");
+    dir.write("app/z.php", "<?php");
+    dir.write("shared/a.php", "<?php");
+    dir.write("shared/n/k.php", "<?php");
+    dir.write("shared/z.php", "<?php");
+    let base = resolved(&dir);
+    std::os::unix::fs::symlink(base.join("shared"), base.join("app/linked")).unwrap();
+    std::os::unix::fs::symlink(base.join("nowhere.php"), base.join("app/dangling.php")).unwrap();
+    let app = base.join("app");
+    let excluded: &[&str] = &["vendor"];
+
+    assert_eq!(
+        in_walk_order(&[
+            (app.clone(), Role::Analysed, excluded),
+            (app.join("vendor/lib"), Role::Context, &[]),
+            (app.join("stubs"), Role::Stub, &[]),
+            (base.join("shared/n"), Role::Context, &[]),
+        ]),
+        vec![
+            (app.join("a/x.php"), Role::Analysed, false),
+            (app.join("a-b.php"), Role::Analysed, false),
+            (app.join("a.php"), Role::Analysed, false),
+            (app.join("dangling.php"), Role::Analysed, false),
+            (app.join("stubs/s.php"), Role::Analysed, true),
+            (app.join("vendor/lib/v.php"), Role::Context, false),
+            (app.join("z.php"), Role::Analysed, false),
+            (base.join("shared/a.php"), Role::Analysed, false),
+            (base.join("shared/n/k.php"), Role::Context, false),
+            (base.join("shared/z.php"), Role::Analysed, false),
+        ]
+    );
+}
+
+/// The order does not depend on the order the roots are added in.
+#[test]
+fn the_listing_does_not_depend_on_the_order_the_roots_are_added_in() {
+    let dir = TempDir::new("walk_root_order");
+    dir.write("app/a.php", "<?php");
+    dir.write("app/sub/b.php", "<?php");
+    dir.write("app/vendor/c.php", "<?php");
+    dir.write("app/vendor/lib/d.php", "<?php");
+    let app = resolved(&dir).join("app");
+    let excluded: &[&str] = &["vendor"];
+    let expected = vec![
+        (app.join("a.php"), Role::Analysed, false),
+        (app.join("sub/b.php"), Role::Analysed, false),
+        (app.join("vendor/lib/d.php"), Role::Context, false),
+    ];
+
+    let forward = in_walk_order(&[
+        (app.clone(), Role::Analysed, excluded),
+        (app.join("vendor/lib"), Role::Context, &[]),
+    ]);
+    let backward = in_walk_order(&[
+        (app.join("vendor/lib"), Role::Context, &[]),
+        (app.clone(), Role::Analysed, excluded),
+    ]);
+    assert_eq!(forward, expected);
+    assert_eq!(backward, expected);
+}
+
+/// A file the tree cannot place, because the directory it is in cannot be
+/// listed, is merged into the listing in path order.
+#[cfg(unix)]
+#[test]
+fn a_file_the_tree_cannot_place_keeps_the_listing_in_path_order() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("walk_unplaced");
+    dir.write("proj/a.php", "<?php");
+    dir.write("proj/locked/x.php", "<?php");
+    dir.write("proj/z.php", "<?php");
+    let base = resolved(&dir).join("proj");
+    let locked = base.join("locked");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o311)).unwrap();
+    // A user who can read a directory of mode 311 (root) has nothing to test.
+    let unreadable = fs::read_dir(&locked).is_err();
+    let listed = in_walk_order(&[
+        (base.clone(), Role::Analysed, &[]),
+        (locked.join("x.php"), Role::Context, &[]),
+    ]);
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    if !unreadable {
+        return;
+    }
+
+    assert_eq!(
+        listed,
+        vec![
+            (base.join("a.php"), Role::Analysed, false),
+            (locked.join("x.php"), Role::Context, false),
+            (base.join("z.php"), Role::Analysed, false),
+        ]
+    );
 }

@@ -67,13 +67,17 @@ impl DirListings {
 }
 
 impl Listing {
+    /// The index of the entry called `name` in `entries`, if the directory has
+    /// one that could be read.
+    pub fn position(&self, name: &OsStr) -> Option<usize> {
+        self.entries
+            .binary_search_by(|entry| entry.name.as_os_str().cmp(name))
+            .ok()
+    }
+
     /// The entry called `name`, if the directory has one that could be read.
     pub fn entry(&self, name: &OsStr) -> Option<&Entry> {
-        let at = self
-            .entries
-            .binary_search_by(|entry| entry.name.as_os_str().cmp(name))
-            .ok()?;
-        self.entries.get(at)
+        self.entries.get(self.position(name)?)
     }
 }
 

@@ -1205,9 +1205,13 @@ impl Session {
         project: &mut Project,
         listed: &[Listed],
     ) -> Vec<(PathBuf, String)> {
-        let mut ordered: Vec<&Listed> = listed.iter().collect();
-        composer::path_order::sort_by_path(&mut ordered, |file| file.path.as_path());
-        ordered.sort_by_key(|file| file.role == Role::Analysed);
+        debug_assert!(
+            listed.windows(2).all(|pair| pair[0].path <= pair[1].path),
+            "the files are given in path order, as a listing is"
+        );
+        let (analysed, context): (Vec<&Listed>, Vec<&Listed>) =
+            listed.iter().partition(|file| file.role == Role::Analysed);
+        let ordered: Vec<&Listed> = context.into_iter().chain(analysed).collect();
         let index_use_sites = project.indexes_class_fn_sites();
         // A cached file has no tree. A context file keeps its tree unless the
         // project is built once, so only such a project reads the cache.
@@ -1311,6 +1315,7 @@ impl Session {
             };
             listed.push(Listed::new(file.path, role, file.stub));
         }
+        composer::path_order::sort_by_path(&mut listed, |file| file.path.as_path());
         session.overlay_listing = Some(listed);
         session
     }
@@ -1328,6 +1333,7 @@ impl Session {
     pub fn load(&self) -> Result<Loaded, String> {
         let mut analyze_files: Vec<&Listed> = Vec::new();
         let mut context_files: Vec<&Listed> = Vec::new();
+        // The listing is in path order, so each role's files are too.
         for listed in &self.listing_of().files {
             if listed.role == Role::Analysed {
                 analyze_files.push(listed);
@@ -1335,8 +1341,6 @@ impl Session {
                 context_files.push(listed);
             }
         }
-        composer::path_order::sort_by_path(&mut analyze_files, |file| file.path.as_path());
-        composer::path_order::sort_by_path(&mut context_files, |file| file.path.as_path());
         if analyze_files.is_empty() && self.overlay_listing.is_none() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
@@ -1653,6 +1657,7 @@ pub(crate) fn load_test_files(
         };
         listed.push(Listed::new(path.clone(), role, false));
     }
+    composer::path_order::sort_by_path(&mut listed, |file| file.path.as_path());
     Session::for_overlay(Vec::new(), Stubs::shared().clone()).load_listed(project, &listed)
 }
 
