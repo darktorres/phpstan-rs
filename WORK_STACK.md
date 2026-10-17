@@ -181,7 +181,7 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 2: LOAD-2.8 (its third part waits on LOAD-2.3), then 2.2 to 2.7.
+- Item 2: LOAD-2.2 to 2.7 (LOAD-2.8's first two parts are in; its third waits on LOAD-2.3).
 - Item 3: LOAD-3.2 (3.1 waits on REG-16.4, level 2).
 - Item 5: LOAD-4.3, 4.5 and 4.7 (4.4 waits on LOAD-2.5).
 - Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).

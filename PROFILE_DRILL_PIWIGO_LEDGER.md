@@ -203,7 +203,7 @@ These rows are open with every need met:
 
 - **CACHE-8** (heap H1), a memory row. With CHECK-4.2 (off P11, under CHECK below), it is one of the two off-drill rows nothing blocks.
 - **LOAD:**
-  - LOAD-2.8 except its third part;
+  - LOAD-2.2 (LOAD-2.8's third part waits on LOAD-2.3);
   - LOAD-3.2;
   - LOAD-4.3, 4.5 and 4.7;
   - LOAD-5.4.
@@ -699,7 +699,7 @@ Merging the sources into one list found six places where two of them disagree, o
 | LOAD-2.5 | **Order without comparisons.** Each result is keyed by its root's index and its entries' index path. Roots are sorted in component order, and nested roots are dropped. An explicit file under no root is placed by one binary search, and ids follow the placement | 20 G 2 | OPEN | LOAD-2.2 |
 | LOAD-2.6 | **Path data from the walk, all resolved.** A root's absolute path comes from one `realpath`, and a child's is its parent's plus its name. The package index stores each package directory once, so `owner_of_dir` is one trie lookup per directory, and the server's single-file lookup uses the same implementation | 20 G 2 | OPEN | LOAD-1.1, LOAD-2.3 |
 | LOAD-2.7 | **A path stored once.** `FileTable`'s map becomes a `hashbrown::HashTable<FileId>` that hashes the slot's path with the walk's hash | 20 G 2 | OPEN | LOAD-2.3 |
-| LOAD-2.8 | **The walk's other allocations.** `installed.json` and the Composer manifests are deserialized straight into their typed form, `eval_concat` builds into one buffer, and `ignore_errors::filter` matches the text the walk built | 20 G 2 | READY, except the third part | LOAD-2.3 (the third part only) |
+| LOAD-2.8 | **The walk's other allocations.** `installed.json` and the Composer manifests are deserialized straight into their typed form, `eval_concat` builds into one buffer, and `ignore_errors::filter` matches the text the walk built | 20 G 2 | Parts 1 and 2 DONE: `27c3b093` (the manifests and `installed.json` read member by member; a repeated key keeps its last value, a wrong-shape member is skipped, and the documents that `Value` rejected for an out-of-range number or for nesting past serde_json's recursion limit are read as `json_decode` reads them, with nesting capped at its 511), `53e6f766` (`eval_concat`). Instructions and wall time are not measured yet (needs approval). Part 3 OPEN, waits on LOAD-2.3 | LOAD-2.3 (the third part only) |
 | LOAD-3 | Context trees dropped on the worker that parsed them | 20 G 3 | OPEN; its premise was halved by PROD-3 | — |
 | LOAD-3.1 | Whether a tree is kept is one function of (role, open), in the load and in `update_file` alike; today `update_file` keeps every tree. The insert's assertion that an analysed file has its tree stays | 20 G 3 | OPEN | LOAD-2.2 (roles final before the parse), REG-16.4 (the parse as a query whose eviction this is; it took LOAD-1.6's `built_once` split) |
 | LOAD-3.2 | A context file's state has the cached shape: the worker builds it, so a parsed and a cached context file give the same state. It keeps no ignore comments | 20 G 3 | READY | — |
