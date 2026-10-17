@@ -14,15 +14,21 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   confirmed ("Decisions", below).
 - **The rows are being built,** since the user's second "go" (2026-10-17), in the order
   below, one commit each, with a pathspec, since another session shares the checkout. R1
-  (`6016499f`) and R11 (`a5a4d85f`) are in, and their measurements are on the ledger's rows
-  (LOAD-8.1, LOAD-3.3): R1 −381.2 M off, with no wall change beyond the noise; R11 −0.22 s
-  of the off run's 1.98 s and −214 MiB of peak RSS, most of it the kernel's page zeroing,
-  since the parse reuses the freed trees' memory. R12 is next.
+  (`6016499f`), R11 (`a5a4d85f`) and R12 (`6705eedd`) are in, and their measurements are on
+  the ledger's rows (LOAD-8.1, LOAD-3.3, CACHE-12):
+  - R1: −381.2 M off, with no wall change beyond the noise.
+  - R11: −0.22 s of the off run's 1.98 s and −214 MiB of peak RSS, most of it the kernel's
+    page zeroing, since the parse reuses the freed trees' memory.
+  - R12: −54.3 ms of the warm run's 1.39 s (p = 0.009). The decodes moved from the main
+    thread into the merge's bucketing on the pool, so the warm Ir fell by only 31.8 M.
+
+  R15 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
   built since move some of them: R1 changes `session.rs`, `project.rs`, `lsp.rs` and
-  `source.rs`, and R11 `session.rs` and `project.rs`.
+  `source.rs`, R11 `session.rs` and `project.rs`, and R12 `name_table.rs`, `members.rs`,
+  `class_info.rs`, `function_sig.rs` and `provenance.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -1020,6 +1026,8 @@ ours is noted, and a run it distorts is taken again.
 - Done with R1 and R11: LOAD-3.4's note and LOAD-6's record; LOAD-3.3's record, which says
   that `update_file` waits on LOAD-3.1; their rows in §1's table; CACHE-12's row, for R12's
   corrected change.
+- Done with R12: CACHE-12's task, target and record (its decode context is the file's
+  number, so E8's was not needed); its row in §1's table; §1's open off-drill rows and §2.1.
 - Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
   row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with

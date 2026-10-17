@@ -1,6 +1,6 @@
 # Piwigo performance ledger
 
-Every optimization task for the Piwigo profile on this branch (`callgrind-20g`), grouped by the part of the program it changes, with its state and what blocks it. State as of 2026-10-17; the code is at `a5a4d85f`.
+Every optimization task for the Piwigo profile on this branch (`callgrind-20g`), grouped by the part of the program it changes, with its state and what blocks it. State as of 2026-10-17; the code is at `6705eedd`.
 
 This is the one list of the branch's tasks. The documents the tasks come from stay as their design texts. Their status claims are not kept up; this ledger's are.
 
@@ -102,7 +102,7 @@ Inside a record, ids and section numbers are those of the record's source, as wr
 | | |
 |---|---|
 | base | `5fb858c9`'s code (the 20 G plan's), off mode: 25,625,190,065 Ir |
-| now | `a5a4d85f` (HEAD): 20,809,876,336 Ir, off mode, measured 2026-10-17; −4.82 G (−18.79%) against the base, the lowest measured so far (`ee56851c` was 20,909,227,687 and `791d29cb` (PROD-3) 20,928,053,254). Piwigo output not compared since PROD-3 (VAL-1 is deferred) |
+| now | `6705eedd` (HEAD): 20,806,948,614 Ir, off mode, measured 2026-10-17; −4.82 G (−18.80%) against the base, the lowest measured so far (`ee56851c` was 20,909,227,687 and `791d29cb` (PROD-3) 20,928,053,254). Piwigo output not compared since PROD-3 (VAL-1 is deferred) |
 | profile | `~/.cache/prs-profile/p8b/cg` (off mode: the stub cache and the file cache are off, so the 3.4 G stub build is in it) |
 
 Where the 20.93 G sits (threads summed):
@@ -125,7 +125,7 @@ After `791d29cb` the branch has the crate split's first C4 commits:
 
 They change the registry's data model, and `e7b2521f` and `0f32829b` change the reports of the missing-type rules. No Ir was measured at them.
 
-Since `791d29cb` the 20 G plan's items 1 to 5 have landed in part: LOAD-1 (item 1), LOAD-2 except its last deletion, LOAD-3.2, 3.4 and 3.6, and LOAD-4.3 to 4.5 (their rows in §3). Their instruction counts and heap were measured on 2026-10-16 and 17 (the rows below the table), and the wall time at `aa896697` on 2026-10-17 (MEAS-4). The Piwigo gate has not run. The items 1 to 3 fixes (`ITEMS_1_TO_3_FIXES_PLAN.md`, LOAD-8) started on 2026-10-17: LOAD-8.1 (`6016499f`) and LOAD-3.3's load part (`a5a4d85f`) are in, each measured against the row before it.
+Since `791d29cb` the 20 G plan's items 1 to 5 have landed in part: LOAD-1 (item 1), LOAD-2 except its last deletion, LOAD-3.2, 3.4 and 3.6, and LOAD-4.3 to 4.5 (their rows in §3). Their instruction counts and heap were measured on 2026-10-16 and 17 (the rows below the table), and the wall time at `aa896697` on 2026-10-17 (MEAS-4). The Piwigo gate has not run. The items 1 to 3 fixes (`ITEMS_1_TO_3_FIXES_PLAN.md`, LOAD-8) started on 2026-10-17: LOAD-8.1 (`6016499f`), LOAD-3.3's load part (`a5a4d85f`) and CACHE-12 (`6705eedd`) are in, each measured against the row before it.
 
 The rows that moved the Ir, in order (callgrind, off mode). Each row's output was byte-identical to the base's; each row's record has its checks.
 
@@ -153,12 +153,13 @@ The rows that moved the Ir, in order (callgrind, off mode). Each row's output wa
 | item 5, LOAD-4.3 to 4.5 (range, unattributed) | | `d870ddcb` → `aa896697` | 21,331,572,685 | +42.4 M |
 | LOAD-8.1 | fixes R1 | `6016499f` | 20,948,523,065 | −381.2 M against `aa896697`'s code built again and measured beside it (21,329,725,495); warm −136.9 M |
 | LOAD-3.3, the load | fixes R11 | `a5a4d85f` | 20,809,876,336 | −138.6 M: mimalloc's cross-thread frees; the main thread −265.0 M |
+| CACHE-12 | off E11; fixes R12 | `6705eedd` | 20,806,948,614 | −2.9 M, inside the noise: a warm row. Warm −31.8 M (13,209,699,103 → 13,177,851,490); the main thread −394.7 M warm |
 
 The fixes' rows are measured against the row before them, both built in a worktree of their own (`~/.cache/prs-profile/fixes/`): there `aa896697`'s code measured 21,329,725,495, 1.8 M under `regress-item5`'s run, inside MEAS-3's spread. The four range rows are measurements of commit ranges, not rows. Item 1's and items 2 and 3's are attributed; the eight fixes' and item 5's are not. Each is one off-mode callgrind run per commit with default threads, on the dhat profile, from `~/.cache/prs-profile/`: `item1-regress` (base and head), `fixes8` and `regress-item5`. MEAS-3 puts the noise at up to 16.9 M. The +380 M of items 2 and 3 is attributed (the 28-commit row): `845efaab` (LOAD-3.4) adds a lossy UTF-8 decode of every file's text, for its length, in `read_and_parse_file` (`session.rs:1224`), which is 394 M of `Utf8Chunks::next`'s callers in the off run. The other 27 commits net −14 M. The function diff came from `callers.py` and `cgfn.py` on the two runs' callgrind files, with no new build.
 
 Warm runs (`regress-item5`): `d870ddcb` 13,382,535,920, `aa896697` 13,346,910,728 (−35.6 M). Heap at one thread (`regress-item5`): `d870ddcb` 2,913,109,581 bytes allocated, peak 807,381,174, exit 647,439,034; `aa896697` +23.7 M allocated (+0.82%), peak +2.2 M, exit −5.8 M. Item 1's heap was measured at default threads, so its deltas (allocated +2.7 M, peak +7.7 M, exit +5.7 M) are not comparable with item 5's.
 
-Wall time was first measured on 2026-10-17, at `aa896697` (MEAS-4): an off run takes about 2.3 s and a warm run about 1.6 s on this machine, a VM with 8 vCPUs, and leaves 0.75 s and 0.85 s of the 8 cores unused. At `a5a4d85f` the off run's median is 1.796 s, from LOAD-3.3's 20 pairs. The Piwigo output is the same at `d870ddcb` and `aa896697` (171,439 bytes, sha256 `8ff144c3…`, off and warm), so item 5 changed no diagnostic; it has not been compared with PROD-3's.
+Wall time was first measured on 2026-10-17, at `aa896697` (MEAS-4): an off run takes about 2.3 s and a warm run about 1.6 s on this machine, a VM with 8 vCPUs, and leaves 0.75 s and 0.85 s of the 8 cores unused. At `a5a4d85f` the off run's median is 1.796 s, from LOAD-3.3's 20 pairs, and at `6705eedd` the warm run's is 1.322 s, from CACHE-12's. The Piwigo output is the same at `d870ddcb` and `aa896697` (171,439 bytes, sha256 `8ff144c3…`, off and warm), so item 5 changed no diagnostic; it has not been compared with PROD-3's.
 
 Defects fixed along the way:
 
@@ -168,11 +169,11 @@ Defects fixed along the way:
 
 The off drill's decisions: D6 is decided (skim unchecked, 2026-10-15; PROD-4.3), and so are D1, D2 and D5 (PROD-4.1, PROD-4.2, CACHE-2). D3 was decided again on 2026-10-15 as §2.4's decision 7 (STUB-10): the analyser's builtin knowledge is built at compile time, and PHPStan's own classes are read from the PHPStan the project installs.
 
-Six of the off drill's rows are open:
+Five of the off drill's rows are open:
 - CACHE-8 (READY);
 - CHECK-4, re-opened: CHECK-4.2 is READY, and CHECK-4.1 is built with CHECK-6.10;
 - STUB-10, whose measurements (STUB-10.1) are left, and STUB-11, which waits on them and on the reflection crate;
-- CACHE-11, which waits on CACHE-9 and CACHE-10, and CACHE-12, READY since its decode context became the file's number (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12).
+- CACHE-11, which waits on CACHE-9 and CACHE-10.
 
 E9's cut is CHECK-6.16's (READY). The off drill's questions (U1-U9) and D6's unbuilt policy are §15's Q-1 to Q-10: Q-1 to Q-7 and Q-9 are done (Q-2's fix is SYN-6, and Q-4's regression test is in the tree as `55d9ea1f`), Q-8 is superseded by STUB-10.1 and STUB-11, and Q-10 is open. The rest of its rows are done or skipped.
 
@@ -217,8 +218,8 @@ Four questions that a reading of the whole ledger found the decisions had left o
 
 These rows are open with every need met:
 
-- **CACHE-8** (heap H1), a memory row, and **CACHE-12** (off E11), whose decode context is now the file's number (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12). With CHECK-4.2 (off P11, under CHECK below), they are the three off-drill rows nothing blocks.
-- **LOAD:** LOAD-2.2's last part (the name floor's replacement, decided on 2026-10-17) and LOAD-5.4; LOAD-8.2, 8.5, 8.9, 8.13 and 8.15. The fixes plan's rows (LOAD-8, LOAD-3.3, CACHE-12) are being built since the user's second go (2026-10-17), in the plan's order (its decision 4): LOAD-8.1 and LOAD-3.3's load part are in, and CACHE-12 is next.
+- **CACHE-8** (heap H1), a memory row. It and CHECK-4.2 (off P11, under CHECK below) are the two off-drill rows nothing blocks.
+- **LOAD:** LOAD-2.2's last part (the name floor's replacement, decided on 2026-10-17) and LOAD-5.4; LOAD-8.2, 8.5, 8.9, 8.13 and 8.15. The fixes plan's rows (LOAD-8, LOAD-3.3, CACHE-12) are being built since the user's second go (2026-10-17), in the plan's order (its decision 4): LOAD-8.1, LOAD-3.3's load part and CACHE-12 are in, and LOAD-8.15 is next.
 - **SYN:**
   - SYN-1.1 (`peeled` becomes a loop) and SYN-1.2 (the flat tree, decision 4);
   - SYN-3.1, 3.2 and 3.3;
@@ -1445,7 +1446,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | CACHE-9 | **Names stored once per cache file.** A cache file holds a table of its distinct names, and records refer to them by index; an entry is interned on first need (`OnceLock<Name>`). The per-file cache has one table per file. Format bump | 20 G 6.3 | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | STUB-7.6; the persistence's format (CACHE-13.2; REG-16.1 kept salsa) |
 | CACHE-10 | **Records read, not mapped or copied.** The directory, the keys and the name table are read eagerly. A lazy record is its offset and length, beside a shared `Arc<File>`, read with `read_at` into a per-thread scratch buffer under a decode context. Each record has its own CRC, and failures are recoverable. No `unsafe` and no mapping; `u64` offsets; the stub index's keys are read with the eager sections. Same format bump as CACHE-9 | 20 G 6.5 | BLOCKED: as CACHE-9 | STUB-7.6; the persistence's format (CACHE-13.2; REG-16.1 kept salsa) |
 | CACHE-11 | **A cache file's types stored once,** in a table its records index. Warm-cache runs only | off E8 | OPEN | CACHE-9, CACHE-10 (the name table by index, `read_at` records, a decode context: one format bump) |
-| CACHE-12 | **A cached file's origins decoded as the `FileId` its file binds** (an origin is `Origin::File(FileId)` since LOAD-4.5, not an `Arc<Path>`). The file's number is kept in `Lazy` beside the encoded bytes: `bind_file` sets it without decoding, and the decode binds the value before any reader sees it. That number is the decode context, so CACHE-11's is not needed. A `Lazy` keeps its bytes until a write, so two values that still hold the same bytes and number are equal with no decode (`changed_since`'s comparison). No deferred-type fact: three later passes read every method in scope, so it would only move the scan's decodes (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12). The caches' formats stay | off E11; fixes R12 | READY | — |
+| CACHE-12 | **A cached file's origins decoded as the `FileId` its file binds** (an origin is `Origin::File(FileId)` since LOAD-4.5, not an `Arc<Path>`). The file's number is kept in `Lazy` beside the encoded bytes: `bind_file` sets it without decoding, and the decode binds the value before any reader sees it. That number is the decode context, so CACHE-11's is not needed. A `Lazy` keeps its bytes until a write, so two values that still hold the same bytes and number are equal with no decode (`changed_since`'s comparison). No deferred-type fact: three later passes read every method in scope, so it would only move the scan's decodes (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12). The caches' formats stay | off E11; fixes R12 | DONE `6705eedd`. `Lazy` keeps the file's number beside its encoded bytes: `bind_file` sets it without decoding, and `get` binds the value it decodes. A `Lazy` keeps its bytes until `get_mut`, writes them when it is stored again, and is equal to another that holds the same bytes and number with no decode. `Members<FunctionReflection>::bind_file` binds each member so, and `ClassReflection::bind_file` calls it. **Measured** (warm, against `a5a4d85f`; the callgrind against `6016499f`'s warm run, since LOAD-3.3 changes nothing in a warm run): callgrind 13,177,851,490 Ir, −31.8 M; the main thread fell from 651.9 M to 257.1 M. The method decodes by caller, 656.0 M → 623.5 M: `bind_file`'s 393.1 M moved into the declaration merge's bucketing (`for_each_assert_tagged_name`, 398.0 M, on the pool in 32 chunks); `Members::eq` 87.9 → 48.1 M; the deferred-type scan's 177.9 M stays, REG-7's. Perf, one warm recording each: `bind_file` 39 → 4 samples, `merge_by_shard` 55 → 105, the main thread's `Session::load` 60 → 27; the serial stretch in `bind_file` (0.45 to 0.55 s, at 0.9 cores) is gone, and the merge after it runs at 4.65 cores. Wall, warm, 20 pairs (`scripts/abab.py`, load 1.2 to 3.8): medians 1.392 → 1.322 s, paired median −54.3 ms (mean −69.6 ms), 16 of 20 pairs faster, Wilcoxon p = 0.009; peak RSS and CPU time unchanged (p 0.94 and 0.97). Off: 20,806,948,614 Ir, −2.9 M, inside the noise. The Piwigo output was the oracle's in every run. **Tests** (`stub_cache_round_trip.rs`): a stored class's methods take their file's number without being decoded, and one read before the binding takes it too; members read back from the same bytes are equal with no decode, a member written to is compared by its value, and the same bytes bound to other files are not equal; a member read but not written is stored as the bytes it was read from. The lib suite passes (1197) | — |
 | CACHE-13 | Warm runs: cache entries checked by `stat`, and the engine's results persisted | 20 G 17; decision 3 | OPEN | — |
 | CACHE-13.1 | **Entries checked by `stat`.** A per-project index maps each path to `(size, mtime_ns, ctime_ns, inode, device, content hash)`, from a stat taken before the file's bytes are read. A file, analysed or context, takes the recorded hash without being read when its five stat fields match and both its recorded times are older than the index's own write time (git's rule for racily clean entries, applied to the change time too). That holds only on a file system known to keep a change time that no program sets (ext4, xfs, btrfs, APFS and the like); on any other, and on Windows, every file is read and hashed (decision 13) | 20 G 17.1; decision 13 | OPEN | LOAD-1.4 (the hash the read keeps); for analysed files, CACHE-13.2 |
 | CACHE-13.2 | **The engine's results persisted with their dependencies.** Each query's result is saved with the dependencies it recorded, as rustc's incremental compilation saves its query results and its dependency graph. A warm run parses and checks again only the files whose recorded reads changed. The plan's resolved context base and a check-results cache are this persistence, not stores of their own; today an analysed file is always parsed and checked (`project/file_cache.rs:1-8`). It is keyed by the build. The configuration, the version range (decision 6) and each `(path, content hash)` are inputs, not keys. Its format is salsa's `persistence` feature or the cache's own container (CACHE-9, CACHE-10), as REG-16.1 decides | 20 G 17.2; decision 3 | OPEN | REG-16.4 |
@@ -1457,7 +1458,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | CACHE-8 | memory only | −15.3 MB at the cold run's peak, −31.4 MB allocated per cold run |
 | CACHE-9, CACHE-10 | item 6's parts (STUB targets) | ≈40 MB of heap at exit, item 6's |
 | CACHE-11 | types decoded, ≈436.5 M of the warm run (MEAS-1) | ≈ −65 M; ≈ −25 M after item 6 |
-| CACHE-12 | 123.9 M of the warm run (MEAS-1). At `aa896697`, `bind_file`'s decodes: 393.1 M, serial on the main thread (110 ms of the warm run, with the pool idle; MEAS-4), less the decodes later passes make anyway; and the deferred-type scan's 177.8 M of stub decodes | ≈ −116 M, per-file cache warm |
+| CACHE-12 | done (`6705eedd`): `bind_file`'s 393.1 M of decodes, serial on the main thread, moved into the merge's bucketing on the pool, and `Members::eq`'s fell by 39.9 M; warm −31.8 M Ir and −54.3 ms of wall time (p = 0.009). The deferred-type scan's 177.9 M of decodes stays, REG-7's | ≈ −116 M, per-file cache warm |
 | CACHE-13 | CACHE-13.1: reads, ≈60-70 M Ir; the per-file decode (≈1,260 M, MEAS-1) is not what a `stat` index removes. CACHE-13.2: on the warm run (MEAS-1), the parse of the analysed files (`parse_with_ignores` 1,967.9 M) and their check (`check_program` 6,414.6 M) where their recorded reads did not change, and the per-file decode | decoding and reads, ≈0.85 core-s (item 17's, before decision 3) |
 
 ### Notes
@@ -1466,7 +1467,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 - **CACHE-13 and the per-file decode.** CACHE-13.2's persistence is what replaces the per-file decode of the context files, and the parse and check of unchanged analysed files; CACHE-13.1 does not touch them. CACHE-13.1's weight is syscalls and I/O, which Ir does not count.
 - **CACHE-6 (off E4)** measured the idea nearest to CACHE-13 (the analysed files in the per-file cache) and found no gain worth its cold cost. A hit there still parsed the file and checked it. CACHE-13.2 keeps the check's results, so an unchanged file is neither parsed nor checked.
 - **CACHE-9 and CACHE-10's form waits on the stub layer and on the persistence.**
-  - The crate split reshapes the stub layer, so it decides their form, and with it CACHE-11's. CACHE-12 is built in today's format (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12), since its decode context is the file's number.
+  - The crate split reshapes the stub layer, so it decides their form, and with it CACHE-11's. CACHE-12 was built in today's format (`6705eedd`), since its decode context is the file's number.
   - Since decision 7 the stub disk cache goes with STUB-11.
   - Since decision 3 the per-file cache is CACHE-13.2's persistence, whose format REG-16.1 decides. So what is left for CACHE-9 to CACHE-11 is that format, if it is the cache's own container.
 - **CACHE-7 (off E12) and REG-5 touch the same set,** `names_with_assert_tags`.
@@ -1519,6 +1520,8 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 **CACHE-11** (off E8), as recorded: OPEN. A cache file's types stored once, in a table its records index. Estimated saving ≈ −65 M; ≈ −25 M after item 6. Needs item 6, steps 3 and 5.
 
 **CACHE-12** (off E11), as recorded: OPEN. A cached file's origins decoded as the one `Arc<Path>` its file binds. Estimated saving ≈ −116 M, per-file cache warm. Needs E8's decode context.
+
+- *Since:* an origin names its file by number (LOAD-4.5), so the decode context is that number, kept beside the encoded bytes, and E8's was not needed. Built as `6705eedd` (2026-10-17, the fixes plan's R12); the task row has its measurements. The decodes `bind_file` made moved to the first reader that reads every method, the declaration merge's bucketing, which runs on the pool, so the saving is the warm run's serial stretch (−54.3 ms), not its Ir (−31.8 M).
 
 ## 12. CHECK: the check phase
 
