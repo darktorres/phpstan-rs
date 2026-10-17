@@ -37,7 +37,7 @@ use composer::manifest::resolve;
 use hashbrown::hash_map::EntryRef;
 use hashbrown::hash_table::Entry;
 use rayon::prelude::*;
-use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use same_file::Handle;
 
 /// The role a listed file plays, weakest first.
@@ -163,9 +163,6 @@ pub(crate) struct Walk<'a, 'p> {
     roots: Vec<Root<'a>>,
     /// The walks of the roots, in the order the roots were added.
     jobs: Vec<Job<'a>>,
-    /// The resolved paths of the stronger roots that exclude no names. A
-    /// context walk leaves out the directories under them.
-    covering: FxHashSet<PathBuf>,
     /// The walks the roots start, by the path each starts from, so that a file
     /// is known to be listed by one walk alone before the walks run.
     starts: Starts<'a>,
@@ -206,8 +203,17 @@ struct Scope<'a> {
     outside: bool,
 }
 
+impl Scope<'_> {
+    /// Whether a context walk leaves out a directory that `reaching` reaches,
+    /// because a stronger root that excludes no names holds it. The walk of a
+    /// link's target is not left out here.
+    fn prunes(self, reaching: &Reaching<'_>) -> bool {
+        self.role == Role::Context && !self.outside && reaching.covered
+    }
+}
+
 /// How many directory walks reach a directory.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Reach {
     None,
     /// One walk reaches it, with this role.
@@ -215,51 +221,154 @@ enum Reach {
     Several,
 }
 
+/// A directory walk: its role and the names it excludes.
+type DirWalk<'a> = (Role, &'a [&'a str]);
+
 /// The walks the roots start, by the path each starts from. Each walk is
 /// counted here before any runs, so a file's walks are known when it is listed.
 #[derive(Default)]
 struct Starts<'a> {
-    /// The directory walks, each with its role and the names it excludes.
-    dirs: FxHashMap<PathBuf, Vec<(Role, &'a [&'a str])>>,
+    /// The directory walks.
+    dirs: hashbrown::HashTable<(HashedPath, Vec<DirWalk<'a>>)>,
     /// The file walks, each with its role, by the file's resolved path.
-    files: FxHashMap<PathBuf, Vec<Role>>,
+    files: hashbrown::HashTable<(HashedPath, Vec<Role>)>,
+    /// The resolved paths of the stronger roots that exclude no names. A
+    /// context walk leaves out the directories under them.
+    covering: hashbrown::HashTable<HashedPath>,
+}
+
+/// What reaches a directory: the directory walks that list its files, each
+/// with its role and the names it excludes, and whether a covering root holds
+/// it. A walk carries it down from its root, a subdirectory's made from its
+/// directory's (`Starts::below`).
+#[derive(Clone, Default)]
+struct Reaching<'a> {
+    walks: Vec<DirWalk<'a>>,
+    covered: bool,
+}
+
+impl Reaching<'_> {
+    /// How many directory walks list the files of the directory. A context walk
+    /// lists nothing under a covering root (`prunes`). A walk that cannot read
+    /// a directory is counted too, which only keeps a file from being handed
+    /// over.
+    fn reach(&self) -> Reach {
+        let mut reach = Reach::None;
+        for &(role, _) in &self.walks {
+            if self.covered && role == Role::Context {
+                continue;
+            }
+            reach = match reach {
+                Reach::None => Reach::Sole(role),
+                Reach::Sole(_) | Reach::Several => Reach::Several,
+            };
+        }
+        reach
+    }
 }
 
 impl<'a> Starts<'a> {
-    fn of(jobs: &[Job<'a>]) -> Self {
+    fn of(jobs: &[Job<'a>], roots: &[Root<'a>]) -> Self {
         let mut starts = Starts::default();
         for job in jobs {
             match job {
-                Job::Dir { path, scope } => starts
-                    .dirs
-                    .entry(path.as_path().to_path_buf())
-                    .or_default()
-                    .push((scope.role, scope.excluded)),
-                Job::File { path, role } => {
-                    starts
-                        .files
-                        .entry(path.as_path().to_path_buf())
-                        .or_default()
-                        .push(*role);
+                Job::Dir { path, scope } => {
+                    held(&mut starts.dirs, path).push((scope.role, scope.excluded));
                 }
+                Job::File { path, role } => held(&mut starts.files, path).push(*role),
+            }
+        }
+        for root in roots
+            .iter()
+            .filter(|root| root.role > Role::Context && root.excluded.is_empty())
+        {
+            let path = HashedPath::new(root.path.clone());
+            if !starts.covers(path.as_path(), path.hash()) {
+                starts
+                    .covering
+                    .insert_unique(path.hash(), path, HashedPath::hash);
             }
         }
         starts
     }
 
-    /// How many directory walks list the files of `dir`, a resolved directory.
-    /// A walk lists them when its root holds `dir`, no directory from the root
-    /// down to `dir` is one it excludes, and it is not a context walk that a
-    /// covering root holds (`prunes`). A walk that cannot read a directory is
-    /// counted too, which only keeps a file from being handed over.
-    fn reaching(&self, dir: &Path, covering: &FxHashSet<PathBuf>) -> Reach {
-        // A context walk lists nothing under a covering root.
-        let covered = dir.ancestors().any(|ancestor| covering.contains(ancestor));
+    /// What reaches `dir`, a resolved directory: what each directory above it
+    /// passes down, from the top.
+    fn reaching(&self, dir: &Path) -> Reaching<'a> {
+        let ancestors: Vec<(&Path, PathHash)> = hashed_ancestors(dir).collect();
+        ancestors
+            .into_iter()
+            .rev()
+            .fold(Reaching::default(), |above, (ancestor, hash)| {
+                self.below(&above, ancestor, hash)
+            })
+    }
+
+    /// What reaches `dir`, whose hash is `hash`, a subdirectory of a directory
+    /// that `above` reaches: the walks that reach that directory and do not
+    /// exclude the name of `dir`, and the walks that start at `dir`.
+    fn below(&self, above: &Reaching<'a>, dir: &Path, hash: PathHash) -> Reaching<'a> {
+        let name = dir.file_name();
+        let mut walks: Vec<DirWalk<'a>> = above
+            .walks
+            .iter()
+            .copied()
+            .filter(|&(_, excluded)| !name.is_some_and(|name| excludes(excluded, name)))
+            .collect();
+        if let Some((_, starting)) = self.dirs.find(hash, |(start, _)| start.as_path() == dir) {
+            walks.extend_from_slice(starting);
+        }
+        Reaching {
+            walks,
+            covered: above.covered || self.covers(dir, hash),
+        }
+    }
+
+    /// Whether a covering root is `dir`, whose hash is `hash`.
+    fn covers(&self, dir: &Path, hash: PathHash) -> bool {
+        self.covering
+            .find(hash, |root| root.as_path() == dir)
+            .is_some()
+    }
+
+    /// Whether a file walk is for `file`, a resolved path.
+    fn is_file_root(&self, file: &HashedPath) -> bool {
+        self.file_roles(file).is_some()
+    }
+
+    /// The roles of the file walks for `file`, a resolved path.
+    fn file_roles(&self, file: &HashedPath) -> Option<&[Role]> {
+        self.files
+            .find(file.hash(), |(root, _)| root == file)
+            .map(|(_, roles)| roles.as_slice())
+    }
+
+    /// Whether the explicit file `file` is listed by its own walk alone: no
+    /// directory walk reaches its directory, and no other file walk is for it.
+    fn file_alone(&self, file: &HashedPath) -> bool {
+        file.parent()
+            .is_some_and(|(dir, _)| self.reaching(dir).reach() == Reach::None)
+            && self.file_roles(file).is_some_and(|roles| roles.len() == 1)
+    }
+
+    /// What reaches `dir`, as each ancestor of it reaches it and whether a
+    /// covering root holds one, without what a walk carries down: the reading
+    /// that `reaching` and `below` must agree with.
+    #[cfg(test)]
+    fn reach_by_ancestors(&self, dir: &Path) -> (Reach, bool) {
+        let covered = dir
+            .ancestors()
+            .any(|ancestor| self.covers(ancestor, path_hash(ancestor)));
         let mut reach = Reach::None;
         // The names of the directories below the ancestor being checked, down to `dir`.
         let mut below: Vec<&OsStr> = Vec::new();
         for ancestor in dir.ancestors() {
-            for &(role, excluded) in self.dirs.get(ancestor).into_iter().flatten() {
+            let hash = path_hash(ancestor);
+            let starting = self
+                .dirs
+                .find(hash, |(start, _)| start.as_path() == ancestor)
+                .map_or(&[][..], |(_, walks)| walks.as_slice());
+            for &(role, excluded) in starting {
                 if (covered && role == Role::Context)
                     || below.iter().any(|&name| excludes(excluded, name))
                 {
@@ -274,16 +383,24 @@ impl<'a> Starts<'a> {
                 below.push(name);
             }
         }
-        reach
+        (reach, covered)
     }
+}
 
-    /// Whether the explicit file `file` is listed by its own walk alone: no
-    /// directory walk reaches its directory, and no other file walk is for it.
-    fn file_alone(&self, file: &Path, covering: &FxHashSet<PathBuf>) -> bool {
-        file.parent()
-            .is_some_and(|dir| self.reaching(dir, covering) == Reach::None)
-            && self.files.get(file).is_some_and(|roles| roles.len() == 1)
-    }
+/// What `table` holds for `path`, made empty when it holds nothing.
+fn held<'t, T: Default>(
+    table: &'t mut hashbrown::HashTable<(HashedPath, T)>,
+    path: &HashedPath,
+) -> &'t mut T {
+    let entry = match table.entry(
+        path.hash(),
+        |(held, _)| held == path,
+        |(held, _)| held.hash(),
+    ) {
+        Entry::Occupied(entry) => entry.into_mut(),
+        Entry::Vacant(entry) => entry.insert((path.clone(), T::default())).into_mut(),
+    };
+    &mut entry.1
 }
 
 /// What a walk lists, in listing order.
@@ -521,7 +638,6 @@ impl<'a, 'p> Walk<'a, 'p> {
         Walk {
             roots: Vec::new(),
             jobs: Vec::new(),
-            covering: FxHashSet::default(),
             starts: Starts::default(),
             targets: Default::default(),
             tree: Tree::new(Arc::clone(&listings)),
@@ -587,14 +703,8 @@ impl<'a, 'p> Walk<'a, 'p> {
         pool: &rayon::ThreadPool,
         sink: &S,
     ) -> Walked<'a> {
-        self.covering = self
-            .roots
-            .iter()
-            .filter(|root| root.role > Role::Context && root.excluded.is_empty())
-            .map(|root| root.path.clone())
-            .collect();
         let jobs = std::mem::take(&mut self.jobs);
-        self.starts = Starts::of(&jobs);
+        self.starts = Starts::of(&jobs, &self.roots);
         pool.install(|| {
             rayon::scope(|tasks| {
                 let take = |files: Vec<Listed>| sink.take(tasks, files);
@@ -666,7 +776,7 @@ impl<'a, 'p> Walk<'a, 'p> {
             Job::File { path, role } => {
                 let owner = self.owner_of(path.as_path());
                 if let Some(take) = take
-                    && self.starts.file_alone(path.as_path(), &self.covering)
+                    && self.starts.file_alone(path)
                 {
                     take(vec![Listed {
                         path: path.clone(),
@@ -697,14 +807,20 @@ impl<'a, 'p> Walk<'a, 'p> {
         }
     }
 
-    /// Walks the directory `path`, a resolved path, from the top.
+    /// Walks the directory `path`, a resolved path, from the top. What reaches
+    /// it is found for a root's walk, which can hand files over or be left
+    /// out, and not for a link target's, which does neither.
     fn walk_root(
         &self,
         path: &HashedPath,
         scope: Scope<'a>,
         take: Option<&Take<'_>>,
     ) -> Vec<Found> {
-        if self.prunes(scope, path.as_path()) {
+        let reaching = (!scope.outside).then(|| self.starts.reaching(path.as_path()));
+        if reaching
+            .as_ref()
+            .is_some_and(|reaching| scope.prunes(reaching))
+        {
             return Vec::new();
         }
         let Ok(handle) = Handle::from_path(path) else {
@@ -712,6 +828,7 @@ impl<'a, 'p> Walk<'a, 'p> {
         };
         self.walk_dir(
             path,
+            reaching.as_ref(),
             scope,
             &Ancestors {
                 handle: &handle,
@@ -721,15 +838,16 @@ impl<'a, 'p> Walk<'a, 'p> {
         )
     }
 
-    /// Lists what `dir`, a resolved directory, holds under `scope`, in listing
-    /// order. A subdirectory is walked by a task of its own, and its results
-    /// are placed back among the entries in order. `ancestors` holds `dir` and
-    /// the directories above it in this walk. The files of `dir` that only
-    /// this walk lists are handed to `take` as one batch, once its entries are
-    /// read.
+    /// Lists what `dir`, a resolved directory that `reaching` reaches, holds
+    /// under `scope`, in listing order. A subdirectory is walked by a task of
+    /// its own, and its results are placed back among the entries in order.
+    /// `ancestors` holds `dir` and the directories above it in this walk. The
+    /// files of `dir` that only this walk lists are handed to `take` as one
+    /// batch, once its entries are read.
     fn walk_dir(
         &self,
         dir: &HashedPath,
+        reaching: Option<&Reaching<'a>>,
         scope: Scope<'a>,
         ancestors: &Ancestors<'_>,
         take: Option<&Take<'_>>,
@@ -737,11 +855,20 @@ impl<'a, 'p> Walk<'a, 'p> {
         let Some(listing) = self.listings.listing(dir) else {
             return Vec::new();
         };
+        #[cfg(test)]
+        if let Some(reaching) = reaching {
+            assert_eq!(
+                (reaching.reach(), reaching.covered),
+                self.starts.reach_by_ancestors(dir.as_path()),
+                "what reaches {}",
+                dir.as_path().display()
+            );
+        }
         // The files listed here are all in `dir`, so they share its owner.
         let owner = self.packages.owner_of_dir(dir.as_path());
         // The role of the files of `dir` when one walk reaches it.
-        let sole = match self.starts.reaching(dir.as_path(), &self.covering) {
-            Reach::Sole(role) if take.is_some() => Some(role),
+        let sole = match reaching.map(Reaching::reach) {
+            Some(Reach::Sole(role)) if take.is_some() => Some(role),
             _ => None,
         };
         let mut batch = Vec::new();
@@ -776,18 +903,21 @@ impl<'a, 'p> Walk<'a, 'p> {
                     continue;
                 }
                 let child = dir.child(name);
-                if (scope.outside && self.under_root(child.as_path()))
-                    || self.prunes(scope, child.as_path())
-                {
+                if scope.outside && self.under_root(child.as_path()) {
+                    continue;
+                }
+                let below = reaching
+                    .map(|reaching| self.starts.below(reaching, child.as_path(), child.hash()));
+                if below.as_ref().is_some_and(|below| scope.prunes(below)) {
                     continue;
                 }
                 steps.push(Step::Dir);
-                dirs.push(child);
+                dirs.push((child, below));
             } else if is_php(Path::new(name)) {
                 let child = dir.child(name);
                 if !(scope.outside && self.under_root(child.as_path())) {
                     if let Some(role) = sole
-                        && !self.starts.files.contains_key(child.as_path())
+                        && !self.starts.is_file_root(&child)
                     {
                         batch.push(Listed {
                             path: child.clone(),
@@ -807,7 +937,9 @@ impl<'a, 'p> Walk<'a, 'p> {
         }
         let subtrees: Vec<Vec<Found>> = dirs
             .par_iter()
-            .map(|child| self.walk_subdirectory(child, scope, ancestors, take))
+            .map(|(child, below)| {
+                self.walk_subdirectory(child, below.as_ref(), scope, ancestors, take)
+            })
             .collect();
         let mut subtrees = subtrees.into_iter();
         let mut found = Vec::new();
@@ -820,12 +952,13 @@ impl<'a, 'p> Walk<'a, 'p> {
         found
     }
 
-    /// Walks the subdirectory `child`, unless it is one of `ancestors`, which
-    /// ends the loop. The subdirectory's handle is opened here, so only the
-    /// directories being walked hold one.
+    /// Walks the subdirectory `child`, which `reaching` reaches, unless it is
+    /// one of `ancestors`, which ends the loop. The subdirectory's handle is
+    /// opened here, so only the directories being walked hold one.
     fn walk_subdirectory(
         &self,
         child: &HashedPath,
+        reaching: Option<&Reaching<'a>>,
         scope: Scope<'a>,
         ancestors: &Ancestors<'_>,
         take: Option<&Take<'_>>,
@@ -840,6 +973,7 @@ impl<'a, 'p> Walk<'a, 'p> {
         }
         self.walk_dir(
             child,
+            reaching,
             scope,
             &Ancestors {
                 handle: &handle,
@@ -847,18 +981,6 @@ impl<'a, 'p> Walk<'a, 'p> {
             },
             take,
         )
-    }
-
-    /// Whether a context walk leaves `path`, a resolved path, out, because a
-    /// stronger root that excludes no names holds it. The walk of a link's
-    /// target is not left out here.
-    fn prunes(&self, scope: Scope<'a>, path: &Path) -> bool {
-        !self.covering.is_empty()
-            && scope.role == Role::Context
-            && !scope.outside
-            && path
-                .ancestors()
-                .any(|ancestor| self.covering.contains(ancestor))
     }
 
     /// Records what a walk listed, in the order it listed it: each file under
