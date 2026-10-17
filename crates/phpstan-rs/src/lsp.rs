@@ -624,8 +624,10 @@ impl Server {
             previous
                 .iter()
                 .filter(|old| current.get(old.path.as_path()) != Some(&(old.role, old.stub)))
-                .filter(|old| loaded.contains(old.path.as_path()) && !open.contains_key(&old.path))
-                .map(|old| old.path.clone())
+                .filter(|old| {
+                    loaded.contains(old.path.as_path()) && !open.contains_key(old.path.as_path())
+                })
+                .map(|old| old.path.as_path().to_path_buf())
                 .collect()
         };
         if !removed.is_empty() {
@@ -652,11 +654,11 @@ impl Server {
         // An open document is set to the editor's text before it is loaded,
         // so the load reads that text rather than the disk's.
         for listed in &to_load {
-            if let Some(text) = self.latest_text.get(&listed.path) {
+            if let Some(text) = self.latest_text.get(listed.path.as_path()) {
                 folder
                     .slot
                     .project
-                    .set_document(&listed.path, text.as_bytes());
+                    .set_document(listed.path.as_path(), text.as_bytes());
             }
         }
         let loaded = !to_load.is_empty();

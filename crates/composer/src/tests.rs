@@ -1,4 +1,5 @@
 mod dir_listings;
+mod hashed_path;
 mod helpers;
 mod manifest_reading;
 mod package_ownership;

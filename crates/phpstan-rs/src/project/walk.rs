@@ -28,11 +28,11 @@
 use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs;
-use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use composer::dir_listings::{DirListings, Listing};
+use composer::hashed_path::{HashedPath, PathHash, hashed_ancestors, path_hash};
 use composer::manifest::resolve;
 use hashbrown::hash_map::EntryRef;
 use hashbrown::hash_table::Entry;
@@ -55,16 +55,11 @@ impl Role {
     }
 }
 
-/// The hash of a path, as `path_hash` gives it.
-pub(crate) type PathHash = u64;
-
 /// A PHP file the walk listed, once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Listed {
-    /// The file's resolved path.
-    pub(crate) path: PathBuf,
-    /// The path's hash, `path_hash(&path)`.
-    pub(crate) hash: PathHash,
+    /// The file's resolved path, with its hash.
+    pub(crate) path: HashedPath,
     /// The strongest role of the roots and links that list the file.
     pub(crate) role: Role,
     /// Whether a stub root lists it.
@@ -76,11 +71,10 @@ pub(crate) struct Listed {
 }
 
 impl Listed {
-    /// A file listed at `path`, with the hash of its path and no owner found.
+    /// A file listed at `path`, with no owner found.
     pub(crate) fn new(path: PathBuf, role: Role, stub: bool) -> Self {
         Listed {
-            hash: path_hash(&path),
-            path,
+            path: HashedPath::new(path),
             role,
             stub,
             owner: None,
@@ -112,9 +106,9 @@ impl FileIndex {
             hashbrown::HashTable::with_capacity(files.len());
         for (at, file) in files.iter().enumerate() {
             match index.entry(
-                file.hash,
+                file.path.hash(),
                 |&i| files[i].path == file.path,
-                |&i| files[i].hash,
+                |&i| files[i].path.hash(),
             ) {
                 Entry::Occupied(mut entry) => *entry.get_mut() = at,
                 Entry::Vacant(entry) => {
@@ -128,7 +122,7 @@ impl FileIndex {
     /// The position of `path` in `files`, the listing this index was made for.
     pub(crate) fn position(&self, files: &[Listed], path: &Path) -> Option<usize> {
         self.0
-            .find(path_hash(path), |&at| files[at].path == path)
+            .find(path_hash(path), |&at| files[at].path.as_path() == path)
             .copied()
     }
 }
@@ -185,7 +179,7 @@ pub(crate) struct Walk<'a, 'p> {
     unplaced: Vec<Listed>,
     /// The resolved path of each directory an explicit file was listed in, by
     /// the directory as it was given.
-    directories: hashbrown::HashMap<PathBuf, PathBuf, FxBuildHasher>,
+    directories: hashbrown::HashMap<PathBuf, HashedPath, FxBuildHasher>,
     /// The listings of the directories the walk reads. A load shares them with
     /// its vendor discovery, so each directory is read once.
     listings: Arc<DirListings>,
@@ -196,8 +190,8 @@ pub(crate) struct Walk<'a, 'p> {
 /// The walk of one root: a directory, or a file that is listed whatever its
 /// extension.
 enum Job<'a> {
-    Dir { path: PathBuf, scope: Scope<'a> },
-    File { path: PathBuf, role: Role },
+    Dir { path: HashedPath, scope: Scope<'a> },
+    File { path: HashedPath, role: Role },
 }
 
 /// What a walk applies to the entries it meets.
@@ -238,11 +232,15 @@ impl<'a> Starts<'a> {
             match job {
                 Job::Dir { path, scope } => starts
                     .dirs
-                    .entry(path.clone())
+                    .entry(path.as_path().to_path_buf())
                     .or_default()
                     .push((scope.role, scope.excluded)),
                 Job::File { path, role } => {
-                    starts.files.entry(path.clone()).or_default().push(*role);
+                    starts
+                        .files
+                        .entry(path.as_path().to_path_buf())
+                        .or_default()
+                        .push(*role);
                 }
             }
         }
@@ -290,9 +288,8 @@ impl<'a> Starts<'a> {
 
 /// What a walk lists, in listing order.
 enum Found {
-    /// A PHP file, under its path, with the hash of the path and the package
-    /// that owns its directory.
-    File(PathBuf, PathHash, Option<composer::PackageOwner>),
+    /// A PHP file, under its path, with the package that owns its directory.
+    File(HashedPath, Option<composer::PackageOwner>),
     /// The resolved target of a link, which the walk that met the link queues.
     Link(PathBuf),
 }
@@ -332,7 +329,7 @@ impl Ancestors<'_> {
 struct Tree {
     listings: Arc<DirListings>,
     nodes: Vec<Node>,
-    /// The nodes by the hash of their directory's path.
+    /// The nodes, found by their directories' hashes.
     by_path: hashbrown::HashTable<usize>,
     /// The nodes whose directory has no parent, where a walk starts.
     tops: Vec<usize>,
@@ -342,8 +339,7 @@ struct Tree {
 
 /// A directory with listed files, or one above such a directory.
 struct Node {
-    path: PathBuf,
-    hash: PathHash,
+    path: HashedPath,
     listing: Arc<Listing>,
     /// One slot for each entry of `listing`, in its order.
     slots: Vec<Slot>,
@@ -396,45 +392,71 @@ impl Tree {
 
     /// The node and slot of the entry at `path`, or `None` when its directory
     /// cannot be placed.
-    fn slot_of(&mut self, path: &Path) -> Option<(usize, usize)> {
-        let node = self.node(path.parent()?)?;
-        let at = self.nodes[node].listing.position(path.file_name()?)?;
+    fn slot_of(&mut self, path: &HashedPath) -> Option<(usize, usize)> {
+        let (dir, dir_hash) = path.parent()?;
+        let node = self.node(dir, dir_hash)?;
+        let at = self.nodes[node]
+            .listing
+            .position(path.as_path().file_name()?)?;
         Some((node, at))
     }
 
-    /// The node of the directory `dir`, made with the nodes above it when it is
-    /// new. `None` when `dir` is relative, or when `dir` or a directory above it
-    /// cannot be listed.
-    fn node(&mut self, dir: &Path) -> Option<usize> {
+    /// The node of the directory `dir`, whose hash is `hash`, made with the
+    /// nodes above it when it is new. `None` when `dir` is relative, or when
+    /// `dir` or a directory above it cannot be listed.
+    fn node(&mut self, dir: &Path, hash: PathHash) -> Option<usize> {
         if !dir.is_absolute() {
             return None;
         }
-        let hash = path_hash(dir);
-        if let Some(&node) = self
-            .by_path
-            .find(hash, |&node| self.nodes[node].path.as_path() == dir)
-        {
+        if let Some(node) = self.find(dir, hash) {
             return Some(node);
         }
-        let listing = self.listings.listing(dir)?;
-        let link = match dir.parent() {
-            Some(parent) => {
-                let up = self.node(parent)?;
-                let at = self.nodes[up].listing.position(dir.file_name()?)?;
+        // The hashes of one fold of the path find the nearest directory above
+        // that has a node, and the nodes below it are made from the top down.
+        let ancestors = hashed_ancestors(dir);
+        debug_assert_eq!(ancestors.last(), Some(&(dir, hash)));
+        let above = ancestors.len() - 1;
+        let (mut up, first_new) = ancestors[..above]
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(at, &(path, hash))| Some((Some(self.find(path, hash)?), at + 1)))
+            .unwrap_or((None, 0));
+        for &(path, _) in &ancestors[first_new..] {
+            up = Some(self.make(path, up)?);
+        }
+        up
+    }
+
+    /// The node of `dir`, if it has one.
+    fn find(&self, dir: &Path, hash: PathHash) -> Option<usize> {
+        self.by_path
+            .find(hash, |&node| self.nodes[node].path.as_path() == dir)
+            .copied()
+    }
+
+    /// Makes the node of `dir`, in its slot of `up`, its parent's node, or as a
+    /// top when it has no parent. `None` when `dir` cannot be listed, or when
+    /// its slot holds something else.
+    fn make(&mut self, dir: &Path, up: Option<usize>) -> Option<usize> {
+        let (path, link) = match up {
+            Some(up) => {
+                let name = dir.file_name()?;
+                let at = self.nodes[up].listing.position(name)?;
                 if !matches!(self.nodes[up].slots[at], Slot::Empty) {
                     return None;
                 }
-                Some((up, at))
+                (self.nodes[up].path.child(name), Some((up, at)))
             }
-            None => None,
+            None => (HashedPath::new(dir.to_path_buf()), None),
         };
+        let listing = self.listings.listing(&path)?;
         let node = self.nodes.len();
         let nodes = &self.nodes;
         self.by_path
-            .insert_unique(hash, node, |&node| nodes[node].hash);
+            .insert_unique(path.hash(), node, |&node| nodes[node].path.hash());
         self.nodes.push(Node {
-            path: dir.to_path_buf(),
-            hash,
+            path,
             slots: vec![Slot::Empty; listing.entries.len()],
             listing,
         });
@@ -525,12 +547,12 @@ impl<'a, 'p> Walk<'a, 'p> {
                 outside: false,
             };
             self.jobs.push(Job::Dir {
-                path: identity,
+                path: HashedPath::new(identity),
                 scope,
             });
         } else if is_php(&identity) {
             self.jobs.push(Job::File {
-                path: identity,
+                path: HashedPath::new(identity),
                 role,
             });
         }
@@ -541,7 +563,7 @@ impl<'a, 'p> Walk<'a, 'p> {
     pub(crate) fn add_file(&mut self, path: &Path, role: Role) {
         let identity = self.resolve_file(path);
         self.roots.push(Root {
-            path: identity.clone(),
+            path: identity.as_path().to_path_buf(),
             role,
             stub: role == Role::Stub,
             excluded: &[],
@@ -638,20 +660,18 @@ impl<'a, 'p> Walk<'a, 'p> {
         match job {
             Job::Dir { path, scope } => self.walk_root(path, *scope, take),
             Job::File { path, role } => {
-                let hash = path_hash(path);
-                let owner = self.owner_of(path);
+                let owner = self.owner_of(path.as_path());
                 if let Some(take) = take
-                    && self.starts.file_alone(path, &self.covering)
+                    && self.starts.file_alone(path.as_path(), &self.covering)
                 {
                     take(vec![Listed {
                         path: path.clone(),
-                        hash,
                         role: *role,
                         stub: *role == Role::Stub,
                         owner: Some(owner),
                     }]);
                 }
-                vec![Found::File(path.clone(), hash, owner)]
+                vec![Found::File(path.clone(), owner)]
             }
         }
     }
@@ -662,11 +682,10 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// its role is not final until the walk ends.
     fn walk_target(&self, target: &Path, scope: Scope<'a>) -> Vec<Found> {
         if target.is_dir() {
-            self.walk_root(target, scope, None)
+            self.walk_root(&HashedPath::new(target.to_path_buf()), scope, None)
         } else if is_php(target) {
             vec![Found::File(
-                target.to_path_buf(),
-                path_hash(target),
+                HashedPath::new(target.to_path_buf()),
                 self.owner_of(target),
             )]
         } else {
@@ -675,8 +694,13 @@ impl<'a, 'p> Walk<'a, 'p> {
     }
 
     /// Walks the directory `path`, a resolved path, from the top.
-    fn walk_root(&self, path: &Path, scope: Scope<'a>, take: Option<&Take<'_>>) -> Vec<Found> {
-        if self.prunes(scope, path) {
+    fn walk_root(
+        &self,
+        path: &HashedPath,
+        scope: Scope<'a>,
+        take: Option<&Take<'_>>,
+    ) -> Vec<Found> {
+        if self.prunes(scope, path.as_path()) {
             return Vec::new();
         }
         let Ok(handle) = Handle::from_path(path) else {
@@ -684,7 +708,6 @@ impl<'a, 'p> Walk<'a, 'p> {
         };
         self.walk_dir(
             path,
-            path_hash(path),
             scope,
             &Ancestors {
                 handle: &handle,
@@ -694,16 +717,15 @@ impl<'a, 'p> Walk<'a, 'p> {
         )
     }
 
-    /// Lists what `dir`, a resolved directory whose hash is `hash`, holds under
-    /// `scope`, in listing order. A subdirectory is walked by a task of its
-    /// own, and its results are placed back among the entries in order.
-    /// `ancestors` holds `dir` and the directories above it in this walk. The
-    /// files of `dir` that only this walk lists are handed to `take` as one
-    /// batch, once its entries are read.
+    /// Lists what `dir`, a resolved directory, holds under `scope`, in listing
+    /// order. A subdirectory is walked by a task of its own, and its results
+    /// are placed back among the entries in order. `ancestors` holds `dir` and
+    /// the directories above it in this walk. The files of `dir` that only
+    /// this walk lists are handed to `take` as one batch, once its entries are
+    /// read.
     fn walk_dir(
         &self,
-        dir: &Path,
-        hash: PathHash,
+        dir: &HashedPath,
         scope: Scope<'a>,
         ancestors: &Ancestors<'_>,
         take: Option<&Take<'_>>,
@@ -712,9 +734,9 @@ impl<'a, 'p> Walk<'a, 'p> {
             return Vec::new();
         };
         // The files listed here are all in `dir`, so they share its owner.
-        let owner = self.packages.owner_of_dir(dir);
+        let owner = self.packages.owner_of_dir(dir.as_path());
         // The role of the files of `dir` when one walk reaches it.
-        let sole = match self.starts.reaching(dir, &self.covering) {
+        let sole = match self.starts.reaching(dir.as_path(), &self.covering) {
             Reach::Sole(role) if take.is_some() => Some(role),
             _ => None,
         };
@@ -732,17 +754,16 @@ impl<'a, 'p> Walk<'a, 'p> {
                 if excludes(scope.excluded, name) {
                     continue;
                 }
-                let child = dir.join(name);
+                let child = dir.child(name);
                 match fs::canonicalize(&child) {
                     Ok(target) => steps.push(Step::Found(Found::Link(target))),
                     // A dangling `.php` link is listed under its own path, so
                     // that reading it reports that path.
-                    Err(_) if is_php(&child) && !(scope.outside && self.under_root(&child)) => {
-                        steps.push(Step::Found(Found::File(
-                            child,
-                            child_hash(hash, name),
-                            owner,
-                        )));
+                    Err(_)
+                        if is_php(child.as_path())
+                            && !(scope.outside && self.under_root(child.as_path())) =>
+                    {
+                        steps.push(Step::Found(Found::File(child, owner)));
                     }
                     Err(_) => {}
                 }
@@ -750,28 +771,28 @@ impl<'a, 'p> Walk<'a, 'p> {
                 if excludes(scope.excluded, name) {
                     continue;
                 }
-                let child = dir.join(name);
-                if (scope.outside && self.under_root(&child)) || self.prunes(scope, &child) {
+                let child = dir.child(name);
+                if (scope.outside && self.under_root(child.as_path()))
+                    || self.prunes(scope, child.as_path())
+                {
                     continue;
                 }
                 steps.push(Step::Dir);
-                dirs.push((child, child_hash(hash, name)));
+                dirs.push(child);
             } else if is_php(Path::new(name)) {
-                let child = dir.join(name);
-                if !(scope.outside && self.under_root(&child)) {
-                    let file_hash = child_hash(hash, name);
+                let child = dir.child(name);
+                if !(scope.outside && self.under_root(child.as_path())) {
                     if let Some(role) = sole
-                        && !self.starts.files.contains_key(&child)
+                        && !self.starts.files.contains_key(child.as_path())
                     {
                         batch.push(Listed {
                             path: child.clone(),
-                            hash: file_hash,
                             role,
                             stub: role == Role::Stub,
                             owner: Some(owner),
                         });
                     }
-                    steps.push(Step::Found(Found::File(child, file_hash, owner)));
+                    steps.push(Step::Found(Found::File(child, owner)));
                 }
             }
         }
@@ -782,9 +803,7 @@ impl<'a, 'p> Walk<'a, 'p> {
         }
         let subtrees: Vec<Vec<Found>> = dirs
             .par_iter()
-            .map(|(child, child_hash)| {
-                self.walk_subdirectory(child, *child_hash, scope, ancestors, take)
-            })
+            .map(|child| self.walk_subdirectory(child, scope, ancestors, take))
             .collect();
         let mut subtrees = subtrees.into_iter();
         let mut found = Vec::new();
@@ -797,13 +816,12 @@ impl<'a, 'p> Walk<'a, 'p> {
         found
     }
 
-    /// Walks the subdirectory `child`, whose hash is `hash`, unless it is one of
-    /// `ancestors`, which ends the loop. The subdirectory's handle is opened
-    /// here, so only the directories being walked hold one.
+    /// Walks the subdirectory `child`, unless it is one of `ancestors`, which
+    /// ends the loop. The subdirectory's handle is opened here, so only the
+    /// directories being walked hold one.
     fn walk_subdirectory(
         &self,
-        child: &Path,
-        hash: PathHash,
+        child: &HashedPath,
         scope: Scope<'a>,
         ancestors: &Ancestors<'_>,
         take: Option<&Take<'_>>,
@@ -818,7 +836,6 @@ impl<'a, 'p> Walk<'a, 'p> {
         }
         self.walk_dir(
             child,
-            hash,
             scope,
             &Ancestors {
                 handle: &handle,
@@ -846,26 +863,19 @@ impl<'a, 'p> Walk<'a, 'p> {
     fn merge(&mut self, found: Vec<Found>, role: Role, excluded: &'a [&'a str]) {
         for item in found {
             match item {
-                Found::File(path, hash, owner) => self.place(path, hash, role, owner),
+                Found::File(path, owner) => self.place(path, role, owner),
                 Found::Link(target) => self.targets[role.index()].push_back((target, excluded)),
             }
         }
     }
 
-    /// Places a listed file at its resolved path, whose hash is `hash` and
-    /// whose owner is `owner`, under the walk's role. A file listed again keeps
-    /// the strongest role of its listings; its owner is the same, as the owner
-    /// depends on the path. A file the tree cannot place is kept aside.
-    fn place(
-        &mut self,
-        path: PathBuf,
-        hash: PathHash,
-        role: Role,
-        owner: Option<composer::PackageOwner>,
-    ) {
+    /// Places a listed file at its resolved path, whose owner is `owner`, under
+    /// the walk's role. A file listed again keeps the strongest role of its
+    /// listings; its owner is the same, as the owner depends on the path. A
+    /// file the tree cannot place is kept aside.
+    fn place(&mut self, path: HashedPath, role: Role, owner: Option<composer::PackageOwner>) {
         let listed = Listed {
             path,
-            hash,
             role,
             stub: role == Role::Stub,
             owner: Some(owner),
@@ -880,12 +890,12 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// is resolved once per walk, with the file's name joined to it. A link, a
     /// path ending in `.` or `..`, and a path that does not exist are left to
     /// `resolve`.
-    fn resolve_file(&mut self, path: &Path) -> PathBuf {
+    fn resolve_file(&mut self, path: &Path) -> HashedPath {
         let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-            return resolve(path);
+            return HashedPath::new(resolve(path));
         };
         if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
-            return resolve(path);
+            return HashedPath::new(resolve(path));
         }
         let parent = if parent.as_os_str().is_empty() {
             Path::new(".")
@@ -893,13 +903,8 @@ impl<'a, 'p> Walk<'a, 'p> {
             parent
         };
         match self.directories.entry_ref(parent) {
-            EntryRef::Occupied(entry) => entry.get().join(name),
-            EntryRef::Vacant(entry) => {
-                let directory = resolve(parent);
-                let identity = directory.join(name);
-                entry.insert(directory);
-                identity
-            }
+            EntryRef::Occupied(entry) => entry.get().child(name),
+            EntryRef::Vacant(entry) => entry.insert(HashedPath::new(resolve(parent))).child(name),
         }
     }
 
@@ -925,18 +930,4 @@ fn excludes(excluded: &[&str], name: &OsStr) -> bool {
 
 fn is_php(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "php")
-}
-
-/// The hash of `path`, computed from its components, so that paths equal as
-/// `Path`s hash alike. It is `child_hash` folded over the components, which
-/// lets a walk extend a directory's hash by each entry's name.
-pub(crate) fn path_hash(path: &Path) -> PathHash {
-    path.components()
-        .fold(0, |hash, component| child_hash(hash, component.as_os_str()))
-}
-
-/// The hash of the path that `name` makes under a directory of hash `parent`.
-fn child_hash(parent: PathHash, name: &OsStr) -> PathHash {
-    const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
-    (parent.rotate_left(5) ^ FxBuildHasher.hash_one(name)).wrapping_mul(SEED)
 }

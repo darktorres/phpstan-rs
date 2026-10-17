@@ -3,16 +3,18 @@
 //! load, by whichever asks for it first, and every later ask gets that
 //! listing.
 
-use rustc_hash::FxHashMap;
+use hashbrown::{HashTable, hash_table};
 use std::ffi::{OsStr, OsString};
 use std::fs::FileType;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+
+use crate::hashed_path::HashedPath;
 
 /// The directories a load has listed, by resolved path.
 #[derive(Default)]
 pub struct DirListings {
-    listed: Mutex<FxHashMap<PathBuf, Slot>>,
+    listed: Mutex<HashTable<(HashedPath, Slot)>>,
 }
 
 /// One directory's listing, read by the first ask. `None` when the directory
@@ -41,19 +43,20 @@ impl DirListings {
     /// The listing of `dir`, a resolved directory, or `None` when it cannot be
     /// read. It is read once: a later ask, from this thread or another, gets
     /// the same listing.
-    pub fn listing(&self, dir: &Path) -> Option<Arc<Listing>> {
+    pub fn listing(&self, dir: &HashedPath) -> Option<Arc<Listing>> {
         let slot = {
             let mut listed = self.listed.lock().unwrap_or_else(PoisonError::into_inner);
-            match listed.get(dir) {
-                Some(slot) => Arc::clone(slot),
-                None => {
+            match listed.entry(dir.hash(), |(path, _)| path == dir, |(path, _)| path.hash()) {
+                hash_table::Entry::Occupied(entry) => Arc::clone(&entry.get().1),
+                hash_table::Entry::Vacant(entry) => {
                     let slot = Slot::default();
-                    listed.insert(dir.to_path_buf(), Arc::clone(&slot));
+                    entry.insert((dir.clone(), Arc::clone(&slot)));
                     slot
                 }
             }
         };
-        slot.get_or_init(|| read_listing(dir).map(Arc::new)).clone()
+        slot.get_or_init(|| read_listing(dir.as_path()).map(Arc::new))
+            .clone()
     }
 
     /// Forgets every listing. A listing already handed out stays valid for its

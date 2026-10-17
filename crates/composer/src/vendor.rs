@@ -30,6 +30,7 @@ use std::sync::Arc;
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 
 use crate::dir_listings::{DirListings, Listing};
+use crate::hashed_path::HashedPath;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {
@@ -302,9 +303,12 @@ impl<'p> Resolver<'p> {
     /// with an entry that could not be read is no listing: the entries it
     /// lacks are not known.
     fn list(&mut self, dir: &Path) -> Option<Listed> {
-        let canonical = self.canonical_dir(dir)?;
+        let canonical = HashedPath::new(self.canonical_dir(dir)?);
         let listing = self.table.listing(&canonical)?;
-        listing.complete.then_some(Listed { canonical, listing })
+        listing.complete.then(|| Listed {
+            canonical: canonical.into_path_buf(),
+            listing,
+        })
     }
 
     /// The canonical form of `dir`: its parent's, joined with its name,
@@ -503,8 +507,9 @@ fn listable_dir(dir: &Path, listable: &mut FxHashMap<PathBuf, bool>, table: &Dir
     if let Some(&known) = listable.get(dir) {
         return known;
     }
-    let known = std::fs::symlink_metadata(dir).is_ok_and(|metadata| metadata.is_dir())
-        && table.listing(dir).is_some();
-    listable.insert(dir.to_path_buf(), known);
+    let dir = HashedPath::new(dir.to_path_buf());
+    let known = std::fs::symlink_metadata(dir.as_path()).is_ok_and(|metadata| metadata.is_dir())
+        && table.listing(&dir).is_some();
+    listable.insert(dir.into_path_buf(), known);
     known
 }

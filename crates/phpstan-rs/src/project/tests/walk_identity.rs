@@ -3,9 +3,10 @@
 //! and a target no root holds is listed once, with the strongest role of the
 //! links that reach it.
 
-use super::super::walk::{FileIndex, FinalFiles, Listed, Role, Unstreamed, Walk, path_hash};
+use super::super::walk::{FileIndex, FinalFiles, Listed, Role, Unstreamed, Walk};
 use super::helpers::*;
 use composer::dir_listings::DirListings;
+use composer::hashed_path::path_hash;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -33,14 +34,14 @@ fn in_walk_order(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool
     walk.finish(&crate::project::worker_pool(), &Unstreamed)
         .files
         .into_iter()
-        .map(|listed| (listed.path, listed.role, listed.stub))
+        .map(|listed| (listed.path.into_path_buf(), listed.role, listed.stub))
         .collect()
 }
 
 fn sorted(listed: Vec<Listed>) -> Vec<(PathBuf, Role, bool)> {
     let mut listed: Vec<(PathBuf, Role, bool)> = listed
         .into_iter()
-        .map(|listed| (listed.path, listed.role, listed.stub))
+        .map(|listed| (listed.path.into_path_buf(), listed.role, listed.stub))
         .collect();
     listed.sort();
     listed
@@ -652,12 +653,6 @@ fn thread_pool(threads: usize) -> rayon::ThreadPool {
         .unwrap()
 }
 
-#[test]
-fn a_path_hashes_by_its_components() {
-    assert_eq!(path_hash(Path::new("/a/b/")), path_hash(Path::new("/a//b")));
-    assert_ne!(path_hash(Path::new("/a/b")), path_hash(Path::new("/a/c")));
-}
-
 /// The hash a walk gives each listed file is the hash of its path, and the
 /// index finds each file at its position.
 #[cfg(unix)]
@@ -672,8 +667,9 @@ fn a_listed_file_is_hashed_as_its_path_and_indexed_there() {
     assert!(!files.is_empty());
     let index = FileIndex::of(&files);
     for (at, file) in files.iter().enumerate() {
-        assert_eq!(file.hash, path_hash(&file.path), "{}", file.path.display());
-        assert_eq!(index.position(&files, &file.path), Some(at));
+        let path = file.path.as_path();
+        assert_eq!(file.path.hash(), path_hash(path), "{}", path.display());
+        assert_eq!(index.position(&files, path), Some(at));
     }
 }
 
@@ -710,7 +706,7 @@ fn a_listed_file_carries_the_package_that_owns_its_directory() {
     let owner = |name: &str| {
         let file = files
             .iter()
-            .find(|file| file.path.ends_with(name))
+            .find(|file| file.path.as_path().ends_with(name))
             .expect(name);
         file.owner.flatten().and_then(|owner| packages.name(owner))
     };

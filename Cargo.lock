@@ -1590,6 +1590,7 @@ dependencies = [
 name = "phpstan-rs-composer"
 version = "0.1.0"
 dependencies = [
+ "hashbrown 0.17.1",
  "phpstan-rs-syntax",
  "rustc-hash 2.1.3",
  "serde",

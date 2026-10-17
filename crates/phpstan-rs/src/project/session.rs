@@ -296,7 +296,7 @@ impl FinalFiles for StreamParse<'_> {
                             self.index_use_sites,
                         )
                     });
-                    (file.path, file.role, read)
+                    (file.path.into_path_buf(), file.role, read)
                 })
                 .collect();
             self.parsed
@@ -1355,7 +1355,9 @@ impl Session {
                 },
                 || {
                     super::file_table::FileTable::with_paths(
-                        ordered.iter().map(|file| (file.path.as_path(), file.hash)),
+                        ordered
+                            .iter()
+                            .map(|file| (file.path.as_path(), file.path.hash())),
                     )
                 },
             )
@@ -1379,7 +1381,7 @@ impl Session {
         project.insert_declarations(
             &self.pool,
             ordered.iter().zip(&parsed).filter_map(|(file, read)| {
-                declaration_of(&file.path, file.role == Role::Analysed, read)
+                declaration_of(file.path.as_path(), file.role == Role::Analysed, read)
             }),
         );
         project.insert_file_tables(
@@ -1400,13 +1402,15 @@ impl Session {
                     let ReadFile { text, parsed, .. } = *loaded;
                     project.insert_numbered_file(
                         id,
-                        &file.path,
+                        file.path.as_path(),
                         parsed,
                         text,
                         file.role == Role::Analysed,
                     );
                 }
-                Read::Unparsed(failure) => failures.push((file.path.clone(), failure.message)),
+                Read::Unparsed(failure) => {
+                    failures.push((file.path.as_path().to_path_buf(), failure.message))
+                }
                 Read::Unread => {}
             }
         }
@@ -1509,7 +1513,7 @@ impl Session {
         let mut slots: Vec<Option<Read>> = combined_files
             .iter()
             .map(|file| {
-                parsed.remove(&file.path).map(|(role, read)| {
+                parsed.remove(file.path.as_path()).map(|(role, read)| {
                     debug_assert_eq!(role, file.role, "a file is parsed under its listed role");
                     read
                 })
@@ -1542,7 +1546,7 @@ impl Session {
                     super::file_table::FileTable::with_paths(
                         combined_files
                             .iter()
-                            .map(|file| (file.path.as_path(), file.hash)),
+                            .map(|file| (file.path.as_path(), file.path.hash())),
                     )
                 },
             )
@@ -1583,12 +1587,12 @@ impl Session {
             context_files
                 .iter()
                 .zip(&context_parsed)
-                .filter_map(|(file, read)| declaration_of(&file.path, false, read))
+                .filter_map(|(file, read)| declaration_of(file.path.as_path(), false, read))
                 .chain(
                     analyze_files
                         .iter()
                         .zip(&analyze_parsed)
-                        .filter_map(|(file, read)| declaration_of(&file.path, true, read)),
+                        .filter_map(|(file, read)| declaration_of(file.path.as_path(), true, read)),
                 ),
         );
         project.insert_file_tables(
@@ -1627,7 +1631,7 @@ impl Session {
             .zip(context_numbers)
             .zip(context_parsed)
         {
-            let path = &file.path;
+            let path = file.path.as_path();
             match parsed {
                 Read::Loaded(loaded) => {
                     let ReadFile { text, parsed, .. } = *loaded;
@@ -1657,7 +1661,7 @@ impl Session {
             .zip(analyze_parsed)
             .enumerate()
         {
-            let path = &file.path;
+            let path = file.path.as_path();
             match parsed {
                 Read::Loaded(loaded) => {
                     let ReadFile { text, parsed, .. } = *loaded;
@@ -1667,7 +1671,7 @@ impl Session {
                 }
                 Read::Unparsed(failure) => {
                     skipped_analyze += 1;
-                    parse_failures.push((path.clone(), failure));
+                    parse_failures.push((path.to_path_buf(), failure));
                 }
                 Read::Unread => skipped_analyze += 1,
             }
@@ -1681,7 +1685,7 @@ impl Session {
         by_size.sort_by_key(|&index| std::cmp::Reverse(analyze_sizes[index]));
         let analyze_files_by_size = by_size
             .into_iter()
-            .map(|index| analyze_files[index].path.clone())
+            .map(|index| analyze_files[index].path.as_path().to_path_buf())
             .collect();
         Ok(Loaded {
             project,

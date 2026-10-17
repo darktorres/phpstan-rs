@@ -3286,7 +3286,7 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
         walk.finish(&worker_pool(), &walk::Unstreamed)
             .files
             .into_iter()
-            .map(|listed| listed.path),
+            .map(|listed| listed.path.into_path_buf()),
     );
 }
 

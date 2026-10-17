@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use composer::hashed_path::{PathHash, path_hash};
 use rayon::prelude::*;
 
-use super::walk::{PathHash, path_hash};
 use crate::file_id::FileId;
 
 /// A map from path to what is known of that file, which also numbers the
