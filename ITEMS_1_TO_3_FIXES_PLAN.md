@@ -30,8 +30,10 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     path carries its parent's hash too (its Built).
   - R3 (`75b628f8`): −80.4 M off, with no wall change beyond the noise. A root's state is a
     fold of the carried rule over its ancestors, not the old scan (its Built).
+  - R4 (`1ba57cc0`): −47.0 M off, of which the main thread's −27.8 M is the row's, with no
+    wall change beyond the noise over 60 pairs.
 
-  R4 is next.
+  R6 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -40,7 +42,7 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   `class_info.rs`, `function_sig.rs` and `provenance.rs`, R15 `allocator.rs`, `lib.rs` and
   `main.rs`, R2 `walk.rs`, `session.rs`, `file_table.rs`, `project.rs`, `lsp.rs`,
   `dir_listings.rs` and `vendor.rs`, with `PathHash` and `path_hash` now in the composer
-  crate's `hashed_path.rs`, and R3 `walk.rs`.
+  crate's `hashed_path.rs`, R3 `walk.rs`, and R4 `session.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -549,6 +551,11 @@ the table already uses.
 **Test.** No behaviour changes; the `walk_identity.rs` and `load_text.rs` tests are its check.
 
 **Measure.** Off callgrind: the main thread's `Path::hash` under `Session::load`.
+
+**Built** as `1ba57cc0`, as written: −47.0 M off, of which the main thread's −27.8 M is the
+row's (its `Path::hash` 53.4 M → 26.1 M). The first 20 pairs were +55.5 ms (p = 0.145) for
+a change of 2 to 8 ms, so 40 more were run: the 60 give +11.9 ms, p = 0.296. The ledger's
+LOAD-8.4 has the numbers.
 
 ### 8. R6: vendor discovery stops hashing paths and stat-ing files
 
@@ -1081,6 +1088,8 @@ ours is noted, and a run it distorts is taken again.
   LOAD-8.3, 8.4 and 8.6 are READY.
 - Done with R3: LOAD-8.3's row, with the fold that makes a root's state; its row in §1's
   table; LOAD-8.7's known site, the file roots' reach; LOAD-8.10 is READY.
+- Done with R4: LOAD-8.4's row, with the 60 pairs and the peak RSS set that did not
+  reproduce; its row in §1's table.
 - Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
   row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
