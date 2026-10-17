@@ -980,3 +980,131 @@ fn a_context_walk_stops_at_a_covering_root_below_it() {
     assert_eq!(sorted(handed), expected);
     assert_eq!(sorted(listing), expected);
 }
+
+/// What a walk hands over, in path order, what it lists, and its roots, in
+/// path order.
+type Outcome = (Vec<Listed>, Vec<Listed>, Vec<(PathBuf, Role)>);
+
+/// Runs `walk` as `handed_over` does, and adds its roots.
+fn walked_with_roots(walk: Walk<'_, '_>) -> Outcome {
+    let handed = Handed::default();
+    let walked = walk.finish(&crate::project::worker_pool(), &handed);
+    let mut handed = handed.0.into_inner().unwrap();
+    handed.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut roots: Vec<(PathBuf, Role)> = walked
+        .roots
+        .iter()
+        .map(|root| (root.path.clone(), root.role))
+        .collect();
+    roots.sort();
+    (handed, walked.files, roots)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_path_that_discovery_resolved_is_walked_as_when_the_walk_resolves_it() {
+    use composer::vendor::VendorPath;
+
+    let dir = TempDir::new("walk_vendor_resolved");
+    let base = resolved(&dir);
+    dir.write("composer.json", "{}");
+    dir.write("vendor/composer/ClassLoader.php", "<?php");
+    dir.write("vendor/acme/a/src/A.php", "<?php");
+    dir.write("vendor/acme/a/src/deep/D.php", "<?php");
+    dir.write("vendor/acme/a/Extra.php", "<?php");
+    dir.write("vendor/acme/a/Target.php", "<?php");
+    std::os::unix::fs::symlink(
+        base.join("vendor/acme/a/Target.php"),
+        base.join("vendor/acme/a/Linked.php"),
+    )
+    .unwrap();
+    // A path-repository package, linked into `vendor/`.
+    dir.write("packages/b/src/B.php", "<?php");
+    dir.write("packages/b/Other.php", "<?php");
+    std::os::unix::fs::symlink(base.join("packages/b"), base.join("vendor/acme/b")).unwrap();
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'A' => $vendorDir . '/acme/a/src/A.php',
+    'Extra' => $vendorDir . '/acme/a/Extra.php',
+    'Linked' => $vendorDir . '/acme/a/Linked.php',
+    'Other' => $vendorDir . '/acme/b/Other.php',
+);
+"#,
+    );
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'A\\' => array($vendorDir . '/acme/a/src'),
+    'B\\' => array($vendorDir . '/acme/b/src'),
+);
+"#,
+    );
+
+    let listings = Arc::new(DirListings::default());
+    let found = composer::vendor::discover_vendor_context(&base, &listings);
+    let resolved_ones = |paths: &[VendorPath]| {
+        paths
+            .iter()
+            .filter(|path| matches!(path, VendorPath::Resolved(_)))
+            .count()
+    };
+    // `a/src`, `Extra.php` and `ClassLoader.php` are resolved; `b/src` and
+    // `Other.php` are kept as written, and `Linked.php` was resolved through
+    // its link.
+    assert_eq!(
+        (resolved_ones(&found.dirs), found.dirs.len()),
+        (1, 2),
+        "{:?}",
+        found.dirs
+    );
+    assert_eq!(
+        (resolved_ones(&found.files), found.files.len()),
+        (2, 4),
+        "{:?}",
+        found.files
+    );
+
+    let mut taken = Walk::new(Arc::clone(&listings), &NO_PACKAGES);
+    let mut resolving = Walk::new(Arc::clone(&listings), &NO_PACKAGES);
+    for dir in &found.dirs {
+        match dir {
+            VendorPath::Resolved(dir) => taken.add_resolved_dir(dir.clone(), Role::Context, &[]),
+            VendorPath::Unresolved(dir) => taken.add(dir, Role::Context, &[]),
+        }
+        resolving.add(dir.as_path(), Role::Context, &[]);
+    }
+    for file in &found.files {
+        match file {
+            VendorPath::Resolved(file) => taken.add_resolved_file(file.clone(), Role::Context),
+            VendorPath::Unresolved(file) => taken.add_file(file, Role::Context),
+        }
+        resolving.add_file(file.as_path(), Role::Context);
+    }
+    let taken = walked_with_roots(taken);
+    assert_eq!(taken, walked_with_roots(resolving));
+    // The files under the two directories are handed over, and so are the
+    // explicit files, each listed by its own walk alone.
+    let handed: Vec<PathBuf> = taken
+        .0
+        .iter()
+        .map(|listed| listed.path.as_path().to_path_buf())
+        .collect();
+    assert_eq!(
+        handed,
+        [
+            "packages/b/Other.php",
+            "packages/b/src/B.php",
+            "vendor/acme/a/Extra.php",
+            "vendor/acme/a/Target.php",
+            "vendor/acme/a/src/A.php",
+            "vendor/acme/a/src/deep/D.php",
+            "vendor/composer/ClassLoader.php",
+        ]
+        .map(|path| base.join(path))
+    );
+}

@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use composer::dir_listings::{DirListings, Listing};
-use composer::hashed_path::{HashedPath, PathHash, hashed_ancestors, path_hash};
+use composer::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors, path_hash};
 use composer::manifest::resolve;
 use hashbrown::hash_map::EntryRef;
 use hashbrown::hash_table::Entry;
@@ -653,29 +653,58 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// the walk does not enter a directory of such a name, nor follow a link of
     /// it, and the root itself is walked whatever its name.
     pub(crate) fn add(&mut self, path: &Path, role: Role, excluded: &'a [&'a str]) {
-        let identity = resolve(path);
+        let identity = Resolved::resolve(path);
+        if identity.as_path().is_dir() {
+            self.add_resolved_dir(identity, role, excluded);
+            return;
+        }
         self.roots.push(Root {
-            path: identity.clone(),
+            path: identity.as_path().to_path_buf(),
             role,
             stub: role == Role::Stub,
             excluded,
         });
-        if identity.is_dir() {
-            let scope = Scope {
-                role,
-                excluded,
-                outside: false,
-            };
-            self.jobs.push(Job::Dir {
-                path: HashedPath::new(identity),
-                scope,
-            });
-        } else if is_php(&identity) {
+        if is_php(identity.as_path()) {
             self.jobs.push(Job::File {
-                path: HashedPath::new(identity),
+                path: identity.into_hashed(),
                 role,
             });
         }
+    }
+
+    /// Adds `dir`, a resolved directory, as a root, as `add` adds one, without
+    /// resolving it again or asking the system what it is.
+    pub(crate) fn add_resolved_dir(&mut self, dir: Resolved, role: Role, excluded: &'a [&'a str]) {
+        self.roots.push(Root {
+            path: dir.as_path().to_path_buf(),
+            role,
+            stub: role == Role::Stub,
+            excluded,
+        });
+        let scope = Scope {
+            role,
+            excluded,
+            outside: false,
+        };
+        self.jobs.push(Job::Dir {
+            path: dir.into_hashed(),
+            scope,
+        });
+    }
+
+    /// Adds `file`, a resolved regular file, as a root, as `add_file` adds
+    /// one, without resolving it again.
+    pub(crate) fn add_resolved_file(&mut self, file: Resolved, role: Role) {
+        self.roots.push(Root {
+            path: file.as_path().to_path_buf(),
+            role,
+            stub: role == Role::Stub,
+            excluded: &[],
+        });
+        self.jobs.push(Job::File {
+            path: file.into_hashed(),
+            role,
+        });
     }
 
     /// Adds `path` as a root and lists it whatever its extension, as an

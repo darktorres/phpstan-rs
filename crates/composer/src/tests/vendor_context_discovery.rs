@@ -4,10 +4,20 @@
 
 use super::helpers::*;
 use crate::dir_listings::DirListings;
+use crate::hashed_path::Resolved;
 use crate::vendor::*;
+use std::path::PathBuf;
 use syntax::ast::*;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
+
+/// The paths of `listed`, resolved or not.
+fn paths(listed: &[VendorPath]) -> Vec<PathBuf> {
+    listed
+        .iter()
+        .map(|path| path.as_path().to_path_buf())
+        .collect()
+}
 
 #[test]
 fn no_composer_json_means_no_context() {
@@ -58,8 +68,16 @@ return array(
     let ctx = discover_vendor_context(dir.path(), &DirListings::default());
     let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
     let src_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src")).unwrap();
-    assert_eq!(ctx.files, vec![foo]);
-    assert_eq!(ctx.dirs, vec![src_dir]);
+    // Both are entries of listed directories that are not links, so the walk
+    // takes them as they are.
+    assert_eq!(
+        ctx.files,
+        vec![VendorPath::Resolved(Resolved::resolve(&foo))]
+    );
+    assert_eq!(
+        ctx.dirs,
+        vec![VendorPath::Resolved(Resolved::resolve(&src_dir))]
+    );
 }
 
 // Real code that constructs Composer's own bootstrap loader directly
@@ -87,7 +105,8 @@ return array();
     let class_loader =
         std::fs::canonicalize(dir.path().join("vendor/composer/ClassLoader.php")).unwrap();
     assert!(
-        ctx.files.contains(&class_loader),
+        ctx.files
+            .contains(&VendorPath::Resolved(Resolved::resolve(&class_loader))),
         "expected ClassLoader.php in {:?}",
         ctx.files
     );
@@ -152,20 +171,24 @@ class ComposerStaticInitTest
     // The vendor-rooted entries resolve: the PSR-4 directory, and a classmap
     // file beside it. The classmap file under the directory is left to the
     // directory's walk.
-    assert!(ctx.dirs.contains(&acme_dir), "got: {:?}", ctx.dirs);
-    assert!(ctx.files.contains(&other), "got: {:?}", ctx.files);
-    assert!(!ctx.files.contains(&foo), "got: {:?}", ctx.files);
+    assert!(paths(&ctx.dirs).contains(&acme_dir), "got: {:?}", ctx.dirs);
+    assert!(paths(&ctx.files).contains(&other), "got: {:?}", ctx.files);
+    assert!(!paths(&ctx.files).contains(&foo), "got: {:?}", ctx.files);
 
     // The `__DIR__ . '/../..'`-rooted (first-party, `app/`) entries
     // must be dropped by the vendor-only filter.
     let first_party_file = std::fs::canonicalize(dir.path().join("app/FirstParty.php")).unwrap();
     let first_party_dir = std::fs::canonicalize(dir.path().join("app")).unwrap();
     assert!(
-        !ctx.files.contains(&first_party_file),
+        !paths(&ctx.files).contains(&first_party_file),
         "got: {:?}",
         ctx.files
     );
-    assert!(!ctx.dirs.contains(&first_party_dir), "got: {:?}", ctx.dirs);
+    assert!(
+        !paths(&ctx.dirs).contains(&first_party_dir),
+        "got: {:?}",
+        ctx.dirs
+    );
 }
 
 #[test]
@@ -211,7 +234,12 @@ return array(
 
     let ctx = discover_vendor_context(dir.path(), &DirListings::default());
     assert_eq!(ctx.dirs.len(), 1, "{:?}", ctx.dirs);
-    assert!(ctx.dirs[0].ends_with("vendor/acme/b/src"), "{:?}", ctx.dirs);
+    // Kept as written, so the walk resolves it.
+    assert!(
+        matches!(&ctx.dirs[0], VendorPath::Unresolved(dir) if dir.ends_with("vendor/acme/b/src")),
+        "{:?}",
+        ctx.dirs
+    );
 }
 
 #[test]
@@ -254,15 +282,15 @@ return array(
     let lib = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
     // The directory loads `Bar.php`. `Foo.php` lies beside the directory, and
     // `helpers.inc` is not PHP, so the walk does not take it: both stay.
-    assert_eq!(ctx.dirs, vec![lib.join("src")]);
+    assert_eq!(paths(&ctx.dirs), vec![lib.join("src")]);
     assert_eq!(ctx.files.len(), 2, "got: {:?}", ctx.files);
     assert!(
-        ctx.files.contains(&lib.join("Foo.php")),
+        paths(&ctx.files).contains(&lib.join("Foo.php")),
         "got: {:?}",
         ctx.files
     );
     assert!(
-        ctx.files.contains(&lib.join("src/helpers.inc")),
+        paths(&ctx.files).contains(&lib.join("src/helpers.inc")),
         "got: {:?}",
         ctx.files
     );
@@ -308,7 +336,12 @@ return array(
     let baz = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src"))
         .unwrap()
         .join("hidden/Baz.php");
-    assert_eq!(ctx.files.contains(&baz), !listable, "got: {:?}", ctx.files);
+    assert_eq!(
+        paths(&ctx.files).contains(&baz),
+        !listable,
+        "got: {:?}",
+        ctx.files
+    );
 }
 
 // The discovery checks each file it leaves to a directory against the check
@@ -385,7 +418,7 @@ return array(
     let mut kept: Vec<&str> = ctx
         .files
         .iter()
-        .map(|file| file.file_name().unwrap().to_str().unwrap())
+        .map(|file| file.as_path().file_name().unwrap().to_str().unwrap())
         .collect();
     kept.sort_unstable();
     // `A1`, `A2`, `O` and `I` lie under directories the walks list, and so does

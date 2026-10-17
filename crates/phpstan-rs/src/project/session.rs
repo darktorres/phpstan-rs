@@ -17,6 +17,7 @@ use rayon::prelude::*;
 
 use composer::dir_listings::DirListings;
 use composer::hashed_path::HashedPath;
+use composer::vendor::VendorPath;
 use config::ConfigFile;
 use serde::Deserialize;
 
@@ -1084,14 +1085,32 @@ impl Session {
             walk.add(&self.root.join(dir), Role::Analysed, excluded);
         }
         // The vendor context was being found while the analysed files were
-        // listed.
+        // listed. A path that discovery resolved is taken as it is.
         for vendor in &self.vendors {
             let found = vendor.get();
-            for dir in found.dirs.iter().filter(|d| !self.is_promoted(d)) {
-                walk.add(&self.root.join(dir), Role::Context, &[]);
+            for dir in found.dirs.iter().filter(|d| !self.is_promoted(d.as_path())) {
+                match dir {
+                    VendorPath::Resolved(dir) => {
+                        walk.add_resolved_dir(dir.clone(), Role::Context, &[]);
+                    }
+                    VendorPath::Unresolved(dir) => {
+                        walk.add(&self.root.join(dir), Role::Context, &[]);
+                    }
+                }
             }
-            for file in found.files.iter().filter(|f| !self.is_promoted(f)) {
-                walk.add_file(&self.root.join(file), Role::Context);
+            for file in found
+                .files
+                .iter()
+                .filter(|f| !self.is_promoted(f.as_path()))
+            {
+                match file {
+                    VendorPath::Resolved(file) => {
+                        walk.add_resolved_file(file.clone(), Role::Context)
+                    }
+                    VendorPath::Unresolved(file) => {
+                        walk.add_file(&self.root.join(file), Role::Context);
+                    }
+                }
             }
         }
         for file in &self.scan_files {

@@ -2,7 +2,8 @@
 //! and carried with it, so that a table keyed by such paths finds one without
 //! hashing it again. The hash is folded over the components, so paths equal
 //! as `Path`s hash alike, and a directory's hash extends to each of its
-//! entries by the entry's name.
+//! entries by the entry's name. A `Resolved` path is one that resolving gives
+//! back as it is, so a walk takes it without resolving it again.
 
 use std::cmp::Ordering;
 use std::ffi::OsStr;
@@ -96,6 +97,38 @@ impl Ord for HashedPath {
 impl PartialOrd for HashedPath {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+/// A path that `manifest::resolve` gives back as it is, with its hashes: its
+/// links followed and its `.` and `..` taken out. `resolve` makes one, and the
+/// vendor discovery makes one where a directory's listing shows that a path is
+/// already resolved; nothing else does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resolved(HashedPath);
+
+impl Resolved {
+    /// `path`, resolved.
+    pub fn resolve(path: &Path) -> Self {
+        Resolved(HashedPath::new(crate::manifest::resolve(path)))
+    }
+
+    /// `path`, which the caller knows to be resolved.
+    pub(crate) fn known(path: HashedPath) -> Self {
+        debug_assert_eq!(
+            crate::manifest::resolve(path.as_path()),
+            path.as_path(),
+            "the path must be resolved"
+        );
+        Resolved(path)
+    }
+
+    pub fn as_path(&self) -> &Path {
+        self.0.as_path()
+    }
+
+    pub fn into_hashed(self) -> HashedPath {
+        self.0
     }
 }
 

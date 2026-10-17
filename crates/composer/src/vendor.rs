@@ -28,21 +28,43 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use std::cell::OnceCell;
 use std::ffi::OsStr;
+use std::fs::FileType;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 
 use crate::dir_listings::{DirListings, Listing};
-use crate::hashed_path::{HashedPath, PathHash, hashed_ancestors};
+use crate::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {
     /// Exact files to load (classmap/files entries), except the PHP files that
     /// the walk of a directory of `dirs` lists.
-    pub files: Vec<PathBuf>,
+    pub files: Vec<VendorPath>,
     /// Directories to recursively load (PSR-4 base dirs).
-    pub dirs: Vec<PathBuf>,
+    pub dirs: Vec<VendorPath>,
+}
+
+/// A path the vendor context lists.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VendorPath {
+    /// A resolved path of the kind its entry names, by its directory's
+    /// listing: a directory for a directory to load, a regular file for a
+    /// file. The walk takes it as it is.
+    Resolved(Resolved),
+    /// A path the walk resolves: one kept as written, or one resolved through
+    /// a link, whose own kind the listing does not give.
+    Unresolved(PathBuf),
+}
+
+impl VendorPath {
+    pub fn as_path(&self) -> &Path {
+        match self {
+            VendorPath::Resolved(path) => path.as_path(),
+            VendorPath::Unresolved(path) => path,
+        }
+    }
 }
 
 /// Discovers `vendor/` context for the Composer project rooted at
@@ -76,21 +98,7 @@ pub fn discover_vendor_context(project_dir: &Path, listings: &DirListings) -> Ve
     std::panic::set_hook(Box::new(|_| {}));
     let entries = discover_inner(&composer_dir, &vendor_dir, &base_dir, listings);
     std::panic::set_hook(default_hook);
-    let mut ctx = entries.into_context(listings);
-
-    // Composer's own bootstrap loader class - unlike every other file
-    // this function discovers, it's never listed in any of the generated
-    // autoload maps at all (it's what *runs* them: `vendor/autoload.php`
-    // requires it directly, before the classmap/PSR-4 mechanisms it
-    // reads even exist). Present unconditionally whenever
-    // `vendor/composer/` exists at all, so always worth loading for
-    // context - real code occasionally constructs it directly for its
-    // own plugin/dynamic-autoloading needs.
-    let class_loader = composer_dir.join("ClassLoader.php");
-    if class_loader.is_file() {
-        ctx.files.push(class_loader);
-    }
-    ctx
+    entries.into_context(listings)
 }
 
 fn discover_inner(
@@ -99,27 +107,37 @@ fn discover_inner(
     base_dir: &Path,
     listings: &DirListings,
 ) -> Entries {
+    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, listings);
     let static_path = composer_dir.join("autoload_static.php");
-    if static_path.is_file()
-        && let Some(entries) = parse_static_file(&static_path, vendor_dir, base_dir, listings)
+    let mut entries = if static_path.is_file()
+        && let Some(entries) = parse_static_file(&static_path, &mut resolver)
     {
-        return entries;
-    }
-    parse_separate_files(composer_dir, vendor_dir, base_dir, listings)
+        entries
+    } else {
+        parse_separate_files(composer_dir, &mut resolver)
+    };
+    // Composer's own bootstrap loader class - unlike every other file
+    // this function discovers, it's never listed in any of the generated
+    // autoload maps at all (it's what *runs* them: `vendor/autoload.php`
+    // requires it directly, before the classmap/PSR-4 mechanisms it
+    // reads even exist). Present unconditionally whenever
+    // `vendor/composer/` exists at all, so always worth loading for
+    // context - real code occasionally constructs it directly for its
+    // own plugin/dynamic-autoloading needs.
+    entries.class_loader = resolver
+        .locate(&vendor_dir.join("composer").join("ClassLoader.php"))
+        .filter(|found| match found.kind {
+            Some(kind) => kind.is_file(),
+            None => found.path.as_path().is_file(),
+        });
+    entries
 }
 
-fn parse_static_file(
-    path: &Path,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    listings: &DirListings,
-) -> Option<Entries> {
-    let generated_dir = path.parent()?;
+fn parse_static_file(path: &Path, resolver: &mut Resolver<'_>) -> Option<Entries> {
     let stmts = parse_generated_file(path)?;
     let class = find_class_decl(&stmts)?;
 
     let mut entries = Entries::default();
-    let mut resolver = Resolver::new(vendor_dir, base_dir, generated_dir, listings);
     for prop in &class.def.properties {
         if !prop.is_static {
             continue;
@@ -136,14 +154,8 @@ fn parse_static_file(
     Some(entries)
 }
 
-fn parse_separate_files(
-    composer_dir: &Path,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    listings: &DirListings,
-) -> Entries {
+fn parse_separate_files(composer_dir: &Path, resolver: &mut Resolver<'_>) -> Entries {
     let mut entries = Entries::default();
-    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, listings);
     for name in ["autoload_classmap.php", "autoload_files.php"] {
         let path = composer_dir.join(name);
         if let Some(arr) = parse_top_level_array(&path) {
@@ -184,33 +196,58 @@ fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
     syntax::parse(&bytes).ok().map(|parsed| parsed.stmts)
 }
 
-/// What the generated files list, resolved: the files and the directories.
+/// What the generated files list, resolved: the files and the directories,
+/// and Composer's own loader class.
 #[derive(Default)]
 struct Entries {
-    files: Vec<HashedPath>,
-    dirs: Vec<HashedPath>,
+    files: Vec<Located>,
+    dirs: Vec<Located>,
+    class_loader: Option<Located>,
 }
 
 impl Entries {
     /// The context the entries give: each list without its repeats, and the
-    /// files without those that the walk of a directory lists. The lists keep
-    /// their order: nothing here needs one, as the walk's output does not
-    /// depend on the order of its roots.
+    /// files without those that the walk of a directory lists, then the
+    /// loader class. The lists keep their order: nothing here needs one, as
+    /// the walk's output does not depend on the order of its roots.
     fn into_context(mut self, table: &DirListings) -> VendorContext {
         keep_first(&mut self.dirs);
         drop_files_under_dirs(&mut self.files, &self.dirs, table);
         keep_first(&mut self.files);
+        let mut files: Vec<VendorPath> = self
+            .files
+            .into_iter()
+            .map(|file| file.into_vendor_path(FileType::is_file))
+            .collect();
+        files.extend(
+            self.class_loader
+                .map(|file| file.into_vendor_path(FileType::is_file)),
+        );
         VendorContext {
-            files: self
-                .files
-                .into_iter()
-                .map(HashedPath::into_path_buf)
-                .collect(),
+            files,
             dirs: self
                 .dirs
                 .into_iter()
-                .map(HashedPath::into_path_buf)
+                .map(|dir| dir.into_vendor_path(FileType::is_dir))
                 .collect(),
+        }
+    }
+}
+
+/// A path the resolver found, with its kind when its directory's listing
+/// gives the entry as no link, which makes the path resolved.
+struct Located {
+    path: HashedPath,
+    kind: Option<FileType>,
+}
+
+impl Located {
+    /// The path as the walk takes it: as it is when it is resolved and of the
+    /// kind that `is_kind` asks for, and resolved by the walk otherwise.
+    fn into_vendor_path(self, is_kind: fn(&FileType) -> bool) -> VendorPath {
+        match self.kind {
+            Some(kind) if is_kind(&kind) => VendorPath::Resolved(Resolved::known(self.path)),
+            _ => VendorPath::Unresolved(self.path.into_path_buf()),
         }
     }
 }
@@ -306,7 +343,7 @@ impl<'p> Resolver<'p> {
         }
     }
 
-    fn collect_files(&mut self, array: &Expr, out: &mut Vec<HashedPath>) {
+    fn collect_files(&mut self, array: &Expr, out: &mut Vec<Located>) {
         let ExprKind::ArrayLiteral(items) = &array.kind else {
             return;
         };
@@ -317,7 +354,7 @@ impl<'p> Resolver<'p> {
         }
     }
 
-    fn collect_dirs(&mut self, array: &Expr, out: &mut Vec<HashedPath>) {
+    fn collect_dirs(&mut self, array: &Expr, out: &mut Vec<Located>) {
         let ExprKind::ArrayLiteral(items) = &array.kind else {
             return;
         };
@@ -341,20 +378,25 @@ impl<'p> Resolver<'p> {
     /// resolves outside it but is written inside it is kept as written: a
     /// path-repository package is a `vendor/<name>` symlink to a directory
     /// outside `vendor/`, and still belongs to vendor context.
-    fn path(&mut self, expr: &Expr) -> Option<HashedPath> {
+    fn path(&mut self, expr: &Expr) -> Option<Located> {
         let raw = eval_concat(expr, self.vendor_dir, self.base_dir, self.generated_dir)?;
-        let raw = path_of(&raw);
+        self.locate(path_of(&raw))
+    }
+
+    /// `raw` resolved as `path` resolves an array value's path.
+    fn locate(&mut self, raw: &Path) -> Option<Located> {
+        let unknown = |path| Located { path, kind: None };
         let (Some(dir), Some(name)) = (raw.parent(), raw.file_name()) else {
-            return self.path_alone(raw);
+            return self.path_alone(raw).map(unknown);
         };
         if dir.as_os_str().is_empty() {
-            return self.path_alone(raw);
+            return self.path_alone(raw).map(unknown);
         }
         let vendor_dir = self.vendor_dir;
         let Some(listed) = self.listed(dir) else {
             // A directory that can't be listed (no permission to read it
             // but to pass through it) is still resolved as the system does.
-            return self.path_alone(raw);
+            return self.path_alone(raw).map(unknown);
         };
         let entry = listed.listing.entry(name)?;
         match entry.kind {
@@ -362,7 +404,10 @@ impl<'p> Resolver<'p> {
             // canonical form does.
             Some(kind) if !kind.is_symlink() => {
                 if listed.vendor.holds(name, vendor_dir) {
-                    return Some(listed.canonical.child(name));
+                    return Some(Located {
+                        path: listed.canonical.child(name),
+                        kind: Some(kind),
+                    });
                 }
             }
             // A link may lead anywhere, and an entry of no known type may be
@@ -370,11 +415,11 @@ impl<'p> Resolver<'p> {
             _ => {
                 let resolved = std::fs::canonicalize(raw).ok()?;
                 if resolved.starts_with(vendor_dir) {
-                    return Some(HashedPath::new(resolved));
+                    return Some(unknown(HashedPath::new(resolved)));
                 }
             }
         }
-        self.written_entry(dir, name)
+        self.written_entry(dir, name).map(unknown)
     }
 
     /// `raw`, which has no directory to look it up in or one that cannot be
@@ -440,8 +485,14 @@ impl<'p> Resolver<'p> {
 
     /// The canonical form of `dir`: its parent's, joined with its name,
     /// unless the parent lists it as a link, which is the one case that
-    /// needs the system to follow it.
+    /// needs the system to follow it. The vendor directory and its parent are
+    /// canonical already, so the directories above them are not read.
     fn canonical_dir(&mut self, dir: &Path) -> Option<HashedPath> {
+        for known in [self.vendor_dir, self.base_dir] {
+            if dir == known {
+                return Some(HashedPath::new(known.to_path_buf()));
+            }
+        }
         let Some(parent) = dir.parent() else {
             // The root.
             return canonicalized(dir);
@@ -562,12 +613,12 @@ fn append_concat(
 }
 
 /// Keeps the first of each path in `paths`, in their order.
-fn keep_first(paths: &mut Vec<HashedPath>) {
+fn keep_first(paths: &mut Vec<Located>) {
     let first: Vec<bool> = {
         let mut seen = HashTable::with_capacity(paths.len());
         paths
             .iter()
-            .map(|path| {
+            .map(|Located { path, .. }| {
                 match seen.entry(
                     path.hash(),
                     |seen: &&HashedPath| *seen == path,
@@ -589,16 +640,16 @@ fn keep_first(paths: &mut Vec<HashedPath>) {
 /// Drops the PHP files that the walk of a directory of `dirs` is sure to
 /// list: the walk lists them already, and listing them again adds nothing.
 /// Other files stay, as an explicit file is listed whatever its extension.
-fn drop_files_under_dirs(files: &mut Vec<HashedPath>, dirs: &[HashedPath], table: &DirListings) {
+fn drop_files_under_dirs(files: &mut Vec<Located>, dirs: &[Located], table: &DirListings) {
     let mut walks = Walks::of(dirs, table);
     #[cfg(test)]
     let (by_path, mut listable) = (
         dirs.iter()
-            .map(HashedPath::as_path)
+            .map(|dir| dir.path.as_path())
             .collect::<FxHashSet<&Path>>(),
         FxHashMap::default(),
     );
-    files.retain(|file| {
+    files.retain(|Located { path: file, .. }| {
         let listed = walks.list(file);
         #[cfg(test)]
         assert_eq!(
@@ -630,9 +681,9 @@ struct Walks<'d> {
 }
 
 impl<'d> Walks<'d> {
-    fn of(dirs: &'d [HashedPath], table: &'d DirListings) -> Self {
+    fn of(dirs: &'d [Located], table: &'d DirListings) -> Self {
         let mut roots = HashTable::with_capacity(dirs.len());
-        for dir in dirs {
+        for Located { path: dir, .. } in dirs {
             roots.insert_unique(dir.hash(), (dir, OnceCell::new()), |(dir, _)| dir.hash());
         }
         Walks {
