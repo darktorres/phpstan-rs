@@ -26,7 +26,8 @@ hotpath.workspace = true
 imbl.workspace = true
 lsp-server = "=0.10.0"
 lsp-types = "=0.97.0"
-libmimalloc-sys.workspace = true
+# `extended` declares the options API (`mi_option_set`); the C build is the same.
+libmimalloc-sys = { workspace = true, features = ["extended"] }
 memchr.workspace = true
 pcre2-sys = { version = "=0.2.10", optional = true }
 rayon = "=1.12.0"

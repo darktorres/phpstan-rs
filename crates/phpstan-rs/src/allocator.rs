@@ -11,6 +11,25 @@ use std::ffi::c_void;
 
 pub(crate) struct Allocator;
 
+/// mimalloc's `mi_option_purge_delay`, which the binding has no constant
+/// for: index 15 of `mimalloc.h`'s `mi_option_e`, between the binding's
+/// `mi_option_eager_commit_delay` (14) and `mi_option_use_numa_nodes` (16).
+const PURGE_DELAY: libmimalloc_sys::mi_option_t = 15;
+
+/// Stops the allocator purging: memory the process frees stays its own, for
+/// its later allocations, until it exits.
+///
+/// # Safety
+///
+/// No other thread may be running: `mi_option_set` writes the option with
+/// no synchronization, and the allocator reads it each time it schedules or
+/// makes a purge.
+pub(crate) unsafe fn keep_freed_memory() {
+    // SAFETY: the caller runs no other thread, so nothing reads the option
+    // while it is written.
+    unsafe { libmimalloc_sys::mi_option_set(PURGE_DELAY, -1) }
+}
+
 /// Whether a block `mi_malloc` serves for `size` bytes is aligned to
 /// `align` without being asked: blocks are multiples of 8 bytes in pages
 /// aligned to far more, and a block whose size is a multiple of 16 starts
@@ -66,5 +85,23 @@ unsafe impl GlobalAlloc for Allocator {
                     as *mut u8
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_purge_delay_option_is_the_one_whose_default_is_a_second() {
+        // An environment that sets the option changes what it reads.
+        if ["MIMALLOC_PURGE_DELAY", "MIMALLOC_RESET_DELAY"]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some())
+        {
+            return;
+        }
+        // SAFETY: every option was read at load, so `mi_option_get` only
+        // reads; nothing in this test binary sets one.
+        let delay = unsafe { libmimalloc_sys::mi_option_get(super::PURGE_DELAY) };
+        assert_eq!(delay, 1000);
     }
 }

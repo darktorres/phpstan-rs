@@ -55,6 +55,21 @@ enum Command {
     ConvertBaseline { path: PathBuf },
 }
 
+impl Command {
+    /// Whether the command is a batch run, which keeps the memory it frees
+    /// until it exits. The server gives memory back after a large analysis,
+    /// and the bench measures the server's path.
+    fn keeps_freed_memory(&self) -> bool {
+        match self {
+            Command::Check { .. }
+            | Command::CheckProject(_)
+            | Command::Demo { .. }
+            | Command::ConvertBaseline { .. } => true,
+            Command::IncrementalBench { .. } | Command::Lsp => false,
+        }
+    }
+}
+
 #[hotpath::main]
 fn main() {
     // Held for the whole run; its `Drop` writes `dhat-heap.json` on
@@ -72,6 +87,13 @@ fn main() {
     };
 
     let cli = Cli::parse();
+    // The profiler's guard starts threads before this body runs.
+    let only_thread = !cfg!(feature = "hotpath");
+    #[allow(unsafe_code)]
+    if only_thread && cli.command.keeps_freed_memory() {
+        // SAFETY: no other thread has started.
+        unsafe { phpstan_rs::keep_freed_memory() }
+    }
     match cli.command {
         Command::Check { paths } => check::run_check(&paths),
         Command::CheckProject(args) => check_project::run_check_project_command(args),
