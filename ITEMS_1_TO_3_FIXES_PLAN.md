@@ -13,31 +13,34 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
 - **The decisions are ruled.** All seven were taken as recommended, and decision 7 was
   confirmed ("Decisions", below).
 - **The rows are being built,** since the user's second "go" (2026-10-17), in the order
-  below, one commit each, with a pathspec, since another session shares the checkout. R1
-  (`6016499f`), R11 (`a5a4d85f`) and R12 (`6705eedd`) are in, and their measurements are on
-  the ledger's rows (LOAD-8.1, LOAD-3.3, CACHE-12):
-  - R1: −381.2 M off, with no wall change beyond the noise.
-  - R11: −0.22 s of the off run's 1.98 s and −214 MiB of peak RSS, most of it the kernel's
-    page zeroing, since the parse reuses the freed trees' memory.
-  - R12: −54.3 ms of the warm run's 1.39 s (p = 0.009). The decodes moved from the main
-    thread into the merge's bucketing on the pool, so the warm Ir fell by only 31.8 M.
+  below, one commit each, with a pathspec, since another session shares the checkout. These
+  are in, and their measurements are on their ledger rows (LOAD-8.n for Rn; LOAD-3.3 for R11,
+  CACHE-12 for R12):
+  - R1 (`6016499f`): −381.2 M off, with no wall change beyond the noise.
+  - R11 (`a5a4d85f`): −0.22 s of the off run's 1.98 s and −214 MiB of peak RSS, most of it
+    the kernel's page zeroing, since the parse reuses the freed trees' memory.
+  - R12 (`6705eedd`): −54.3 ms of the warm run's 1.39 s (p = 0.009). The decodes moved from
+    the main thread into the merge's bucketing on the pool, so the warm Ir fell by only
+    31.8 M.
   - R15 (`d6ca3442`): −21.6 ms of the off run's 1.83 s (60 pairs, p = 0.031), for +18.9 MiB
     of peak RSS. After R11 the purges are fewer (745, 105.5 MiB, against 987, 154.8 MiB), so
     Step 0's 5.4% became about 1%. The batch commands' public function is `unsafe`, where
     the row said safe (its Change).
   - R2 (`68af1c72`, `276ed5ad`): −18.5 M off, with no wall change beyond the noise. The
     path carries its parent's hash too (its Built).
+  - R3 (`75b628f8`): −80.4 M off, with no wall change beyond the noise. A root's state is a
+    fold of the carried rule over its ancestors, not the old scan (its Built).
 
-  R3 is next.
+  R4 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
   built since move some of them: R1 changes `session.rs`, `project.rs`, `lsp.rs` and
   `source.rs`, R11 `session.rs` and `project.rs`, R12 `name_table.rs`, `members.rs`,
   `class_info.rs`, `function_sig.rs` and `provenance.rs`, R15 `allocator.rs`, `lib.rs` and
-  `main.rs`, and R2 `walk.rs`, `session.rs`, `file_table.rs`, `project.rs`, `lsp.rs`,
+  `main.rs`, R2 `walk.rs`, `session.rs`, `file_table.rs`, `project.rs`, `lsp.rs`,
   `dir_listings.rs` and `vendor.rs`, with `PathHash` and `path_hash` now in the composer
-  crate's `hashed_path.rs`.
+  crate's `hashed_path.rs`, and R3 `walk.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -512,6 +515,13 @@ the unplaceable fallback).
 
 **Measure.** Off callgrind: `Starts::reaching`, `prunes` and `walk_dir`.
 
+**Built** as `75b628f8`: −80.4 M off. A root's state is not the old scan: `Starts::reaching`
+folds the carried rule (`Starts::below`) from the top over the root's ancestors, which gives
+the same state, since a walk's exclusions apply only below its root. The old scan is the test
+oracle, `reach_by_ancestors`, and `walk_dir` asserts the carried state against it in every
+walk the unit tests make. The fold is left for the file roots (16.1 M, one per explicit file),
+which R7 lists. The ledger's LOAD-8.3 has the numbers.
+
 ### 7. R4: the walk's hand-over keyed by the carried hash
 
 *LOAD-8.4. An Ir row. Needs R2.*
@@ -942,6 +952,10 @@ accounts for by caller (`Components::next`, `parse_next_component_back`, `next_b
   file). R8 removes the first and R7 the others: the absolute path is a field of the table's
   slot, computed when the file is numbered, and the bindings that match a file are found once,
   by the file's carried components, not by a `starts_with` per binding per check.
+- The file roots' reach, 16.1 M at `75b628f8` (R3's Built): `Starts::file_alone`, inlined into
+  `Walk::run`, folds each explicit file's directory from the top (`Path::parent` 6.4 M,
+  `Starts::below` 6.2 M, `hashed_ancestors` 3.3 M), once per file, 1,744 vendor files on
+  Piwigo, which share far fewer directories.
 
 **Change.** Enumerate every caller from a fresh profile, taken after the rows before it (R2
 removes some), and replace each with data the walk already holds: a listed path's directory,
@@ -1065,6 +1079,8 @@ ours is noted, and a run it distorts is taken again.
   in §1's table, whose Ir comes from R2's baseline run.
 - Done with R2: LOAD-8.2's row, with the parent's hash the path carries; its row in §1's table;
   LOAD-8.3, 8.4 and 8.6 are READY.
+- Done with R3: LOAD-8.3's row, with the fold that makes a root's state; its row in §1's
+  table; LOAD-8.7's known site, the file roots' reach; LOAD-8.10 is READY.
 - Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
   row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
