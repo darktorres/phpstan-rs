@@ -11,7 +11,7 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-17, `a5d61611` on branch `callgrind-20g`. Counts below were
+State as of 2026-10-17, `5cca45c1` on branch `callgrind-20g`. Counts below were
 read from the files on that date. This file covers this branch only.
 
 ## Where to resume
@@ -181,7 +181,7 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 2: LOAD-2.1 and 2.8, then 2.2 to 2.7.
+- Item 2: LOAD-2.8 (its third part waits on LOAD-2.3), then 2.2 to 2.7.
 - Item 3: LOAD-3.2 (3.1 waits on REG-16.4, level 2).
 - Item 5: LOAD-4.3, 4.5 and 4.7 (4.4 waits on LOAD-2.5).
 - Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).

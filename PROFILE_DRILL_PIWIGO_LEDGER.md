@@ -203,7 +203,7 @@ These rows are open with every need met:
 
 - **CACHE-8** (heap H1), a memory row. With CHECK-4.2 (off P11, under CHECK below), it is one of the two off-drill rows nothing blocks.
 - **LOAD:**
-  - LOAD-2.1, and LOAD-2.8 except its third part;
+  - LOAD-2.8 except its third part;
   - LOAD-3.2;
   - LOAD-4.3, 4.5 and 4.7;
   - LOAD-5.4.
@@ -692,7 +692,7 @@ Merging the sources into one list found six places where two of them disagree, o
 | LOAD-1.7 | **Folders.** Each workspace folder has its own session and project, and a document belongs to the deepest folder that contains it | 20 G 1 | DONE `11e820f8`, `b97bdbd2` | LOAD-1.3, LOAD-1.4 |
 | LOAD-1.8 | **Off the message loop.** The load runs on the pool and reports through `$/progress`; edits that arrive meanwhile are queued as overlays | 20 G 1 | DONE `99b1c2e4` | LOAD-1.4 |
 | LOAD-2 | A parallel walk: one listing per directory, path data from the walk, each path stored once | 20 G 2 | OPEN | — |
-| LOAD-2.1 | **One listing per directory per load.** The vendor resolver's listings become the walk's directory table. The vendor context lists each file once: a classmap or `files` entry under one of its PSR-4 directories is dropped at discovery, by a trie of the resolved directories. The stub directories are walked once, as stubs | 20 G 2 | READY | — |
+| LOAD-2.1 | **One listing per directory per load.** The vendor resolver's listings become the walk's directory table. The vendor context lists each file once: a classmap or `files` entry under one of its PSR-4 directories is dropped at discovery, by a trie of the resolved directories. The stub directories are walked once, as stubs | 20 G 2 | DONE `3d2dc7c3`, `08877e58`, `5cca45c1`; the drop is a guard on each file's directories (`walked_by_a_directory`), not a trie, which is not exact for a directory that cannot be read | — |
 | LOAD-2.2 | **One task per directory, on the pool.** Entries are sorted by name bytes, and each entry's kind comes from the dirent. Links follow LOAD-1.1's rules, with cycles found against the task's ancestors. The subtrees of stronger roots and of promoted packages are pruned, so each file is listed once and its role is final before its parse. `collect_php_files_excluding`, `path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` are deleted | 20 G 2 | OPEN; a link cycle's tree is listed once, a delta, approved (VAL-2.2) | LOAD-1.1, LOAD-1.2 |
 | LOAD-2.3 | **Spellings built, not respelled.** A task carries its directory's configured spelling, resolved path and path hash; a child's are its parent's plus its name | 20 G 2 | OPEN | LOAD-2.2 |
 | LOAD-2.4 | **Parsing starts as directories are listed.** Each listed directory's PHP files go to the pool as one task, parsed with the worker thread's name cache, which the load owns and clears at its end | 20 G 2 | OPEN | LOAD-2.2 |
