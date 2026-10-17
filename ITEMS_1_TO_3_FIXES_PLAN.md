@@ -452,6 +452,11 @@ the most proper, with its reason; none is decided until the user rules on it.
      `resolve_deferred_value_of`, `flatten_traits`; ledger line 1178).
    - A row here would parallelize code that REG-7 deletes. The cost stays until REG-7,
      which waits on REG-16.3.
+   - The stretch's other passes have owners too (read in `run_finishing_passes`,
+     `project.rs:1507`, on 2026-10-17). REG-7.2 to 7.4 take the `@method` tags, the
+     imported aliases, the assertion step, the property hooks, the mixins and the
+     constant-named types. REG-4.2 (READY) deletes `canonicalize_class_name_case`. Only
+     `infer_global_variables_of` stays: it is the one whole-program pass REG-7.8 keeps.
 2. **The page zeroing and the purging** (measured; Kernel time).
    - *Recommended: R15, and no change to the huge pages.* The zeroing is the first touch
      of the footprint, which only a smaller footprint lowers (R11).
