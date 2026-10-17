@@ -3,12 +3,12 @@
 //! and a target no root holds is listed once, with the strongest role of the
 //! links that reach it.
 
-use super::super::walk::{FileIndex, Listed, Role, Walk, path_hash};
+use super::super::walk::{FileIndex, FinalFiles, Listed, Role, Unstreamed, Walk, path_hash};
 use super::helpers::*;
 use composer::dir_listings::DirListings;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 
 /// The packages the walks here are given: none, so no file they list has an
 /// owner.
@@ -30,7 +30,7 @@ fn in_walk_order(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool
     for (path, role, excluded) in roots {
         walk.add(path, *role, excluded);
     }
-    walk.finish(&crate::project::worker_pool())
+    walk.finish(&crate::project::worker_pool(), &Unstreamed)
         .files
         .into_iter()
         .map(|listed| (listed.path, listed.role, listed.stub))
@@ -79,7 +79,10 @@ fn a_file_under_two_roots_is_listed_once_under_its_resolved_path() {
     walk.add(&base.join("proj"), Role::Analysed, &[]);
 
     assert_eq!(
-        sorted(walk.finish(&crate::project::worker_pool()).files),
+        sorted(
+            walk.finish(&crate::project::worker_pool(), &Unstreamed)
+                .files
+        ),
         vec![
             (base.join("proj/src/a.php"), Role::Analysed, false),
             (base.join("proj/top.php"), Role::Analysed, false),
@@ -164,7 +167,7 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
     by_walk.add(&file, Role::Context, &[]);
     assert!(
         by_walk
-            .finish(&crate::project::worker_pool())
+            .finish(&crate::project::worker_pool(), &Unstreamed)
             .files
             .is_empty()
     );
@@ -172,7 +175,11 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
     let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&file, Role::Context);
     assert_eq!(
-        sorted(explicit.finish(&crate::project::worker_pool()).files),
+        sorted(
+            explicit
+                .finish(&crate::project::worker_pool(), &Unstreamed)
+                .files
+        ),
         vec![(file.clone(), Role::Context, false)]
     );
 }
@@ -426,7 +433,11 @@ fn an_explicit_link_is_listed_under_its_target() {
     let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("link.php"), Role::Context);
     assert_eq!(
-        sorted(explicit.finish(&crate::project::worker_pool()).files),
+        sorted(
+            explicit
+                .finish(&crate::project::worker_pool(), &Unstreamed)
+                .files
+        ),
         vec![(base.join("real/lib.php"), Role::Context, false)]
     );
 }
@@ -444,7 +455,11 @@ fn explicit_files_under_a_linked_directory_are_listed_under_its_target() {
     explicit.add_file(&base.join("alias/lib.php"), Role::Context);
     explicit.add_file(&base.join("alias/other.php"), Role::Context);
     assert_eq!(
-        sorted(explicit.finish(&crate::project::worker_pool()).files),
+        sorted(
+            explicit
+                .finish(&crate::project::worker_pool(), &Unstreamed)
+                .files
+        ),
         vec![
             (base.join("real/lib.php"), Role::Context, false),
             (base.join("real/other.php"), Role::Context, false),
@@ -462,7 +477,11 @@ fn an_explicit_file_spelled_through_dot_dot_is_listed_under_its_resolved_path() 
     let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("proj/config/../lib.php"), Role::Context);
     assert_eq!(
-        sorted(explicit.finish(&crate::project::worker_pool()).files),
+        sorted(
+            explicit
+                .finish(&crate::project::worker_pool(), &Unstreamed)
+                .files
+        ),
         vec![(base.join("proj/lib.php"), Role::Context, false)]
     );
 }
@@ -476,7 +495,11 @@ fn a_missing_explicit_file_is_listed_under_its_path() {
     let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("proj/missing.php"), Role::Context);
     assert_eq!(
-        sorted(explicit.finish(&crate::project::worker_pool()).files),
+        sorted(
+            explicit
+                .finish(&crate::project::worker_pool(), &Unstreamed)
+                .files
+        ),
         vec![(base.join("proj/missing.php"), Role::Context, false)]
     );
 }
@@ -486,7 +509,10 @@ fn a_missing_explicit_file_is_listed_under_its_path() {
 fn walk_through(root: &Path, listings: &Arc<DirListings>) -> Vec<(PathBuf, Role, bool)> {
     let mut walk = Walk::new(Arc::clone(listings), &NO_PACKAGES);
     walk.add(root, Role::Analysed, &[]);
-    sorted(walk.finish(&crate::project::worker_pool()).files)
+    sorted(
+        walk.finish(&crate::project::worker_pool(), &Unstreamed)
+            .files,
+    )
 }
 
 #[test]
@@ -558,7 +584,7 @@ fn oracle_walk(tree: &OracleTree, pool: &rayon::ThreadPool) -> Vec<Listed> {
     walk.add(&tree.app.join("pkg/src"), Role::Context, &[]);
     walk.add(&tree.ctx, Role::Context, &[]);
     walk.add_file(&tree.ctx.join("c.php"), Role::Context);
-    walk.finish(pool).files
+    walk.finish(pool, &Unstreamed).files
 }
 
 /// Sets the mode of the unreadable directory, `0o000` or `0o755`.
@@ -677,7 +703,9 @@ fn a_listed_file_carries_the_package_that_owns_its_directory() {
 
     let mut walk = Walk::new(Arc::default(), &packages);
     walk.add(&base.join("src"), Role::Analysed, &[]);
-    let files = walk.finish(&crate::project::worker_pool()).files;
+    let files = walk
+        .finish(&crate::project::worker_pool(), &Unstreamed)
+        .files;
 
     let owner = |name: &str| {
         let file = files
@@ -798,4 +826,161 @@ fn a_file_the_tree_cannot_place_keeps_the_listing_in_path_order() {
             (base.join("z.php"), Role::Analysed, false),
         ]
     );
+}
+
+/// A sink that keeps the files it is handed.
+#[derive(Default)]
+struct Handed(Mutex<Vec<Listed>>);
+
+impl FinalFiles for Handed {
+    fn take<'s>(&'s self, _scope: &rayon::Scope<'s>, files: Vec<Listed>) {
+        self.0.lock().unwrap().extend(files);
+    }
+}
+
+/// Runs `walk` with a sink that keeps the files it hands over. Returns those
+/// files, in path order, and the listing.
+fn handed_over(walk: Walk<'_, '_>) -> (Vec<Listed>, Vec<Listed>) {
+    let handed = Handed::default();
+    let listing = walk.finish(&crate::project::worker_pool(), &handed).files;
+    let mut handed = handed.0.into_inner().unwrap();
+    handed.sort_by(|a, b| a.path.cmp(&b.path));
+    (handed, listing)
+}
+
+#[test]
+fn a_file_only_one_walk_lists_is_handed_over_with_the_role_it_is_listed_with() {
+    let dir = TempDir::new("walk_handed");
+    dir.write("proj/a.php", "<?php");
+    dir.write("proj/sub/b.php", "<?php");
+    dir.write("proj/vendor/pkg/src/x.php", "<?php");
+    dir.write("proj/vendor/pkg/y.php", "<?php");
+    dir.write("proj/ctx/c.php", "<?php");
+    dir.write("proj/stubs/s.php", "<?php");
+    let root = resolved(&dir).join("proj");
+    let package = root.join("vendor/pkg");
+
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
+    walk.add(&root, Role::Analysed, &["vendor"]);
+    walk.add(&package, Role::Context, &[]);
+    walk.add(&root.join("ctx"), Role::Context, &[]);
+    walk.add(&root.join("stubs"), Role::Stub, &[]);
+    let (handed, listing) = handed_over(walk);
+
+    // The analysed root excludes `vendor`, so only the package root lists the
+    // package's files. The files of `ctx` and `stubs` are listed by two roots,
+    // so no walk hands them over.
+    assert!(handed.iter().all(|file| listing.contains(file)));
+    assert_eq!(
+        sorted(handed),
+        vec![
+            (root.join("a.php"), Role::Analysed, false),
+            (root.join("sub/b.php"), Role::Analysed, false),
+            (package.join("src/x.php"), Role::Context, false),
+            (package.join("y.php"), Role::Context, false),
+        ]
+    );
+    assert_eq!(
+        sorted(listing),
+        vec![
+            (root.join("a.php"), Role::Analysed, false),
+            (root.join("ctx/c.php"), Role::Analysed, false),
+            (root.join("stubs/s.php"), Role::Analysed, true),
+            (root.join("sub/b.php"), Role::Analysed, false),
+            (package.join("src/x.php"), Role::Context, false),
+            (package.join("y.php"), Role::Context, false),
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_target_is_listed_but_never_handed_over() {
+    let dir = TempDir::new("walk_link_handed");
+    dir.write("proj/a.php", "<?php");
+    dir.write("outside/o.php", "<?php");
+    let base = resolved(&dir);
+    let proj = base.join("proj");
+    std::os::unix::fs::symlink("../outside", proj.join("out")).unwrap();
+
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
+    walk.add(&proj, Role::Analysed, &[]);
+    let (handed, listing) = handed_over(walk);
+
+    assert_eq!(
+        sorted(handed),
+        vec![(proj.join("a.php"), Role::Analysed, false)]
+    );
+    assert_eq!(
+        sorted(listing),
+        vec![
+            (base.join("outside/o.php"), Role::Analysed, false),
+            (proj.join("a.php"), Role::Analysed, false),
+        ]
+    );
+}
+
+#[test]
+fn an_explicit_file_is_handed_over_only_when_no_directory_walk_lists_it() {
+    let dir = TempDir::new("walk_handed_explicit");
+    dir.write("proj/a.php", "<?php");
+    dir.write("other/b.php", "<?php");
+    let base = resolved(&dir);
+    let proj = base.join("proj");
+
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
+    walk.add(&proj, Role::Analysed, &[]);
+    walk.add_file(&proj.join("a.php"), Role::Context);
+    walk.add_file(&base.join("other/b.php"), Role::Context);
+    let (handed, _) = handed_over(walk);
+
+    assert_eq!(
+        sorted(handed),
+        vec![(base.join("other/b.php"), Role::Context, false)]
+    );
+}
+
+#[test]
+fn a_context_root_under_a_covering_root_is_handed_over_under_the_covering_role() {
+    let dir = TempDir::new("walk_handed_covered");
+    dir.write("proj/a.php", "<?php");
+    dir.write("proj/ctx/c.php", "<?php");
+    let root = resolved(&dir).join("proj");
+
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
+    walk.add(&root, Role::Analysed, &[]);
+    walk.add(&root.join("ctx"), Role::Context, &[]);
+    let (handed, listing) = handed_over(walk);
+
+    // The analysed root excludes no names, so it covers `ctx`, whose walk
+    // lists nothing. The analysed root alone lists `ctx/c.php`, so the file
+    // is handed over with the analysed role it is listed with.
+    let expected = vec![
+        (root.join("a.php"), Role::Analysed, false),
+        (root.join("ctx/c.php"), Role::Analysed, false),
+    ];
+    assert_eq!(sorted(handed), expected);
+    assert_eq!(sorted(listing), expected);
+}
+
+#[test]
+fn a_context_walk_stops_at_a_covering_root_below_it() {
+    let dir = TempDir::new("walk_handed_partly_covered");
+    dir.write("proj/x.php", "<?php");
+    dir.write("proj/src/s.php", "<?php");
+    let root = resolved(&dir).join("proj");
+
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
+    walk.add(&root, Role::Context, &[]);
+    walk.add(&root.join("src"), Role::Analysed, &[]);
+    let (handed, listing) = handed_over(walk);
+
+    // The context walk lists `x.php` and stops at `src`, which the analysed
+    // root covers. `src/s.php` is listed by the analysed root alone.
+    let expected = vec![
+        (root.join("src/s.php"), Role::Analysed, false),
+        (root.join("x.php"), Role::Context, false),
+    ];
+    assert_eq!(sorted(handed), expected);
+    assert_eq!(sorted(listing), expected);
 }

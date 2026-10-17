@@ -3150,7 +3150,7 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
     let mut walk = walk::Walk::new(Arc::default(), &packages);
     walk.add(path, walk::Role::Analysed, &[]);
     out.extend(
-        walk.finish(&worker_pool())
+        walk.finish(&worker_pool(), &walk::Unstreamed)
             .files
             .into_iter()
             .map(|listed| listed.path),

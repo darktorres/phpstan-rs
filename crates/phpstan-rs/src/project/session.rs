@@ -33,7 +33,7 @@ use crate::{ext, ignore_errors};
 
 use super::file_cache;
 use super::source::FileSource;
-use super::walk::{FileIndex, Listed, Role, Root, Walk, Walked};
+use super::walk::{FileIndex, FinalFiles, Listed, Role, Root, Unstreamed, Walk, Walked};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
@@ -221,6 +221,74 @@ pub(crate) struct Listing {
     /// Where each file is in `files`, by its path.
     index: FileIndex,
     roots: Vec<Root<'static>>,
+}
+
+/// The name caches of one load, one for each thread of its pool. A thread
+/// parses its files with the names it has met in the load, and the load's end
+/// drops them, so a pool that outlives the load keeps none of them.
+struct Names(Vec<Mutex<syntax::name::NameCache>>);
+
+impl Names {
+    fn new(threads: usize) -> Self {
+        Names((0..threads.max(1)).map(|_| Mutex::default()).collect())
+    }
+
+    /// Runs `parse` with the name cache of the thread it runs on.
+    fn with<T>(&self, parse: impl FnOnce(&mut syntax::name::NameCache) -> T) -> T {
+        let slot = rayon::current_thread_index().unwrap_or(0) % self.0.len();
+        let mut names = self.0[slot].lock().unwrap_or_else(PoisonError::into_inner);
+        parse(&mut names)
+    }
+}
+
+/// The parse of a walk's files as the walk lists them. A directory's files
+/// whose roles are final are parsed in one task on the pool, while the walk
+/// lists the rest. The load parses the other files once the walk ends.
+struct StreamParse<'l> {
+    session: &'l Session,
+    project: &'l Project,
+    names: &'l Names,
+    index_use_sites: bool,
+    /// Each file parsed so far, with the role it was parsed under.
+    parsed: Mutex<Vec<(PathBuf, Role, Read)>>,
+}
+
+impl StreamParse<'_> {
+    /// The files parsed so far, by path, with the role each was parsed under.
+    fn into_parsed(self) -> FxHashMap<PathBuf, (Role, Read)> {
+        self.parsed
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+            .into_iter()
+            .map(|(path, role, read)| (path, (role, read)))
+            .collect()
+    }
+}
+
+impl FinalFiles for StreamParse<'_> {
+    fn take<'s>(&'s self, scope: &rayon::Scope<'s>, files: Vec<Listed>) {
+        scope.spawn(move |_| {
+            let parsed: Vec<(PathBuf, Role, Read)> = files
+                .into_iter()
+                .map(|file| {
+                    let read = self.names.with(|names| {
+                        self.session.read_indexed(
+                            self.project,
+                            &file,
+                            names,
+                            file.role != Role::Analysed,
+                            self.index_use_sites,
+                        )
+                    });
+                    (file.path, file.role, read)
+                })
+                .collect();
+            self.parsed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend(parsed);
+        });
+    }
 }
 
 /// The resolved path of `path`, which is the key its file has in a project.
@@ -944,14 +1012,21 @@ impl Session {
     /// listings the walk and the vendor discovery read are released once it is
     /// walked.
     fn listing_of(&self) -> &Listing {
+        self.listing_with(&Unstreamed)
+    }
+
+    /// The listing, walked on first use with `sink` taking the files whose roles
+    /// are final as the walk lists them. A listing walked already is kept, and
+    /// `sink` is given none of its files.
+    fn listing_with<S: FinalFiles>(&self, sink: &S) -> &Listing {
         self.listing.get_or_init(|| {
-            let listing = self.walk_listing();
+            let listing = self.walk_listing(sink);
             self.dir_listings.clear();
             listing
         })
     }
 
-    fn walk_listing(&self) -> Listing {
+    fn walk_listing<S: FinalFiles>(&self, sink: &S) -> Listing {
         if let Some(listed) = &self.overlay_listing {
             return Listing {
                 files: listed.clone(),
@@ -992,7 +1067,7 @@ impl Session {
             files,
             index,
             roots,
-        } = walk.finish(&self.pool);
+        } = walk.finish(&self.pool, sink);
         Listing {
             files,
             index,
@@ -1217,19 +1292,22 @@ impl Session {
         // project is built once, so only such a project reads the cache.
         let built_once = project.built_once;
         let shared: &Project = project;
+        let names = Names::new(self.pool.current_num_threads());
         let (parsed, numbering): (Vec<Read>, _) = self.pool.install(|| {
             rayon::join(
                 || {
                     ordered
                         .par_iter()
-                        .map_init(syntax::name::NameCache::default, |names, file| {
-                            self.read_indexed(
-                                shared,
-                                file,
-                                names,
-                                built_once && file.role != Role::Analysed,
-                                index_use_sites,
-                            )
+                        .map(|file| {
+                            names.with(|names| {
+                                self.read_indexed(
+                                    shared,
+                                    file,
+                                    names,
+                                    built_once && file.role != Role::Analysed,
+                                    index_use_sites,
+                                )
+                            })
                         })
                         .collect()
                 },
@@ -1331,10 +1409,22 @@ impl Session {
     /// Parses every context and analysed file into a configured,
     /// finished `Project`, ready for `analyse`.
     pub fn load(&self) -> Result<Loaded, String> {
+        let mut project = Project::loading();
+        self.configure(&mut project);
+        let names = Names::new(self.pool.current_num_threads());
+        let index_use_sites = project.indexes_class_fn_sites();
+        let streamed = StreamParse {
+            session: self,
+            project: &project,
+            names: &names,
+            index_use_sites,
+            parsed: Mutex::default(),
+        };
+        let listing = self.listing_with(&streamed);
         let mut analyze_files: Vec<&Listed> = Vec::new();
         let mut context_files: Vec<&Listed> = Vec::new();
         // The listing is in path order, so each role's files are too.
-        for listed in &self.listing_of().files {
+        for listed in &listing.files {
             if listed.role == Role::Analysed {
                 analyze_files.push(listed);
             } else {
@@ -1346,35 +1436,45 @@ impl Session {
             return Err(format!("no .php files found under {}", dirs.join(", ")));
         }
 
-        let mut project = Project::loading();
-        self.configure(&mut project);
-
         let pool = &self.pool;
 
-        let index_use_sites = project.indexes_class_fn_sites();
         let combined_files: Vec<&Listed> = context_files
             .iter()
             .chain(analyze_files.iter())
             .copied()
             .collect();
+        // The files the walk handed over are parsed already, under the role
+        // they have in the listing. The others are parsed below.
+        let mut parsed = streamed.into_parsed();
+        let mut slots: Vec<Option<Read>> = combined_files
+            .iter()
+            .map(|file| {
+                parsed.remove(&file.path).map(|(role, read)| {
+                    debug_assert_eq!(role, file.role, "a file is parsed under its listed role");
+                    read
+                })
+            })
+            .collect();
+        debug_assert!(parsed.is_empty(), "the walk hands over only listed files");
+        let deferred: Vec<usize> = (0..slots.len()).filter(|&at| slots[at].is_none()).collect();
         // The files are numbered while they parse.
-        let (mut combined_parsed, numbering): (Vec<Read>, _) = pool.install(|| {
+        let (deferred_parsed, numbering): (Vec<(usize, Read)>, _) = pool.install(|| {
             rayon::join(
                 || {
-                    combined_files
+                    deferred
                         .par_iter()
-                        .enumerate()
-                        // The names a job meets are kept while it parses one
-                        // file after another, and dropped with the load.
-                        .map_init(syntax::name::NameCache::default, |names, (index, file)| {
-                            self.read_indexed(
-                                &project,
-                                file,
-                                names,
-                                // The context files come first.
-                                index < context_files.len(),
-                                index_use_sites,
-                            )
+                        .map(|&at| {
+                            let read = names.with(|names| {
+                                self.read_indexed(
+                                    &project,
+                                    combined_files[at],
+                                    names,
+                                    // The context files come first.
+                                    at < context_files.len(),
+                                    index_use_sites,
+                                )
+                            });
+                            (at, read)
                         })
                         .collect()
                 },
@@ -1387,6 +1487,13 @@ impl Session {
                 },
             )
         });
+        for (at, read) in deferred_parsed {
+            slots[at] = Some(read);
+        }
+        let mut combined_parsed: Vec<Read> = slots
+            .into_iter()
+            .map(|slot| slot.expect("every listed file is parsed"))
+            .collect();
         file_cache::trim();
         let numbers = project.number_files(numbering);
         let (context_numbers, analyze_numbers) = numbers.split_at(context_files.len());
