@@ -845,7 +845,7 @@ fn handed_over(walk: Walk<'_, '_>) -> (Vec<Listed>, Vec<Listed>) {
 }
 
 #[test]
-fn a_file_only_one_walk_lists_is_handed_over_with_the_role_it_is_listed_with() {
+fn a_file_is_handed_over_by_the_one_walk_of_its_strongest_role_as_it_is_listed() {
     let dir = TempDir::new("walk_handed");
     dir.write("proj/a.php", "<?php");
     dir.write("proj/sub/b.php", "<?php");
@@ -865,26 +865,41 @@ fn a_file_only_one_walk_lists_is_handed_over_with_the_role_it_is_listed_with() {
 
     // The analysed root excludes `vendor`, so only the package root lists the
     // package's files. The files of `ctx` and `stubs` are listed by two roots,
-    // so no walk hands them over.
-    assert!(handed.iter().all(|file| listing.contains(file)));
-    assert_eq!(
-        sorted(handed),
-        vec![
-            (root.join("a.php"), Role::Analysed, false),
-            (root.join("sub/b.php"), Role::Analysed, false),
-            (package.join("src/x.php"), Role::Context, false),
-            (package.join("y.php"), Role::Context, false),
-        ]
-    );
+    // and the analysed one alone has their strongest role, so it hands them
+    // over, those of `stubs` with the stub root's mark.
+    let expected = vec![
+        (root.join("a.php"), Role::Analysed, false),
+        (root.join("ctx/c.php"), Role::Analysed, false),
+        (root.join("stubs/s.php"), Role::Analysed, true),
+        (root.join("sub/b.php"), Role::Analysed, false),
+        (package.join("src/x.php"), Role::Context, false),
+        (package.join("y.php"), Role::Context, false),
+    ];
+    assert_eq!(sorted(handed), expected);
+    assert_eq!(sorted(listing), expected);
+}
+
+#[test]
+fn a_file_two_walks_of_its_strongest_role_list_is_handed_over_by_neither() {
+    let dir = TempDir::new("walk_handed_two_strongest");
+    dir.write("proj/a.php", "<?php");
+    dir.write("proj/src/s.php", "<?php");
+    let root = resolved(&dir).join("proj");
+
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
+    walk.add(&root, Role::Stub, &["vendor"]);
+    walk.add(&root.join("src"), Role::Stub, &["vendor"]);
+    walk.add(&root.join("src"), Role::Context, &[]);
+    let (handed, listing) = handed_over(walk);
+
+    // Both stub roots list `src/s.php`, so its role is known when the walk
+    // ends; the stub root of `proj` alone lists `a.php`.
+    assert_eq!(sorted(handed), vec![(root.join("a.php"), Role::Stub, true)]);
     assert_eq!(
         sorted(listing),
         vec![
-            (root.join("a.php"), Role::Analysed, false),
-            (root.join("ctx/c.php"), Role::Analysed, false),
-            (root.join("stubs/s.php"), Role::Analysed, true),
-            (root.join("sub/b.php"), Role::Analysed, false),
-            (package.join("src/x.php"), Role::Context, false),
-            (package.join("y.php"), Role::Context, false),
+            (root.join("a.php"), Role::Stub, true),
+            (root.join("src/s.php"), Role::Stub, true),
         ]
     );
 }
@@ -917,10 +932,11 @@ fn a_link_target_is_listed_but_never_handed_over() {
 }
 
 #[test]
-fn an_explicit_file_is_handed_over_only_when_no_directory_walk_lists_it() {
+fn an_explicit_file_is_handed_over_by_the_one_walk_of_its_strongest_role() {
     let dir = TempDir::new("walk_handed_explicit");
     dir.write("proj/a.php", "<?php");
     dir.write("other/b.php", "<?php");
+    dir.write("other/c.php", "<?php");
     let base = resolved(&dir);
     let proj = base.join("proj");
 
@@ -928,12 +944,21 @@ fn an_explicit_file_is_handed_over_only_when_no_directory_walk_lists_it() {
     walk.add(&proj, Role::Analysed, &[]);
     walk.add_file(&proj.join("a.php"), Role::Context);
     walk.add_file(&base.join("other/b.php"), Role::Context);
-    let (handed, _) = handed_over(walk);
+    walk.add_file(&base.join("other/b.php"), Role::Stub);
+    walk.add_file(&base.join("other/c.php"), Role::Context);
+    walk.add_file(&base.join("other/c.php"), Role::Context);
+    let (handed, listing) = handed_over(walk);
 
+    // The analysed walk lists `a.php` with the strongest role, and the stub
+    // file walk `b.php`; two context file walks list `c.php`.
     assert_eq!(
         sorted(handed),
-        vec![(base.join("other/b.php"), Role::Context, false)]
+        vec![
+            (base.join("other/b.php"), Role::Stub, true),
+            (proj.join("a.php"), Role::Analysed, false),
+        ]
     );
+    assert_eq!(listing.len(), 3);
 }
 
 #[test]
@@ -1106,5 +1131,82 @@ return array(
             "vendor/composer/ClassLoader.php",
         ]
         .map(|path| base.join(path))
+    );
+}
+
+#[test]
+fn context_roots_given_while_the_stronger_walks_run_are_walked_as_when_given_first() {
+    let dir = TempDir::new("walk_context_later");
+    dir.write("proj/a.php", "<?php");
+    dir.write("proj/src/S.php", "<?php");
+    dir.write("proj/src/Kept.php", "<?php");
+    dir.write("proj/ctx/C.php", "<?php");
+    dir.write("proj/stubs/St.php", "<?php");
+    dir.write("proj/vendor/acme/lib/Beside.php", "<?php");
+    dir.write("proj/vendor/acme/lib/src/L.php", "<?php");
+    dir.write("proj/vendor/acme/lib/src/inner/I.php", "<?php");
+    dir.write("scan/Sc.php", "<?php");
+    let base = resolved(&dir);
+    let root = base.join("proj");
+    let lib = root.join("vendor/acme/lib");
+    let analysed = |walk: &mut Walk<'_, '_>| walk.add(&root, Role::Analysed, &["vendor"]);
+    let stub = |walk: &mut Walk<'_, '_>| walk.add(&root.join("stubs"), Role::Stub, &[]);
+    let context_dirs = [lib.join("src"), root.join("ctx"), base.join("scan")];
+    let context_files = [lib.join("Beside.php"), root.join("src/Kept.php")];
+
+    // Every root given before the walk starts, the stub root last.
+    let mut first = Walk::new(Arc::default(), &NO_PACKAGES);
+    analysed(&mut first);
+    for dir in &context_dirs {
+        first.add(dir, Role::Context, &[]);
+    }
+    for file in &context_files {
+        first.add_file(file, Role::Context);
+    }
+    stub(&mut first);
+    let first = walked_with_roots(first);
+
+    // The analysed and stub roots given first, and the context roots while
+    // their walks run.
+    let mut later = Walk::new(Arc::default(), &NO_PACKAGES);
+    analysed(&mut later);
+    stub(&mut later);
+    let handed = Handed::default();
+    let walked = later.finish_with(&crate::project::worker_pool(), &handed, |context| {
+        for dir in &context_dirs {
+            context.add(dir);
+        }
+        for file in &context_files {
+            context.add_file(file);
+        }
+    });
+    let mut later_handed = handed.0.into_inner().unwrap();
+    later_handed.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut later_roots: Vec<(PathBuf, Role)> = walked
+        .roots
+        .iter()
+        .map(|root| (root.path.clone(), root.role))
+        .collect();
+    later_roots.sort();
+    assert_eq!((later_handed, walked.files, later_roots), first);
+
+    // Each file is handed over once, by the one walk of its strongest role:
+    // `Kept.php`, a context file root in an analysed directory, and `ctx`, a
+    // context root in the analysed root, by the analysed walk; `stubs` by the
+    // analysed walk too, with the stub mark; the vendor files by their own
+    // walks.
+    assert_eq!(
+        sorted(first.0),
+        vec![
+            (root.join("a.php"), Role::Analysed, false),
+            (root.join("ctx/C.php"), Role::Analysed, false),
+            (root.join("src/Kept.php"), Role::Analysed, false),
+            (root.join("src/S.php"), Role::Analysed, false),
+            (root.join("stubs/St.php"), Role::Analysed, true),
+            (lib.join("Beside.php"), Role::Context, false),
+            (lib.join("src/L.php"), Role::Context, false),
+            (lib.join("src/inner/I.php"), Role::Context, false),
+            (base.join("scan/Sc.php"), Role::Context, false),
+        ]
     );
 }

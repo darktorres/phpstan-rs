@@ -13,11 +13,17 @@
 //! a stronger root that excludes no names is not walked: that root lists its
 //! files.
 //!
-//! A file is final as soon as one walk can list it: no other walk reaches it,
-//! so its role cannot change. Such a file is handed to the sink with the files
-//! of its directory, while the walk goes on, so it can be parsed at once. A
-//! file that two walks can reach, or that only a link reaches, is handed over
-//! by no one: its role is known when the walk ends.
+//! A file is final as soon as the walk that lists it is the one walk of the
+//! strongest role that reaches it: a weaker walk does not change its role,
+//! and the stub walks that reach it, which mark it, are known. Such a file is
+//! handed to the sink by that walk, with the files of its directory, while
+//! the walk goes on, so it can be parsed at once. A file that two walks of its
+//! strongest role reach, or that only a link reaches, is handed over by no
+//! one: its role is known when the walk ends.
+//!
+//! A walk of a role above context is decided by the roots of such roles
+//! alone, so the context roots can be given while those walks run
+//! (`Walk::finish_with`); the context walks start once every root is known.
 //!
 //! The listed files are placed in a tree of the directories that hold them.
 //! Each directory has one slot per entry of its listing, in the listing's
@@ -29,7 +35,9 @@ use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
+use std::sync::{Arc, OnceLock};
 
 use composer::dir_listings::{DirListings, Listing};
 use composer::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors, path_hash};
@@ -138,10 +146,11 @@ pub(crate) struct Walked<'a> {
 /// are handed over in one batch, as its listing is read, so that they can be
 /// handled on the pool while the walk goes on.
 pub(crate) trait FinalFiles: Sync {
-    /// Takes `files`, a directory's batch in listing order. Each file is one that
-    /// only this walk lists, with the role it has in the walk's listing. A task
-    /// spawned on `scope` handles the batch, and the walk does not return until
-    /// the task is done.
+    /// Takes `files`, a directory's batch in listing order. Each file is one
+    /// whose role this walk makes final, as the one walk of the file's
+    /// strongest role, with the role and stub mark it has in the walk's
+    /// listing. A task spawned on `scope` handles the batch, and the walk does
+    /// not return until the task is done.
     fn take<'s>(&'s self, scope: &rayon::Scope<'s>, files: Vec<Listed>);
 }
 
@@ -160,12 +169,20 @@ type Take<'t> = dyn Fn(Vec<Listed>) + Sync + 't;
 /// met the link. Each file listed carries the package that owns its
 /// directory, found in the packages the walk was given.
 pub(crate) struct Walk<'a, 'p> {
+    /// The roots given before the walk starts.
+    given: Roots<'a>,
+    /// Every root the walk was given, once it has started.
     roots: Vec<Root<'a>>,
-    /// The walks of the roots, in the order the roots were added.
-    jobs: Vec<Job<'a>>,
-    /// The walks the roots start, by the path each starts from, so that a file
-    /// is known to be listed by one walk alone before the walks run.
+    /// The walks the roots of the roles above context start, by the path each
+    /// starts from, so that a file is known to be listed by one walk of its
+    /// strongest role before the walks run. Those walks are decided by these.
     starts: Starts<'a>,
+    /// The walks every root starts, for the context walks: known once the
+    /// context roots are.
+    every_start: OnceLock<Starts<'a>>,
+    /// The context walks: those of the context roots given before the walk
+    /// started, then those of the ones given while the stronger walks ran.
+    context_jobs: OnceLock<Vec<Job<'a>>>,
     /// The targets of the links met so far, by the role of the walk that met
     /// each link, with the names that walk excludes.
     targets: [VecDeque<(PathBuf, &'a [&'a str])>; 3],
@@ -174,9 +191,6 @@ pub(crate) struct Walk<'a, 'p> {
     /// The listed files the tree cannot place: a file whose directory, or one
     /// of the directories above it, cannot be listed.
     unplaced: Vec<Listed>,
-    /// The resolved path of each directory an explicit file was listed in, by
-    /// the directory as it was given.
-    directories: hashbrown::HashMap<PathBuf, HashedPath, FxBuildHasher>,
     /// The listings of the directories the walk reads. A load shares them with
     /// its vendor discovery, so each directory is read once.
     listings: Arc<DirListings>,
@@ -184,11 +198,36 @@ pub(crate) struct Walk<'a, 'p> {
     packages: &'p composer::PackageIndex,
 }
 
+/// Roots given to a walk, with the walk of each, in the order they were
+/// given.
+#[derive(Default)]
+struct Roots<'a> {
+    roots: Vec<Root<'a>>,
+    jobs: Vec<Job<'a>>,
+    /// The resolved path of each directory an explicit file was listed in, by
+    /// the directory as it was given.
+    directories: hashbrown::HashMap<PathBuf, HashedPath, FxBuildHasher>,
+}
+
+/// The context roots a walk is given while its stronger walks run, which the
+/// context walks start from.
+pub(crate) struct ContextRoots<'a>(Roots<'a>);
+
 /// The walk of one root: a directory, or a file that is listed whatever its
 /// extension.
 enum Job<'a> {
     Dir { path: HashedPath, scope: Scope<'a> },
     File { path: HashedPath, role: Role },
+}
+
+impl Job<'_> {
+    /// The role of the files the walk lists.
+    fn role(&self) -> Role {
+        match self {
+            Job::Dir { scope, .. } => scope.role,
+            Job::File { role, .. } => *role,
+        }
+    }
 }
 
 /// What a walk applies to the entries it meets.
@@ -212,13 +251,39 @@ impl Scope<'_> {
     }
 }
 
-/// How many directory walks reach a directory.
+/// What the walks that list a file decide for it: the strongest of their
+/// roles, and whether one walk alone has it; and whether a stub walk is among
+/// them, which marks the file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Reach {
+    strongest: Option<Strongest>,
+    stub: bool,
+}
+
+/// The strongest role of some walks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Reach {
-    None,
-    /// One walk reaches it, with this role.
-    Sole(Role),
-    Several,
+struct Strongest {
+    role: Role,
+    /// Whether one walk alone has the role.
+    alone: bool,
+}
+
+impl Reach {
+    /// Counts a walk of `role` in.
+    fn add(&mut self, role: Role) {
+        self.stub |= role == Role::Stub;
+        self.strongest = Some(match self.strongest {
+            Some(strongest) if strongest.role > role => strongest,
+            Some(strongest) if strongest.role == role => Strongest { role, alone: false },
+            _ => Strongest { role, alone: true },
+        });
+    }
+
+    /// The stub mark of the files that a walk of `role` hands over, when it is
+    /// the walk that hands them over: the one walk of the strongest role.
+    fn hands_over(self, role: Role) -> Option<bool> {
+        (self.strongest == Some(Strongest { role, alone: true })).then_some(self.stub)
+    }
 }
 
 /// A directory walk: its role and the names it excludes.
@@ -248,27 +313,29 @@ struct Reaching<'a> {
 }
 
 impl Reaching<'_> {
-    /// How many directory walks list the files of the directory. A context walk
-    /// lists nothing under a covering root (`prunes`). A walk that cannot read
-    /// a directory is counted too, which only keeps a file from being handed
-    /// over.
+    /// What the directory walks that list the files of the directory decide
+    /// for them. A context walk lists nothing under a covering root
+    /// (`prunes`). A walk that cannot read a directory is counted too, which
+    /// only keeps a file from being handed over.
     fn reach(&self) -> Reach {
-        let mut reach = Reach::None;
+        let mut reach = Reach::default();
         for &(role, _) in &self.walks {
-            if self.covered && role == Role::Context {
-                continue;
+            if !(self.covered && role == Role::Context) {
+                reach.add(role);
             }
-            reach = match reach {
-                Reach::None => Reach::Sole(role),
-                Reach::Sole(_) | Reach::Several => Reach::Several,
-            };
         }
         reach
     }
 }
 
 impl<'a> Starts<'a> {
-    fn of(jobs: &[Job<'a>], roots: &[Root<'a>]) -> Self {
+    fn of<'j>(
+        jobs: impl IntoIterator<Item = &'j Job<'a>>,
+        roots: impl IntoIterator<Item = &'j Root<'a>>,
+    ) -> Self
+    where
+        'a: 'j,
+    {
         let mut starts = Starts::default();
         for job in jobs {
             match job {
@@ -279,7 +346,7 @@ impl<'a> Starts<'a> {
             }
         }
         for root in roots
-            .iter()
+            .into_iter()
             .filter(|root| root.role > Role::Context && root.excluded.is_empty())
         {
             let path = HashedPath::new(root.path.clone());
@@ -331,24 +398,30 @@ impl<'a> Starts<'a> {
             .is_some()
     }
 
-    /// Whether a file walk is for `file`, a resolved path.
-    fn is_file_root(&self, file: &HashedPath) -> bool {
-        self.file_roles(file).is_some()
-    }
-
     /// The roles of the file walks for `file`, a resolved path.
-    fn file_roles(&self, file: &HashedPath) -> Option<&[Role]> {
+    fn file_roles(&self, file: &HashedPath) -> &[Role] {
         self.files
             .find(file.hash(), |(root, _)| root == file)
-            .map(|(_, roles)| roles.as_slice())
+            .map_or(&[], |(_, roles)| roles.as_slice())
     }
 
-    /// Whether the explicit file `file` is listed by its own walk alone: no
-    /// directory walk reaches its directory, and no other file walk is for it.
-    fn file_alone(&self, file: &HashedPath) -> bool {
-        file.parent()
-            .is_some_and(|(dir, _)| self.reaching(dir).reach() == Reach::None)
-            && self.file_roles(file).is_some_and(|roles| roles.len() == 1)
+    /// What the walks that list `file`, a file in a directory that `dir_reach`
+    /// is the reach of, decide for it: those directory walks and the file
+    /// walks for it.
+    fn with_file_walks(&self, mut dir_reach: Reach, file: &HashedPath) -> Reach {
+        for &role in self.file_roles(file) {
+            dir_reach.add(role);
+        }
+        dir_reach
+    }
+
+    /// What the walks that list the explicit file `file` decide for it: the
+    /// directory walks that reach its directory, and the file walks for it.
+    fn file_reach(&self, file: &HashedPath) -> Reach {
+        let dir_reach = file
+            .parent()
+            .map_or_else(Reach::default, |(dir, _)| self.reaching(dir).reach());
+        self.with_file_walks(dir_reach, file)
     }
 
     /// What reaches `dir`, as each ancestor of it reaches it and whether a
@@ -359,7 +432,7 @@ impl<'a> Starts<'a> {
         let covered = dir
             .ancestors()
             .any(|ancestor| self.covers(ancestor, path_hash(ancestor)));
-        let mut reach = Reach::None;
+        let mut reach = Reach::default();
         // The names of the directories below the ancestor being checked, down to `dir`.
         let mut below: Vec<&OsStr> = Vec::new();
         for ancestor in dir.ancestors() {
@@ -374,10 +447,7 @@ impl<'a> Starts<'a> {
                 {
                     continue;
                 }
-                reach = match reach {
-                    Reach::None => Reach::Sole(role),
-                    Reach::Sole(_) | Reach::Several => Reach::Several,
-                };
+                reach.add(role);
             }
             if let Some(name) = ancestor.file_name() {
                 below.push(name);
@@ -613,6 +683,26 @@ impl Tree {
     }
 }
 
+/// Asserts that each file in `handed` was handed over once, as `files`, the
+/// listing, holds it: with its final role, stub mark and owner.
+#[cfg(test)]
+fn assert_handed_as_listed(mut handed: Vec<Listed>, files: &[Listed], index: &FileIndex) {
+    handed.sort_by(|a, b| a.path.cmp(&b.path));
+    for pair in handed.windows(2) {
+        assert!(
+            pair[0].path != pair[1].path,
+            "{} is handed over twice",
+            pair[0].path.as_path().display()
+        );
+    }
+    for file in &handed {
+        let listed = index
+            .position(files, file.path.as_path())
+            .map(|at| &files[at]);
+        assert_eq!(listed, Some(file), "a file is handed over as it is listed");
+    }
+}
+
 /// Merges the files the tree could not place into `files`, which are in path
 /// order, and sorts the result. Only a walk with such a file sorts.
 fn merge_unplaced(mut files: Vec<Listed>, unplaced: Vec<Listed>) -> Vec<Listed> {
@@ -631,28 +721,12 @@ fn merge_unplaced(mut files: Vec<Listed>, unplaced: Vec<Listed>) -> Vec<Listed> 
     merged
 }
 
-impl<'a, 'p> Walk<'a, 'p> {
-    /// A walk that reads its directories through `listings`, and finds each
-    /// directory's owner in `packages`.
-    pub(crate) fn new(listings: Arc<DirListings>, packages: &'p composer::PackageIndex) -> Self {
-        Walk {
-            roots: Vec::new(),
-            jobs: Vec::new(),
-            starts: Starts::default(),
-            targets: Default::default(),
-            tree: Tree::new(Arc::clone(&listings)),
-            unplaced: Vec::new(),
-            directories: Default::default(),
-            listings,
-            packages,
-        }
-    }
-
-    /// Adds `path` as a root, walked by `finish`. A directory is walked; a file
-    /// is listed when it is PHP. The names in `excluded` apply below the root:
-    /// the walk does not enter a directory of such a name, nor follow a link of
-    /// it, and the root itself is walked whatever its name.
-    pub(crate) fn add(&mut self, path: &Path, role: Role, excluded: &'a [&'a str]) {
+impl<'a> Roots<'a> {
+    /// Adds `path` as a root. A directory is walked; a file is listed when it
+    /// is PHP. The names in `excluded` apply below the root: the walk does not
+    /// enter a directory of such a name, nor follow a link of it, and the root
+    /// itself is walked whatever its name.
+    fn add(&mut self, path: &Path, role: Role, excluded: &'a [&'a str]) {
         let identity = Resolved::resolve(path);
         if identity.as_path().is_dir() {
             self.add_resolved_dir(identity, role, excluded);
@@ -674,7 +748,7 @@ impl<'a, 'p> Walk<'a, 'p> {
 
     /// Adds `dir`, a resolved directory, as a root, as `add` adds one, without
     /// resolving it again or asking the system what it is.
-    pub(crate) fn add_resolved_dir(&mut self, dir: Resolved, role: Role, excluded: &'a [&'a str]) {
+    fn add_resolved_dir(&mut self, dir: Resolved, role: Role, excluded: &'a [&'a str]) {
         self.roots.push(Root {
             path: dir.as_path().to_path_buf(),
             role,
@@ -694,7 +768,7 @@ impl<'a, 'p> Walk<'a, 'p> {
 
     /// Adds `file`, a resolved regular file, as a root, as `add_file` adds
     /// one, without resolving it again.
-    pub(crate) fn add_resolved_file(&mut self, file: Resolved, role: Role) {
+    fn add_resolved_file(&mut self, file: Resolved, role: Role) {
         self.roots.push(Root {
             path: file.as_path().to_path_buf(),
             role,
@@ -709,7 +783,7 @@ impl<'a, 'p> Walk<'a, 'p> {
 
     /// Adds `path` as a root and lists it whatever its extension, as an
     /// explicitly configured file is listed.
-    pub(crate) fn add_file(&mut self, path: &Path, role: Role) {
+    fn add_file(&mut self, path: &Path, role: Role) {
         let identity = self.resolve_file(path);
         self.roots.push(Root {
             path: identity.as_path().to_path_buf(),
@@ -723,50 +797,218 @@ impl<'a, 'p> Walk<'a, 'p> {
         });
     }
 
+    /// The resolved path of the explicitly configured file `path`, as `resolve`
+    /// gives it. A regular file's path is its directory's resolved path, which
+    /// is resolved once per walk, with the file's name joined to it. A link, a
+    /// path ending in `.` or `..`, and a path that does not exist are left to
+    /// `resolve`.
+    fn resolve_file(&mut self, path: &Path) -> HashedPath {
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return HashedPath::new(resolve(path));
+        };
+        if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+            return HashedPath::new(resolve(path));
+        }
+        let parent = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        match self.directories.entry_ref(parent) {
+            EntryRef::Occupied(entry) => entry.get().child(name),
+            EntryRef::Vacant(entry) => entry.insert(HashedPath::new(resolve(parent))).child(name),
+        }
+    }
+}
+
+impl<'a> ContextRoots<'a> {
+    /// Adds the context directory or file `path`, as `Walk::add` adds one.
+    pub(crate) fn add(&mut self, path: &Path) {
+        self.0.add(path, Role::Context, &[]);
+    }
+
+    /// Adds the resolved context directory `dir`, as
+    /// `Walk::add_resolved_dir` adds one.
+    pub(crate) fn add_resolved_dir(&mut self, dir: Resolved) {
+        self.0.add_resolved_dir(dir, Role::Context, &[]);
+    }
+
+    /// Adds the resolved context file `file`, as `Walk::add_resolved_file`
+    /// adds one.
+    pub(crate) fn add_resolved_file(&mut self, file: Resolved) {
+        self.0.add_resolved_file(file, Role::Context);
+    }
+
+    /// Adds the context file `path`, as `Walk::add_file` adds one.
+    pub(crate) fn add_file(&mut self, path: &Path) {
+        self.0.add_file(path, Role::Context);
+    }
+}
+
+/// Where a walk hands over the files whose roles are final: its sink, and in
+/// tests a record of them, which the listing is checked against.
+struct Hand<'s, S> {
+    sink: &'s S,
+    #[cfg(test)]
+    handed: Mutex<Vec<Listed>>,
+}
+
+impl<'s, S: FinalFiles> Hand<'s, S> {
+    fn take(&'s self, scope: &rayon::Scope<'s>, files: Vec<Listed>) {
+        #[cfg(test)]
+        self.handed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(files.iter().cloned());
+        self.sink.take(scope, files);
+    }
+}
+
+impl<'a, 'p> Walk<'a, 'p> {
+    /// A walk that reads its directories through `listings`, and finds each
+    /// directory's owner in `packages`.
+    pub(crate) fn new(listings: Arc<DirListings>, packages: &'p composer::PackageIndex) -> Self {
+        Walk {
+            given: Roots::default(),
+            roots: Vec::new(),
+            starts: Starts::default(),
+            every_start: OnceLock::new(),
+            context_jobs: OnceLock::new(),
+            targets: Default::default(),
+            tree: Tree::new(Arc::clone(&listings)),
+            unplaced: Vec::new(),
+            listings,
+            packages,
+        }
+    }
+
+    /// Adds `path` as a root, walked by `finish`. A directory is walked; a file
+    /// is listed when it is PHP. The names in `excluded` apply below the root:
+    /// the walk does not enter a directory of such a name, nor follow a link of
+    /// it, and the root itself is walked whatever its name.
+    pub(crate) fn add(&mut self, path: &Path, role: Role, excluded: &'a [&'a str]) {
+        self.given.add(path, role, excluded);
+    }
+
+    /// Adds `dir`, a resolved directory, as a root, as `add` adds one, without
+    /// resolving it again or asking the system what it is.
+    #[cfg(test)]
+    pub(crate) fn add_resolved_dir(&mut self, dir: Resolved, role: Role, excluded: &'a [&'a str]) {
+        self.given.add_resolved_dir(dir, role, excluded);
+    }
+
+    /// Adds `file`, a resolved regular file, as a root, as `add_file` adds
+    /// one, without resolving it again.
+    #[cfg(test)]
+    pub(crate) fn add_resolved_file(&mut self, file: Resolved, role: Role) {
+        self.given.add_resolved_file(file, role);
+    }
+
+    /// Adds `path` as a root and lists it whatever its extension, as an
+    /// explicitly configured file is listed.
+    #[cfg(test)]
+    pub(crate) fn add_file(&mut self, path: &Path, role: Role) {
+        self.given.add_file(path, role);
+    }
+
     /// Walks the roots, then the targets no root holds, strongest role first,
     /// on `pool`, and returns the listed files with the roots they were given.
     /// A target is walked once for each set of excluded names that meets it.
     /// `sink` takes the files whose roles are final, as the walk lists them.
-    pub(crate) fn finish<S: FinalFiles>(
+    pub(crate) fn finish<S: FinalFiles>(self, pool: &rayon::ThreadPool, sink: &S) -> Walked<'a> {
+        self.finish_with(pool, sink, |_| {})
+    }
+
+    /// Walks the roots as `finish` does, with the context roots that `context`
+    /// adds. `context` runs on the calling thread while the walks of the roots
+    /// above context run, which no context root decides, and the context walks
+    /// start once it returns.
+    pub(crate) fn finish_with<S: FinalFiles>(
         mut self,
         pool: &rayon::ThreadPool,
         sink: &S,
+        context: impl FnOnce(&mut ContextRoots<'a>),
     ) -> Walked<'a> {
-        let jobs = std::mem::take(&mut self.jobs);
-        self.starts = Starts::of(&jobs, &self.roots);
-        pool.install(|| {
-            rayon::scope(|tasks| {
-                let take = |files: Vec<Listed>| sink.take(tasks, files);
-                let take: &Take<'_> = &take;
+        let Roots {
+            mut roots, jobs, ..
+        } = std::mem::take(&mut self.given);
+        let (stronger, given_context): (Vec<Job<'a>>, Vec<Job<'a>>) =
+            jobs.into_iter().partition(|job| job.role() > Role::Context);
+        self.starts = Starts::of(&stronger, &roots);
+        let hand = Hand {
+            sink,
+            #[cfg(test)]
+            handed: Mutex::default(),
+        };
+        let mut later = ContextRoots(Roots::default());
+        let stronger_found = OnceLock::new();
+        let context_found = OnceLock::new();
+        let walk = &self;
+        pool.in_place_scope(|tasks| {
+            tasks.spawn(|tasks| {
+                let take = |files: Vec<Listed>| hand.take(tasks, files);
+                let found: Vec<Vec<Found>> = stronger
+                    .par_iter()
+                    .map(|job| walk.run(job, Some(&take)))
+                    .collect();
+                let _ = stronger_found.set(found);
+            });
+            context(&mut later);
+            let jobs = walk.context_jobs.get_or_init(|| {
+                given_context
+                    .into_iter()
+                    .chain(std::mem::take(&mut later.0.jobs))
+                    .collect()
+            });
+            let _ = walk.every_start.set(Starts::of(
+                stronger.iter().chain(jobs),
+                roots.iter().chain(&later.0.roots),
+            ));
+            tasks.spawn(|tasks| {
+                let take = |files: Vec<Listed>| hand.take(tasks, files);
                 let found: Vec<Vec<Found>> = jobs
                     .par_iter()
-                    .map(|job| self.run(job, Some(take)))
+                    .map(|job| walk.run(job, Some(&take)))
                     .collect();
-                for (job, found) in jobs.iter().zip(found) {
-                    match job {
-                        Job::Dir { scope, .. } => self.merge(found, scope.role, scope.excluded),
-                        Job::File { role, .. } => self.merge(found, *role, &[]),
-                    }
+                let _ = context_found.set(found);
+            });
+        });
+        roots.extend(later.0.roots);
+        self.roots = roots;
+        let context_jobs = self.context_jobs.take().unwrap_or_default();
+        let found = stronger
+            .iter()
+            .zip(stronger_found.into_inner().unwrap_or_default())
+            .chain(
+                context_jobs
+                    .iter()
+                    .zip(context_found.into_inner().unwrap_or_default()),
+            );
+        for (job, found) in found {
+            match job {
+                Job::Dir { scope, .. } => self.merge(found, scope.role, scope.excluded),
+                Job::File { role, .. } => self.merge(found, *role, &[]),
+            }
+        }
+        pool.install(|| {
+            let mut walked: FxHashMap<PathBuf, Vec<&'a [&'a str]>> = FxHashMap::default();
+            while let Some((role, target, excluded)) = self.next_target() {
+                if self.under_root(&target) {
+                    continue;
                 }
-                let mut walked: FxHashMap<PathBuf, Vec<&'a [&'a str]>> = FxHashMap::default();
-                while let Some((role, target, excluded)) = self.next_target() {
-                    if self.under_root(&target) {
-                        continue;
-                    }
-                    let walks = walked.entry(target.clone()).or_default();
-                    if walks.contains(&excluded) {
-                        continue;
-                    }
-                    walks.push(excluded);
-                    let scope = Scope {
-                        role,
-                        excluded,
-                        outside: true,
-                    };
-                    let found = self.walk_target(&target, scope);
-                    self.merge(found, role, excluded);
+                let walks = walked.entry(target.clone()).or_default();
+                if walks.contains(&excluded) {
+                    continue;
                 }
-            })
+                walks.push(excluded);
+                let scope = Scope {
+                    role,
+                    excluded,
+                    outside: true,
+                };
+                let found = self.walk_target(&target, scope);
+                self.merge(found, role, excluded);
+            }
         });
         let Walk {
             mut tree,
@@ -785,10 +1027,31 @@ impl<'a, 'p> Walk<'a, 'p> {
             "a walk lists each file once, in path order"
         );
         let index = FileIndex::of(&files);
+        #[cfg(test)]
+        assert_handed_as_listed(
+            hand.handed
+                .into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            &files,
+            &index,
+        );
         Walked {
             files,
             index,
             roots,
+        }
+    }
+
+    /// The walks that a walk of `role` is decided by: for a role above
+    /// context, those of the roots of such roles, which no context root
+    /// changes; for a context walk, every root's.
+    fn starts_for(&self, role: Role) -> &Starts<'a> {
+        if role > Role::Context {
+            &self.starts
+        } else {
+            self.every_start
+                .get()
+                .expect("a context walk starts once every root is known")
         }
     }
 
@@ -797,20 +1060,20 @@ impl<'a, 'p> Walk<'a, 'p> {
         self.packages.owner_of_dir(path.parent()?)
     }
 
-    /// What the walk of one root lists. The files it lists alone are handed to
-    /// `take`, when it is given.
+    /// What the walk of one root lists. The files whose roles it makes final
+    /// are handed to `take`, when it is given.
     fn run(&self, job: &Job<'a>, take: Option<&Take<'_>>) -> Vec<Found> {
         match job {
             Job::Dir { path, scope } => self.walk_root(path, *scope, take),
             Job::File { path, role } => {
                 let owner = self.owner_of(path.as_path());
                 if let Some(take) = take
-                    && self.starts.file_alone(path)
+                    && let Some(stub) = self.starts_for(*role).file_reach(path).hands_over(*role)
                 {
                     take(vec![Listed {
                         path: path.clone(),
                         role: *role,
-                        stub: *role == Role::Stub,
+                        stub,
                         owner: Some(owner),
                     }]);
                 }
@@ -845,7 +1108,8 @@ impl<'a, 'p> Walk<'a, 'p> {
         scope: Scope<'a>,
         take: Option<&Take<'_>>,
     ) -> Vec<Found> {
-        let reaching = (!scope.outside).then(|| self.starts.reaching(path.as_path()));
+        let reaching =
+            (!scope.outside).then(|| self.starts_for(scope.role).reaching(path.as_path()));
         if reaching
             .as_ref()
             .is_some_and(|reaching| scope.prunes(reaching))
@@ -871,8 +1135,8 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// under `scope`, in listing order. A subdirectory is walked by a task of
     /// its own, and its results are placed back among the entries in order.
     /// `ancestors` holds `dir` and the directories above it in this walk. The
-    /// files of `dir` that only this walk lists are handed to `take` as one
-    /// batch, once its entries are read.
+    /// files of `dir` whose roles this walk makes final are handed to `take` as
+    /// one batch, once its entries are read.
     fn walk_dir(
         &self,
         dir: &HashedPath,
@@ -884,20 +1148,22 @@ impl<'a, 'p> Walk<'a, 'p> {
         let Some(listing) = self.listings.listing(dir) else {
             return Vec::new();
         };
+        let starts = self.starts_for(scope.role);
         #[cfg(test)]
         if let Some(reaching) = reaching {
             assert_eq!(
                 (reaching.reach(), reaching.covered),
-                self.starts.reach_by_ancestors(dir.as_path()),
+                starts.reach_by_ancestors(dir.as_path()),
                 "what reaches {}",
                 dir.as_path().display()
             );
         }
         // The files listed here are all in `dir`, so they share its owner.
         let owner = self.packages.owner_of_dir(dir.as_path());
-        // The role of the files of `dir` when one walk reaches it.
-        let sole = match reaching.map(Reaching::reach) {
-            Some(Reach::Sole(role)) if take.is_some() => Some(role),
+        // What the walks that reach `dir` decide for its files, when this walk
+        // is the one walk of their strongest role.
+        let reach = match reaching.map(Reaching::reach) {
+            Some(reach) if take.is_some() && reach.hands_over(scope.role).is_some() => Some(reach),
             _ => None,
         };
         let mut batch = Vec::new();
@@ -935,8 +1201,8 @@ impl<'a, 'p> Walk<'a, 'p> {
                 if scope.outside && self.under_root(child.as_path()) {
                     continue;
                 }
-                let below = reaching
-                    .map(|reaching| self.starts.below(reaching, child.as_path(), child.hash()));
+                let below =
+                    reaching.map(|reaching| starts.below(reaching, child.as_path(), child.hash()));
                 if below.as_ref().is_some_and(|below| scope.prunes(below)) {
                     continue;
                 }
@@ -945,13 +1211,14 @@ impl<'a, 'p> Walk<'a, 'p> {
             } else if is_php(Path::new(name)) {
                 let child = dir.child(name);
                 if !(scope.outside && self.under_root(child.as_path())) {
-                    if let Some(role) = sole
-                        && !self.starts.is_file_root(&child)
+                    if let Some(reach) = reach
+                        && let Some(stub) =
+                            starts.with_file_walks(reach, &child).hands_over(scope.role)
                     {
                         batch.push(Listed {
                             path: child.clone(),
-                            role,
-                            stub: role == Role::Stub,
+                            role: scope.role,
+                            stub,
                             owner: Some(owner),
                         });
                     }
@@ -1037,29 +1304,6 @@ impl<'a, 'p> Walk<'a, 'p> {
         };
         if let Err(listed) = self.tree.attach(listed) {
             self.unplaced.push(listed);
-        }
-    }
-
-    /// The resolved path of the explicitly configured file `path`, as `resolve`
-    /// gives it. A regular file's path is its directory's resolved path, which
-    /// is resolved once per walk, with the file's name joined to it. A link, a
-    /// path ending in `.` or `..`, and a path that does not exist are left to
-    /// `resolve`.
-    fn resolve_file(&mut self, path: &Path) -> HashedPath {
-        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-            return HashedPath::new(resolve(path));
-        };
-        if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
-            return HashedPath::new(resolve(path));
-        }
-        let parent = if parent.as_os_str().is_empty() {
-            Path::new(".")
-        } else {
-            parent
-        };
-        match self.directories.entry_ref(parent) {
-            EntryRef::Occupied(entry) => entry.get().child(name),
-            EntryRef::Vacant(entry) => entry.insert(HashedPath::new(resolve(parent))).child(name),
         }
     }
 
