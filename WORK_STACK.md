@@ -11,7 +11,7 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-16, `67682219` on branch `callgrind-20g`. Counts below were
+State as of 2026-10-17, `a5d61611` on branch `callgrind-20g`. Counts below were
 read from the files on that date. This file covers this branch only.
 
 ## Where to resume
@@ -23,7 +23,7 @@ level 8's order; DOC-2.1 stays deferred.
 
 Level 8 is the one active level. It holds the 20 G plan and the off drill, and
 its order is in its section below. Work the lowest item that has a READY row
-(item 1 on 2026-10-16).
+(item 2 on 2026-10-17).
 
 ## The stack
 
@@ -181,7 +181,6 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 1: LOAD-1.1, 1.3, 1.4 and 1.5, then 1.2, 1.7 and 1.8.
 - Item 2: LOAD-2.1 and 2.8, then 2.2 to 2.7.
 - Item 3: LOAD-3.2 (3.1 waits on REG-16.4, level 2).
 - Item 5: LOAD-4.3, 4.5 and 4.7 (4.4 waits on LOAD-2.5).
