@@ -25,15 +25,19 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     of peak RSS. After R11 the purges are fewer (745, 105.5 MiB, against 987, 154.8 MiB), so
     Step 0's 5.4% became about 1%. The batch commands' public function is `unsafe`, where
     the row said safe (its Change).
+  - R2 (`68af1c72`, `276ed5ad`): −18.5 M off, with no wall change beyond the noise. The
+    path carries its parent's hash too (its Built).
 
-  R2 is next.
+  R3 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
   built since move some of them: R1 changes `session.rs`, `project.rs`, `lsp.rs` and
   `source.rs`, R11 `session.rs` and `project.rs`, R12 `name_table.rs`, `members.rs`,
-  `class_info.rs`, `function_sig.rs` and `provenance.rs`, and R15 `allocator.rs`, `lib.rs` and
-  `main.rs`.
+  `class_info.rs`, `function_sig.rs` and `provenance.rs`, R15 `allocator.rs`, `lib.rs` and
+  `main.rs`, and R2 `walk.rs`, `session.rs`, `file_table.rs`, `project.rs`, `lsp.rs`,
+  `dir_listings.rs` and `vendor.rs`, with `PathHash` and `path_hash` now in the composer
+  crate's `hashed_path.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -467,6 +471,14 @@ most 17 samples off and 18 warm, overlapping.
 **Test.** No behaviour changes; the `walk_identity.rs` and `project::` tests are its check.
 
 **Measure.** Off callgrind: `Tree::node` and `Walk::merge`.
+
+**Built** as `68af1c72` and `276ed5ad`: −18.5 M off. A `HashedPath` carries its parent's hash
+too, so a listed file names its directory's hash, and `Found::File` carries only the file's
+path, not its directory's `HashedPath` (a copy of the directory's path per file). The tree
+finds a new directory's nodes with `hashed_ancestors`, one fold of the hashes and then the
+ancestors from the parent up; the first commit made every ancestor (11.0 M), the second only
+those it reaches (3.0 M). R3 and R6 use `hashed_ancestors` too. The ledger's LOAD-8.2 has the
+numbers.
 
 ### 6. R3: a directory's reach carried down the walk
 
@@ -1051,6 +1063,8 @@ ours is noted, and a run it distorts is taken again.
   number, so E8's was not needed); its row in §1's table; §1's open off-drill rows and §2.1.
 - Done with R15: LOAD-8.15's row, with the `unsafe` function and the smaller saving; its row
   in §1's table, whose Ir comes from R2's baseline run.
+- Done with R2: LOAD-8.2's row, with the parent's hash the path carries; its row in §1's table;
+  LOAD-8.3, 8.4 and 8.6 are READY.
 - Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
   row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with

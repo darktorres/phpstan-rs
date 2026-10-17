@@ -24,7 +24,7 @@ level 8's order; DOC-2.1 stays deferred.
 Level 9 is the one active level: the fixes for the costs that the attribution of
 the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done, its decisions
 were ruled on 2026-10-17, and its rows are being built in the plan's order since
-the user's second "go" that day: R1, R11, R12 and R15 are in, and R2 is next.
+the user's second "go" that day: R1, R11, R12, R15 and R2 are in, and R3 is next.
 
 Level 8 waits under it. It holds the 20 G plan and the off drill, and its order is
 in its section below. When level 9 is done, work the lowest item that has a READY
@@ -262,9 +262,9 @@ the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
   R15 shorten serial stretches or the run. R8 and R11 to R15 are older costs than
   items 1 to 3. R15 (a batch run does not purge) came from the allocator runs.
 - Built (since the user's second "go", 2026-10-17): R1 (`6016499f`), R11
-  (`a5a4d85f`), R12 (`6705eedd`) and R15 (`d6ca3442`), measured on their ledger
-  rows (LOAD-8.1, LOAD-3.3, CACHE-12, LOAD-8.15). Next: R2, then R3, R4, R6, R14,
-  R13, R10, R5, R8, R9 and R7.
+  (`a5a4d85f`), R12 (`6705eedd`), R15 (`d6ca3442`) and R2 (`68af1c72`,
+  `276ed5ad`), measured on their ledger rows (LOAD-8.1, LOAD-3.3, CACHE-12,
+  LOAD-8.15, LOAD-8.2). Next: R3, then R4, R6, R14, R13, R10, R5, R8, R9 and R7.
 - The plan's decisions 1 to 7 were ruled on 2026-10-17, each as the plan
   recommended:
   1. the finishing passes' unused cores: REG-7's record;
