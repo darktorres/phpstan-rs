@@ -181,8 +181,9 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 2: LOAD-2.4 to 2.6 (LOAD-2.3, 2.7 and 2.8 are in: `07595369`, `2cd13c8e`
-  and `47adfd19`). LOAD-2.2's walk is in (`85a4ecad`). Its last part, deleting
+- Item 2: LOAD-2.4 and 2.5 (LOAD-2.3, 2.6, 2.7 and 2.8 are in: `07595369`,
+  `c1db8372`, `c7ff651c`, `2cd13c8e` and `47adfd19`). LOAD-2.2's walk is in
+  (`85a4ecad`). Its last part, deleting
   `path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`, waits on a
   decision: what replaces the name floor for the editor's degrade root (no
   `paths`), for a file under no configured root, and for a never-seen path.
