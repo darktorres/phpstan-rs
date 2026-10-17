@@ -1,7 +1,7 @@
 //! The files a project holds, by path and by `FileId`.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -26,6 +26,10 @@ pub(crate) struct FileTable<V> {
     // by (`bind_origin`): an `Arc` kept in the slot, so its address stays
     // that file's.
     by_origin: FxHashMap<usize, FileId>,
+    // The place of each slot's path among the paths of all slots, by slot
+    // index (`rank_of`). It is set from a walk's listing or sorted for on
+    // first use, and dropped when a path is numbered.
+    ranks: OnceLock<Box<[u32]>>,
 }
 
 struct Slot<V> {
@@ -43,6 +47,7 @@ impl<V> Default for FileTable<V> {
             slots: Vec::new(),
             len: 0,
             by_origin: FxHashMap::default(),
+            ranks: OnceLock::new(),
         }
     }
 }
@@ -111,6 +116,8 @@ impl<V> FileTable<V> {
             value: None,
             origins: Vec::new(),
         });
+        // A new path moves the places of the paths after it.
+        self.ranks.take();
         let slots = &self.slots;
         self.ids
             .insert_unique(hash, id, |id| slots[id.index()].hash);
@@ -120,6 +127,53 @@ impl<V> FileTable<V> {
     /// The path `id` numbers, whether or not its file is held.
     pub(crate) fn path(&self, id: FileId) -> &Path {
         &self.slots[id.index()].path
+    }
+
+    /// The place of `id`'s path among the paths of every slot, in path order,
+    /// whether or not its file is held. Places compare as the paths do, so a
+    /// sort can compare them in place of the paths.
+    pub(crate) fn rank_of(&self, id: FileId) -> u32 {
+        self.ranks.get_or_init(|| self.sorted_ranks())[id.index()]
+    }
+
+    /// Sets the places from `ids`, which hold each slot once, in path order,
+    /// as a walk's listing does, so no sort is needed. An order that does not
+    /// hold every slot once sets nothing; the places are then sorted for on
+    /// first use.
+    pub(crate) fn set_path_order(&mut self, ids: &[FileId]) {
+        if ids.len() != self.slots.len() {
+            return;
+        }
+        let mut ranks = vec![u32::MAX; self.slots.len()].into_boxed_slice();
+        for (place, id) in ids.iter().enumerate() {
+            ranks[id.index()] = place_rank(place);
+        }
+        if ranks.contains(&u32::MAX) {
+            return;
+        }
+        debug_assert!(
+            ids.windows(2)
+                .all(|pair| self.path(pair[0]) < self.path(pair[1])),
+            "the ids are given in path order"
+        );
+        self.ranks = OnceLock::from(ranks);
+    }
+
+    /// Whether the places are set, from a listing or by a sort on first use.
+    #[cfg(test)]
+    pub(crate) fn has_places(&self) -> bool {
+        self.ranks.get().is_some()
+    }
+
+    /// The place of every slot's path, found by sorting the paths.
+    fn sorted_ranks(&self) -> Box<[u32]> {
+        let mut order: Vec<FileId> = (0..self.slots.len()).map(FileId::new).collect();
+        order.sort_by(|a, b| self.path(*a).cmp(self.path(*b)));
+        let mut ranks = vec![0; self.slots.len()].into_boxed_slice();
+        for (place, id) in order.into_iter().enumerate() {
+            ranks[id.index()] = place_rank(place);
+        }
+        ranks
     }
 
     /// Notes that declarations naming their file by `origin` are `id`'s.
@@ -235,6 +289,11 @@ impl<'a, V> IntoIterator for &'a FileTable<V> {
     }
 }
 
+/// The rank of the slot at `place` in a sorted order.
+fn place_rank(place: usize) -> u32 {
+    u32::try_from(place).expect("fewer than 2^32 files")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +383,113 @@ mod tests {
         assert_eq!(table.insert_at(numbers[1], 7), None);
         assert_eq!(table.get(Path::new("/a")), Some(&7));
         assert_eq!(table.id_for(Path::new("/b")), numbers[3]);
+    }
+
+    #[test]
+    fn a_path_is_placed_where_the_paths_sort() {
+        let paths = [
+            "/z.php",
+            "/a/b.php",
+            "/a-b.php",
+            "/a/c/d.php",
+            "/a.php",
+            "/a",
+            "/A.php",
+        ];
+        let mut table: FileTable<u32> = FileTable::default();
+        let ids: Vec<FileId> = paths
+            .iter()
+            .map(|path| table.id_for(Path::new(path)))
+            .collect();
+        let mut by_path = ids.clone();
+        by_path.sort_by(|a, b| table.path(*a).cmp(table.path(*b)));
+        let mut by_rank = ids.clone();
+        by_rank.sort_by_key(|&id| table.rank_of(id));
+        assert_eq!(by_rank, by_path);
+        let mut places: Vec<u32> = ids.iter().map(|&id| table.rank_of(id)).collect();
+        places.sort_unstable();
+        assert_eq!(places, (0..paths.len() as u32).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_path_numbered_after_the_places_are_read_takes_its_place_among_them() {
+        let mut table: FileTable<u32> = FileTable::default();
+        let c = table.id_for(Path::new("/c.php"));
+        let a = table.id_for(Path::new("/a.php"));
+        assert_eq!((table.rank_of(a), table.rank_of(c)), (0, 1));
+        let b = table.id_for(Path::new("/b.php"));
+        assert_eq!(
+            (table.rank_of(a), table.rank_of(b), table.rank_of(c)),
+            (0, 1, 2)
+        );
+    }
+
+    #[test]
+    fn removing_a_file_and_inserting_it_again_keeps_every_place() {
+        let mut table: FileTable<u32> = FileTable::default();
+        for name in ["/a.php", "/b.php", "/c.php"] {
+            table.insert(PathBuf::from(name), 0);
+        }
+        let ids = ["/a.php", "/b.php", "/c.php"]
+            .map(|name| table.id_of(Path::new(name)).expect("numbered"));
+        let places = ids.map(|id| table.rank_of(id));
+        table.remove(Path::new("/b.php"));
+        assert_eq!(ids.map(|id| table.rank_of(id)), places);
+        table.insert(PathBuf::from("/b.php"), 1);
+        assert_eq!(ids.map(|id| table.rank_of(id)), places);
+    }
+
+    #[test]
+    fn a_listing_order_sets_the_places_without_a_sort() {
+        let paths = ["/c.php", "/a/b.php", "/a.php", "/b.php"];
+        let mut seeded: FileTable<u32> = FileTable::default();
+        let mut sorted: FileTable<u32> = FileTable::default();
+        for path in paths {
+            seeded.id_for(Path::new(path));
+            sorted.id_for(Path::new(path));
+        }
+        let mut listing: Vec<FileId> = (0..paths.len()).map(FileId::new).collect();
+        listing.sort_by(|a, b| seeded.path(*a).cmp(seeded.path(*b)));
+        seeded.set_path_order(&listing);
+        assert!(seeded.ranks.get().is_some());
+        for index in 0..paths.len() {
+            let id = FileId::new(index);
+            assert_eq!(seeded.rank_of(id), sorted.rank_of(id));
+        }
+        // A path numbered after the listing is set has no place until the
+        // places are sorted for.
+        seeded.id_for(Path::new("/aa.php"));
+        sorted.id_for(Path::new("/aa.php"));
+        assert!(seeded.ranks.get().is_none());
+        for index in 0..=paths.len() {
+            let id = FileId::new(index);
+            assert_eq!(seeded.rank_of(id), sorted.rank_of(id));
+        }
+    }
+
+    #[test]
+    fn an_order_that_leaves_a_path_out_or_repeats_one_sets_no_places() {
+        let mut table: FileTable<u32> = FileTable::default();
+        let b = table.id_for(Path::new("/b.php"));
+        let a = table.id_for(Path::new("/a.php"));
+        let c = table.id_for(Path::new("/c.php"));
+        table.set_path_order(&[a, b]);
+        assert!(table.ranks.get().is_none());
+        table.set_path_order(&[a, a, c]);
+        assert!(table.ranks.get().is_none());
+        assert_eq!(
+            (table.rank_of(a), table.rank_of(b), table.rank_of(c)),
+            (0, 1, 2)
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "the ids are given in path order")]
+    fn an_order_out_of_path_order_is_caught_in_a_debug_build() {
+        let mut table: FileTable<u32> = FileTable::default();
+        let b = table.id_for(Path::new("/b.php"));
+        let a = table.id_for(Path::new("/a.php"));
+        table.set_path_order(&[b, a]);
     }
 }

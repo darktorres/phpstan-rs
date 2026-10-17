@@ -26,6 +26,7 @@ use crate::checker::settings::EngineSettings;
 use crate::ext::disallowed_calls::DisallowedCallsSettings;
 use crate::ext::mockstan::MockstanSettings;
 use crate::ext::sql::SqlSettings;
+use crate::file_id::FileId;
 use crate::parent_calls::{self, ClassShapeSettings};
 use crate::registry::settings::ReflectionSettings;
 use crate::registry::stub_set::Stubs;
@@ -1296,6 +1297,7 @@ impl Session {
         );
         let (analysed, context): (Vec<&Listed>, Vec<&Listed>) =
             listed.iter().partition(|file| file.role == Role::Analysed);
+        let context_count = context.len();
         let ordered: Vec<&Listed> = context.into_iter().chain(analysed).collect();
         let index_use_sites = project.indexes_class_fn_sites();
         // A cached file has no tree. A context file keeps its tree unless the
@@ -1330,6 +1332,12 @@ impl Session {
         });
         file_cache::trim();
         let numbers = project.number_files(numbering);
+        let (context_numbers, analysed_numbers) = numbers.split_at(context_count);
+        project.set_path_order(&ids_in_listed_order(
+            listed,
+            context_numbers,
+            analysed_numbers,
+        ));
         project.expect_files(
             parsed.iter().filter_map(|read| match read {
                 Read::Loaded(file) => Some(&file.parsed),
@@ -1501,6 +1509,11 @@ impl Session {
         file_cache::trim();
         let numbers = project.number_files(numbering);
         let (context_numbers, analyze_numbers) = numbers.split_at(context_files.len());
+        project.set_path_order(&ids_in_listed_order(
+            &listing.files,
+            context_numbers,
+            analyze_numbers,
+        ));
         let analyze_parsed = combined_parsed.split_off(context_files.len());
         let context_parsed = combined_parsed;
         project.expect_files(
@@ -1671,6 +1684,8 @@ impl Session {
 
         let mut per_file: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
+        // Only the rule that reads named-argument facts is given them.
+        let check_renamed_arguments = self.settings.rules.check_renamed_named_arguments;
         let mut named_argument_calls = Vec::new();
         let mut type_dumps = Vec::new();
         for (path, outcome) in checked_results {
@@ -1684,7 +1699,9 @@ impl Session {
                             check.escaped_member_classes,
                         );
                     }
-                    named_argument_calls.push((path.clone(), check.named_argument_calls));
+                    if check_renamed_arguments {
+                        named_argument_calls.push((path.clone(), check.named_argument_calls));
+                    }
                     if dump_types {
                         type_dumps.push((path.clone(), check.type_dump));
                     }
@@ -1694,7 +1711,7 @@ impl Session {
             }
         }
         check_panics.sort();
-        named_argument_calls.sort_by(|a, b| a.0.cmp(&b.0));
+        named_argument_calls.sort_by_cached_key(|(path, _)| project.path_rank(path));
         let type_dump = dump_types.then(|| {
             type_dumps.sort_by(|a, b| a.0.cmp(&b.0));
             let mut text = String::new();
@@ -1737,6 +1754,24 @@ impl Session {
             type_dump,
         }
     }
+}
+
+/// The ids of the files `listed` lists, in the order it lists them. `context`
+/// and `analysed` hold the ids of each role's files, in that same order.
+fn ids_in_listed_order(listed: &[Listed], context: &[FileId], analysed: &[FileId]) -> Vec<FileId> {
+    let mut context = context.iter();
+    let mut analysed = analysed.iter();
+    listed
+        .iter()
+        .map(|file| {
+            let next = if file.role == Role::Analysed {
+                analysed.next()
+            } else {
+                context.next()
+            };
+            *next.expect("every listed file has an id")
+        })
+        .collect()
 }
 
 /// Loads `files`, each `(path, source, analysed)`, into `project` as one

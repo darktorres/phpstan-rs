@@ -1015,6 +1015,22 @@ impl Project {
         numbers
     }
 
+    /// The place of `path` among the numbered paths, in path order, which is
+    /// the order a sort of paths gives (`FileTable::rank_of`). A path with no
+    /// number holds no file, and a check of it records nothing, so its place
+    /// does not change a merge: it sorts last.
+    pub(crate) fn path_rank(&self, path: &Path) -> u32 {
+        self.files
+            .id_of(path)
+            .map_or(u32::MAX, |id| self.files.rank_of(id))
+    }
+
+    /// Sets the places of the numbered paths from `ids`, which hold each of
+    /// them once in path order (`FileTable::set_path_order`).
+    pub(crate) fn set_path_order(&mut self, ids: &[FileId]) {
+        self.files.set_path_order(ids);
+    }
+
     /// Inserts `parsed` as the file `path`, which `id` numbers. The reader of
     /// the file indexed its use sites from its text (`index_use_sites`)
     /// before the insert: only the reader holds the text.
@@ -2312,20 +2328,20 @@ impl Project {
             scopes.insert(class);
         }
         let checked: FxHashSet<&PathBuf> = checks.iter().map(|(path, _)| path).collect();
-        let mut others: Vec<PathBuf> = self
+        let mut others: Vec<(FileId, &PathBuf)> = self
             .files
-            .iter()
-            .filter(|(path, file)| {
+            .iter_with_ids()
+            .filter(|(_, path, file)| {
                 !checked.contains(path)
                     && file
                         .classes
                         .iter()
                         .any(|class| scopes.contains(class.as_str()))
             })
-            .map(|(path, _)| path.clone())
+            .map(|(id, path, _)| (id, path))
             .collect();
-        others.sort();
-        let other_facts = map_on_pool(pool, &others, |path| {
+        others.sort_by_key(|&(id, _)| self.files.rank_of(id));
+        let other_facts = map_on_pool(pool, &others, |&(_, path)| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.run_checker(path, false, false).property_assign_facts
             }))
@@ -2334,14 +2350,14 @@ impl Project {
         let mut sources: Vec<(&PathBuf, PropertyAssignFacts)> = others
             .iter()
             .zip(other_facts)
-            .filter_map(|(path, facts)| Some((path, facts?)))
+            .filter_map(|(&(_, path), facts)| Some((path, facts?)))
             .collect();
         for (path, outcome) in checks.iter_mut() {
             if let Ok(check) = outcome {
                 sources.push((path, std::mem::take(&mut check.property_assign_facts)));
             }
         }
-        sources.sort_by(|a, b| a.0.cmp(b.0));
+        sources.sort_by_cached_key(|source| self.path_rank(source.0));
         let mut merged: PropertyAssignFacts = NameMap::default();
         for (_, facts) in sources {
             for (class, props) in facts {
@@ -2798,12 +2814,12 @@ impl Project {
         }
 
         if self.settings.rules.check_renamed_named_arguments {
-            let mut programs: Vec<(&PathBuf, &[DeclaredClass])> = self
+            let mut programs: Vec<(FileId, &[DeclaredClass])> = self
                 .files
-                .iter()
-                .map(|(path, file)| (path, file.declared_classes.as_slice()))
+                .iter_with_ids()
+                .map(|(id, _, file)| (id, file.declared_classes.as_slice()))
                 .collect();
-            programs.sort_by(|a, b| a.0.cmp(b.0));
+            programs.sort_by_key(|&(id, _)| self.files.rank_of(id));
             let overrides = whole_program::renamed_named_arguments::renamed_parameter_overrides(
                 &self.registry,
                 programs.into_iter().flat_map(|(_, classes)| classes),

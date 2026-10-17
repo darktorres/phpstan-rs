@@ -15,6 +15,7 @@ mod inline_ignore_comments;
 mod load_cache;
 mod load_text;
 pub(super) mod panic_injection;
+mod path_places;
 mod phpstan_api_gating;
 mod project_settings;
 mod property_assign_facts;

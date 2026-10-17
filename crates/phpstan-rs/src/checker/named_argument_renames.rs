@@ -47,7 +47,9 @@ impl<'a> Checker<'a> {
     /// [parameterName]` key exactly, since a rename anywhere between
     /// `owner` and the actual runtime instance is what makes the named
     /// argument ambiguous, regardless of which subtype the call site's
-    /// own static receiver type happens to be.
+    /// own static receiver type happens to be. Nothing is recorded unless
+    /// `check_renamed_named_arguments` is on, the only rule that reads these
+    /// facts.
     pub(crate) fn record_named_argument_call(
         &mut self,
         owner: &Name,
@@ -56,6 +58,9 @@ impl<'a> Checker<'a> {
         span: Span,
         args: &[Arg],
     ) {
+        if !self.settings.rules.check_renamed_named_arguments {
+            return;
+        }
         if *visibility == Visibility::Private {
             return;
         }
