@@ -21,9 +21,13 @@ together later. Their sections below keep the content they had that day. The one
 exception is level 7's designs, which are rows of the 20 G plan and are worked in
 level 8's order; DOC-2.1 stays deferred.
 
-Level 8 is the one active level. It holds the 20 G plan and the off drill, and
-its order is in its section below. Work the lowest item that has a READY row
-(item 8 as of 2026-10-17, after item 5).
+Level 9 is the one active level: the fixes for the costs that the attribution of
+the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done; its rows wait
+on the user's second "go" and on the plan's decisions 1 to 5.
+
+Level 8 waits under it, before item 8. It holds the 20 G plan and the off drill,
+and its order is in its section below. When level 9 is done, work the lowest item
+that has a READY row (item 8 as of 2026-10-17, after item 5).
 
 ## The stack
 
@@ -242,6 +246,28 @@ The off-run rows still open:
 - Settled, not pending: proposal 10 (`simdutf8`, LOAD-6 is SKIP); E4 (CACHE-6),
   E9 (CHECK-5, folded into CHECK-6.16) and E12 (CACHE-7) are SKIP; D3, D6, C7 and
   C8 are decided.
+
+### 9. The costs items 1 to 3 added — `ITEMS_1_TO_3_FIXES_PLAN.md`
+
+Started on 2026-10-17, before level 8's item 8. The ledger's §1 attributes the Ir
+that items 1 to 3 of the 20 G plan added (`4c425d14`, `9aed606b`). The plan fixes
+what that found, and the serial stretches of the load that its Step 0 measured. It
+holds every number, command and script it uses, because the profiles it was read
+from (under `~/.cache/prs-profile/`) are not kept.
+
+- Step 0, the wall-time measurement, is done (the plan's "Step 0 results").
+- Rows R1 to R14, one commit each. R1 to R9 and R13 save Ir; R10 to R12 and R14
+  shorten serial stretches. R8 and R11 to R14 predate items 1 to 3.
+- No row starts before the user's second "go". The plan's decisions 1 to 5 are
+  open: where the finishing passes' unused cores go (a row here, or REG-7's
+  record); the two mimalloc runs; R14 as its own row or in R6, and before or after
+  R10; the row order (proposed: R1; R12, R11; R14, R10; then R2, R3 to R8, R9,
+  R13); where the stub-base wait goes (a row here, or the STUB rows).
+- Each measurement run (callgrind, perf, hyperfine, strace) needs the user's
+  approval.
+- Bookkeeping still open: the ledger rows for R1 to R14 under LOAD; LOAD-3.4's
+  note and LOAD-6's record; Step 0 recorded beside §1; the LOAD-2.2 decision the
+  plan records, written into the ledger and into level 8's item 2.
 
 ## Documents with no place in the stack
 
