@@ -373,36 +373,55 @@ fn lexically_normalized(path: &Path) -> PathBuf {
     out
 }
 
-/// Recursively builds the bytes of the literal string a generated
-/// autoloader file's path expression evaluates to. Required because real
-/// generated code chains multiple concatenations (`__DIR__ . '/..' .
-/// '/pkg/path'`), not a flat two-operand shape.
+/// Builds the bytes of the literal string a generated autoloader file's path
+/// expression evaluates to. Required because real generated code chains
+/// multiple concatenations (`__DIR__ . '/..' . '/pkg/path'`), not a flat
+/// two-operand shape.
 fn eval_concat(
     expr: &Expr,
     vendor_dir: &Path,
     base_dir: &Path,
     generated_dir: &Path,
 ) -> Option<Vec<u8>> {
-    let bytes_of = |dir: &Path| dir.as_os_str().as_encoded_bytes().to_vec();
+    let mut out = Vec::new();
+    append_concat(expr, vendor_dir, base_dir, generated_dir, &mut out)?;
+    Some(out)
+}
+
+/// Appends the bytes `expr` evaluates to onto `out`, which one `eval_concat`
+/// call builds for the whole chain. `None` when `expr` is not such a literal;
+/// the bytes appended before that are then not used.
+fn append_concat(
+    expr: &Expr,
+    vendor_dir: &Path,
+    base_dir: &Path,
+    generated_dir: &Path,
+    out: &mut Vec<u8>,
+) -> Option<()> {
     syntax::stack::guard(|| {
         let expr = expr.peeled();
         match &expr.kind {
-            ExprKind::Literal(Literal::String(s)) => Some(s.as_bytes().to_vec()),
+            ExprKind::Literal(Literal::String(s)) => out.extend_from_slice(s.as_bytes()),
             // The directory containing the generated file itself, i.e.
             // `vendor/composer/` - `autoload_static.php` concatenates `/..`
             // or `/../..` onto this to reach `vendor/` or the project root.
-            ExprKind::Name(n) if n == "__DIR__" => Some(bytes_of(generated_dir)),
-            // Only appears in the separate, non-static autoload_*.php files.
-            ExprKind::Variable(n) if **n == *"vendorDir" => Some(bytes_of(vendor_dir)),
-            ExprKind::Variable(n) if **n == *"baseDir" => Some(bytes_of(base_dir)),
-            ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
-                let mut left = eval_concat(lhs, vendor_dir, base_dir, generated_dir)?;
-                let right = eval_concat(rhs, vendor_dir, base_dir, generated_dir)?;
-                left.extend_from_slice(&right);
-                Some(left)
+            ExprKind::Name(n) if n == "__DIR__" => {
+                out.extend_from_slice(generated_dir.as_os_str().as_encoded_bytes());
             }
-            _ => None,
+            // Only appears in the separate, non-static autoload_*.php files.
+            ExprKind::Variable(n) if **n == *"vendorDir" => {
+                out.extend_from_slice(vendor_dir.as_os_str().as_encoded_bytes());
+            }
+            ExprKind::Variable(n) if **n == *"baseDir" => {
+                out.extend_from_slice(base_dir.as_os_str().as_encoded_bytes());
+            }
+            ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
+                append_concat(lhs, vendor_dir, base_dir, generated_dir, out)?;
+                append_concat(rhs, vendor_dir, base_dir, generated_dir, out)?;
+            }
+            _ => return None,
         }
+        Some(())
     })
 }
 
