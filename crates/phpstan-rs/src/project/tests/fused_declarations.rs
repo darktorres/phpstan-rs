@@ -61,7 +61,7 @@ fn the_one_walk_finds_what_the_five_walks_found() {
                 declared_constants(parsed.ast.as_deref().unwrap()),
                 "constants of source {i}"
             );
-            let origin = Origin::File(Arc::from(path));
+            let origin = Origin::PendingFile;
             let built =
                 crate::registry::build_declarations(parsed.ast.as_deref().unwrap(), &origin);
             assert_eq!(
@@ -175,7 +175,7 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
         assert_eq!(gated_facts, facts, "facts of source {i}");
         assert_eq!(format!("{gated:?}"), format!("{every:?}"), "source {i}");
         // The anonymous classes' registry entries.
-        let origin = Origin::File(Arc::from(path));
+        let origin = Origin::PendingFile;
         let all = crate::registry::anonymous_class_decls(&gated, &origin);
         assert_eq!(
             !all.is_empty(),

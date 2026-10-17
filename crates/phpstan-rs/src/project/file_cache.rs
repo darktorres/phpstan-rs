@@ -148,10 +148,11 @@ impl CachedFile {
         }
     }
 
-    /// The parse of the file at `path` this was stored from, `source` its
-    /// bytes, without its tree and its ignore comments, which only an
-    /// analysed file reads.
-    pub(super) fn into_parsed(self, path: &Path, source: &[u8]) -> ParsedFile {
+    /// The parse of the file this was stored from, `source` its bytes, without
+    /// its tree and its ignore comments, which only an analysed file reads.
+    /// Its declarations are pending their file's number, which
+    /// `ParsedFile::bind_file` gives them.
+    pub(super) fn into_parsed(self, source: &[u8]) -> ParsedFile {
         let references: FxHashSet<RefKey> = self.references.into_iter().collect();
         let declaration_references: FxHashSet<RefKey> =
             self.declaration_references.into_iter().collect();
@@ -172,7 +173,6 @@ impl CachedFile {
             duplicate_class_sites: self.duplicate_class_sites,
             bodies: self.bodies.with_source(source),
             global_facts: self.global_facts,
-            origin_path: Arc::from(path),
             facts: self.facts,
             line_index: self.line_index,
             class_fn_refs: self.class_fn_refs,

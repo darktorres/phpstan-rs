@@ -1602,21 +1602,21 @@ impl Server {
         let registry = project.registry();
         match &resolved {
             navigation::Resolved::Class(fqn) => {
-                let (target_path, span) = registry.class_declaration(fqn)?;
+                let (target_file, span) = registry.class_declaration(fqn)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, span),
+                    self.location(project.path_of(target_file), span),
                 ))
             }
             navigation::Resolved::Function(fqn) => {
-                let (target_path, span) = registry.function_declaration(fqn)?;
+                let (target_file, span) = registry.function_declaration(fqn)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, span),
+                    self.location(project.path_of(target_file), span),
                 ))
             }
             navigation::Resolved::Member(owner, name) => {
-                let (target_path, span) = registry.member_declaration(owner, name)?;
+                let (target_file, span) = registry.member_declaration(owner, name)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, span),
+                    self.location(project.path_of(target_file), span),
                 ))
             }
             // A `Union`/`Intersection` receiver can resolve `member`
@@ -1644,8 +1644,8 @@ impl Server {
                 let owners = resolve_member_owners(registry, &ty, member);
                 let mut locs: Vec<Location> = Vec::new();
                 for owner in &owners {
-                    if let Some((target_path, span)) = registry.member_declaration(owner, member) {
-                        locs.push(self.location(target_path, span));
+                    if let Some((target_file, span)) = registry.member_declaration(owner, member) {
+                        locs.push(self.location(project.path_of(target_file), span));
                     }
                 }
                 match locs.len() {
@@ -1721,8 +1721,8 @@ impl Server {
         let registry = project.registry();
         let mut locs: Vec<Location> = Vec::new();
         for class in &classes {
-            if let Some((target_path, span)) = registry.class_declaration(class) {
-                locs.push(self.location(target_path, span));
+            if let Some((target_file, span)) = registry.class_declaration(class) {
+                locs.push(self.location(project.path_of(target_file), span));
             }
         }
         match locs.len() {
@@ -1852,8 +1852,8 @@ impl Server {
                         registry.member_declaration(owner, name)
                     }
                 };
-                if let Some((p, span)) = decl {
-                    locations.push(self.location(p, span));
+                if let Some((file, span)) = decl {
+                    locations.push(self.location(project.path_of(file), span));
                 }
             }
         }
@@ -1882,22 +1882,21 @@ impl Server {
             &path,
             self.offset_at(&path, position)?,
         )?;
+        let declaring = &self.slot(home).project;
         let (target, decl) = match &resolved {
             navigation::Resolved::Class(fqn) => (
                 use_sites::RefTarget::Class(fqn.clone()),
-                self.slot(home)
-                    .project
+                declaring
                     .registry()
                     .class_declaration(fqn)
-                    .map(|(p, s)| (p.to_path_buf(), s)),
+                    .map(|(file, s)| (declaring.path_of(file).to_path_buf(), s)),
             ),
             navigation::Resolved::Function(fqn) => (
                 use_sites::RefTarget::Function(fqn.clone()),
-                self.slot(home)
-                    .project
+                declaring
                     .registry()
                     .function_declaration(fqn)
-                    .map(|(p, s)| (p.to_path_buf(), s)),
+                    .map(|(file, s)| (declaring.path_of(file).to_path_buf(), s)),
             ),
             _ => return None,
         };

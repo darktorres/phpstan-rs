@@ -30,6 +30,7 @@ fn insert_context(project: &mut Project, skip: BodyText) {
     let path = PathBuf::from("ctx.php");
     let id = project.files.id_for(&path);
     let mut file = parsed(skip);
+    file.bind_file(id);
     project.index_use_sites(&mut file, CONTEXT);
     let text = FileText {
         len: CONTEXT.len(),

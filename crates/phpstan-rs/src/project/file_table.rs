@@ -1,10 +1,9 @@
 //! The files a project holds, by path and by `FileId`.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
 
 use super::walk::{PathHash, path_hash};
 use crate::file_id::FileId;
@@ -22,10 +21,6 @@ pub(crate) struct FileTable<V> {
     ids: hashbrown::HashTable<FileId>,
     slots: Vec<Slot<V>>,
     len: usize,
-    // The file by the address of the `Arc<Path>` its declarations name it
-    // by (`bind_origin`): an `Arc` kept in the slot, so its address stays
-    // that file's.
-    by_origin: FxHashMap<usize, FileId>,
     // The place of each slot's path among the paths of all slots, by slot
     // index (`rank_of`). It is set from a walk's listing or sorted for on
     // first use, and dropped when a path is numbered.
@@ -37,7 +32,6 @@ struct Slot<V> {
     /// `path_hash(path)`.
     hash: PathHash,
     value: Option<V>,
-    origins: Vec<Arc<Path>>,
 }
 
 impl<V> Default for FileTable<V> {
@@ -46,7 +40,6 @@ impl<V> Default for FileTable<V> {
             ids: hashbrown::HashTable::new(),
             slots: Vec::new(),
             len: 0,
-            by_origin: FxHashMap::default(),
             ranks: OnceLock::new(),
         }
     }
@@ -114,7 +107,6 @@ impl<V> FileTable<V> {
             path: path.to_path_buf(),
             hash,
             value: None,
-            origins: Vec::new(),
         });
         // A new path moves the places of the paths after it.
         self.ranks.take();
@@ -174,25 +166,6 @@ impl<V> FileTable<V> {
             ranks[id.index()] = place_rank(place);
         }
         ranks
-    }
-
-    /// Notes that declarations naming their file by `origin` are `id`'s.
-    pub(crate) fn bind_origin(&mut self, id: FileId, origin: &Arc<Path>) {
-        let address = Arc::as_ptr(origin).cast::<u8>() as usize;
-        if self.by_origin.insert(address, id).is_none() {
-            self.slots[id.index()].origins.push(Arc::clone(origin));
-        }
-    }
-
-    /// The file `path` is, when it is the `Arc<Path>` of a declaration
-    /// bound by `bind_origin` - found by address, hashing nothing - and
-    /// otherwise by what the path spells.
-    pub(crate) fn get_by_origin(&self, path: &Path) -> Option<&V> {
-        let address = std::ptr::from_ref(path).cast::<u8>() as usize;
-        match self.by_origin.get(&address) {
-            Some(id) => self.get_by_id(*id),
-            None => self.get(path),
-        }
     }
 
     pub(crate) fn get(&self, path: &Path) -> Option<&V> {
@@ -317,24 +290,6 @@ mod tests {
         assert_eq!(table.get_by_id(a), Some(&3));
         assert_eq!(table.insert(PathBuf::from("/a.php"), 4), Some(3));
         assert_eq!(table.len(), 2);
-    }
-
-    #[test]
-    fn a_bound_origin_finds_its_file_by_address_and_another_by_its_path() {
-        let mut table: FileTable<u32> = FileTable::default();
-        let id = table.id_for(Path::new("/a.php"));
-        table.insert(PathBuf::from("/a.php"), 1);
-        let origin: Arc<Path> = Arc::from(Path::new("/a.php"));
-        table.bind_origin(id, &origin);
-        assert_eq!(table.get_by_origin(&origin), Some(&1));
-        // Another allocation spelling the same path is found by its text.
-        let spelled: Arc<Path> = Arc::from(Path::new("/a.php"));
-        assert_eq!(table.get_by_origin(&spelled), Some(&1));
-        let unknown: Arc<Path> = Arc::from(Path::new("/b.php"));
-        assert_eq!(table.get_by_origin(&unknown), None);
-        // A file removed is not found by its origin.
-        table.remove(Path::new("/a.php"));
-        assert_eq!(table.get_by_origin(&origin), None);
     }
 
     #[test]

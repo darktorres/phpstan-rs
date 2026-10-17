@@ -5,9 +5,11 @@
 
 /// The number a `Project` gave a file the first time it saw its path. A
 /// path keeps its number for as long as the project lives, through the file
-/// being removed and loaded again, and no other path ever has it.
+/// being removed and loaded again, and no other path ever has it. A number
+/// means something only to the project that gave it, and only the crate
+/// makes one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct FileId(u32);
+pub struct FileId(u32);
 
 /// A set of files by number, a bit for each.
 #[derive(Debug, Default, Clone)]

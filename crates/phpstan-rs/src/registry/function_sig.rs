@@ -1,3 +1,4 @@
+use crate::file_id::FileId;
 use crate::registry::reflection_attribute::ReflectionAttribute;
 use rustc_hash::FxHashMap;
 use syntax::name::Name;
@@ -450,6 +451,11 @@ impl FunctionReflection {
 
     pub fn provenance(&self) -> &crate::registry::provenance::Provenance {
         &self.provenance
+    }
+
+    /// Gives the signature the number of its file, once that is known.
+    pub(crate) fn bind_file(&mut self, file: FileId) {
+        self.provenance.bind_file(file);
     }
 }
 

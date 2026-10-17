@@ -3,6 +3,7 @@ use std::sync::Arc;
 use syntax::name::Name;
 use syntax::name::NameMap;
 
+use crate::file_id::FileId;
 use crate::registry::Registry;
 use crate::registry::class_info::MemberSpans;
 use crate::registry::guard::{Guard, GuardExpr};
@@ -47,6 +48,29 @@ pub(crate) enum BuiltDecl {
 }
 
 impl BuiltDecl {
+    /// Gives the declaration its file's number, once that is known. The
+    /// declarations of a file are built pending their file's number.
+    pub(crate) fn bind_file(&mut self, file: FileId) {
+        match self {
+            BuiltDecl::Class { info, .. } if info.provenance().is_pending() => {
+                Arc::make_mut(info).bind_file(file);
+            }
+            BuiltDecl::Function { sig, .. } if sig.provenance().is_pending() => {
+                Arc::make_mut(sig).bind_file(file);
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether the declaration has its file's number, which `bind_file` gives.
+    pub(crate) fn is_bound(&self) -> bool {
+        match self {
+            BuiltDecl::Class { info, .. } => !info.provenance().is_pending(),
+            BuiltDecl::Function { sig, .. } => !sig.provenance().is_pending(),
+            BuiltDecl::GlobalConst { .. } => true,
+        }
+    }
+
     /// The name the declaration declares.
     pub(crate) fn name(&self) -> &Name {
         match self {

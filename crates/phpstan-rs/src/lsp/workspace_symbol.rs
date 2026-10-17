@@ -40,7 +40,7 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
     let registry = project.registry();
     let mut matches: Vec<(u8, Match<'a>)> = Vec::new();
     let mut push = |name: &str, kind: SymbolKind, provenance: &'a Provenance, container| {
-        let Some(path) = provenance.file() else {
+        let Some(file) = provenance.file() else {
             return;
         };
         let Some(score) = match_score(name, query) else {
@@ -51,7 +51,7 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
             Match {
                 name: name.to_string(),
                 kind,
-                path,
+                path: project.path_of(file),
                 span: provenance.declaration_span(),
                 container_name: container,
             },

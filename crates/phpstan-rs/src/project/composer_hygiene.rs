@@ -623,7 +623,7 @@ impl Project {
             .filter(|(_, info)| {
                 info.provenance()
                     .file()
-                    .and_then(|path| self.files.get(path))
+                    .and_then(|file| self.files.get_by_id(file))
                     .is_some_and(|f| f.analyzed)
             })
             .map(|(name, _)| name.as_ref())

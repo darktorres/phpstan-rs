@@ -629,6 +629,17 @@ fn declaration_of<'a>(
     }
 }
 
+/// Gives each loaded file in `parsed` the number at its place in `numbers`,
+/// the two being in the same order.
+fn bind_numbers(parsed: &mut [Read], numbers: &[FileId]) {
+    debug_assert_eq!(parsed.len(), numbers.len(), "every file has a number");
+    for (read, &id) in parsed.iter_mut().zip(numbers) {
+        if let Read::Loaded(file) = read {
+            file.parsed.bind_file(id);
+        }
+    }
+}
+
 impl Session {
     /// Resolves `config`, whose relative paths are relative to
     /// `config_dir` (or to `root` without one), and the command-line
@@ -1202,7 +1213,7 @@ impl Session {
                     source: keeps_source.then(|| String::from_utf8_lossy(bytes).into_owned()),
                     content_hash,
                 },
-                parsed: cached.into_parsed(path, bytes),
+                parsed: cached.into_parsed(bytes),
                 cache_key: None,
             }));
         }
@@ -1346,6 +1357,7 @@ impl Session {
         });
         file_cache::trim();
         let numbers = project.number_files(numbering);
+        bind_numbers(&mut parsed, &numbers);
         let (context_numbers, analysed_numbers) = numbers.split_at(context_count);
         project.set_path_order(&ids_in_listed_order(
             listed,
@@ -1539,6 +1551,7 @@ impl Session {
             .collect();
         file_cache::trim();
         let numbers = project.number_files(numbering);
+        bind_numbers(&mut combined_parsed, &numbers);
         let (context_numbers, analyze_numbers) = numbers.split_at(context_files.len());
         project.set_path_order(&ids_in_listed_order(
             &listing.files,

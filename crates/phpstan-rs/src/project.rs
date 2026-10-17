@@ -235,19 +235,19 @@ impl FileState {
 impl BodySource for file_table::FileTable<FileState> {
     #[cfg(debug_assertions)]
     fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
-        self.get_by_origin(provenance.file()?)?
+        self.get_by_id(provenance.file()?)?
             .bodies
             .get(provenance.declaration_span())
     }
 
     fn summary(&self, provenance: &Provenance) -> Option<&Arc<crate::registry::BodySummary>> {
-        self.get_by_origin(provenance.file()?)?
+        self.get_by_id(provenance.file()?)?
             .bodies
             .summary(provenance.declaration_span())
     }
 
     fn init_flow(&self, provenance: &Provenance) -> Option<&Arc<crate::registry::InitFlow>> {
-        self.get_by_origin(provenance.file()?)?
+        self.get_by_id(provenance.file()?)?
             .bodies
             .init_flow(provenance.declaration_span())
     }
@@ -1017,6 +1017,12 @@ impl Project {
         numbers
     }
 
+    /// The path `file` was numbered by. The path is kept whether or not the
+    /// file is held.
+    pub(crate) fn path_of(&self, file: FileId) -> &Path {
+        self.files.path(file)
+    }
+
     /// The place of `path` among the numbered paths, in path order, which is
     /// the order a sort of paths gives (`FileTable::rank_of`). A path with no
     /// number holds no file, and a check of it records nothing, so its place
@@ -1048,10 +1054,16 @@ impl Project {
         let root = self.absolute_root.as_deref();
         let declared: Vec<DeclaredFile<'a>> = files
             .into_iter()
-            .map(|(path, analyzed, decls)| DeclaredFile {
-                decls,
-                analyzed,
-                shown: shown_path(root, path),
+            .map(|(path, analyzed, decls)| {
+                debug_assert!(
+                    decls.iter().all(BuiltDecl::is_bound),
+                    "a file's declarations are inserted once it is numbered"
+                );
+                DeclaredFile {
+                    decls,
+                    analyzed,
+                    shown: shown_path(root, path),
+                }
             })
             .collect();
         if declared.is_empty() {
@@ -1092,7 +1104,6 @@ impl Project {
             global_facts,
             pest_facts,
             declared_classes,
-            origin_path,
             facts,
             line_index,
             class_fn_refs: _,
@@ -1107,7 +1118,6 @@ impl Project {
             ast.is_some() || (!analyzed && self.built_once),
             "a file whose tree is needed was read back from the cache"
         );
-        self.files.bind_origin(id, &origin_path);
         self.skipped_bodies |= facts.has_skimmed_bodies;
         let owner = owner.unwrap_or_else(|| self.owner_of_file(path));
         self.globals_stale.insert(id);
@@ -1279,8 +1289,8 @@ impl Project {
             if let Some(state) = self.files.get(path)
                 && let Some(ast) = state.tree()
             {
-                let built =
-                    crate::registry::build_declarations(ast, &Origin::File(Arc::from(*path)));
+                let file = self.files.id_of(path).expect("a file held has a number");
+                let built = crate::registry::build_declarations(ast, &Origin::File(file));
                 assert!(
                     built.iter().eq(decls.iter()),
                     "the declarations kept of {} are not those its tree builds",
@@ -1720,7 +1730,8 @@ impl Project {
                 && let Some(state) = self.files.get(path)
                 && let Some(ast) = state.tree()
             {
-                let origin = Origin::File(Arc::from(path));
+                let file = self.files.id_of(path).expect("a file held has a number");
+                let origin = Origin::File(file);
                 let keep: Keep<'_> = &rebuilt;
                 let built = build_declarations_where(ast, &origin, Some(keep));
                 let kept: Vec<&BuiltDecl> = decls
@@ -1954,7 +1965,7 @@ impl Project {
         // not change what kind of file it is. The flag is read before the
         // parse, which keeps ignore comments for an analysed file only.
         let analyzed = self.files.get(path).map_or(analysed, |file| file.analyzed);
-        let parsed = match std::str::from_utf8(bytes) {
+        let mut parsed = match std::str::from_utf8(bytes) {
             Ok(text) => {
                 parse_file_with_names(path, root, text, stub, BodyText::Parsed, None, analyzed)
             }
@@ -1962,6 +1973,7 @@ impl Project {
                 parse_file_with_names(path, root, bytes, stub, BodyText::Parsed, None, analyzed)
             }
         }?;
+        parsed.bind_file(self.files.id_for(path));
         let previous = self.unindex_file(path);
         let ParsedFile {
             ast,
@@ -1980,7 +1992,6 @@ impl Project {
             global_facts,
             pest_facts,
             declared_classes,
-            origin_path: _,
             facts,
             line_index,
             class_fn_refs: _,
@@ -2411,7 +2422,8 @@ impl Project {
     /// `collect_inlay_hints`) rather than through `check_files`'
     /// fixed diagnostic pipeline. Mirrors `run_checker`'s setup exactly.
     pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, AstRef<'_>)> {
-        let file = self.files.get(path)?;
+        let id = self.files.id_of(path)?;
+        let file = self.files.get_by_id(id)?;
         let ast = self.ast_of(path)?;
         let mut checker = Checker::new(&self.registry)
             .with_sql(&self.sql)
@@ -2420,7 +2432,7 @@ impl Project {
             .with_line_index(&file.line_index);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
-        checker.set_current_file(path);
+        checker.set_current_file(path, id);
         checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_root(self.absolute_root.clone());
         checker.set_closure_rebind_possible(
@@ -2699,10 +2711,10 @@ impl Project {
                 &self.escaped_enum_cases,
             );
             for (fqn, case) in dead {
-                let Some((path, span)) = self.registry.constant_declaration(&fqn, &case) else {
+                let Some((file, span)) = self.registry.constant_declaration(&fqn, &case) else {
                     continue;
                 };
-                let path = path.to_path_buf();
+                let path = self.path_of(file).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     span,
@@ -2718,10 +2730,10 @@ impl Project {
             let dead_functions =
                 whole_program::dead_code::find_dead_functions(&self.registry, &self.use_sites);
             for name in dead_functions {
-                let Some((path, span)) = self.registry.function_declaration(&name) else {
+                let Some((file, span)) = self.registry.function_declaration(&name) else {
                     continue;
                 };
-                let path = path.to_path_buf();
+                let path = self.path_of(file).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     span,
@@ -2734,10 +2746,10 @@ impl Project {
             let dead_classes =
                 whole_program::dead_code::find_dead_classes(&self.registry, &self.use_sites);
             for name in dead_classes {
-                let Some((path, span)) = self.registry.class_declaration(&name) else {
+                let Some((file, span)) = self.registry.class_declaration(&name) else {
                     continue;
                 };
-                let path = path.to_path_buf();
+                let path = self.path_of(file).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     span,
@@ -2753,12 +2765,12 @@ impl Project {
             let cycles =
                 whole_program::circular_namespace_deps::find_namespace_cycles(&self.registry);
             for cycle in cycles {
-                let Some((path, span)) =
+                let Some((file, span)) =
                     self.registry.class_declaration(&cycle.representative_class)
                 else {
                     continue;
                 };
-                let path = path.to_path_buf();
+                let path = self.path_of(file).to_path_buf();
                 let namespaces = cycle.namespaces.join(", ");
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
@@ -2775,10 +2787,10 @@ impl Project {
             let dead_abstract_classes =
                 whole_program::dead_abstract_classes::find_dead_abstract_classes(&self.registry);
             for name in dead_abstract_classes {
-                let Some((path, span)) = self.registry.class_declaration(&name) else {
+                let Some((file, span)) = self.registry.class_declaration(&name) else {
                     continue;
                 };
-                let path = path.to_path_buf();
+                let path = self.path_of(file).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     span,
@@ -2811,10 +2823,10 @@ impl Project {
                         self.registry.constant_declaration(&owner, &name)
                     }
                 };
-                let Some((path, span)) = declaration else {
+                let Some((file, span)) = declaration else {
                     continue;
                 };
-                let path = path.to_path_buf();
+                let path = self.path_of(file).to_path_buf();
                 let (noun, identifier) = match kind {
                     whole_program::dead_members::MemberKind::Method => ("Method", "method.unused"),
                     whole_program::dead_members::MemberKind::Property => {
@@ -3084,8 +3096,6 @@ pub struct ParsedFile {
     bodies: FileBodies,
     // What it assigns to globals.
     global_facts: Arc<GlobalFacts>,
-    // The path the file's declarations name it by.
-    origin_path: Arc<Path>,
     // What is true of the file as a whole (`syntax::FileFacts`).
     facts: FileFacts,
     // Its lines, which the lines and columns of its spans are found by.
@@ -3100,9 +3110,8 @@ pub struct ParsedFile {
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
 /// comment. Safe to call concurrently for many files at once (no shared
-/// state touched at all). `path` names the file's declarations' origin and
-/// its anonymous classes. The file is parsed as an analysed one, so its
-/// ignore comments are kept.
+/// state touched at all). `path` names the file's anonymous classes. The file
+/// is parsed as an analysed one, so its ignore comments are kept.
 #[hotpath::measure]
 pub fn parse_file<'a>(
     path: &Path,
@@ -3158,8 +3167,8 @@ pub fn parse_file_with_names<'a>(
         body_text == BodyText::Skipped,
         analysed,
     )?;
-    let origin_path: Arc<Path> = Arc::from(path);
-    let origin = Origin::File(Arc::clone(&origin_path));
+    // Its declarations take the file's number once the file is numbered.
+    let origin = Origin::PendingFile;
     let file_declarations::FileDeclarations {
         functions,
         classes,
@@ -3210,7 +3219,6 @@ pub fn parse_file_with_names<'a>(
         global_facts,
         pest_facts,
         declared_classes,
-        origin_path,
         facts,
         line_index,
         class_fn_refs: None,
@@ -3245,6 +3253,13 @@ impl ParsedFile {
     /// The declarations the file builds, in the order of the file.
     pub(crate) fn built_decls(&self) -> &[BuiltDecl] {
         &self.built_decls
+    }
+
+    /// Gives the file's declarations its number, once the file has one.
+    pub(crate) fn bind_file(&mut self, file: FileId) {
+        for decl in &mut self.built_decls {
+            decl.bind_file(file);
+        }
     }
 }
 

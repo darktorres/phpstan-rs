@@ -1,5 +1,6 @@
 use rustc_hash::FxHashMap;
 
+use crate::file_id::FileId;
 use crate::registry::function_sig::{
     DeclaredType, FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
     build_type_aliases, declared_template_params, declared_type, infer_class_const_type,
@@ -949,6 +950,31 @@ impl ClassReflection {
         }
         for (name, sig) in self.consts.iter_mut() {
             Arc::make_mut(sig).provenance = at(spans.consts.get(name.as_ref()));
+        }
+    }
+
+    /// Gives the class and each of its members the number of its file, once
+    /// that is known.
+    pub(crate) fn bind_file(&mut self, file: FileId) {
+        self.provenance.bind_file(file);
+        for (_, sig) in self.methods.iter_mut() {
+            sig.bind_file(file);
+        }
+        for sig in self.redeclared_methods.values_mut() {
+            sig.bind_file(file);
+        }
+        for (_, sig, _) in self.method_tags.iter_mut() {
+            sig.bind_file(file);
+        }
+        for (_, sig) in self.properties.iter_mut() {
+            if sig.provenance.is_pending() {
+                Arc::make_mut(sig).provenance.bind_file(file);
+            }
+        }
+        for (_, sig) in self.consts.iter_mut() {
+            if sig.provenance.is_pending() {
+                Arc::make_mut(sig).provenance.bind_file(file);
+            }
         }
     }
 

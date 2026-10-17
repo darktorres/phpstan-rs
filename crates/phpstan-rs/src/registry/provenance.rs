@@ -2,12 +2,11 @@
 //! of its name there, recorded for every class, function and member as it
 //! is indexed.
 
-use std::path::Path;
-use std::sync::Arc;
 use syntax::name::Name;
 
 use syntax::span::Span;
 
+use crate::file_id::FileId;
 use crate::registry::Registry;
 
 /// The source a declaration was indexed from.
@@ -19,8 +18,12 @@ pub enum Origin {
     /// Not recorded: a registry built from bare source.
     #[default]
     Unknown,
-    /// A project file, analysed or loaded for context.
-    File(Arc<Path>),
+    /// A project file, by the number its project gave it.
+    File(FileId),
+    /// A declaration of a project file that has no number yet. Numbering the
+    /// file gives it the file's number (`Provenance::bind_file`), so a
+    /// registry holds none of these.
+    PendingFile,
     /// A phpstorm-stubs file (its path below the stubs root): a PHP
     /// built-in, of the extension named by its directory.
     Builtin {
@@ -42,6 +45,7 @@ impl PartialEq for Origin {
         match (self, other) {
             (Origin::Unknown, Origin::Unknown) => true,
             (Origin::File(a), Origin::File(b)) => a == b,
+            (Origin::PendingFile, Origin::PendingFile) => true,
             (
                 Origin::Builtin { file, extension },
                 Origin::Builtin {
@@ -60,7 +64,9 @@ impl PartialEq for Origin {
 #[derive(serde::Serialize, serde::Deserialize)]
 enum OriginData {
     Unknown,
-    File(Arc<Path>),
+    /// A project file. Its number belongs to one session, so it is not
+    /// stored: the origin comes back pending, to be numbered with its file.
+    File,
     /// The index of the file in `PHPSTORM_STUBS_PATHS`, whose extension is
     /// the one at the same index.
     Builtin(u32),
@@ -101,7 +107,7 @@ impl TryFrom<&Origin> for OriginData {
             std::sync::LazyLock::new(|| embedded_index(stub_sources::PHPSTAN_SRC_PATHS));
         Ok(match origin {
             Origin::Unknown => OriginData::Unknown,
-            Origin::File(path) => OriginData::File(Arc::clone(path)),
+            Origin::File(_) | Origin::PendingFile => OriginData::File,
             Origin::Builtin { file, extension } => {
                 let index = *BUILTIN
                     .get(file)
@@ -126,7 +132,7 @@ impl TryFrom<OriginData> for Origin {
     fn try_from(data: OriginData) -> Result<Origin, String> {
         Ok(match data {
             OriginData::Unknown => Origin::Unknown,
-            OriginData::File(path) => Origin::File(path),
+            OriginData::File => Origin::PendingFile,
             OriginData::Builtin(index) => Origin::Builtin {
                 file: stub_sources::PHPSTORM_STUBS_PATHS
                     .get(index as usize)
@@ -192,12 +198,26 @@ impl Provenance {
         &self.origin
     }
 
-    /// The project file declaring it; `None` for a built-in, PHPStan's
-    /// own source, or an unrecorded origin.
-    pub fn file(&self) -> Option<&Path> {
+    /// The project file declaring it, by its number; `None` for a built-in,
+    /// PHPStan's own source, an unrecorded origin, or a declaration whose
+    /// file has no number yet.
+    pub fn file(&self) -> Option<FileId> {
         match &self.origin {
-            Origin::File(path) => Some(path),
+            Origin::File(file) => Some(*file),
             _ => None,
+        }
+    }
+
+    /// Whether the declaring file has no number yet.
+    pub(crate) fn is_pending(&self) -> bool {
+        matches!(self.origin, Origin::PendingFile)
+    }
+
+    /// Gives a pending declaration its file's number; any other origin is
+    /// left as it is.
+    pub(crate) fn bind_file(&mut self, file: FileId) {
+        if self.is_pending() {
+            self.origin = Origin::File(file);
         }
     }
 
@@ -225,25 +245,26 @@ impl Provenance {
         self.declaring_class.as_deref()
     }
 
-    /// The project file declaring it, and its name's span there.
-    fn in_file(&self) -> Option<(&Path, Span)> {
+    /// The project file declaring it, by its number, and its name's span
+    /// there.
+    fn in_file(&self) -> Option<(FileId, Span)> {
         self.file().map(|file| (file, self.span))
     }
 }
 
 impl Registry {
     /// Where a project file declares class-like `fqn`.
-    pub fn class_declaration(&self, fqn: &str) -> Option<(&Path, Span)> {
+    pub fn class_declaration(&self, fqn: &str) -> Option<(FileId, Span)> {
         self.classes.get(fqn)?.provenance.in_file()
     }
 
     /// Where a project file declares function `fqn`.
-    pub fn function_declaration(&self, fqn: &str) -> Option<(&Path, Span)> {
+    pub fn function_declaration(&self, fqn: &str) -> Option<(FileId, Span)> {
         self.functions.get(fqn)?.provenance.in_file()
     }
 
     /// Where a project file declares `owner`'s method `name`.
-    pub fn method_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
+    pub fn method_declaration(&self, owner: &str, name: &str) -> Option<(FileId, Span)> {
         self.classes
             .get(owner)?
             .methods
@@ -253,7 +274,7 @@ impl Registry {
     }
 
     /// Where a project file declares `owner`'s property `name`.
-    pub fn property_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
+    pub fn property_declaration(&self, owner: &str, name: &str) -> Option<(FileId, Span)> {
         self.classes
             .get(owner)?
             .properties
@@ -263,7 +284,7 @@ impl Registry {
     }
 
     /// Where a project file declares `owner`'s constant or enum case `name`.
-    pub fn constant_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
+    pub fn constant_declaration(&self, owner: &str, name: &str) -> Option<(FileId, Span)> {
         self.classes
             .get(owner)?
             .consts
@@ -274,7 +295,7 @@ impl Registry {
 
     /// Where a project file declares `owner`'s member `name` of unknown
     /// kind: a constant or enum case, else a property, else a method.
-    pub fn member_declaration(&self, owner: &str, name: &str) -> Option<(&Path, Span)> {
+    pub fn member_declaration(&self, owner: &str, name: &str) -> Option<(FileId, Span)> {
         self.constant_declaration(owner, name)
             .or_else(|| self.property_declaration(owner, name))
             .or_else(|| self.method_declaration(owner, name))
@@ -334,5 +355,31 @@ mod tests {
         assert!(encode(&wrong_extension).is_err());
         let past_the_end = postcard::to_allocvec(&OriginData::Builtin(u32::MAX)).unwrap();
         assert!(decode::<Origin>(&past_the_end).is_err());
+    }
+
+    #[test]
+    fn a_file_is_stored_without_its_number_and_comes_back_pending() {
+        let bound = Origin::File(FileId::new(3));
+        assert_eq!(
+            encode(&bound).unwrap(),
+            encode(&Origin::PendingFile).unwrap()
+        );
+        assert_eq!(
+            decode::<Origin>(&encode(&bound).unwrap()).unwrap(),
+            Origin::PendingFile
+        );
+    }
+
+    #[test]
+    fn binding_gives_a_pending_declaration_its_file_and_leaves_the_rest() {
+        let mut pending = Provenance::new(Origin::PendingFile, Span::default());
+        assert!(pending.is_pending());
+        pending.bind_file(FileId::new(3));
+        assert!(!pending.is_pending());
+        assert_eq!(pending.file(), Some(FileId::new(3)));
+
+        let mut unknown = Provenance::new(Origin::Unknown, Span::default());
+        unknown.bind_file(FileId::new(3));
+        assert_eq!(unknown.file(), None);
     }
 }

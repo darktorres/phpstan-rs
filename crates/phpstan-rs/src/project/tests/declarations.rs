@@ -17,11 +17,11 @@ fn classes_and_members_are_recorded_without_retain_source() {
     project.finish_loading();
 
     let registry = project.registry();
-    let (path, span) = registry.class_declaration("Foo").expect("Foo");
-    assert_eq!(path, Path::new("a.php"));
+    let (file, span) = registry.class_declaration("Foo").expect("Foo");
+    assert_eq!(project.path_of(file), Path::new("a.php"));
     assert_eq!(span.start, 12);
-    let (path, _) = registry.method_declaration("Foo", "bar").expect("bar");
-    assert_eq!(path, Path::new("a.php"));
+    let (file, _) = registry.method_declaration("Foo", "bar").expect("bar");
+    assert_eq!(project.path_of(file), Path::new("a.php"));
     assert_eq!(
         registry.classes["Foo"].methods()["bar"]
             .provenance()

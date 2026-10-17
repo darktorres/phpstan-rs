@@ -32,7 +32,7 @@ pub mod baseline;
 pub mod checker;
 pub mod deps;
 pub mod doctrine_functions;
-pub(crate) mod file_id;
+pub mod file_id;
 
 pub mod ext;
 pub mod gate;
