@@ -692,8 +692,6 @@ impl Session {
                 .map(resolve_against_config)
                 .collect()
         };
-        scan_dirs.extend(stub_dirs.iter().cloned());
-
         let mut scan_files: Vec<PathBuf> = Vec::new();
         let mut vendors = Vec::new();
         let mut promoted: Vec<PathBuf> = Vec::new();
