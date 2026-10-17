@@ -10,6 +10,8 @@ use syntax::declarations::Declared;
 use syntax::name::Name;
 use syntax::span::Span;
 
+use crate::shard::{join_map, split_map};
+
 /// One class-like (`class`/`interface`/`trait`/`enum`) declaration's own
 /// site, name-keyed the same way `Registry` is - mirrors `project::duplicate_fn_sites::FnDeclSite`
 /// exactly, with one new field this side needs and the function side
@@ -19,7 +21,7 @@ use syntax::span::Span;
 /// override for a real corpus-vendored stub file, e.g. `Imagick.stub.
 /// php`, must never itself be flagged, and must never count toward
 /// flagging the real declaration it's overriding).
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ClassDeclSite {
     pub(crate) path: PathBuf,
     pub(crate) span: Span,
@@ -34,7 +36,7 @@ pub(crate) struct ClassDeclSite {
 /// `DuplicateFunctionSites`, which has no such gate - see that field's own
 /// doc comment for why this one needs it and the function-side precedent
 /// didn't).
-#[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone)]
 pub(crate) struct DuplicateClassSites {
     sites: FxHashMap<String, Vec<ClassDeclSite>>,
 }
@@ -93,8 +95,36 @@ impl DuplicateClassSites {
     /// Mirrors `DuplicateFunctionSites::merge`'s own doc comment/shape
     /// exactly.
     pub(crate) fn merge(&mut self, other: DuplicateClassSites) {
-        for (name, sites) in other.sites {
-            self.sites.entry(name).or_default().extend(sites);
+        for (name, sites) in other.into_names() {
+            self.merge_name(name, sites);
+        }
+    }
+
+    /// Adds `sites`, the sites one file declares `name` at, after the sites
+    /// `self` holds for it.
+    pub(crate) fn merge_name(&mut self, name: String, sites: Vec<ClassDeclSite>) {
+        self.sites.entry(name).or_default().extend(sites);
+    }
+
+    /// The names of the table, each with its sites, for a merge that routes
+    /// each name to its own shard.
+    pub(crate) fn into_names(self) -> impl Iterator<Item = (String, Vec<ClassDeclSite>)> {
+        self.sites.into_iter()
+    }
+
+    /// Takes the table apart into `SHARDS` tables, each holding the names
+    /// `shard_of_key` routes to it. `join_shards` puts them back together.
+    pub(crate) fn split_shards(self) -> Vec<DuplicateClassSites> {
+        split_map(self.sites)
+            .into_iter()
+            .map(|sites| DuplicateClassSites { sites })
+            .collect()
+    }
+
+    /// Joins the tables `split_shards` made back into one.
+    pub(crate) fn join_shards(shards: Vec<DuplicateClassSites>) -> DuplicateClassSites {
+        DuplicateClassSites {
+            sites: join_map(shards.into_iter().map(|shard| shard.sites).collect()),
         }
     }
 }

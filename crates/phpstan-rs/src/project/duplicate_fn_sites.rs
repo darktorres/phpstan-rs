@@ -10,13 +10,15 @@ use syntax::declarations::Declared;
 use syntax::name::Name;
 use syntax::span::Span;
 
+use crate::shard::{join_map, split_map};
+
 /// One `function` declaration's own site, name-keyed the same way
 /// `Registry` is - but every unconditional
 /// declaration of a name is kept (not just the winning one), since
 /// `check_duplicate_function_declarations` needs to see every occurrence
 /// to build its own full location list, exactly mirroring real PHPStan's
 /// `DuplicateFunctionDeclarationRule`.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct FnDeclSite {
     pub(crate) path: PathBuf,
     pub(crate) span: Span,
@@ -31,7 +33,7 @@ pub(crate) struct FnDeclSite {
 /// declarations` needs to run by default for `check-project`, matching
 /// real PHPStan's own always-on `function.duplicate` rule. A conditional
 /// declaration is never tracked (see `index`).
-#[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone)]
 pub(crate) struct DuplicateFunctionSites {
     sites: FxHashMap<String, Vec<FnDeclSite>>,
 }
@@ -102,8 +104,36 @@ impl DuplicateFunctionSites {
     /// sequentially afterward, instead of calling `index` once per file
     /// inside the sequential insert loop.
     pub(crate) fn merge(&mut self, other: DuplicateFunctionSites) {
-        for (name, sites) in other.sites {
-            self.sites.entry(name).or_default().extend(sites);
+        for (name, sites) in other.into_names() {
+            self.merge_name(name, sites);
+        }
+    }
+
+    /// Adds `sites`, the sites one file declares `name` at, after the sites
+    /// `self` holds for it.
+    pub(crate) fn merge_name(&mut self, name: String, sites: Vec<FnDeclSite>) {
+        self.sites.entry(name).or_default().extend(sites);
+    }
+
+    /// The names of the table, each with its sites, for a merge that routes
+    /// each name to its own shard.
+    pub(crate) fn into_names(self) -> impl Iterator<Item = (String, Vec<FnDeclSite>)> {
+        self.sites.into_iter()
+    }
+
+    /// Takes the table apart into `SHARDS` tables, each holding the names
+    /// `shard_of_key` routes to it. `join_shards` puts them back together.
+    pub(crate) fn split_shards(self) -> Vec<DuplicateFunctionSites> {
+        split_map(self.sites)
+            .into_iter()
+            .map(|sites| DuplicateFunctionSites { sites })
+            .collect()
+    }
+
+    /// Joins the tables `split_shards` made back into one.
+    pub(crate) fn join_shards(shards: Vec<DuplicateFunctionSites>) -> DuplicateFunctionSites {
+        DuplicateFunctionSites {
+            sites: join_map(shards.into_iter().map(|shard| shard.sites).collect()),
         }
     }
 }

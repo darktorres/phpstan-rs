@@ -44,6 +44,7 @@ mod duplicate_functions;
 mod file_cache;
 mod file_declarations;
 mod file_table;
+mod file_tables;
 mod mock_hygiene;
 pub mod session;
 pub mod source;
@@ -1062,7 +1063,8 @@ impl Project {
     }
 
     /// Inserts `parsed` as the file `path`, which `id` numbers, without its
-    /// declarations: `insert_declarations` inserts those, and a caller runs it
+    /// declarations or its table entries: `insert_declarations` inserts the
+    /// declarations, `insert_file_tables` the entries, and a caller runs both
     /// first. The reader of the file indexed its use sites from its text
     /// (`index_use_sites`) before the insert: only the reader holds the text.
     pub(crate) fn insert_numbered_file(
@@ -1084,8 +1086,8 @@ impl Project {
             ignores,
             built_decls,
             anonymous_classes,
-            duplicate_fn_sites,
-            duplicate_class_sites,
+            duplicate_fn_sites: _,
+            duplicate_class_sites: _,
             bodies,
             global_facts,
             pest_facts,
@@ -1093,7 +1095,7 @@ impl Project {
             origin_path,
             facts,
             line_index,
-            class_fn_refs,
+            class_fn_refs: _,
             owner,
         } = parsed;
         let FileText {
@@ -1105,18 +1107,7 @@ impl Project {
             ast.is_some() || (!analyzed && self.built_once),
             "a file whose tree is needed was read back from the cache"
         );
-        debug_assert!(
-            class_fn_refs.is_some() || ast.is_none(),
-            "a parse with a tree has its use sites indexed before its insert"
-        );
-        for (span, target) in class_fn_refs.unwrap_or_default() {
-            self.use_sites.insert(path, target, span);
-        }
-        self.duplicate_fn_sites.merge(duplicate_fn_sites);
-        self.duplicate_class_sites.merge(duplicate_class_sites);
         self.files.bind_origin(id, &origin_path);
-        register_references(&mut self.dependents, id, &references);
-        register_references(&mut self.signature_dependents, id, &declaration_references);
         self.skipped_bodies |= facts.has_skimmed_bodies;
         let owner = owner.unwrap_or_else(|| self.owner_of_file(path));
         self.globals_stale.insert(id);
@@ -3040,9 +3031,10 @@ fn parse_with_ignores<'a>(
 /// Everything about loading one file that's pure - parsing, plus every
 /// fact derived only from the parsed AST or the raw source text, with no
 /// dependency on (or mutation of) a `Project`'s shared registry. Computing
-/// this for many files is embarrassingly parallel - `insert_declarations`
-/// and `insert_numbered_file` below do the remaining registry-mutating
-/// half, in the order of the files (see their own doc comments).
+/// this for many files is embarrassingly parallel - `insert_declarations`,
+/// `insert_file_tables` and `insert_numbered_file` below do the remaining
+/// half, which mutates the project, in the order of the files (see their own
+/// doc comments).
 #[cfg_attr(test, derive(Clone))]
 pub struct ParsedFile {
     // The tree; none for a file read back from the per-file cache, which
@@ -3073,7 +3065,7 @@ pub struct ParsedFile {
     declared_classes: Vec<DeclaredClass>,
     // This file's own top-level function declaration sites, already
     // built (see `DuplicateFunctionSites::merge`'s own doc comment) -
-    // `insert_numbered_file` merges these into the project-wide table
+    // `insert_file_tables` merges these into the project-wide table
     // instead of re-walking `ast` via `DuplicateFunctionSites::index`,
     // moving the per-function type-hint cloning `record` does into this
     // already-parallel step. Unlike `built_decls`, this needs `path`
@@ -3096,9 +3088,8 @@ pub struct ParsedFile {
     facts: FileFacts,
     // Its lines, which the lines and columns of its spans are found by.
     line_index: Arc<LineIndex>,
-    // The file's class and function use sites, when indexed alongside the
-    // parse (`Project::index_use_sites`); `insert_numbered_file` indexes
-    // them itself otherwise.
+    // The file's class and function use sites, indexed alongside the parse
+    // (`Project::index_use_sites`); `insert_file_tables` takes them.
     class_fn_refs: Option<Vec<(Span, use_sites::RefTarget)>>,
     // The composer package that owns the file, as the walk that listed it
     // found it; `insert_numbered_file` finds it itself when no walk did.
@@ -3362,14 +3353,23 @@ fn register_references(
     references: &FxHashSet<deps::RefKey>,
 ) {
     for name in references {
-        // The name is copied only for the first file to reference it.
-        match dependents.get_mut(name) {
-            Some(files) => {
-                files.insert(file);
-            }
-            None => {
-                dependents.insert(name.clone(), FxHashSet::from_iter([file]));
-            }
+        register_reference(dependents, file, name);
+    }
+}
+
+/// Records that `file` references `name`.
+fn register_reference(
+    dependents: &mut FxHashMap<deps::RefKey, FxHashSet<FileId>>,
+    file: FileId,
+    name: &deps::RefKey,
+) {
+    // The name is copied only for the first file to reference it.
+    match dependents.get_mut(name) {
+        Some(files) => {
+            files.insert(file);
+        }
+        None => {
+            dependents.insert(name.clone(), FxHashSet::from_iter([file]));
         }
     }
 }

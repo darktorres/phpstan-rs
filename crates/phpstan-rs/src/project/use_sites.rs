@@ -35,6 +35,8 @@ use syntax::ast::*;
 use syntax::span::Span;
 use syntax::visit::{Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_stmts};
 
+use crate::shard::{join_map, split_map};
+
 /// What a reference site points at - no local-variable variant (see
 /// this item's own edge-case notes: local-variable rename/references is
 /// explicitly out of v1 scope, always answered via a `None` short-circuit
@@ -54,7 +56,7 @@ pub(crate) enum RefTarget {
 /// directions: `by_target` answers "where is X used" (`references`'s own
 /// query shape); `by_file` answers "what did this file contribute"
 /// (`remove_file`'s own undo shape).
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub(crate) struct UseSiteIndex {
     by_target: FxHashMap<RefTarget, Vec<(PathBuf, Span)>>,
     by_file: FxHashMap<PathBuf, Vec<(RefTarget, Span)>>,
@@ -62,14 +64,47 @@ pub(crate) struct UseSiteIndex {
 
 impl UseSiteIndex {
     pub(crate) fn insert(&mut self, path: &Path, target: RefTarget, span: Span) {
+        self.add_target_site(target.clone(), path, span);
+        self.add_file_site(path, target, span);
+    }
+
+    /// Adds a site at `span` in the file `path` to the sites of `target`.
+    pub(crate) fn add_target_site(&mut self, target: RefTarget, path: &Path, span: Span) {
         self.by_target
-            .entry(target.clone())
+            .entry(target)
             .or_default()
             .push((path.to_path_buf(), span));
+    }
+
+    /// Adds a site of `target` at `span` to the sites of the file `path`.
+    pub(crate) fn add_file_site(&mut self, path: &Path, target: RefTarget, span: Span) {
         self.by_file
             .entry(path.to_path_buf())
             .or_default()
             .push((target, span));
+    }
+
+    /// Takes the index apart into `SHARDS` indexes for a merge. Each target's
+    /// sites are in the index their target routes to, and each file's in the
+    /// index its path routes to. `join_shards` puts them back together.
+    pub(crate) fn split_shards(self) -> Vec<UseSiteIndex> {
+        split_map(self.by_target)
+            .into_iter()
+            .zip(split_map(self.by_file))
+            .map(|(by_target, by_file)| UseSiteIndex { by_target, by_file })
+            .collect()
+    }
+
+    /// Joins the indexes `split_shards` made back into one.
+    pub(crate) fn join_shards(shards: Vec<UseSiteIndex>) -> UseSiteIndex {
+        let (by_target, by_file): (Vec<_>, Vec<_>) = shards
+            .into_iter()
+            .map(|shard| (shard.by_target, shard.by_file))
+            .unzip();
+        UseSiteIndex {
+            by_target: join_map(by_target),
+            by_file: join_map(by_file),
+        }
     }
 
     /// Drops every site `path` previously contributed, from both

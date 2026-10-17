@@ -1319,7 +1319,7 @@ impl Session {
         let built_once = project.built_once;
         let shared: &Project = project;
         let workers = Workers::new(self.pool.current_num_threads());
-        let (parsed, numbering): (Vec<Read>, _) = self.pool.install(|| {
+        let (mut parsed, numbering): (Vec<Read>, _) = self.pool.install(|| {
             rayon::join(
                 || {
                     ordered
@@ -1364,6 +1364,17 @@ impl Session {
             ordered.iter().zip(&parsed).filter_map(|(file, read)| {
                 declaration_of(&file.path, file.role == Role::Analysed, read)
             }),
+        );
+        project.insert_file_tables(
+            &self.pool,
+            numbers
+                .iter()
+                .zip(&ordered)
+                .zip(parsed.iter_mut())
+                .filter_map(|((&id, file), read)| match read {
+                    Read::Loaded(loaded) => Some((id, file.path.as_path(), &mut loaded.parsed)),
+                    _ => None,
+                }),
         );
         let mut failures = Vec::new();
         for ((file, read), id) in ordered.iter().zip(parsed).zip(numbers) {
@@ -1534,8 +1545,8 @@ impl Session {
             context_numbers,
             analyze_numbers,
         ));
-        let analyze_parsed = combined_parsed.split_off(context_files.len());
-        let context_parsed = combined_parsed;
+        let mut analyze_parsed = combined_parsed.split_off(context_files.len());
+        let mut context_parsed = combined_parsed;
         project.expect_files(
             context_parsed
                 .iter()
@@ -1561,6 +1572,23 @@ impl Session {
                         .zip(&analyze_parsed)
                         .filter_map(|(file, read)| declaration_of(&file.path, true, read)),
                 ),
+        );
+        project.insert_file_tables(
+            pool,
+            context_files
+                .iter()
+                .zip(context_numbers)
+                .zip(&mut context_parsed)
+                .chain(
+                    analyze_files
+                        .iter()
+                        .zip(analyze_numbers)
+                        .zip(&mut analyze_parsed),
+                )
+                .filter_map(|((file, &id), read)| match read {
+                    Read::Loaded(loaded) => Some((id, file.path.as_path(), &mut loaded.parsed)),
+                    _ => None,
+                }),
         );
         let mut lex_warnings = Vec::new();
         let mut note_lex_warnings = |path: &Path, parsed: &ParsedFile| {
