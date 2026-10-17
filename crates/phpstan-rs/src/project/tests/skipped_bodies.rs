@@ -28,7 +28,9 @@ fn parsed(skip: BodyText) -> ParsedFile {
 fn insert_context(project: &mut Project, skip: BodyText) {
     let path = PathBuf::from("ctx.php");
     let id = project.files.id_for(&path);
-    let hash = crate::project::source::content_hash(CONTEXT.as_bytes());
+    let hash = project
+        .retain_source
+        .then(|| crate::project::source::content_hash(CONTEXT.as_bytes()));
     project.insert_numbered_file(id, &path, parsed(skip), CONTEXT.to_string(), hash, false);
 }
 

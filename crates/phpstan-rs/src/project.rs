@@ -102,8 +102,9 @@ pub(crate) struct FileState {
     kept_ast: Option<Vec<Stmt>>,
     // The source's length in bytes: what checking the file costs, roughly.
     source_len: usize,
-    // The digest of the bytes the file was read from (`source::content_hash`).
-    content_hash: u128,
+    // The digest of the bytes the file was read from (`source::content_hash`),
+    // when the project retains source.
+    content_hash: Option<u128>,
     // Where the file came in the order files were loaded, which a rebuild of
     // a name declared in several of them follows; an edited file keeps it.
     load_order: u64,
@@ -877,9 +878,10 @@ impl Project {
     }
 
     /// The digest of the bytes the file at `path` was loaded or last edited
-    /// with, which an edit compares against to find a document unchanged.
+    /// with, which an edit compares against to find a document unchanged. A
+    /// project that does not retain source keeps no digest.
     pub fn content_hash(&self, path: &Path) -> Option<u128> {
-        self.files.get(path).map(|file| file.content_hash)
+        self.files.get(path).and_then(|file| file.content_hash)
     }
 
     /// Gives the file at `path` the bytes `bytes` for every load and edit
@@ -968,7 +970,7 @@ impl Project {
         path: &Path,
         parsed: ParsedFile,
         source: String,
-        content_hash: u128,
+        content_hash: Option<u128>,
         analyzed: bool,
     ) {
         let ParsedFile {
@@ -1931,7 +1933,7 @@ impl Project {
             FileState {
                 kept_ast: Some(ast),
                 source_len: bytes.len(),
-                content_hash: source::content_hash(bytes),
+                content_hash: self.retain_source.then(|| source::content_hash(bytes)),
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,

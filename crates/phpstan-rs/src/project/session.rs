@@ -526,8 +526,9 @@ struct ReadFile {
     len: usize,
     source: String,
     parsed: ParsedFile,
-    /// The digest of the bytes the file was read from.
-    content_hash: u128,
+    /// The digest of the bytes the file was read from, when the project
+    /// retains source.
+    content_hash: Option<u128>,
     /// Where the parse is stored once it is complete, for a file that was
     /// not read back from the per-file cache.
     cache_key: Option<file_cache::Key>,
@@ -1087,7 +1088,9 @@ impl Session {
             return Read::Unread;
         };
         let bytes = bytes.into_owned();
-        let content_hash = super::source::content_hash(&bytes);
+        let content_hash = project
+            .retain_source
+            .then(|| super::source::content_hash(&bytes));
         let shown = super::shown_path(Some(self.absolute_root.as_path()), path);
         let cache_key = if cacheable {
             file_cache::key(&bytes, path, shown, is_stub, index_use_sites)
