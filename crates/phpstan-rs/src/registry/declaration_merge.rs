@@ -10,7 +10,6 @@
 
 use std::path::{Path, PathBuf};
 
-use rayon::prelude::*;
 use syntax::name::Name;
 use types::{PhpVersions, Type};
 
@@ -19,7 +18,7 @@ use super::{
     ChangedNames, ClassReflection, FunctionTable, NameMap, NameSet, NameTable, Registry,
     is_phpstan_namespace,
 };
-use crate::shard::{SHARDS, shard_of_hash};
+use crate::shard::{SHARDS, merge_by_shard, shard_of_hash};
 
 /// One file's declarations, for `DeclMerge::insert`.
 pub(crate) struct DeclaredFile<'a> {
@@ -188,29 +187,16 @@ impl DeclMerge<'_> {
     /// applies its work in parallel.
     pub(crate) fn insert(&mut self, files: Vec<DeclaredFile<'_>>) {
         let versions = self.php_versions;
-        let chunks = into_chunks(files, self.pool.current_num_threads() * 4);
-        let work = self.pool.install(|| {
-            let buckets: Vec<Vec<ShardWork<'_>>> = chunks
-                .into_par_iter()
-                .map(|chunk| bucket(chunk, versions))
-                .collect();
-            by_shard(buckets)
-        });
         let stubs = self.built_in_stub_classes;
         let recording = self.recording;
         let shards = std::mem::take(&mut self.shards);
-        self.shards = self.pool.install(|| {
-            shards
-                .into_par_iter()
-                .zip(work.into_par_iter())
-                .map(|(mut shard, works)| {
-                    for work in works {
-                        shard.apply(work, stubs, recording);
-                    }
-                    shard
-                })
-                .collect()
-        });
+        self.shards = merge_by_shard(
+            self.pool,
+            shards,
+            files,
+            |chunk| bucket(chunk, versions),
+            |shard, work| shard.apply(work, stubs, recording),
+        );
     }
 }
 
@@ -274,28 +260,4 @@ fn bucket<'a>(files: Vec<DeclaredFile<'a>>, versions: Option<PhpVersions>) -> Ve
 /// The shard a name is kept in.
 fn shard_of(name: &Name) -> usize {
     shard_of_hash(name.folded_hash())
-}
-
-/// `items` in at most `count` runs of consecutive items, in order.
-fn into_chunks<T>(items: Vec<T>, count: usize) -> Vec<Vec<T>> {
-    let size = items.len().div_ceil(count).max(1);
-    let mut items = items.into_iter().peekable();
-    let mut chunks = Vec::new();
-    while items.peek().is_some() {
-        chunks.push(items.by_ref().take(size).collect());
-    }
-    chunks
-}
-
-/// The work of each shard, chunk after chunk in the files' order.
-fn by_shard<'a>(chunks: Vec<Vec<ShardWork<'a>>>) -> Vec<Vec<ShardWork<'a>>> {
-    let mut shards: Vec<Vec<ShardWork<'a>>> = (0..SHARDS)
-        .map(|_| Vec::with_capacity(chunks.len()))
-        .collect();
-    for chunk in chunks {
-        for (shard, work) in chunk.into_iter().enumerate() {
-            shards[shard].push(work);
-        }
-    }
-    shards
 }
