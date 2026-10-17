@@ -100,7 +100,7 @@ Inside a record, ids and section numbers are those of the record's source, as wr
 | | |
 |---|---|
 | base | `5fb858c9`'s code (the 20 G plan's), off mode: 25,625,190,065 Ir |
-| now | `791d29cb` (PROD-3): 20,928,053,254 Ir, −4.70 G (−18.3%); output byte-identical at every row |
+| now | `aa896697` (HEAD): 21,331,572,685 Ir, off mode, measured 2026-10-17; −4.29 G (−16.8%) against the base. Not the best measured point: `791d29cb` (PROD-3) was 20,928,053,254 and `ee56851c` 20,909,227,687. Piwigo output not compared since PROD-3 (VAL-1 is deferred) |
 | profile | `~/.cache/prs-profile/p8b/cg` (off mode: the stub cache and the file cache are off, so the 3.4 G stub build is in it) |
 
 Where the 20.93 G sits (threads summed):
@@ -123,7 +123,7 @@ After `791d29cb` the branch has the crate split's first C4 commits:
 
 They change the registry's data model, and `e7b2521f` and `0f32829b` change the reports of the missing-type rules. No Ir was measured at them.
 
-Since `791d29cb` the 20 G plan's items 1 to 5 have landed in part: LOAD-1 (item 1), LOAD-2 except its last deletion, LOAD-3.2, 3.4 and 3.6, and LOAD-4.3 to 4.5 (their rows in §3). The Piwigo gate, wall time and instruction counts for them have not run, since they need approval, so the table above is still the last measured state.
+Since `791d29cb` the 20 G plan's items 1 to 5 have landed in part: LOAD-1 (item 1), LOAD-2 except its last deletion, LOAD-3.2, 3.4 and 3.6, and LOAD-4.3 to 4.5 (their rows in §3). Their instruction counts and heap were measured on 2026-10-16 and 17 (the rows below the table). The Piwigo gate and wall time have not run, since they need approval.
 
 The rows that moved the Ir, in order (callgrind, off mode). Each row's output was byte-identical to the base's; each row's record has its checks.
 
@@ -145,6 +145,14 @@ The rows that moved the Ir, in order (callgrind, off mode). Each row's output wa
 | PROD-1 | off P8a | `7726dacf` | 22,014,267,117 | −348.5 M |
 | PROD-2 | off P8b1 | `11837a04` | 21,775,661,606 | −238.6 M |
 | PROD-3 | off P8b | `791d29cb` | 20,928,053,254 | −847.6 M |
+| item 1, LOAD-1 (range, unattributed) | | `428ed943` → `99b1c2e4` | 21,114,767,711 | +226.2 M |
+| the eight fixes (range; `fixes8`, one run) | | `99b1c2e4` → `ee56851c` | 20,909,227,687 | −205.5 M |
+| items 2 and 3, 28 commits (range, unattributed) | | `ee56851c` → `d870ddcb` | 21,289,129,115 | +379.9 M |
+| item 5, LOAD-4.3 to 4.5 (range, unattributed) | | `d870ddcb` → `aa896697` | 21,331,572,685 | +42.4 M |
+
+The four range rows are measurements of commit ranges, not rows, so none is attributed to a commit. Each is one off-mode callgrind run per commit with default threads, on the dhat profile, from `~/.cache/prs-profile/`: `item1-regress` (base and head), `fixes8` and `regress-item5`. MEAS-3 puts the noise at up to 16.9 M. The +380 M of items 2 and 3 is the one to attribute first, by the inclusive `Ir` of the functions it changes.
+
+Warm runs (`regress-item5`): `d870ddcb` 13,382,535,920, `aa896697` 13,346,910,728 (−35.6 M). Heap at one thread (`regress-item5`): `d870ddcb` 2,913,109,581 bytes allocated, peak 807,381,174, exit 647,439,034; `aa896697` +23.7 M allocated (+0.82%), peak +2.2 M, exit −5.8 M. Item 1's heap was measured at default threads, so its deltas (allocated +2.7 M, peak +7.7 M, exit +5.7 M) are not comparable with item 5's.
 
 Defects fixed along the way:
 
@@ -753,7 +761,7 @@ Merging the sources into one list found six places where two of them disagree, o
   - The engine replaces the dependents indexes, `walk_affected` and the finishing passes' scopes (REG-16.4), so the parts of LOAD-4.5 and 4.7 that work on them go when it lands. Their other parts stand.
 - **LOAD-4.3 overlaps REG-8.1:** the crate split's `apply` builds each file's declarations in parallel and recomputes a name's entry by the collision policy, in canonical order. On the engine that entry is a query over the declaring files.
 - **LOAD-4.7 and PROD-5.7 are one change,** seen from the index and from the recording.
-- **Item 5's validation (2026-10-17, after `4e443227`):** `cargo test -p phpstan-rs --lib` (debug) passes, 1191 tests, and `--test fixtures` passes, 3832. `check-project vendor/monolog` with the default options writes the same stdout bytes at `d870ddcb`, the item's base, and at HEAD, with the file cache off and then cold and warm with it on. Stderr is empty with the cache off. With it on, both binaries print the `union.rs:302` debug assertion for two files, as they did before item 5. The base is a worktree of `d870ddcb`, built in debug, with `vendor/phpstan-src` copied from the main checkout at its pin, `08e3736e`. Not run: the Piwigo gate, timing, dhat and hyperfine, which need approval. The dump tooling (VAL-1.5 to 1.10) is open, so LOAD-4.3's oracle is the tests above and this identity check.
+- **Item 5's validation (2026-10-17, after `4e443227`):** `cargo test -p phpstan-rs --lib` (debug) passes, 1191 tests, and `--test fixtures` passes, 3832. `check-project vendor/monolog` with the default options writes the same stdout bytes at `d870ddcb`, the item's base, and at HEAD, with the file cache off and then cold and warm with it on. Stderr is empty with the cache off. With it on, both binaries print the `union.rs:302` debug assertion for two files, as they did before item 5. The base is a worktree of `d870ddcb`, built in debug, with `vendor/phpstan-src` copied from the main checkout at its pin, `08e3736e`. Run after this note was written, at `aa896697` against `d870ddcb`: callgrind (off and warm) and dhat, in §1. Not run: the Piwigo gate, timing and hyperfine, which need approval. The dump tooling (VAL-1.5 to 1.10) is open, so LOAD-4.3's oracle is the tests above and this identity check.
 - **LOAD-5.4 makes LOAD-5.2's frees safe** for any reader left. LOAD-5.3's are the engine's since decision 3.
 - **Commits that no row cites (2026-10-16 and 17):** ten code commits from the walk, path and registry work. Each is listed with the row it reads as; that reading is this ledger's and is to be confirmed when the row is worked.
   - `8fe88b90` and `27b978a5`: a listed file's path is hashed once, and the session's listing keeps the walk's index (LOAD-2.7).
