@@ -127,6 +127,26 @@ pub(crate) struct ChangedNames {
     pub(crate) constants: FxHashMap<String, Option<Type>>,
 }
 
+impl ChangedNames {
+    /// Records a class declared or removed under `name`.
+    pub(crate) fn record_class(&mut self, name: &str) {
+        self.classes.insert(name.to_ascii_lowercase());
+    }
+
+    /// Records a function declared or removed under `name`.
+    pub(crate) fn record_function(&mut self, name: &str) {
+        self.functions.insert(name.to_ascii_lowercase());
+    }
+
+    /// Records a constant changed under `name`. `before` gives its type
+    /// before the change, and is called only for its first change.
+    pub(crate) fn record_constant(&mut self, name: &str, before: impl FnOnce() -> Option<Type>) {
+        if !self.constants.contains_key(name) {
+            self.constants.insert(name.to_string(), before());
+        }
+    }
+}
+
 /// `scope_keys`' entries of `resolved` reset to `raw`'s (or removed with
 /// them). Returns, for each of `snapshot_keys` in order, what `resolved`
 /// held under it: taken out where the key is reset, copied where it is not.
@@ -673,20 +693,21 @@ impl Registry {
 
     pub(crate) fn record_changed_class(&mut self, name: &str) {
         if self.raw.is_some() {
-            self.changed.classes.insert(name.to_ascii_lowercase());
+            self.changed.record_class(name);
         }
     }
 
     pub(crate) fn record_changed_function(&mut self, name: &str) {
         if self.raw.is_some() {
-            self.changed.functions.insert(name.to_ascii_lowercase());
+            self.changed.record_function(name);
         }
     }
 
     fn record_changed_constant(&mut self, name: &str) {
-        if self.raw.is_some() && !self.changed.constants.contains_key(name) {
-            let before = self.global_constants.get(name).cloned();
-            self.changed.constants.insert(name.to_string(), before);
+        if self.raw.is_some() {
+            let global_constants = &self.global_constants;
+            self.changed
+                .record_constant(name, || global_constants.get(name).cloned());
         }
     }
 

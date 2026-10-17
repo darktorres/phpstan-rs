@@ -107,6 +107,46 @@ impl Registry {
         }
     }
 
+    /// Applies one already-built declaration to the registry's tables, the
+    /// way `DeclTables::insert` does over the tables it is given.
+    pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
+        let recording = self.raw.is_some();
+        DeclTables {
+            classes: &mut self.classes,
+            functions: &mut self.functions,
+            global_constants: &mut self.global_constants,
+            built_in_stub_classes: &self.built_in_stub_classes,
+            unconditionally_declared_classes: &mut self.unconditionally_declared_classes,
+            unconditionally_declared_functions: &mut self.unconditionally_declared_functions,
+            stub_provided_functions: &mut self.stub_provided_functions,
+            function_decl_sites: &mut self.function_decl_sites,
+            names_with_assert_tags: &mut self.names_with_assert_tags,
+            php_versions: self.php_versions,
+            changed: recording.then_some(&mut self.changed),
+        }
+        .insert(decl, analyzed);
+    }
+}
+
+/// The registry tables one declaration's insert reads and writes, borrowed
+/// from wherever they are kept. `insert` holds the one implementation of
+/// every collision decision. `changed` is where changed names are recorded,
+/// and `None` where they are not.
+pub(crate) struct DeclTables<'a> {
+    pub(crate) classes: &'a mut super::NameTable<ClassReflection>,
+    pub(crate) functions: &'a mut super::FunctionTable,
+    pub(crate) global_constants: &'a mut super::NameMap<Type>,
+    pub(crate) built_in_stub_classes: &'a super::NameTable<()>,
+    pub(crate) unconditionally_declared_classes: &'a mut super::NameSet,
+    pub(crate) unconditionally_declared_functions: &'a mut super::NameSet,
+    pub(crate) stub_provided_functions: &'a mut super::NameSet,
+    pub(crate) function_decl_sites: &'a mut super::NameMap<Option<u32>>,
+    pub(crate) names_with_assert_tags: &'a mut super::NameSet,
+    pub(crate) php_versions: Option<types::PhpVersions>,
+    pub(crate) changed: Option<&'a mut super::ChangedNames>,
+}
+
+impl DeclTables<'_> {
     /// Applies one already-built declaration (see `BuiltDecl`/
     /// `build_declarations`) to the registry - factored out so both the
     /// sequential single-file path above and the parallel-parse batch
@@ -141,7 +181,7 @@ impl Registry {
     /// caller: an analyzed file's declaration must always win a same-name
     /// collision outright, never merge with a pre-existing context/stub
     /// entry the way two context-only declarations legitimately do.
-    pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
+    pub(crate) fn insert(&mut self, decl: BuiltDecl, analyzed: bool) {
         // A guard the configured PHP versions rule out is a declaration that
         // never runs: it changes nothing, and is not a change. One they
         // always satisfy declares as if it stood unguarded.
@@ -445,7 +485,7 @@ impl Registry {
                 }
             }
             BuiltDecl::GlobalConst { name, ty, .. } => {
-                register_global_constant(&mut self.global_constants, name, ty);
+                register_global_constant(self.global_constants, name, ty);
             }
         }
     }
@@ -486,6 +526,26 @@ impl Registry {
         }
     }
 
+    fn record_changed_class(&mut self, name: &str) {
+        if let Some(changed) = &mut self.changed {
+            changed.record_class(name);
+        }
+    }
+
+    fn record_changed_function(&mut self, name: &str) {
+        if let Some(changed) = &mut self.changed {
+            changed.record_function(name);
+        }
+    }
+
+    fn record_changed_constant(&mut self, name: &str) {
+        if let Some(changed) = &mut self.changed {
+            changed.record_constant(name, || self.global_constants.get(name).cloned());
+        }
+    }
+}
+
+impl Registry {
     /// Surgically removes one file's prior contributions before
     /// re-indexing its new parse - `Project::update_file`'s whole reason
     /// for existing. `functions`/`classes` must already be the
