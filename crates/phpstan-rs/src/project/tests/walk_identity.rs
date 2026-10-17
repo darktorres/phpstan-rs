@@ -390,3 +390,69 @@ fn a_stub_root_marks_its_files_and_an_analysed_listing_stays_analysed() {
         ]
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn an_explicit_link_is_listed_under_its_target() {
+    let dir = TempDir::new("walk_explicit_link");
+    dir.write("real/lib.php", "<?php");
+    let base = resolved(&dir);
+    std::os::unix::fs::symlink("real/lib.php", base.join("link.php")).unwrap();
+
+    let mut explicit = Walk::new();
+    explicit.add_file(&base.join("link.php"), Role::Context);
+    assert_eq!(
+        sorted(explicit.finish().files),
+        vec![(base.join("real/lib.php"), Role::Context, false)]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn explicit_files_under_a_linked_directory_are_listed_under_its_target() {
+    let dir = TempDir::new("walk_explicit_linked_dir");
+    dir.write("real/lib.php", "<?php");
+    dir.write("real/other.php", "<?php");
+    let base = resolved(&dir);
+    std::os::unix::fs::symlink("real", base.join("alias")).unwrap();
+
+    let mut explicit = Walk::new();
+    explicit.add_file(&base.join("alias/lib.php"), Role::Context);
+    explicit.add_file(&base.join("alias/other.php"), Role::Context);
+    assert_eq!(
+        sorted(explicit.finish().files),
+        vec![
+            (base.join("real/lib.php"), Role::Context, false),
+            (base.join("real/other.php"), Role::Context, false),
+        ]
+    );
+}
+
+#[test]
+fn an_explicit_file_spelled_through_dot_dot_is_listed_under_its_resolved_path() {
+    let dir = TempDir::new("walk_explicit_dot_dot");
+    dir.write("proj/config/keep.txt", "");
+    dir.write("proj/lib.php", "<?php");
+    let base = resolved(&dir);
+
+    let mut explicit = Walk::new();
+    explicit.add_file(&base.join("proj/config/../lib.php"), Role::Context);
+    assert_eq!(
+        sorted(explicit.finish().files),
+        vec![(base.join("proj/lib.php"), Role::Context, false)]
+    );
+}
+
+#[test]
+fn a_missing_explicit_file_is_listed_under_its_path() {
+    let dir = TempDir::new("walk_explicit_missing");
+    dir.write("proj/keep.txt", "");
+    let base = resolved(&dir);
+
+    let mut explicit = Walk::new();
+    explicit.add_file(&base.join("proj/missing.php"), Role::Context);
+    assert_eq!(
+        sorted(explicit.finish().files),
+        vec![(base.join("proj/missing.php"), Role::Context, false)]
+    );
+}
