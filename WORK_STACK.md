@@ -11,7 +11,7 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-17, `4e443227` on branch `callgrind-20g`. Counts below were
+State as of 2026-10-17, `aa896697` on branch `callgrind-20g`. Counts below were
 read from the files on that date. This file covers this branch only.
 
 ## Where to resume
@@ -202,7 +202,7 @@ later item waits for that need. The READY rows, item by item:
   not started); its reverse-index part goes with REG-16.4.
 - Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).
 - Item 9: SYN-1.1 and 1.2, then 1.3, 1.4, 1.5, 1.7 and 1.8.
-- Item 11: SYN-3.1 and 3.2, then 3.3 and 3.4.
+- Item 11: SYN-3.1, 3.2 and 3.3 (LOAD-1.4 is in), then 3.4.
 - Item 12: SYN-4.2, 4.4, 4.5, 4.6, 4.8, 4.9 and 4.10.
 - Item 13: PROD-5.2, 5.3, 5.5, 5.6, and PROD-5.8 (decision 2).
 - Item 14: DOC-2.3, 2.4, 2.7 and 2.8. DOC-2.1 is deferred.

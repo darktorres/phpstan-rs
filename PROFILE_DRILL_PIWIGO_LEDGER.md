@@ -1,6 +1,6 @@
 # Piwigo performance ledger
 
-Every optimization task for the Piwigo profile on this branch (`callgrind-20g`), grouped by the part of the program it changes, with its state and what blocks it. State as of 2026-10-15; the code is at `14dcddb2`.
+Every optimization task for the Piwigo profile on this branch (`callgrind-20g`), grouped by the part of the program it changes, with its state and what blocks it. State as of 2026-10-17; the code is at `aa896697`.
 
 This is the one list of the branch's tasks. The documents the tasks come from stay as their design texts. Their status claims are not kept up; this ledger's are.
 
@@ -123,6 +123,8 @@ After `791d29cb` the branch has the crate split's first C4 commits:
 
 They change the registry's data model, and `e7b2521f` and `0f32829b` change the reports of the missing-type rules. No Ir was measured at them.
 
+Since `791d29cb` the 20 G plan's items 1 to 5 have landed in part: LOAD-1 (item 1), LOAD-2 except its last deletion, LOAD-3.2, 3.4 and 3.6, and LOAD-4.3 to 4.5 (their rows in §3). The Piwigo gate, wall time and instruction counts for them have not run, since they need approval, so the table above is still the last measured state.
+
 The rows that moved the Ir, in order (callgrind, off mode). Each row's output was byte-identical to the base's; each row's record has its checks.
 
 | row | from | commit | Ir after | change |
@@ -202,12 +204,10 @@ Four questions that a reading of the whole ledger found the decisions had left o
 These rows are open with every need met:
 
 - **CACHE-8** (heap H1), a memory row. With CHECK-4.2 (off P11, under CHECK below), it is one of the two off-drill rows nothing blocks.
-- **LOAD:**
-  - LOAD-4.3, 4.5 and 4.7;
-  - LOAD-5.4.
+- **LOAD:** LOAD-5.4.
 - **SYN:**
   - SYN-1.1 (`peeled` becomes a loop) and SYN-1.2 (the flat tree, decision 4);
-  - SYN-3.1 and 3.2;
+  - SYN-3.1, 3.2 and 3.3;
   - SYN-4.2, 4.4, 4.5, 4.6, 4.8, 4.9 and 4.10.
 - **PROD:** PROD-5.2, 5.3, 5.5 and 5.6; PROD-5.8 (the record of written names, decision 2).
 - **DOC:** DOC-2.3, 2.4, 2.7 and 2.8. DOC-2.1 is ready but deferred (2026-10-16).
@@ -680,7 +680,7 @@ Merging the sources into one list found six places where two of them disagree, o
 
 | id | task | from | state | needs |
 |---|---|---|---|---|
-| LOAD-1 | One session for the CLI, the server and the tests: one identity, one configuration, one load, one analysis | 20 G 1 | OPEN | — |
+| LOAD-1 | One session for the CLI, the server and the tests: one identity, one configuration, one load, one analysis | 20 G 1 | DONE (LOAD-1.6 SUPERSEDED by REG-16.4) | — |
 | LOAD-1.1 | **One identity.** A file is its resolved path, as PHP's `include_once` and `__FILE__` see it. Listed paths are normalized lexically. Each link is resolved once, by `realpath`: a target under a walked root is skipped, and a target outside every root is claimed in a set keyed by its resolved path. A link cycle ends where a directory's `(device, inode)` equals an ancestor's (on Windows, the volume serial and file index). Directories that are not links are never merged by identity, and hard links stay two files | 20 G 1 | DONE `aab67287` | — |
 | LOAD-1.2 | **What the identity decides.** A file's spelling, `__FILE__`, `__DIR__` and Composer owner come from its resolved path. Its role is that of the strongest configured root containing it. `Session::classify(path) -> (FileId, role, is_stub)` serves the load and every edit entry point, with an alias table from path to `FileId` | 20 G 1 | DONE `7bef998a` | LOAD-1.1 |
 | LOAD-1.3 | **One configuration.** `Session::resolve` is the server's resolution too, with one error policy as a parameter (fail, or degrade and report). `workspace_config::resolve` is deleted. A reload applies the difference in file sets | 20 G 1 | DONE `c9f6a85c` | — |
@@ -755,6 +755,14 @@ Merging the sources into one list found six places where two of them disagree, o
 - **LOAD-4.7 and PROD-5.7 are one change,** seen from the index and from the recording.
 - **Item 5's validation (2026-10-17, after `4e443227`):** `cargo test -p phpstan-rs --lib` (debug) passes, 1191 tests, and `--test fixtures` passes, 3832. `check-project vendor/monolog` with the default options writes the same stdout bytes at `d870ddcb`, the item's base, and at HEAD, with the file cache off and then cold and warm with it on. Stderr is empty with the cache off. With it on, both binaries print the `union.rs:302` debug assertion for two files, as they did before item 5. The base is a worktree of `d870ddcb`, built in debug, with `vendor/phpstan-src` copied from the main checkout at its pin, `08e3736e`. Not run: the Piwigo gate, timing, dhat and hyperfine, which need approval. The dump tooling (VAL-1.5 to 1.10) is open, so LOAD-4.3's oracle is the tests above and this identity check.
 - **LOAD-5.4 makes LOAD-5.2's frees safe** for any reader left. LOAD-5.3's are the engine's since decision 3.
+- **Commits that no row cites (2026-10-16 and 17):** ten code commits from the walk, path and registry work. Each is listed with the row it reads as; that reading is this ledger's and is to be confirmed when the row is worked.
+  - `8fe88b90` and `27b978a5`: a listed file's path is hashed once, and the session's listing keeps the walk's index (LOAD-2.7).
+  - `ab01515a`, `ee56851c` and `cf5a8ae2`: an existing path resolves without taking its prefix off first, an explicit file resolves its directory once per walk, and the report names each file relative to the root once (LOAD-2.6).
+  - `40a83f19`: a file's display path is built only where its anonymous classes or its cache key need it (LOAD-2.3).
+  - `8ffd68d9`: a file's digest is computed only when the project retains its source (LOAD-3.4).
+  - `6b5bb0b3`: tests that an explicitly listed link is listed under its resolved path (LOAD-1.1).
+  - `a5d61611`: the corpus gate runner follows item 1's `prepare` and `finalize` changes (LOAD-1.4 and LOAD-1.5).
+  - `4bd62127`: a class's display path is built only for a `PHPStan\*` name. It is in the registry, and no LOAD row fits it.
 - **Memory (MEAS-2):** the analysed trees are 151.1 MB at exit, and at the peak of the warm run.
 
 ### Records
@@ -788,7 +796,7 @@ Merging the sources into one list found six places where two of them disagree, o
 | SYN-3 | Line starts for every file, columns only where read, ignore marks and member spans as offsets | 20 G 11 | OPEN | — |
 | SYN-3.1 | **Two types.** `LineStarts` serves every file, built by one pass over newline bitmasks that also says whether the file is ASCII. `LineIndex` adds the column tables, for analysed files only. `FileState` holds `enum Lines { Starts(LineStarts), Full(LineIndex) }` | 20 G 11.1 | READY | — |
 | SYN-3.2 | **Blocks.** SSE2's 16-byte blocks, with AVX2's 32-byte blocks behind one `is_x86_feature_detected!` dispatch per process; eight-byte words on other targets | 20 G 11.2 | READY, with SYN-3.1 | — |
-| SYN-3.3 | The server indexes context files on demand, but only while the hash of the bytes the project loaded still matches the file | 20 G 11.3 | OPEN | LOAD-1.4 (the kept hash) |
+| SYN-3.3 | The server indexes context files on demand, but only while the hash of the bytes the project loaded still matches the file | 20 G 11.3 | READY (its need, LOAD-1.4, is in: `3334ebc9`) | — |
 | SYN-3.4 | **Nothing in the front end reads lines.** Ignore marks, member removal spans and statement docs record offsets. Anonymous-class names take their line from `LineStarts` on the worker. The texts of ignore marks and ignore comments become offsets and slices | 20 G 11.4 | OPEN | SYN-3.1 |
 | SYN-4 | Lexer details | 20 G 12 | OPEN | — |
 | SYN-4.1 | **The identifier lookup** is inlined into the identifier arm, its table is SYN-2's scratch, and a probe compares the length first. The watch list becomes a compile-time perfect-hash table | 20 G 12.1 | OPEN | SYN-2 (the name table) |
