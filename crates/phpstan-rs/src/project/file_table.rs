@@ -6,6 +6,7 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
+use super::walk::{PathHash, path_hash};
 use crate::file_id::FileId;
 
 /// A map from path to what is known of that file, which also numbers the
@@ -16,7 +17,9 @@ use crate::file_id::FileId;
 /// back has the slot it had: a number is never given to two paths, and a
 /// table keyed by `FileId` can hold the number of a file removed meanwhile.
 pub(crate) struct FileTable<V> {
-    ids: FxHashMap<PathBuf, FileId>,
+    /// The numbers of the slots, found by their paths' hashes. A path is held
+    /// in its slot only.
+    ids: hashbrown::HashTable<FileId>,
     slots: Vec<Slot<V>>,
     len: usize,
     // The file by the address of the `Arc<Path>` its declarations name it
@@ -27,6 +30,8 @@ pub(crate) struct FileTable<V> {
 
 struct Slot<V> {
     path: PathBuf,
+    /// `path_hash(path)`.
+    hash: PathHash,
     value: Option<V>,
     origins: Vec<Arc<Path>>,
 }
@@ -34,7 +39,7 @@ struct Slot<V> {
 impl<V> Default for FileTable<V> {
     fn default() -> Self {
         FileTable {
-            ids: FxHashMap::default(),
+            ids: hashbrown::HashTable::new(),
             slots: Vec::new(),
             len: 0,
             by_origin: FxHashMap::default(),
@@ -43,15 +48,17 @@ impl<V> Default for FileTable<V> {
 }
 
 impl<V> FileTable<V> {
-    /// A table that has numbered `paths`, each by its first place in the
-    /// list, and the number each place got. Nothing is held yet.
+    /// A table that has numbered `paths`, each with its hash, by its first
+    /// place in the list, and the number each place got. Nothing is held yet.
     pub(crate) fn with_paths<'a>(
-        paths: impl ExactSizeIterator<Item = &'a Path>,
+        paths: impl ExactSizeIterator<Item = (&'a Path, PathHash)>,
     ) -> (FileTable<V>, Vec<FileId>) {
         let mut table = FileTable::default();
-        table.ids.reserve(paths.len());
+        table
+            .ids
+            .reserve(paths.len(), |id| table.slots[id.index()].hash);
         table.slots.reserve(paths.len());
-        let numbers = paths.map(|path| table.id_for(path)).collect();
+        let numbers = paths.map(|(path, hash)| table.number(path, hash)).collect();
         (table, numbers)
     }
 
@@ -71,21 +78,42 @@ impl<V> FileTable<V> {
 
     /// The number of `path`, if it has one.
     pub(crate) fn id_of(&self, path: &Path) -> Option<FileId> {
-        self.ids.get(path).copied()
+        self.find(path_hash(path), path)
     }
 
     /// The number of `path`, given now if it has none.
     pub(crate) fn id_for(&mut self, path: &Path) -> FileId {
-        if let Some(id) = self.ids.get(path) {
-            return *id;
+        self.number(path, path_hash(path))
+    }
+
+    /// The number of `path`, whose hash is `hash`, if it has one.
+    fn find(&self, hash: PathHash, path: &Path) -> Option<FileId> {
+        let slots = &self.slots;
+        self.ids
+            .find(hash, |id| slots[id.index()].path.as_path() == path)
+            .copied()
+    }
+
+    /// The number of `path`, whose hash is `hash`, given now if it has none.
+    fn number(&mut self, path: &Path, hash: PathHash) -> FileId {
+        debug_assert_eq!(
+            hash,
+            path_hash(path),
+            "`hash` must be the path's `path_hash`"
+        );
+        if let Some(id) = self.find(hash, path) {
+            return id;
         }
         let id = FileId::new(self.slots.len());
-        self.ids.insert(path.to_path_buf(), id);
         self.slots.push(Slot {
             path: path.to_path_buf(),
+            hash,
             value: None,
             origins: Vec::new(),
         });
+        let slots = &self.slots;
+        self.ids
+            .insert_unique(hash, id, |id| slots[id.index()].hash);
         id
     }
 
@@ -283,7 +311,8 @@ mod tests {
             Path::new("/c"),
             Path::new("/b"),
         ];
-        let (mut table, numbers): (FileTable<u32>, _) = FileTable::with_paths(paths.into_iter());
+        let (mut table, numbers): (FileTable<u32>, _) =
+            FileTable::with_paths(paths.into_iter().map(|path| (path, path_hash(path))));
         assert_eq!(numbers[0], numbers[2]);
         assert_ne!(numbers[0], numbers[1]);
         assert_ne!(numbers[1], numbers[3]);

@@ -37,14 +37,23 @@ const MERGED_RUNS: usize = 16;
 /// order, gives one), is merged by the paths themselves, and any other is
 /// sorted by a key made once for each.
 pub fn sort_paths(paths: &mut [PathBuf]) {
-    let descents = paths.windows(2).filter(|pair| pair[1] < pair[0]).count();
+    sort_by_path(paths, PathBuf::as_path);
+}
+
+/// `sort_paths` for items that hold a path: sorts `items` stably by the path
+/// `path` gives each.
+pub fn sort_by_path<T>(items: &mut [T], path: impl Fn(&T) -> &Path) {
+    let descents = items
+        .windows(2)
+        .filter(|pair| path(&pair[1]) < path(&pair[0]))
+        .count();
     if descents == 0 {
         return;
     }
     if descents < MERGED_RUNS {
-        paths.sort();
+        items.sort_by(|a, b| path(a).cmp(path(b)));
     } else {
-        paths.sort_by_cached_key(|path| key(path));
+        items.sort_by_cached_key(|item| key(path(item)));
     }
 }
 

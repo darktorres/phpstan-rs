@@ -6,7 +6,7 @@
 //! reports. The CLI and the fixture harness both drive it, so a fixture
 //! exercises exactly what `check-project` runs.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
@@ -1199,24 +1199,9 @@ impl Session {
         project: &mut Project,
         listed: &[Listed],
     ) -> Vec<(PathBuf, String)> {
-        let mut paths: Vec<PathBuf> = listed.iter().map(|listed| listed.path.clone()).collect();
-        composer::path_order::sort_paths(&mut paths);
-        let by_path: FxHashMap<&Path, &Listed> = listed
-            .iter()
-            .map(|listed| (listed.path.as_path(), listed))
-            .collect();
-        let mut ordered: Vec<&Listed> = paths.iter().map(|path| by_path[path.as_path()]).collect();
-        ordered.sort_by_key(|listed| listed.role == Role::Analysed);
-        let files: Vec<(PathBuf, bool, bool)> = ordered
-            .into_iter()
-            .map(|listed| {
-                (
-                    listed.path.clone(),
-                    listed.role == Role::Analysed,
-                    listed.stub,
-                )
-            })
-            .collect();
+        let mut ordered: Vec<&Listed> = listed.iter().collect();
+        composer::path_order::sort_by_path(&mut ordered, |file| file.path.as_path());
+        ordered.sort_by_key(|file| file.role == Role::Analysed);
         let index_use_sites = project.indexes_class_fn_sites();
         // A cached file has no tree. A context file keeps its tree unless the
         // project is built once, so only such a project reads the cache.
@@ -1225,26 +1210,23 @@ impl Session {
         let (parsed, numbering): (Vec<Read>, _) = self.pool.install(|| {
             rayon::join(
                 || {
-                    files
+                    ordered
                         .par_iter()
-                        .map_init(
-                            syntax::name::NameCache::default,
-                            |names, (path, analysed, stub)| {
-                                self.read_indexed(
-                                    shared,
-                                    path,
-                                    *stub,
-                                    names,
-                                    built_once && !analysed,
-                                    index_use_sites,
-                                )
-                            },
-                        )
+                        .map_init(syntax::name::NameCache::default, |names, file| {
+                            self.read_indexed(
+                                shared,
+                                &file.path,
+                                file.stub,
+                                names,
+                                built_once && file.role != Role::Analysed,
+                                index_use_sites,
+                            )
+                        })
                         .collect()
                 },
                 || {
                     super::file_table::FileTable::with_paths(
-                        files.iter().map(|(path, _, _)| path.as_path()),
+                        ordered.iter().map(|file| (file.path.as_path(), file.hash)),
                     )
                 },
             )
@@ -1259,18 +1241,25 @@ impl Session {
             &self.stubs,
         );
         let mut failures = Vec::new();
-        for (((path, analysed, _), read), id) in files.iter().zip(parsed).zip(numbers) {
+        for ((file, read), id) in ordered.iter().zip(parsed).zip(numbers) {
             match read {
-                Read::Loaded(file) => {
+                Read::Loaded(loaded) => {
                     let ReadFile {
                         source,
                         parsed,
                         content_hash,
                         ..
-                    } = *file;
-                    project.insert_numbered_file(id, path, parsed, source, content_hash, *analysed);
+                    } = *loaded;
+                    project.insert_numbered_file(
+                        id,
+                        &file.path,
+                        parsed,
+                        source,
+                        content_hash,
+                        file.role == Role::Analysed,
+                    );
                 }
-                Read::Unparsed(failure) => failures.push((path.clone(), failure.message)),
+                Read::Unparsed(failure) => failures.push((file.path.clone(), failure.message)),
                 Read::Unread => {}
             }
         }
@@ -1282,7 +1271,7 @@ impl Session {
     /// error. The files are read from this session's source.
     pub fn load_into(&self, project: &mut Project) -> Result<(), String> {
         project.set_source(self.source.clone());
-        if let Some((path, message)) = self.load_listed(project, &self.listing()).first() {
+        if let Some((path, message)) = self.load_listed(project, &self.listing_of().files).first() {
             let shown = super::shown_path(Some(self.absolute_root.as_path()), path);
             return Err(format!("{} does not parse: {message}", shown.display()));
         }
@@ -1332,21 +1321,17 @@ impl Session {
     /// Parses every context and analysed file into a configured,
     /// finished `Project`, ready for `analyse`.
     pub fn load(&self) -> Result<Loaded, String> {
-        let mut analyze_files = Vec::new();
-        let mut context_files = Vec::new();
-        let mut stub_files: FxHashSet<PathBuf> = FxHashSet::default();
-        for listed in self.listing() {
-            if listed.stub {
-                stub_files.insert(listed.path.clone());
-            }
+        let mut analyze_files: Vec<&Listed> = Vec::new();
+        let mut context_files: Vec<&Listed> = Vec::new();
+        for listed in &self.listing_of().files {
             if listed.role == Role::Analysed {
-                analyze_files.push(listed.path);
+                analyze_files.push(listed);
             } else {
-                context_files.push(listed.path);
+                context_files.push(listed);
             }
         }
-        composer::path_order::sort_paths(&mut analyze_files);
-        composer::path_order::sort_paths(&mut context_files);
+        composer::path_order::sort_by_path(&mut analyze_files, |file| file.path.as_path());
+        composer::path_order::sort_by_path(&mut context_files, |file| file.path.as_path());
         if analyze_files.is_empty() && self.overlay_listing.is_none() {
             let dirs: Vec<String> = self.dirs.iter().map(|d| d.display().to_string()).collect();
             return Err(format!("no .php files found under {}", dirs.join(", ")));
@@ -1358,8 +1343,11 @@ impl Session {
         let pool = &self.pool;
 
         let index_use_sites = project.indexes_class_fn_sites();
-        let combined_files: Vec<&PathBuf> =
-            context_files.iter().chain(analyze_files.iter()).collect();
+        let combined_files: Vec<&Listed> = context_files
+            .iter()
+            .chain(analyze_files.iter())
+            .copied()
+            .collect();
         // The files are numbered while they parse.
         let (mut combined_parsed, numbering): (Vec<Read>, _) = pool.install(|| {
             rayon::join(
@@ -1369,11 +1357,11 @@ impl Session {
                         .enumerate()
                         // The names a job meets are kept while it parses one
                         // file after another, and dropped with the load.
-                        .map_init(syntax::name::NameCache::default, |names, (index, p)| {
+                        .map_init(syntax::name::NameCache::default, |names, (index, file)| {
                             self.read_indexed(
                                 &project,
-                                p,
-                                stub_files.contains(p.as_path()),
+                                &file.path,
+                                file.stub,
                                 names,
                                 // The context files come first.
                                 index < context_files.len(),
@@ -1384,7 +1372,9 @@ impl Session {
                 },
                 || {
                     super::file_table::FileTable::with_paths(
-                        combined_files.iter().map(|p| p.as_path()),
+                        combined_files
+                            .iter()
+                            .map(|file| (file.path.as_path(), file.hash)),
                     )
                 },
             )
@@ -1421,19 +1411,20 @@ impl Session {
         };
         let mut skipped_context = 0usize;
         let mut parse_failure_lines = Vec::new();
-        for ((path, &id), parsed) in context_files
+        for ((file, &id), parsed) in context_files
             .iter()
             .zip(context_numbers)
             .zip(context_parsed)
         {
+            let path = &file.path;
             match parsed {
-                Read::Loaded(file) => {
+                Read::Loaded(loaded) => {
                     let ReadFile {
                         source,
                         parsed,
                         content_hash,
                         ..
-                    } = *file;
+                    } = *loaded;
                     note_lex_warnings(path, &parsed);
                     project.insert_numbered_file(id, path, parsed, source, content_hash, false)
                 }
@@ -1454,21 +1445,22 @@ impl Session {
         let mut analyze_sizes: Vec<usize> = vec![0; analyze_files.len()];
         let mut skipped_analyze = 0usize;
         let mut parse_failures = Vec::new();
-        for (index, ((path, &id), parsed)) in analyze_files
+        for (index, ((file, &id), parsed)) in analyze_files
             .iter()
             .zip(analyze_numbers)
             .zip(analyze_parsed)
             .enumerate()
         {
+            let path = &file.path;
             match parsed {
-                Read::Loaded(file) => {
+                Read::Loaded(loaded) => {
                     let ReadFile {
                         len,
                         source,
                         parsed,
                         content_hash,
                         cache_key: _,
-                    } = *file;
+                    } = *loaded;
                     note_lex_warnings(path, &parsed);
                     analyze_sizes[index] = len;
                     project.insert_numbered_file(id, path, parsed, source, content_hash, true)
@@ -1489,7 +1481,7 @@ impl Session {
         by_size.sort_by_key(|&index| std::cmp::Reverse(analyze_sizes[index]));
         let analyze_files_by_size = by_size
             .into_iter()
-            .map(|index| analyze_files[index].clone())
+            .map(|index| analyze_files[index].path.clone())
             .collect();
         Ok(Loaded {
             project,
