@@ -9,6 +9,8 @@ use rustc_hash::FxHashSet;
 use std::sync::{Arc, OnceLock};
 use syntax::name::{FoldKey, FoldedMap, FoldedSet, Name};
 
+use crate::file_id::FileId;
+use crate::registry::provenance::BindFile;
 use crate::shard::{SHARDS, shard_of_hash};
 
 use super::container::{Buffer, Reader, Stored, Writer};
@@ -510,8 +512,31 @@ impl<V> Base<V> {
 #[derive(Debug)]
 pub(crate) struct Lazy<V> {
     value: OnceLock<V>,
-    // The entry encoded, with what decodes it; `None` once built decoded.
-    encoded: Option<(Arc<Vec<u8>>, Decoder<V>)>,
+    // The entry encoded, while it describes the value: `None` once built
+    // decoded or written.
+    encoded: Option<Encoded<V>>,
+}
+
+/// A lazy value's entry: its bytes, what decodes them, and the number of
+/// the file the value names once decoded.
+#[derive(Debug)]
+struct Encoded<V> {
+    bytes: Arc<Vec<u8>>,
+    decode: Decoder<V>,
+    file: Option<(FileId, Binder<V>)>,
+}
+
+/// What gives a decoded value its file's number.
+type Binder<V> = fn(&mut V, FileId);
+
+impl<V> Clone for Encoded<V> {
+    fn clone(&self) -> Encoded<V> {
+        Encoded {
+            bytes: Arc::clone(&self.bytes),
+            decode: self.decode,
+            file: self.file,
+        }
+    }
 }
 
 impl<V: Clone> Clone for Lazy<V> {
@@ -524,9 +549,11 @@ impl<V: Clone> Clone for Lazy<V> {
 }
 
 impl<V> Lazy<V> {
-    /// The value, decoded first when it is not yet.
+    /// The value, decoded first when it is not yet, to be written: its bytes
+    /// no longer describe it.
     pub(crate) fn get_mut(&mut self) -> &mut V {
         self.get();
+        self.encoded = None;
         self.value.get_mut().expect("just decoded")
     }
 
@@ -544,12 +571,44 @@ impl<V> Lazy<V> {
 
     pub(crate) fn get(&self) -> &V {
         self.value.get_or_init(|| {
-            let (bytes, decode) = self
+            let encoded = self
                 .encoded
                 .as_ref()
                 .expect("a slot built decoded holds its value");
-            decode(bytes)
+            let mut value = (encoded.decode)(&encoded.bytes);
+            if let Some((file, bind)) = encoded.file {
+                bind(&mut value, file);
+            }
+            value
         })
+    }
+
+    /// Whether both hold the same bytes, bound to the same file, and so the
+    /// same value, decoded or not.
+    fn same_encoding(&self, other: &Lazy<V>) -> bool {
+        match (&self.encoded, &other.encoded) {
+            (Some(a), Some(b)) => {
+                a.file.map(|(file, _)| file) == b.file.map(|(file, _)| file)
+                    && (Arc::ptr_eq(&a.bytes, &b.bytes) || a.bytes == b.bytes)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl<V: BindFile> Lazy<V> {
+    /// Gives the value its file's number without decoding it: a value still
+    /// encoded takes the number as it is decoded. As with a declaration's
+    /// own binding, only the first number counts.
+    pub(crate) fn bind_file(&mut self, file: FileId) {
+        if let Some(value) = self.value.get_mut() {
+            value.bind_file(file);
+        }
+        if let Some(encoded) = &mut self.encoded
+            && encoded.file.is_none()
+        {
+            encoded.file = Some((file, V::bind_file));
+        }
     }
 }
 
@@ -1258,7 +1317,7 @@ impl<V> NameTable<V> {
 
 impl<V: PartialEq> PartialEq for Lazy<V> {
     fn eq(&self, other: &Lazy<V>) -> bool {
-        std::ptr::eq(self, other) || self.get() == other.get()
+        std::ptr::eq(self, other) || self.same_encoding(other) || self.get() == other.get()
     }
 }
 
@@ -1266,11 +1325,11 @@ impl<V: PartialEq> PartialEq for Lazy<V> {
 impl<V: serde::Serialize> serde::Serialize for Lazy<V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error;
-        // A value not read since it was stored is written as it was.
-        if self.value.get().is_none()
-            && let Some((bytes, _)) = &self.encoded
-        {
-            return serializer.serialize_bytes(bytes);
+        // A value not written since it was stored is written as it was. Its
+        // file's number is not stored, as the value's own encoding leaves it
+        // out.
+        if let Some(encoded) = &self.encoded {
+            return serializer.serialize_bytes(&encoded.bytes);
         }
         let bytes = super::stub_cache::encode(self.get()).map_err(S::Error::custom)?;
         Bytes(bytes).serialize(serializer)
@@ -1282,7 +1341,11 @@ impl<'de, V: serde::de::DeserializeOwned> serde::Deserialize<'de> for Lazy<V> {
         let bytes = Bytes::deserialize(deserializer)?;
         Ok(Lazy {
             value: OnceLock::new(),
-            encoded: Some((Arc::new(bytes.0), decode_entry::<V> as Decoder<V>)),
+            encoded: Some(Encoded {
+                bytes: Arc::new(bytes.0),
+                decode: decode_entry::<V>,
+                file: None,
+            }),
         })
     }
 }

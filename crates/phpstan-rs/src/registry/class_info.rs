@@ -9,7 +9,7 @@ use crate::registry::function_sig::{
 use crate::registry::name_context::{
     class_ref, collect_class_name_case_refs, resolve_names_in_type,
 };
-use crate::registry::provenance::{Origin, Provenance};
+use crate::registry::provenance::{BindFile, Origin, Provenance};
 use crate::registry::reflection_attribute::ReflectionAttribute;
 use crate::registry::type_node::parse_type_node;
 use crate::registry::{Members, Shared};
@@ -957,9 +957,7 @@ impl ClassReflection {
     /// that is known.
     pub(crate) fn bind_file(&mut self, file: FileId) {
         self.provenance.bind_file(file);
-        for (_, sig) in self.methods.iter_mut() {
-            sig.bind_file(file);
-        }
+        self.methods.bind_file(file);
         for sig in self.redeclared_methods.values_mut() {
             sig.bind_file(file);
         }

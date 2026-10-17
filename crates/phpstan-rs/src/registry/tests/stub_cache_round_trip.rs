@@ -1,5 +1,7 @@
 //! What the stub cache stores must read back: the resolved registry and
-//! the declarations as built, with every class and function entry decoding.
+//! the declarations as built, with every class and function entry decoding,
+//! and a class's methods, which decode only when read: they take their
+//! file's number, compare and are stored again without a decode.
 
 use crate::project::Project;
 use crate::registry::Registry;
@@ -189,4 +191,110 @@ fn a_stored_classs_methods_are_decoded_when_read() {
         decode(&encode(&back).expect("encodes")).expect("decodes");
     assert_eq!(again.encoded_count(), count);
     assert_eq!(again, *exception.methods());
+}
+
+/// A project class's methods as the per-file cache stores them, and how many
+/// there are: read back, each is pending its file's number.
+fn stored_project_methods() -> (Vec<u8>, usize) {
+    use crate::registry::stub_cache::encode;
+
+    let mut project = Project::new();
+    crate::project::session::load_test_file(
+        &mut project,
+        std::path::PathBuf::from("app.php"),
+        "<?php class App {
+            function a(): int { return 1; }
+            function b(string $s): string { return $s; }
+            function c(): void {}
+        }",
+        true,
+    );
+    let (_, app) = project
+        .registry()
+        .lookup_class("App")
+        .expect("a project class");
+    let methods = app.methods();
+    (encode(methods).expect("encodes"), methods.len())
+}
+
+#[test]
+fn a_stored_classs_methods_take_their_files_number_without_being_decoded() {
+    use crate::file_id::FileId;
+    use crate::registry::Members;
+    use crate::registry::function_sig::FunctionReflection;
+    use crate::registry::stub_cache::decode;
+
+    let (bytes, count) = stored_project_methods();
+    let mut back: Members<FunctionReflection> = decode(&bytes).expect("decodes");
+    back.bind_file(FileId::new(7));
+    assert_eq!(back.encoded_count(), count, "binding decodes nothing");
+    let a = back.get("a").expect("a method");
+    assert_eq!(a.provenance().file(), Some(FileId::new(7)));
+    assert_eq!(back.encoded_count(), count - 1);
+
+    // A member read before the binding takes it too, and a second number
+    // changes none of them.
+    let mut back: Members<FunctionReflection> = decode(&bytes).expect("decodes");
+    assert!(back.get("b").expect("a method").provenance().is_pending());
+    back.bind_file(FileId::new(7));
+    back.bind_file(FileId::new(9));
+    assert_eq!(back.encoded_count(), count - 1);
+    for name in ["a", "b", "c"] {
+        let file = back.get(name).expect("a method").provenance().file();
+        assert_eq!(file, Some(FileId::new(7)), "{name}");
+    }
+}
+
+#[test]
+fn members_read_back_from_the_same_bytes_are_equal_without_a_decode() {
+    use crate::file_id::FileId;
+    use crate::registry::Members;
+    use crate::registry::function_sig::FunctionReflection;
+    use crate::registry::stub_cache::decode;
+
+    let (bytes, count) = stored_project_methods();
+    let read = |file: usize| {
+        let mut members: Members<FunctionReflection> = decode(&bytes).expect("decodes");
+        members.bind_file(FileId::new(file));
+        members
+    };
+    let (mut written, other) = (read(7), read(7));
+    assert_eq!(written, other);
+    assert_eq!(written.encoded_count(), count, "compared by their bytes");
+    assert_eq!(other.encoded_count(), count, "compared by their bytes");
+
+    // Read and still the bytes it was read from, a member compares by them.
+    written.get("c").expect("a method");
+    assert_eq!(written, other);
+    assert_eq!(other.encoded_count(), count);
+
+    // A member written to is compared by its value, even when unchanged.
+    written.get_mut("a").expect("a method");
+    assert_eq!(written, other);
+    assert_eq!(other.encoded_count(), count - 1);
+    written.get_mut("a").expect("a method").return_type = types::Type::mixed();
+    assert_ne!(written, other);
+
+    // The same bytes bound to other files are other values.
+    assert_ne!(read(7), read(8));
+}
+
+#[test]
+fn a_member_read_but_not_written_is_stored_as_the_bytes_it_was_read_from() {
+    use crate::file_id::FileId;
+    use crate::registry::Members;
+    use crate::registry::function_sig::FunctionReflection;
+    use crate::registry::stub_cache::{decode, encode};
+
+    let (bytes, count) = stored_project_methods();
+    let mut back: Members<FunctionReflection> = decode(&bytes).expect("decodes");
+    back.bind_file(FileId::new(7));
+    for name in ["a", "b", "c"] {
+        back.get(name).expect("a method");
+    }
+    assert_eq!(back.encoded_count(), 0);
+    assert_eq!(encode(&back).expect("encodes"), bytes);
+    let again: Members<FunctionReflection> =
+        decode(&encode(&back).expect("encodes")).expect("decodes");
+    assert_eq!(again.encoded_count(), count);
 }

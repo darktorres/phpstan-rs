@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 use syntax::name::{FoldKey, FoldedMap, Name};
 
+use crate::file_id::FileId;
+use crate::registry::function_sig::FunctionReflection;
 use crate::registry::{Lazy, Shared};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -144,6 +146,16 @@ impl<V: Clone> Members<V> {
     pub fn retain(&mut self, mut keep: impl FnMut(&Name, &mut V) -> bool) {
         self.map
             .retain(|name, member| keep(name, Arc::make_mut(member).get_mut()));
+    }
+}
+
+impl Members<FunctionReflection> {
+    /// Gives every member its file's number, without decoding a member that
+    /// is still encoded.
+    pub(crate) fn bind_file(&mut self, file: FileId) {
+        for member in self.map.values_mut() {
+            Arc::make_mut(member).bind_file(file);
+        }
     }
 }
 

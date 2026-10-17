@@ -7,7 +7,7 @@ use crate::file_id::FileId;
 use crate::registry::Registry;
 use crate::registry::class_info::MemberSpans;
 use crate::registry::guard::{Guard, GuardExpr};
-use crate::registry::provenance::{Origin, Provenance};
+use crate::registry::provenance::{BindFile, Origin, Provenance};
 use crate::registry::{
     ClassReflection, FunctionReflection, folded_key, function_key, infer_const_type,
 };

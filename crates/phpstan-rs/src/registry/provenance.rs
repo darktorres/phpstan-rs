@@ -167,6 +167,14 @@ pub(crate) fn embedded_str(text: &str) -> Result<&'static str, String> {
         .ok_or_else(|| format!("{text} is not an embedded stub"))
 }
 
+/// A declaration that names its project file by number, which it is given
+/// once the file is numbered.
+pub(crate) trait BindFile {
+    /// Gives a pending declaration its file's number; any other is left as
+    /// it is.
+    fn bind_file(&mut self, file: FileId);
+}
+
 /// A declaration's source, the span of its name there, and for a member,
 /// the class-like that declares it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
