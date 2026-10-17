@@ -1104,13 +1104,6 @@ impl Project {
         }
     }
 
-    /// Finds the composer package `parsed`, the file at `path`, belongs to
-    /// ahead of its insertion, so a caller parsing many files in
-    /// parallel does the path work there too.
-    pub(crate) fn note_owner(&self, parsed: &mut ParsedFile, path: &Path) {
-        parsed.owner = Some(self.owner_of_file(path));
-    }
-
     /// Merges PHPStan's own source in with the built-in stubs while some
     /// loaded file mentions a `PHPStan\` name, and takes it out again once
     /// none does: most projects never name it, and it is over half of the
@@ -3005,9 +2998,8 @@ pub struct ParsedFile {
     // parse (`Project::index_use_sites`); `insert_numbered_file` indexes
     // them itself otherwise.
     class_fn_refs: Option<Vec<(Span, use_sites::RefTarget)>>,
-    // The composer package that owns the file, when found alongside the
-    // parse (`Project::note_owner`); `insert_numbered_file` finds it itself
-    // otherwise.
+    // The composer package that owns the file, as the walk that listed it
+    // found it; `insert_numbered_file` finds it itself when no walk did.
     owner: Option<Option<composer::PackageOwner>>,
 }
 
@@ -3153,7 +3145,9 @@ impl ParsedFile {
 /// top-level scan in one non-recursive, correctly-measured call instead -
 /// see that function's own doc comment for the real number this found.
 pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
-    let mut walk = walk::Walk::new(Arc::default());
+    // Only the paths are kept, so no packages are given to find owners in.
+    let packages = composer::PackageIndex::default();
+    let mut walk = walk::Walk::new(Arc::default(), &packages);
     walk.add(path, walk::Role::Analysed, &[]);
     out.extend(
         walk.finish(&worker_pool())

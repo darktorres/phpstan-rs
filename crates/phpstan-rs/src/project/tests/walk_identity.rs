@@ -8,12 +8,17 @@ use super::helpers::*;
 use composer::dir_listings::DirListings;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+
+/// The packages the walks here are given: none, so no file they list has an
+/// owner.
+static NO_PACKAGES: LazyLock<composer::PackageIndex> =
+    LazyLock::new(composer::PackageIndex::default);
 
 /// Lists each `(root, role, excluded)` in order, and returns the listing
 /// sorted by path as `(path, role, stub)`.
 fn listing(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
-    let mut walk = Walk::new(Arc::default());
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
     for (path, role, excluded) in roots {
         walk.add(path, *role, excluded);
     }
@@ -57,7 +62,7 @@ fn a_file_under_two_roots_is_listed_once_under_its_resolved_path() {
     dir.write("proj/src/a.php", "<?php");
     dir.write("proj/top.php", "<?php");
     let base = resolved(&dir);
-    let mut walk = Walk::new(Arc::default());
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
     walk.add(&base.join("proj/src"), Role::Analysed, &[]);
     walk.add(&base.join("proj"), Role::Analysed, &[]);
 
@@ -143,7 +148,7 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
     dir.write("config/bootstrap.inc", "<?php");
     let file = resolved(&dir).join("config/bootstrap.inc");
 
-    let mut by_walk = Walk::new(Arc::default());
+    let mut by_walk = Walk::new(Arc::default(), &NO_PACKAGES);
     by_walk.add(&file, Role::Context, &[]);
     assert!(
         by_walk
@@ -152,7 +157,7 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
             .is_empty()
     );
 
-    let mut explicit = Walk::new(Arc::default());
+    let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&file, Role::Context);
     assert_eq!(
         sorted(explicit.finish(&crate::project::worker_pool()).files),
@@ -406,7 +411,7 @@ fn an_explicit_link_is_listed_under_its_target() {
     let base = resolved(&dir);
     std::os::unix::fs::symlink("real/lib.php", base.join("link.php")).unwrap();
 
-    let mut explicit = Walk::new(Arc::default());
+    let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("link.php"), Role::Context);
     assert_eq!(
         sorted(explicit.finish(&crate::project::worker_pool()).files),
@@ -423,7 +428,7 @@ fn explicit_files_under_a_linked_directory_are_listed_under_its_target() {
     let base = resolved(&dir);
     std::os::unix::fs::symlink("real", base.join("alias")).unwrap();
 
-    let mut explicit = Walk::new(Arc::default());
+    let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("alias/lib.php"), Role::Context);
     explicit.add_file(&base.join("alias/other.php"), Role::Context);
     assert_eq!(
@@ -442,7 +447,7 @@ fn an_explicit_file_spelled_through_dot_dot_is_listed_under_its_resolved_path() 
     dir.write("proj/lib.php", "<?php");
     let base = resolved(&dir);
 
-    let mut explicit = Walk::new(Arc::default());
+    let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("proj/config/../lib.php"), Role::Context);
     assert_eq!(
         sorted(explicit.finish(&crate::project::worker_pool()).files),
@@ -456,7 +461,7 @@ fn a_missing_explicit_file_is_listed_under_its_path() {
     dir.write("proj/keep.txt", "");
     let base = resolved(&dir);
 
-    let mut explicit = Walk::new(Arc::default());
+    let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("proj/missing.php"), Role::Context);
     assert_eq!(
         sorted(explicit.finish(&crate::project::worker_pool()).files),
@@ -467,7 +472,7 @@ fn a_missing_explicit_file_is_listed_under_its_path() {
 /// Walks `root` as analysed, reading its directories through `listings`, and
 /// returns the listed files.
 fn walk_through(root: &Path, listings: &Arc<DirListings>) -> Vec<(PathBuf, Role, bool)> {
-    let mut walk = Walk::new(Arc::clone(listings));
+    let mut walk = Walk::new(Arc::clone(listings), &NO_PACKAGES);
     walk.add(root, Role::Analysed, &[]);
     sorted(walk.finish(&crate::project::worker_pool()).files)
 }
@@ -536,7 +541,7 @@ fn oracle_tree(dir: &TempDir) -> OracleTree {
 /// What `oracle_tree`'s roots list on `pool`, in the order the walk gives it.
 #[cfg(unix)]
 fn oracle_walk(tree: &OracleTree, pool: &rayon::ThreadPool) -> Vec<Listed> {
-    let mut walk = Walk::new(Arc::default());
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
     walk.add(&tree.app, Role::Analysed, &[]);
     walk.add(&tree.app.join("pkg/src"), Role::Context, &[]);
     walk.add(&tree.ctx, Role::Context, &[]);
@@ -632,4 +637,45 @@ fn a_listed_file_is_hashed_as_its_path_and_indexed_there() {
         assert_eq!(file.hash, path_hash(&file.path), "{}", file.path.display());
         assert_eq!(index.position(&files, &file.path), Some(at));
     }
+}
+
+/// Each file a walk lists carries the package that owns its directory. A file
+/// reached through a link is owned by the package of its target, and a dangling
+/// `.php` link by the package of the directory it is in.
+#[cfg(unix)]
+#[test]
+fn a_listed_file_carries_the_package_that_owns_its_directory() {
+    let dir = TempDir::new("walk_owners");
+    dir.write("composer.json", r#"{"name": "acme/app"}"#);
+    dir.write(
+        "vendor/composer/installed.json",
+        r#"{"packages": [{"name": "acme/lib", "type": "library", "install-path": "../acme/lib"}]}"#,
+    );
+    dir.write("vendor/acme/lib/src/A.php", "<?php");
+    dir.write("src/B.php", "<?php");
+    let base = resolved(&dir);
+    std::os::unix::fs::symlink("../vendor/acme/lib/src/A.php", base.join("src/Linked.php"))
+        .unwrap();
+    std::os::unix::fs::symlink("nowhere.php", base.join("src/Dangling.php")).unwrap();
+    let packages = composer::PackageIndex::new(
+        composer::manifest::ComposerManifest::load(&base, &base)
+            .into_iter()
+            .collect(),
+    );
+
+    let mut walk = Walk::new(Arc::default(), &packages);
+    walk.add(&base.join("src"), Role::Analysed, &[]);
+    let files = walk.finish(&crate::project::worker_pool()).files;
+
+    let owner = |name: &str| {
+        let file = files
+            .iter()
+            .find(|file| file.path.ends_with(name))
+            .expect(name);
+        file.owner.flatten().and_then(|owner| packages.name(owner))
+    };
+    assert_eq!(files.len(), 3);
+    assert_eq!(owner("B.php"), Some("acme/app"));
+    assert_eq!(owner("Dangling.php"), Some("acme/app"));
+    assert_eq!(owner("A.php"), Some("acme/lib"));
 }

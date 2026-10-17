@@ -57,16 +57,21 @@ pub(crate) struct Listed {
     pub(crate) role: Role,
     /// Whether a stub root lists it.
     pub(crate) stub: bool,
+    /// The package that owns the file's directory, as the walk that listed the
+    /// file found it: `Some(None)` when no package does. `None` when no walk
+    /// listed the file, and the project finds the owner when it inserts it.
+    pub(crate) owner: Option<Option<composer::PackageOwner>>,
 }
 
 impl Listed {
-    /// A file listed at `path`, with the hash of its path.
+    /// A file listed at `path`, with the hash of its path and no owner found.
     pub(crate) fn new(path: PathBuf, role: Role, stub: bool) -> Self {
         Listed {
             hash: path_hash(&path),
             path,
             role,
             stub,
+            owner: None,
         }
     }
 }
@@ -125,8 +130,9 @@ pub(crate) struct Walked<'a> {
 
 /// One run's walk over its roots. Each root is walked with the directory
 /// names it excludes, and a link's target with the names of the walk that
-/// met the link.
-pub(crate) struct Walk<'a> {
+/// met the link. Each file listed carries the package that owns its
+/// directory, found in the packages the walk was given.
+pub(crate) struct Walk<'a, 'p> {
     roots: Vec<Root<'a>>,
     /// The walks of the roots, in the order the roots were added.
     jobs: Vec<Job<'a>>,
@@ -144,6 +150,8 @@ pub(crate) struct Walk<'a> {
     /// The listings of the directories the walk reads. A load shares them with
     /// its vendor discovery, so each directory is read once.
     listings: Arc<DirListings>,
+    /// The packages whose directories give each listed file its owner.
+    packages: &'p composer::PackageIndex,
 }
 
 /// The walk of one root: a directory, or a file that is listed whatever its
@@ -167,8 +175,9 @@ struct Scope<'a> {
 
 /// What a walk lists, in listing order.
 enum Found {
-    /// A PHP file, under its path, with the hash of the path.
-    File(PathBuf, PathHash),
+    /// A PHP file, under its path, with the hash of the path and the package
+    /// that owns its directory.
+    File(PathBuf, PathHash, Option<composer::PackageOwner>),
     /// The resolved target of a link, which the walk that met the link queues.
     Link(PathBuf),
 }
@@ -200,9 +209,10 @@ impl Ancestors<'_> {
     }
 }
 
-impl<'a> Walk<'a> {
-    /// A walk that reads its directories through `listings`.
-    pub(crate) fn new(listings: Arc<DirListings>) -> Self {
+impl<'a, 'p> Walk<'a, 'p> {
+    /// A walk that reads its directories through `listings`, and finds each
+    /// directory's owner in `packages`.
+    pub(crate) fn new(listings: Arc<DirListings>, packages: &'p composer::PackageIndex) -> Self {
         Walk {
             roots: Vec::new(),
             jobs: Vec::new(),
@@ -212,6 +222,7 @@ impl<'a> Walk<'a> {
             index: FileIndex::default(),
             directories: Default::default(),
             listings,
+            packages,
         }
     }
 
@@ -306,11 +317,22 @@ impl<'a> Walk<'a> {
         }
     }
 
+    /// The package owning the resolved file `path`: the package of its directory.
+    fn owner_of(&self, path: &Path) -> Option<composer::PackageOwner> {
+        self.packages.owner_of_dir(path.parent()?)
+    }
+
     /// What the walk of one root lists.
     fn run(&self, job: &Job<'a>) -> Vec<Found> {
         match job {
             Job::Dir { path, scope } => self.walk_root(path, *scope),
-            Job::File { path, .. } => vec![Found::File(path.clone(), path_hash(path))],
+            Job::File { path, .. } => {
+                vec![Found::File(
+                    path.clone(),
+                    path_hash(path),
+                    self.owner_of(path),
+                )]
+            }
         }
     }
 
@@ -320,7 +342,11 @@ impl<'a> Walk<'a> {
         if target.is_dir() {
             self.walk_root(target, scope)
         } else if is_php(target) {
-            vec![Found::File(target.to_path_buf(), path_hash(target))]
+            vec![Found::File(
+                target.to_path_buf(),
+                path_hash(target),
+                self.owner_of(target),
+            )]
         } else {
             Vec::new()
         }
@@ -359,6 +385,8 @@ impl<'a> Walk<'a> {
         let Some(listing) = self.listings.listing(dir) else {
             return Vec::new();
         };
+        // The files listed here are all in `dir`, so they share its owner.
+        let owner = self.packages.owner_of_dir(dir);
         let mut steps = Vec::with_capacity(listing.entries.len());
         let mut dirs = Vec::new();
         for entry in &listing.entries {
@@ -378,7 +406,11 @@ impl<'a> Walk<'a> {
                     // A dangling `.php` link is listed under its own path, so
                     // that reading it reports that path.
                     Err(_) if is_php(&child) && !(scope.outside && self.under_root(&child)) => {
-                        steps.push(Step::Found(Found::File(child, child_hash(hash, name))));
+                        steps.push(Step::Found(Found::File(
+                            child,
+                            child_hash(hash, name),
+                            owner,
+                        )));
                     }
                     Err(_) => {}
                 }
@@ -395,7 +427,11 @@ impl<'a> Walk<'a> {
             } else if is_php(Path::new(name)) {
                 let child = dir.join(name);
                 if !(scope.outside && self.under_root(&child)) {
-                    steps.push(Step::Found(Found::File(child, child_hash(hash, name))));
+                    steps.push(Step::Found(Found::File(
+                        child,
+                        child_hash(hash, name),
+                        owner,
+                    )));
                 }
             }
         }
@@ -461,15 +497,22 @@ impl<'a> Walk<'a> {
     fn merge(&mut self, found: Vec<Found>, role: Role, excluded: &'a [&'a str]) {
         for item in found {
             match item {
-                Found::File(path, hash) => self.list(path, hash, role),
+                Found::File(path, hash, owner) => self.list(path, hash, role, owner),
                 Found::Link(target) => self.targets[role.index()].push_back((target, excluded)),
             }
         }
     }
 
-    /// Records a listed file at its resolved path, whose hash is `hash`. A file
-    /// listed again keeps the strongest role of its listings.
-    fn list(&mut self, path: PathBuf, hash: PathHash, role: Role) {
+    /// Records a listed file at its resolved path, whose hash is `hash` and
+    /// whose owner is `owner`. A file listed again keeps the strongest role of
+    /// its listings; its owner is the same, as the owner depends on the path.
+    fn list(
+        &mut self,
+        path: PathBuf,
+        hash: PathHash,
+        role: Role,
+        owner: Option<composer::PackageOwner>,
+    ) {
         let stub = role == Role::Stub;
         match self.index.0.entry(
             hash,
@@ -488,6 +531,7 @@ impl<'a> Walk<'a> {
                     hash,
                     role,
                     stub,
+                    owner: Some(owner),
                 });
             }
         }

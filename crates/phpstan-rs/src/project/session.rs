@@ -959,7 +959,7 @@ impl Session {
                 roots: Vec::new(),
             };
         }
-        let mut walk = Walk::new(Arc::clone(&self.dir_listings));
+        let mut walk = Walk::new(Arc::clone(&self.dir_listings), &self.settings.packages);
         for dir in &self.dirs {
             let excluded: &'static [&'static str] = if self.promoted.contains(dir) {
                 &[]
@@ -1170,17 +1170,22 @@ impl Session {
     fn read_indexed(
         &self,
         project: &Project,
-        path: &Path,
-        is_stub: bool,
+        listed: &Listed,
         names: &mut syntax::name::NameCache,
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
-        let mut read =
-            self.read_and_parse_file(project, path, is_stub, names, cacheable, index_use_sites);
+        let mut read = self.read_and_parse_file(
+            project,
+            &listed.path,
+            listed.stub,
+            names,
+            cacheable,
+            index_use_sites,
+        );
         if let Read::Loaded(file) = &mut read {
             project.index_use_sites(&mut file.parsed, &file.source);
-            project.note_owner(&mut file.parsed, path);
+            file.parsed.owner = listed.owner;
             if let Some(key) = file.cache_key.take()
                 && file_cache::can_store()
             {
@@ -1216,8 +1221,7 @@ impl Session {
                         .map_init(syntax::name::NameCache::default, |names, file| {
                             self.read_indexed(
                                 shared,
-                                &file.path,
-                                file.stub,
+                                file,
                                 names,
                                 built_once && file.role != Role::Analysed,
                                 index_use_sites,
@@ -1361,8 +1365,7 @@ impl Session {
                         .map_init(syntax::name::NameCache::default, |names, (index, file)| {
                             self.read_indexed(
                                 &project,
-                                &file.path,
-                                file.stub,
+                                file,
                                 names,
                                 // The context files come first.
                                 index < context_files.len(),
