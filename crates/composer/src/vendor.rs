@@ -22,7 +22,11 @@
 //! for context, never reported" and its bugs would stop being reported
 //! with no warning.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use hashbrown::{HashTable, hash_table};
+use rustc_hash::FxHashMap;
+#[cfg(test)]
+use rustc_hash::FxHashSet;
+use std::cell::OnceCell;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,7 +34,7 @@ use std::sync::Arc;
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 
 use crate::dir_listings::{DirListings, Listing};
-use crate::hashed_path::HashedPath;
+use crate::hashed_path::{HashedPath, PathHash, hashed_ancestors};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {
@@ -70,8 +74,9 @@ pub fn discover_vendor_context(project_dir: &Path, listings: &DirListings) -> Ve
     // what should be a quiet "skip this source of context" degrade.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let mut ctx = discover_inner(&composer_dir, &vendor_dir, &base_dir, listings);
+    let entries = discover_inner(&composer_dir, &vendor_dir, &base_dir, listings);
     std::panic::set_hook(default_hook);
+    let mut ctx = entries.into_context(listings);
 
     // Composer's own bootstrap loader class - unlike every other file
     // this function discovers, it's never listed in any of the generated
@@ -93,12 +98,12 @@ fn discover_inner(
     vendor_dir: &Path,
     base_dir: &Path,
     listings: &DirListings,
-) -> VendorContext {
+) -> Entries {
     let static_path = composer_dir.join("autoload_static.php");
     if static_path.is_file()
-        && let Some(ctx) = parse_static_file(&static_path, vendor_dir, base_dir, listings)
+        && let Some(entries) = parse_static_file(&static_path, vendor_dir, base_dir, listings)
     {
-        return ctx;
+        return entries;
     }
     parse_separate_files(composer_dir, vendor_dir, base_dir, listings)
 }
@@ -108,12 +113,12 @@ fn parse_static_file(
     vendor_dir: &Path,
     base_dir: &Path,
     listings: &DirListings,
-) -> Option<VendorContext> {
+) -> Option<Entries> {
     let generated_dir = path.parent()?;
     let stmts = parse_generated_file(path)?;
     let class = find_class_decl(&stmts)?;
 
-    let mut ctx = VendorContext::default();
+    let mut entries = Entries::default();
     let mut resolver = Resolver::new(vendor_dir, base_dir, generated_dir, listings);
     for prop in &class.def.properties {
         if !prop.is_static {
@@ -123,13 +128,12 @@ fn parse_static_file(
             continue;
         };
         match prop.name.as_ref() {
-            "classMap" | "files" => resolver.collect_files(default, &mut ctx.files),
-            "prefixDirsPsr4" => resolver.collect_dirs(default, &mut ctx.dirs),
+            "classMap" | "files" => resolver.collect_files(default, &mut entries.files),
+            "prefixDirsPsr4" => resolver.collect_dirs(default, &mut entries.dirs),
             _ => {}
         }
     }
-    dedup(&mut ctx, listings);
-    Some(ctx)
+    Some(entries)
 }
 
 fn parse_separate_files(
@@ -137,23 +141,22 @@ fn parse_separate_files(
     vendor_dir: &Path,
     base_dir: &Path,
     listings: &DirListings,
-) -> VendorContext {
-    let mut ctx = VendorContext::default();
+) -> Entries {
+    let mut entries = Entries::default();
     let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, listings);
     for name in ["autoload_classmap.php", "autoload_files.php"] {
         let path = composer_dir.join(name);
         if let Some(arr) = parse_top_level_array(&path) {
-            resolver.collect_files(&arr, &mut ctx.files);
+            resolver.collect_files(&arr, &mut entries.files);
         }
     }
     for name in ["autoload_psr4.php", "autoload_namespaces.php"] {
         let path = composer_dir.join(name);
         if let Some(arr) = parse_top_level_array(&path) {
-            resolver.collect_dirs(&arr, &mut ctx.dirs);
+            resolver.collect_dirs(&arr, &mut entries.dirs);
         }
     }
-    dedup(&mut ctx, listings);
-    ctx
+    entries
 }
 
 fn parse_top_level_array(path: &Path) -> Option<Expr> {
@@ -181,10 +184,85 @@ fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
     syntax::parse(&bytes).ok().map(|parsed| parsed.stmts)
 }
 
-/// A directory the resolver found: its canonical form, and its listing.
+/// What the generated files list, resolved: the files and the directories.
+#[derive(Default)]
+struct Entries {
+    files: Vec<HashedPath>,
+    dirs: Vec<HashedPath>,
+}
+
+impl Entries {
+    /// The context the entries give: each list without its repeats, and the
+    /// files without those that the walk of a directory lists. The lists keep
+    /// their order: nothing here needs one, as the walk's output does not
+    /// depend on the order of its roots.
+    fn into_context(mut self, table: &DirListings) -> VendorContext {
+        keep_first(&mut self.dirs);
+        drop_files_under_dirs(&mut self.files, &self.dirs, table);
+        keep_first(&mut self.files);
+        VendorContext {
+            files: self
+                .files
+                .into_iter()
+                .map(HashedPath::into_path_buf)
+                .collect(),
+            dirs: self
+                .dirs
+                .into_iter()
+                .map(HashedPath::into_path_buf)
+                .collect(),
+        }
+    }
+}
+
+/// A directory the resolver found: its canonical form, its listing, and where
+/// it lies against the vendor directory.
 struct Listed {
-    canonical: PathBuf,
+    canonical: HashedPath,
     listing: Arc<Listing>,
+    vendor: Place,
+}
+
+/// A directory as the generated files write it, with `.` and `..` folded
+/// away, and where that lies against the vendor directory, resolved and as
+/// written.
+struct AsWritten {
+    dir: HashedPath,
+    vendor: Place,
+    vendor_as_written: Place,
+}
+
+/// Where a directory lies against a base directory, which tells which of its
+/// entries lie in the base: an entry is the directory joined with one name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Place {
+    /// In the base, or the base itself: every entry lies in it.
+    In,
+    /// The base's parent: only the entry that is the base lies in it.
+    Above,
+    /// Elsewhere: no entry lies in it.
+    Out,
+}
+
+impl Place {
+    pub(crate) fn of(dir: &Path, base: &Path) -> Place {
+        if dir.starts_with(base) {
+            Place::In
+        } else if base.parent() == Some(dir) {
+            Place::Above
+        } else {
+            Place::Out
+        }
+    }
+
+    /// Whether the entry `name` of a directory placed so lies in `base`.
+    pub(crate) fn holds(self, name: &OsStr, base: &Path) -> bool {
+        match self {
+            Place::In => true,
+            Place::Above => base.file_name() == Some(name),
+            Place::Out => false,
+        }
+    }
 }
 
 /// Resolves a generated autoloader's path expressions against its vendor,
@@ -193,6 +271,9 @@ struct Resolver<'p> {
     vendor_dir: &'p Path,
     base_dir: &'p Path,
     generated_dir: &'p Path,
+    /// `vendor_dir` as the generated files write it: the generated
+    /// directory's parent, with `.` and `..` folded away.
+    vendor_as_written: PathBuf,
     /// The directory listings of the load, by canonical path.
     table: &'p DirListings,
     // Each directory's listing, made once: autoload entries share a few
@@ -202,6 +283,9 @@ struct Resolver<'p> {
     // which hashes as bytes - a `Path` hashes component by component. None
     // for a directory that has no canonical form or cannot be listed.
     listings: FxHashMap<Vec<u8>, Option<Listed>>,
+    /// The directories whose entries were taken as written, by their text as
+    /// written.
+    written: FxHashMap<Vec<u8>, AsWritten>,
 }
 
 impl<'p> Resolver<'p> {
@@ -215,12 +299,14 @@ impl<'p> Resolver<'p> {
             vendor_dir,
             base_dir,
             generated_dir,
+            vendor_as_written: lexically_normalized(&generated_dir.join("..")),
             table,
             listings: FxHashMap::default(),
+            written: FxHashMap::default(),
         }
     }
 
-    fn collect_files(&mut self, array: &Expr, out: &mut Vec<PathBuf>) {
+    fn collect_files(&mut self, array: &Expr, out: &mut Vec<HashedPath>) {
         let ExprKind::ArrayLiteral(items) = &array.kind else {
             return;
         };
@@ -231,7 +317,7 @@ impl<'p> Resolver<'p> {
         }
     }
 
-    fn collect_dirs(&mut self, array: &Expr, out: &mut Vec<PathBuf>) {
+    fn collect_dirs(&mut self, array: &Expr, out: &mut Vec<HashedPath>) {
         let ExprKind::ArrayLiteral(items) = &array.kind else {
             return;
         };
@@ -251,39 +337,79 @@ impl<'p> Resolver<'p> {
     /// `None` if it can't be evaluated, doesn't exist, or (the common,
     /// load-bearing case) resolves outside `vendor_dir` entirely - a
     /// `$baseDir`/`__DIR__`-with-extra-`/..`-rooted, first-party location,
-    /// which must never be silently treated as vendor context.
-    fn path(&mut self, expr: &Expr) -> Option<PathBuf> {
+    /// which must never be silently treated as vendor context. A path that
+    /// resolves outside it but is written inside it is kept as written: a
+    /// path-repository package is a `vendor/<name>` symlink to a directory
+    /// outside `vendor/`, and still belongs to vendor context.
+    fn path(&mut self, expr: &Expr) -> Option<HashedPath> {
         let raw = eval_concat(expr, self.vendor_dir, self.base_dir, self.generated_dir)?;
         let raw = path_of(&raw);
-        // Containment is decided on the path as written, not its canonical
-        // form: a path-repository package is a `vendor/<name>` symlink to a
-        // directory outside `vendor/`, and still belongs to vendor context.
-        let resolved = self.canonical(raw)?;
-        if resolved.starts_with(self.vendor_dir) {
-            return Some(resolved);
-        }
-        let lexical = lexically_normalized(raw);
-        let vendor_as_written = lexically_normalized(&self.generated_dir.join(".."));
-        (lexical.starts_with(self.vendor_dir) || lexical.starts_with(&vendor_as_written))
-            .then_some(lexical)
-    }
-
-    /// `std::fs::canonicalize(path)`, through its directory's canonical
-    /// form when the entry itself isn't a link, and none for an entry its
-    /// directory does not list.
-    fn canonical(&mut self, path: &Path) -> Option<PathBuf> {
-        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
-            return std::fs::canonicalize(path).ok();
+        let (Some(dir), Some(name)) = (raw.parent(), raw.file_name()) else {
+            return self.path_alone(raw);
         };
         if dir.as_os_str().is_empty() {
-            return std::fs::canonicalize(path).ok();
+            return self.path_alone(raw);
         }
+        let vendor_dir = self.vendor_dir;
         let Some(listed) = self.listed(dir) else {
             // A directory that can't be listed (no permission to read it
             // but to pass through it) is still resolved as the system does.
-            return std::fs::canonicalize(path).ok();
+            return self.path_alone(raw);
         };
-        entry_canonical(listed, name, path)
+        let entry = listed.listing.entry(name)?;
+        match entry.kind {
+            // An entry that is not a link lies where its directory's
+            // canonical form does.
+            Some(kind) if !kind.is_symlink() => {
+                if listed.vendor.holds(name, vendor_dir) {
+                    return Some(listed.canonical.child(name));
+                }
+            }
+            // A link may lead anywhere, and an entry of no known type may be
+            // one, so the system resolves it and it is placed itself.
+            _ => {
+                let resolved = std::fs::canonicalize(raw).ok()?;
+                if resolved.starts_with(vendor_dir) {
+                    return Some(HashedPath::new(resolved));
+                }
+            }
+        }
+        self.written_entry(dir, name)
+    }
+
+    /// `raw`, which has no directory to look it up in or one that cannot be
+    /// listed, resolved by the system; or, when that lies outside the vendor
+    /// directory, as written.
+    fn path_alone(&self, raw: &Path) -> Option<HashedPath> {
+        let resolved = std::fs::canonicalize(raw).ok()?;
+        if resolved.starts_with(self.vendor_dir) {
+            return Some(HashedPath::new(resolved));
+        }
+        let lexical = lexically_normalized(raw);
+        (lexical.starts_with(self.vendor_dir) || lexical.starts_with(&self.vendor_as_written))
+            .then(|| HashedPath::new(lexical))
+    }
+
+    /// The entry `name` of `dir` as written, with `.` and `..` folded away,
+    /// when that lies in the vendor directory, resolved or as written. Where
+    /// `dir` lies is found once per directory.
+    fn written_entry(&mut self, dir: &Path, name: &OsStr) -> Option<HashedPath> {
+        let key = dir.as_os_str().as_encoded_bytes();
+        if !self.written.contains_key(key) {
+            let lexical = lexically_normalized(dir);
+            let written = AsWritten {
+                vendor: Place::of(&lexical, self.vendor_dir),
+                vendor_as_written: Place::of(&lexical, &self.vendor_as_written),
+                dir: HashedPath::new(lexical),
+            };
+            self.written.insert(key.to_vec(), written);
+        }
+        let written = &self.written[key];
+        (written.vendor.holds(name, self.vendor_dir)
+            || written
+                .vendor_as_written
+                .holds(name, &self.vendor_as_written))
+        .then(|| written.dir.child(name))
     }
 
     /// The listing of `dir`, found once. A directory is listed under the
@@ -303,10 +429,11 @@ impl<'p> Resolver<'p> {
     /// with an entry that could not be read is no listing: the entries it
     /// lacks are not known.
     fn list(&mut self, dir: &Path) -> Option<Listed> {
-        let canonical = HashedPath::new(self.canonical_dir(dir)?);
+        let canonical = self.canonical_dir(dir)?;
         let listing = self.table.listing(&canonical)?;
         listing.complete.then(|| Listed {
-            canonical: canonical.into_path_buf(),
+            vendor: Place::of(canonical.as_path(), self.vendor_dir),
+            canonical,
             listing,
         })
     }
@@ -314,35 +441,40 @@ impl<'p> Resolver<'p> {
     /// The canonical form of `dir`: its parent's, joined with its name,
     /// unless the parent lists it as a link, which is the one case that
     /// needs the system to follow it.
-    fn canonical_dir(&mut self, dir: &Path) -> Option<PathBuf> {
+    fn canonical_dir(&mut self, dir: &Path) -> Option<HashedPath> {
         let Some(parent) = dir.parent() else {
             // The root.
-            return std::fs::canonicalize(dir).ok();
+            return canonicalized(dir);
         };
         if parent.as_os_str().is_empty() {
-            return std::fs::canonicalize(dir).ok();
+            return canonicalized(dir);
         }
         let Some(name) = dir.file_name() else {
             // Ends in `..`: the parent of what precedes it, as the system
             // reads it.
-            return std::fs::canonicalize(dir).ok();
+            return canonicalized(dir);
         };
         let Some(parent_listed) = self.listed(parent) else {
-            return std::fs::canonicalize(dir).ok();
+            return canonicalized(dir);
         };
         entry_canonical(parent_listed, name, dir)
     }
+}
+
+/// `path` resolved by the system.
+fn canonicalized(path: &Path) -> Option<HashedPath> {
+    std::fs::canonicalize(path).ok().map(HashedPath::new)
 }
 
 /// The canonical form of the entry `name` of a listed directory, or `None`
 /// when the listing does not have it. A link, or an entry whose type the
 /// system does not give, is resolved by the system at `path`; any other is
 /// its directory's canonical form joined with its name.
-fn entry_canonical(listed: &Listed, name: &OsStr, path: &Path) -> Option<PathBuf> {
+fn entry_canonical(listed: &Listed, name: &OsStr, path: &Path) -> Option<HashedPath> {
     let entry = listed.listing.entry(name)?;
     match entry.kind {
-        Some(kind) if !kind.is_symlink() => Some(listed.canonical.join(name)),
-        _ => std::fs::canonicalize(path).ok(),
+        Some(kind) if !kind.is_symlink() => Some(listed.canonical.child(name)),
+        _ => canonicalized(path),
     }
 }
 
@@ -429,46 +561,167 @@ fn append_concat(
     })
 }
 
-/// Deduplicates both lists, then leaves out the files that a directory of the
-/// lists loads. The lists keep their order: nothing here needs one, as the
-/// walk's output does not depend on the order of its roots.
-fn dedup(ctx: &mut VendorContext, table: &DirListings) {
-    keep_first(&mut ctx.dirs);
-    drop_files_under_dirs(ctx, table);
-    keep_first(&mut ctx.files);
-}
-
 /// Keeps the first of each path in `paths`, in their order.
-fn keep_first(paths: &mut Vec<PathBuf>) {
-    let mut seen = FxHashSet::default();
-    let first: Vec<bool> = paths
-        .iter()
-        .map(|path| seen.insert(path.as_path()))
-        .collect();
+fn keep_first(paths: &mut Vec<HashedPath>) {
+    let first: Vec<bool> = {
+        let mut seen = HashTable::with_capacity(paths.len());
+        paths
+            .iter()
+            .map(|path| {
+                match seen.entry(
+                    path.hash(),
+                    |seen: &&HashedPath| *seen == path,
+                    |seen| seen.hash(),
+                ) {
+                    hash_table::Entry::Occupied(_) => false,
+                    hash_table::Entry::Vacant(entry) => {
+                        entry.insert(path);
+                        true
+                    }
+                }
+            })
+            .collect()
+    };
     let mut first = first.into_iter();
     paths.retain(|_| first.next() == Some(true));
 }
 
-/// Drops the PHP files that the walk of a directory of `ctx.dirs` is sure to
+/// Drops the PHP files that the walk of a directory of `dirs` is sure to
 /// list: the walk lists them already, and listing them again adds nothing.
 /// Other files stay, as an explicit file is listed whatever its extension.
-fn drop_files_under_dirs(ctx: &mut VendorContext, table: &DirListings) {
-    let dirs: FxHashSet<&Path> = ctx.dirs.iter().map(PathBuf::as_path).collect();
-    let mut listable = FxHashMap::default();
-    ctx.files
-        .retain(|file| !(is_php(file) && walked_by_a_directory(file, &dirs, &mut listable, table)));
+fn drop_files_under_dirs(files: &mut Vec<HashedPath>, dirs: &[HashedPath], table: &DirListings) {
+    let mut walks = Walks::of(dirs, table);
+    #[cfg(test)]
+    let (by_path, mut listable) = (
+        dirs.iter()
+            .map(HashedPath::as_path)
+            .collect::<FxHashSet<&Path>>(),
+        FxHashMap::default(),
+    );
+    files.retain(|file| {
+        let listed = walks.list(file);
+        #[cfg(test)]
+        assert_eq!(
+            listed,
+            is_php(file.as_path())
+                && walked_by_a_directory(file.as_path(), &by_path, &mut listable, table),
+            "whether a walk lists {}",
+            file.as_path().display()
+        );
+        !listed
+    });
 }
 
 fn is_php(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "php")
 }
 
-/// Whether the walk of a directory of `dirs` is sure to list `file`: the
+/// What the walks of some directories are sure to list, read from the
+/// listings that the walks read.
+struct Walks<'d> {
+    table: &'d DirListings,
+    /// The walks' directories, by the hashes their paths carry, each with its
+    /// listing once asked for: none when it is not a directory, is a link, or
+    /// cannot be listed.
+    roots: HashTable<(&'d HashedPath, OnceCell<Option<Arc<Listing>>>)>,
+    /// The directories of the files asked about, each with its listing when
+    /// a walk is sure to list what it holds.
+    known: HashTable<(PathBuf, PathHash, Option<Arc<Listing>>)>,
+}
+
+impl<'d> Walks<'d> {
+    fn of(dirs: &'d [HashedPath], table: &'d DirListings) -> Self {
+        let mut roots = HashTable::with_capacity(dirs.len());
+        for dir in dirs {
+            roots.insert_unique(dir.hash(), (dir, OnceCell::new()), |(dir, _)| dir.hash());
+        }
+        Walks {
+            table,
+            roots,
+            known: HashTable::new(),
+        }
+    }
+
+    /// Whether a walk is sure to list `file`: a PHP file that its
+    /// directory's listing gives as a regular file, in a directory that a
+    /// walk is sure to list. A file that this does not hold for stays listed
+    /// explicitly, so a file the walk could miss (a missing one, or one
+    /// behind a directory that cannot be read) is still listed.
+    fn list(&mut self, file: &HashedPath) -> bool {
+        let (Some((dir, hash)), Some(name)) = (file.parent(), file.as_path().file_name()) else {
+            return false;
+        };
+        is_php(Path::new(name))
+            && self.listing(dir, hash).is_some_and(|listing| {
+                listing
+                    .entry(name)
+                    .and_then(|entry| entry.kind)
+                    .is_some_and(|kind| kind.is_file())
+            })
+    }
+
+    /// The listing of `dir`, whose hash is `hash`, when a walk is sure to
+    /// list what it holds. It is found once per directory.
+    fn listing(&mut self, dir: &Path, hash: PathHash) -> Option<Arc<Listing>> {
+        if let Some((.., known)) = self.known.find(hash, |(known, ..)| known == dir) {
+            return known.clone();
+        }
+        let listing = self.find(dir);
+        self.known.insert_unique(
+            hash,
+            (dir.to_path_buf(), hash, listing.clone()),
+            |&(_, hash, _)| hash,
+        );
+        listing
+    }
+
+    /// The listing of `dir` when the walk of the nearest of the walks'
+    /// directories at or above it is sure to list what `dir` holds: that
+    /// directory is a directory and not a link, each directory below it down
+    /// to `dir` is one by its parent's listing, and each can be listed.
+    fn find(&self, dir: &Path) -> Option<Arc<Listing>> {
+        let mut below = Vec::new();
+        let mut ancestors = hashed_ancestors(dir);
+        let (root, checked) = loop {
+            let (ancestor, hash) = ancestors.next()?;
+            if let Some(root) = self
+                .roots
+                .find(hash, |(root, _)| root.as_path() == ancestor)
+            {
+                break root;
+            }
+            below.push(ancestor);
+        };
+        let mut listing = checked
+            .get_or_init(|| {
+                let is_dir = std::fs::symlink_metadata(root.as_path())
+                    .is_ok_and(|metadata| metadata.is_dir());
+                is_dir.then(|| self.table.listing(root)).flatten()
+            })
+            .clone()?;
+        let mut path = HashedPath::clone(root);
+        for ancestor in below.into_iter().rev() {
+            let name = ancestor.file_name()?;
+            let is_dir = listing
+                .entry(name)
+                .and_then(|entry| entry.kind)
+                .is_some_and(|kind| kind.is_dir());
+            if !is_dir {
+                return None;
+            }
+            path = path.child(name);
+            listing = self.table.listing(&path)?;
+        }
+        Some(listing)
+    }
+}
+
+/// Whether the walk of a directory of `dirs` is sure to list `file`, read
+/// from the paths with a `stat` of the file and of each directory: the
 /// directory nearest above the file is one of `dirs`, the file is a regular
 /// file, and that directory and each directory down to the file's own can be
-/// listed. A file that this does not hold for stays listed explicitly, so a
-/// file the walk could miss (a missing one, or one behind a directory that
-/// cannot be read) is still listed.
+/// listed. `Walks` must agree with it.
+#[cfg(test)]
 fn walked_by_a_directory(
     file: &Path,
     dirs: &FxHashSet<&Path>,
@@ -503,6 +756,7 @@ fn walked_by_a_directory(
 
 /// Whether a walk can list `dir`: it is a directory and not a link, and the
 /// table has a listing of it. Remembered per directory.
+#[cfg(test)]
 fn listable_dir(dir: &Path, listable: &mut FxHashMap<PathBuf, bool>, table: &DirListings) -> bool {
     if let Some(&known) = listable.get(dir) {
         return known;

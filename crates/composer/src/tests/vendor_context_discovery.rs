@@ -310,3 +310,140 @@ return array(
         .join("hidden/Baz.php");
     assert_eq!(ctx.files.contains(&baz), !listable, "got: {:?}", ctx.files);
 }
+
+// The discovery checks each file it leaves to a directory against the check
+// made per file from the paths, so this fixture holds each case of the drop:
+// the walk of the nearest directory lists a file only through directories
+// that are not links, down to a file that is not one.
+#[cfg(unix)]
+#[test]
+fn a_file_is_left_to_a_directory_only_when_the_directorys_walk_lists_it() {
+    let dir = TempDir::new("left_by_listing");
+    let link = |target: &str, link: &str| {
+        std::os::unix::fs::symlink(dir.path().join(target), dir.path().join(link)).unwrap()
+    };
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/a/src/A1.php", "<?php class A1 {}");
+    dir.write("vendor/acme/a/src/deep/er/A2.php", "<?php class A2 {}");
+    dir.write("vendor/acme/a/src/notes.txt", "");
+    dir.write("vendor/acme/a/Beside.php", "<?php class Beside {}");
+    dir.write("vendor/acme/n/O.php", "<?php class O {}");
+    dir.write("vendor/acme/n/inner/sub/I.php", "<?php class I {}");
+    dir.write("vendor/acme/lonely/L.php", "<?php class L {}");
+    // Path-repository packages, linked into `vendor/` and kept as written.
+    dir.write("packages/b/src/B.php", "<?php class B {}");
+    dir.write("packages/b/Real.php", "<?php class Real {}");
+    link("packages/b/Real.php", "packages/b/src/Link.php");
+    dir.write("packages/c/C.php", "<?php class C {}");
+    std::fs::create_dir_all(dir.path().join("vendor/acme/d/src")).unwrap();
+    dir.write("packages/e/Z.php", "<?php class Z {}");
+    link("packages/b", "vendor/acme/b");
+    link("packages/c", "vendor/acme/c");
+    link("packages/e", "vendor/acme/d/src/lnk");
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'A1' => $vendorDir . '/acme/a/src/A1.php',
+    'A2' => $vendorDir . '/acme/a/src/deep/er/A2.php',
+    'Beside' => $vendorDir . '/acme/a/Beside.php',
+    'O' => $vendorDir . '/acme/n/O.php',
+    'I' => $vendorDir . '/acme/n/inner/sub/I.php',
+    'L' => $vendorDir . '/acme/lonely/L.php',
+    'B' => $vendorDir . '/acme/b/src/B.php',
+    'Link' => $vendorDir . '/acme/b/src/Link.php',
+    'C' => $vendorDir . '/acme/c/C.php',
+    'Z' => $vendorDir . '/acme/d/src/lnk/Z.php',
+);
+"#,
+    );
+    dir.write(
+        "vendor/composer/autoload_files.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    $vendorDir . '/acme/a/src/notes.txt',
+);
+"#,
+    );
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'A\\' => array($vendorDir . '/acme/a/src'),
+    'N\\' => array($vendorDir . '/acme/n', $vendorDir . '/acme/n/inner'),
+    'B\\' => array($vendorDir . '/acme/b/src'),
+    'C\\' => array($vendorDir . '/acme/c'),
+    'D\\' => array($vendorDir . '/acme/d/src'),
+);
+"#,
+    );
+
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
+    let mut kept: Vec<&str> = ctx
+        .files
+        .iter()
+        .map(|file| file.file_name().unwrap().to_str().unwrap())
+        .collect();
+    kept.sort_unstable();
+    // `A1`, `A2`, `O` and `I` lie under directories the walks list, and so does
+    // `B`, through the link that is its package's directory. `Link` is a link,
+    // `C`'s directory is one, and `Z` lies behind one; `Beside` and `L` lie
+    // under no directory, and `notes.txt` is not PHP.
+    assert_eq!(
+        kept,
+        [
+            "Beside.php",
+            "C.php",
+            "L.php",
+            "Link.php",
+            "Z.php",
+            "notes.txt"
+        ]
+    );
+    assert_eq!(ctx.dirs.len(), 6, "{:?}", ctx.dirs);
+}
+
+#[test]
+fn an_entry_lies_in_a_base_as_its_directory_is_placed() {
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    let dirs = [
+        "/",
+        "/a",
+        "/a/vendor",
+        "/a/vendor/x",
+        "/a/vendorx",
+        "/b",
+        "/a/b/c",
+        "a",
+        "a/vendor",
+        "",
+    ];
+    let bases = [
+        "/a/vendor",
+        "/vendor",
+        "/",
+        "/a/vendor/x",
+        "a/vendor",
+        "vendor",
+    ];
+    let names = ["vendor", "x", "vendorx", "a", "b"];
+    for dir in dirs.map(Path::new) {
+        for base in bases.map(Path::new) {
+            for name in names.map(OsStr::new) {
+                assert_eq!(
+                    Place::of(dir, base).holds(name, base),
+                    dir.join(name).starts_with(base),
+                    "{} joined with {} against {}",
+                    dir.display(),
+                    name.display(),
+                    base.display()
+                );
+            }
+        }
+    }
+}
