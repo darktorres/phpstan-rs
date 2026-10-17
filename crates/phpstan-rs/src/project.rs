@@ -1009,12 +1009,10 @@ impl Project {
         for (span, target) in class_fn_refs {
             self.use_sites.insert(path, target, span);
         }
-        // `record_phpstan_class_file` no-ops unless the name is
-        // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
-        // ordinary corpus.
         for name in &classes {
-            self.registry
-                .record_phpstan_class_file(name, shown_path(self.absolute_root.as_deref(), path));
+            self.registry.record_phpstan_class_file(name, || {
+                shown_path(self.absolute_root.as_deref(), path).to_path_buf()
+            });
         }
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
         self.duplicate_class_sites.merge(duplicate_class_sites);
@@ -1209,10 +1207,9 @@ impl Project {
         for (analyzed, _, path, decls) in sources {
             for decl in decls {
                 if let BuiltDecl::Class { name, .. } = decl {
-                    self.registry.record_phpstan_class_file(
-                        name,
-                        shown_path(self.absolute_root.as_deref(), path),
-                    );
+                    self.registry.record_phpstan_class_file(name, || {
+                        shown_path(self.absolute_root.as_deref(), path).to_path_buf()
+                    });
                 }
                 self.registry.insert_built_decl(decl.clone(), analyzed);
             }
@@ -1661,10 +1658,9 @@ impl Project {
                     continue;
                 }
                 if let BuiltDecl::Class { name, .. } = decl {
-                    self.registry.record_phpstan_class_file(
-                        name,
-                        shown_path(self.absolute_root.as_deref(), path),
-                    );
+                    self.registry.record_phpstan_class_file(name, || {
+                        shown_path(self.absolute_root.as_deref(), path).to_path_buf()
+                    });
                 }
                 self.registry.insert_built_decl(decl.clone(), analyzed);
             }

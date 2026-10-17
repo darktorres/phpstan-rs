@@ -533,14 +533,17 @@ impl Registry {
 
     /// Records `name`'s declaring file path, for `is_phpstan_code`'s
     /// vendor-directory check - only ever populated for a name already
-    /// passing `is_phpstan_namespace`, so this is a zero-cost no-op for
-    /// every ordinary corpus.
-    pub(crate) fn record_phpstan_class_file(&mut self, name: &str, path: &std::path::Path) {
+    /// passing `is_phpstan_namespace`, so `path` is called for those names
+    /// alone.
+    pub(crate) fn record_phpstan_class_file(
+        &mut self,
+        name: &str,
+        path: impl FnOnce() -> std::path::PathBuf,
+    ) {
         if !crate::registry::is_phpstan_namespace(name) {
             return;
         }
-        self.phpstan_class_files
-            .insert(name.to_string(), path.to_path_buf());
+        self.phpstan_class_files.insert(name.to_string(), path());
     }
 
     /// User-defined symbols always win: a stub only fills in a name that
