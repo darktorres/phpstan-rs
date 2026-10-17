@@ -196,8 +196,9 @@ later item waits for that need. The READY rows, item by item:
   the constant go. The Piwigo gate and the measurements of item 2's rows (wall
   time, instructions) have not run.
 - Item 3: LOAD-3.2 is in (`001bd4f2`), LOAD-3.4 (`845efaab`) and LOAD-3.6
-  (`11f03ec9`). 3.1 waits on REG-16.4, level 2; 3.3 on 3.1; 3.5 on SYN-1.2, which
-  is item 9's. No row of item 3 is READY.
+  (`11f03ec9`). 3.1 waits on REG-16.4, level 2. 3.3's load part is level 9's R11,
+  and its `update_file` part waits on 3.1. 3.5 waits on SYN-1.2, which is item 9's.
+  No other row of item 3 is READY.
 - Item 5: none ready. LOAD-4.3 (`6bda466c` to `cf37f8d9`), LOAD-4.4 (`412fafbc`) and
   LOAD-4.5 (`e9b253b4`, `4e443227`) are in; their need, LOAD-2.5, is in (`8590ff55`).
   LOAD-4.7 is blocked by PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2 (both READY,
@@ -232,7 +233,7 @@ The off-run rows still open:
     and a second `file` buffer.
   - CACHE-9 and CACHE-10 are BLOCKED: they need STUB-7.6 and the persistence
     format of CACHE-13.2.
-  - CACHE-11 (E8) and CACHE-12 (E11) follow them.
+  - CACHE-11 (E8) follows them. CACHE-12 (E11) is level 9's R12.
   - CACHE-13 (warm runs) is OPEN; its persistence part needs REG-16.4.
 - **Text made when read** (proposal 11): CHECK-4.1, messages formatted when
   displayed, is OPEN and needs CHECK-6.10 (READY). `report_missing_offset`
@@ -271,13 +272,13 @@ the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
      the `.git` and `node_modules` names until `exclude_paths` exists (level 8's
      item 2).
 - Builds and measurement runs need no approval (since 2026-10-17).
-- Bookkeeping still open:
-  - the ledger rows for the rows that have none (R11 is LOAD-3.3, R12 is CACHE-12's
-    decode context);
-  - LOAD-3.4's note and LOAD-6's record;
-  - Step 0 and the allocator runs recorded beside §1;
-  - the LOAD-2.2 decision, once confirmed, written into the ledger and into level
-    8's item 2.
+- The ledger's rows: LOAD-8.n is Rn, R11 is LOAD-3.3's load part and R12 is CACHE-12
+  (LOAD-8.11 and 8.12 point to them). Step 0 is the ledger's MEAS-4, with a paragraph
+  in §1; REG-7's and STUB's notes hold the finishing passes' and the stub-base wait's
+  numbers (decisions 1 and 5).
+- Bookkeeping left, with the rows: LOAD-3.4's note and LOAD-6's record (R1); the
+  comment at `session.rs:1081` (R10); LOAD-3.3's record (R11); §1's range rows as
+  each row lands.
 
 ## Documents with no place in the stack
 

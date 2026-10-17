@@ -13,6 +13,7 @@ This is the one list of the branch's tasks. The documents the tasks come from st
 - **The 20 G plan.** `PROFILE_DRILL_PIWIGO_20G.md`, Part II: twenty items (0-19), written at `5fb858c9`, before the off drill's rows changed the code under them. Each is re-evaluated here against the code and the latest profile.
 - **The 25 G report's unbuilt designs:** the designs of `PROFILE_DRILL_PIWIGO_25G.md` that the 20 G report's §2 lists as not built, or built otherwise. Each is carried by a 20 G item; Appendix B maps them.
 - **The crate split.** `CRATE_SPLIT_PLAN.md`, Stage C from C4 on (C4, C5 and C10), worked on this branch since 2026-10-15. Its states were audited against the code on 2026-10-15: the module graph's `finished` line is `A0 A1 A2 B1-B9 C1 C2 C3`.
+- **The items 1 to 3 fixes.** `ITEMS_1_TO_3_FIXES_PLAN.md` (2026-10-17) fixes the costs that §1's attribution of the 20 G plan's items 1 to 3 found, and the serial stretches of the load that MEAS-4 measured. It holds each row's design, numbers and test; its rows are LOAD-8, LOAD-3.3 and CACHE-12.
 
 ## Conventions
 
@@ -55,6 +56,7 @@ Each area has:
 - `25 G X` is a design of the 25 G report.
 - `split C4 <part>` is a part of the crate split's C4, named by the plan's own heading for it: gates, gatetime, data model, written results, harness, memo, snapshots, staleness, tests, behaviour, gate. `split C5` and `split C10` work the same way.
 - `decision n` is decision n of §2.4: a row that decision made, or rewrote.
+- `fixes Rn` is row Rn of `ITEMS_1_TO_3_FIXES_PLAN.md`. That plan's decisions are cited with its name, since `decision n` is §2.4's.
 
 **Ids from the sources are always cited with their document's name**, because the documents reuse ids:
 
@@ -93,7 +95,7 @@ Inside a record, ids and section numbers are those of the record's source, as wr
   - callgrind `Ir` summed over threads, against the previous row's commit, in off mode, on the `dhat` profile with frame pointers;
   - a run's total also holds work that follows the threads' schedule and not the code: mimalloc's cross-thread reclaim and the per-thread caches moved by −6.4 M and then +22.4 M across the runs of P7, LOAD-6 and CHECK-4, none of which touches them (CHECK-4's record). So a change of that size is judged by the inclusive `Ir` of the functions it changes, in its own profile against the base's, with the total beside it. MEAS-3 measured the spread: three runs of one binary at the default thread count differ by up to 16.9 M, and two at one thread (`PHPSTAN_RS_THREADS=1`) by 1.1 M. So a change under ≈20 M is also measured at one thread, where the total resolves about 1 M;
   - wall time by `hyperfine -N`, alternating A B A B, under `nice -n 19`, with `/proc/loadavg` noted.
-- Builds, profiling runs and `check-project` probes need the user's go-ahead. Heavy jobs run one at a time.
+- Builds, profiling runs and `check-project` probes need no go-ahead since 2026-10-17 (the user's standing approval). Heavy jobs run one at a time.
 
 ## 1. Where the branch stands
 
@@ -123,7 +125,7 @@ After `791d29cb` the branch has the crate split's first C4 commits:
 
 They change the registry's data model, and `e7b2521f` and `0f32829b` change the reports of the missing-type rules. No Ir was measured at them.
 
-Since `791d29cb` the 20 G plan's items 1 to 5 have landed in part: LOAD-1 (item 1), LOAD-2 except its last deletion, LOAD-3.2, 3.4 and 3.6, and LOAD-4.3 to 4.5 (their rows in §3). Their instruction counts and heap were measured on 2026-10-16 and 17 (the rows below the table). The Piwigo gate and wall time have not run, since they need approval.
+Since `791d29cb` the 20 G plan's items 1 to 5 have landed in part: LOAD-1 (item 1), LOAD-2 except its last deletion, LOAD-3.2, 3.4 and 3.6, and LOAD-4.3 to 4.5 (their rows in §3). Their instruction counts and heap were measured on 2026-10-16 and 17 (the rows below the table), and the wall time at `aa896697` on 2026-10-17 (MEAS-4). The Piwigo gate has not run.
 
 The rows that moved the Ir, in order (callgrind, off mode). Each row's output was byte-identical to the base's; each row's record has its checks.
 
@@ -154,6 +156,8 @@ The four range rows are measurements of commit ranges, not rows. Item 1's and it
 
 Warm runs (`regress-item5`): `d870ddcb` 13,382,535,920, `aa896697` 13,346,910,728 (−35.6 M). Heap at one thread (`regress-item5`): `d870ddcb` 2,913,109,581 bytes allocated, peak 807,381,174, exit 647,439,034; `aa896697` +23.7 M allocated (+0.82%), peak +2.2 M, exit −5.8 M. Item 1's heap was measured at default threads, so its deltas (allocated +2.7 M, peak +7.7 M, exit +5.7 M) are not comparable with item 5's.
 
+Wall time was first measured on 2026-10-17, at `aa896697` (MEAS-4): an off run takes about 2.3 s and a warm run about 1.6 s on this machine, a VM with 8 vCPUs, and leaves 0.75 s and 0.85 s of the 8 cores unused. The Piwigo output is the same at `d870ddcb` and `aa896697` (171,439 bytes, sha256 `8ff144c3…`, off and warm), so item 5 changed no diagnostic; it has not been compared with PROD-3's.
+
 Defects fixed along the way:
 
 - SYN-5 (off E14), `6dd06124`: `instanceof` with a static property as the class.
@@ -166,7 +170,7 @@ Six of the off drill's rows are open:
 - CACHE-8 (READY);
 - CHECK-4, re-opened: CHECK-4.2 is READY, and CHECK-4.1 is built with CHECK-6.10;
 - STUB-10, whose measurements (STUB-10.1) are left, and STUB-11, which waits on them and on the reflection crate;
-- CACHE-11 and CACHE-12, which wait on CACHE-9 and CACHE-10.
+- CACHE-11, which waits on CACHE-9 and CACHE-10, and CACHE-12, READY since its decode context became the file's number (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12).
 
 E9's cut is CHECK-6.16's (READY). The off drill's questions (U1-U9) and D6's unbuilt policy are §15's Q-1 to Q-10: Q-1 to Q-7 and Q-9 are done (Q-2's fix is SYN-6, and Q-4's regression test is in the tree as `55d9ea1f`), Q-8 is superseded by STUB-10.1 and STUB-11, and Q-10 is open. The rest of its rows are done or skipped.
 
@@ -211,8 +215,8 @@ Four questions that a reading of the whole ledger found the decisions had left o
 
 These rows are open with every need met:
 
-- **CACHE-8** (heap H1), a memory row. With CHECK-4.2 (off P11, under CHECK below), it is one of the two off-drill rows nothing blocks.
-- **LOAD:** LOAD-2.2's last part (the name floor's replacement, decided on 2026-10-17) and LOAD-5.4.
+- **CACHE-8** (heap H1), a memory row, and **CACHE-12** (off E11), whose decode context is now the file's number (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12). With CHECK-4.2 (off P11, under CHECK below), they are the three off-drill rows nothing blocks.
+- **LOAD:** LOAD-2.2's last part (the name floor's replacement, decided on 2026-10-17) and LOAD-5.4; LOAD-3.3 for the load; LOAD-8.1, 8.2, 8.5, 8.9, 8.13 and 8.15. The fixes plan's rows (LOAD-8, LOAD-3.3, CACHE-12) start on the user's second go, in the plan's order (its decision 4).
 - **SYN:**
   - SYN-1.1 (`peeled` becomes a loop) and SYN-1.2 (the flat tree, decision 4);
   - SYN-3.1, 3.2 and 3.3;
@@ -231,6 +235,7 @@ These rows are open with every need met:
 ### 2.2 Chains
 
 - **The load (the 20 G plan's items 1, 2, 3 and 19):** LOAD-1 → LOAD-2 → LOAD-3 → LOAD-5. Roles become final before the parse, then trees are dropped by role, then each is freed after its last reader.
+- **The items 1 to 3 fixes (LOAD-8):** LOAD-8.2 → 8.3, 8.4, 8.6 and 8.14; LOAD-8.6 → 8.14; LOAD-8.3 → 8.10; LOAD-8.5 → 8.8; LOAD-8.2 to 8.6 and 8.8 → 8.7.
 - **The crate split:**
   - REG-4.2 and the engine (REG-16.3) → REG-7 → REG-8 → REG-9 and REG-10 → REG-11 → REG-12;
   - REG-4.2 and REG-4.12 → REG-4.15;
@@ -243,7 +248,7 @@ These rows are open with every need met:
   - REG-7.6 → CHECK-7;
   - REG-7.5 → CHECK-8;
   - REG-16.4 → REG-17.1 → REG-17.2, 17.3 and 17.4;
-  - STUB-7.6 and REG-16.1 → CACHE-9 and CACHE-10 → CACHE-11 → CACHE-12;
+  - STUB-7.6 and REG-16.1 → CACHE-9 and CACHE-10 → CACHE-11;
   - STUB-7 → STUB-8;
   - STUB-7.1 → STUB-12 and CHECK-10; STUB-7.4 → STUB-13;
   - STUB-7.3 → PROD-5.4.
@@ -709,7 +714,7 @@ Merging the sources into one list found six places where two of them disagree, o
 | LOAD-3 | Context trees dropped on the worker that parsed them | 20 G 3 | OPEN; its premise was halved by PROD-3 | — |
 | LOAD-3.1 | Whether a tree is kept is one function of (role, open), in the load and in `update_file` alike; today `update_file` keeps every tree. The insert's assertion that an analysed file has its tree stays | 20 G 3 | OPEN | LOAD-2.2 (roles final before the parse), REG-16.4 (the parse as a query whose eviction this is; it took LOAD-1.6's `built_once` split) |
 | LOAD-3.2 | A context file's state has the cached shape: the worker builds it, so a parsed and a cached context file give the same state. It keeps no ignore comments | 20 G 3 | DONE `001bd4f2`. The parse keeps a file's ignore comments only when the file is analysed: `read_and_parse_file` takes the role from the listing, and `update_file_as` reads the file's flag before its parse, so an edit keeps the role it had. `ast_of` and the two test parses that read only a tree pass `false`, and `UnindexedFile` no longer holds the flag, which nothing read. The CLI output cannot change: `apply_inline_ignores` and `check_banned` read the comments of analysed files only. The one route that showed a context file's malformed-comment report was `check_file` for an open, unchanged, non-analysed document (`lsp.rs:1152`); it shows none now, which matches PHPStan, which reports nothing for a file it does not analyse. Measured: `check-project vendor/monolog` gives the same sorted stdout as HEAD with the file cache off, and cold and warm with it on. Tests: three in `inline_ignore_comments` (a context file keeps none, an analysed file keeps its own, an edit keeps the role); lib 1151 and fixtures 3832 pass; clippy is clean. The tree is still kept, which LOAD-3.1 changes | — |
-| LOAD-3.3 | The drop runs in parallel, on the thread that allocated the tree | 20 G 3 | OPEN | LOAD-3.1 |
+| LOAD-3.3 | The drop runs in parallel, on the thread that allocated the tree | 20 G 3; fixes R11 | READY for the load: in a project built once `keeps_tree` is a function of the role, which LOAD-2.2's walk makes final before the parse, so the read drops a context tree on its worker once its cache entry is stored (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R11). OPEN for `update_file`, which keeps every tree until LOAD-3.1 | LOAD-3.1 (for `update_file` only) |
 | LOAD-3.4 | A context file is read into the worker's reusable read buffer; only a file whose tree is kept gets a source of its own | 20 G 3 | DONE `845efaab`. Every file is read into its worker's buffer, one for each pool thread beside its name cache (`Workers`), not only context files: an analysed file's text is copied out as before. A buffer over 1 MiB is freed after its file. A file's text is copied out only when the file keeps its tree (`Project::keeps_source`), so a context file in a project built once keeps no text; its tree is still dropped in the insert, which LOAD-3.3 moves. **Deviations:** the reader indexes a file's use sites before the insert, because only the reader holds the text, and `insert_numbered_file` no longer computes them from text (a debug assertion checks that a parse with a tree arrives indexed); `source_len` is now the text's length for every file (it was 0 for a batch file, which kept no text), and the batch check's order is unchanged, since `analyze_files_by_size` already lists the files largest first and `check_files` re-sorts them by the same lengths; `load_cache`'s test asserted the text a context file keeps under retention in a project built once, which the rule drops (no product path combines the two), so it now asserts the rule. Verified: the five tests in `load_text.rs` and the two changed tests pass; the `project::` and `lsp::` module tests pass (461); clippy is clean. Output identity and the full suites are not run: they wait for §11. Measured since (§1): this commit's lossy decode of every file's text, to take its length, costs 394 M Ir in the off run, which is the whole +380 M that items 2 and 3 added. Not fixed; the fix needs a ruling on whether a file's length must be its lossy length or its byte length (they differ only for a file that is not UTF-8) | — |
 | LOAD-3.5 | A file whose tree is not kept is parsed into the worker's scratch `Ast`, whose vectors are cleared, not freed, once its products are copied out | 20 G 3; decision 4 | OPEN | SYN-1 (1.2) |
 | LOAD-3.6 | `ast_of` reads the overlay before the disk, so an open file with unsaved edits is parsed from its editor text | 20 G 3 | DONE `11f03ec9`. The overlay read was already in (`FileSource::read`, which `read_bytes` uses), so the row needed its test. The test found a gap the rule covers: `ast_of` kept each parse in a cache by path and never forgot one, so after an edit a file with no kept tree was parsed from its old text. The cache entry is now forgotten on every change to a file's bytes or state (`set_document`, `unset_document`, the insert, the update and the removal, which is `unindex_file`), and `set_source` empties the cache. Today the editor keeps every tree, so the cache is not reached there; LOAD-3.1 makes context trees go, and from then on it serves. Tests: two in `ast_of_overlay.rs` (the second fails without the forgetting); the `project::` and `lsp::` module tests pass (463); clippy is clean. Output identity is not run: it waits for §11 | — |
@@ -736,6 +741,22 @@ Merging the sources into one list found six places where two of them disagree, o
 | LOAD-7.6 | **Keys.** Grouped keys name the upstream parameters they cover; one casing; no key repeats its section's name, as `ext.psr3.check_psr3_logging` and `ext.psr3.check_psr3_exception_context` do today; a PHPStan parameter's own name where one exists. PHP versions and extension activation read every discovered Composer root's manifest | split C1 | READY; a delta in the config's keys | — |
 | LOAD-7.7 | **Tests and docs.** Config tests for nested keys, `--set` of an unknown key and error key paths; a config reference generated from the section doc comments; `check-project`'s help corrected: an unset `--level` caps at `DEFAULT_REPORT_LEVEL` 6 (`project/session.rs:40`, `:347`) where the help says it reports everything, and `--stub-path` and `--format` stop citing the deleted `check_duplicate_class_declarations` flag and `config.rs` (`main/check_project.rs:71`, `:91`). `declared_php_versions` has its doc comment already | split C1 | READY | — |
 | LOAD-7.8 | **The missing settings,** each with the phase the plan names for it: the PHPStan parameters that change analysis (mixin exclude classes, universal object crates, global type aliases, `treatPhpDocTypesAsCertain`, `polluteScopeWith*`, early-terminating calls, the exception model, additional constructors, `exclude_paths`, `file_extensions`, the `report*` and `check*` parameters, `featureToggles`, `skipCheckGenericClasses` and the rest). One of about 40 exists (`report_possibly_nonexistent_general_array_offset`). The version range is C5's (STUB-7.1); the others' phases (C7, C8, D2, D5, D6, E3, F3) are not tracked here | split C1 | OPEN | each its phase |
+| LOAD-8 | **The fixes for the costs items 1 to 3 added,** and for the load's serial stretches that MEAS-4 measured: `ITEMS_1_TO_3_FIXES_PLAN.md`, which holds each row's design, numbers and test. LOAD-8.n is the plan's Rn. One commit each; none starts before the user's second go, and they go in the plan's order (its decision 4): 8.1; LOAD-3.3, CACHE-12, 8.15; 8.2, 8.3, 8.4, 8.6, 8.14, 8.13; 8.10; 8.5, 8.8; 8.9; 8.7 | fixes | OPEN | — |
+| LOAD-8.1 | **UTF-8 validated once, with the fast check.** `read_and_parse_file`'s `String::from_utf8_lossy` (`session.rs:1224`), 394 M on the pool, becomes `simdutf8::basic::from_utf8`, borrowed, with the lossy decode only for a file that fails it. One helper serves the three other lossy decodes (`session.rs:1213`, `project.rs:2049`, `lsp.rs:1290`). A file's length, text and parse stay the same for valid and invalid files, so LOAD-3.4's note and LOAD-6's record are corrected with it | fixes R1 | READY | — |
+| LOAD-8.2 | **A path that carries its hash.** `PathHash`, `path_hash` and `child_hash` move into the `composer` crate, and `HashedPath { path, hash }` keys `Listed`, `Found::File`, `DirListings` and the walk's tables. A hash is made by `HashedPath::new` and extended by `child`, so a recomputation is a call a review finds. `Tree::node` takes its directory's hash from the listing | fixes R2 | READY | — |
+| LOAD-8.3 | **A directory's reach carried down the walk.** Each directory task receives the walks that reach it and whether it is covered, where `Starts::reaching` scans every ancestor (quadratic in depth) and `prunes` does so per child. `Starts`' tables become `HashTable`s keyed by `PathHash`. The old `reaching` stays as a test oracle | fixes R3 | OPEN | LOAD-8.2 |
+| LOAD-8.4 | **The walk's hand-over keyed by the carried hash:** `into_parsed`'s map and `Session::load`'s removal per file (28,502 path hashes, on the main thread) become a `HashTable` keyed by `Listed`'s hash | fixes R4 | OPEN | LOAD-8.2 |
+| LOAD-8.5 | **Per-file tables keyed by `FileId`:** `UseSiteIndex.by_file` and `file_tables::bucket`'s routing, and `judge_property_types`' `checked` set (13.65 M of path hashes each) | fixes R5 | READY | — |
+| LOAD-8.6 | **Vendor discovery stops hashing paths and stat-ing files.** `DirListings.listed` is keyed by `PathHash`. `drop_files_under_dirs` groups the files by parent, folds each directory's components once and reads a file's kind from its parent's listing. `Resolver::path` decides containment once per listed directory and makes the as-written fallback's base once. The `composer` crate gains `hashbrown` | fixes R6 | OPEN | LOAD-8.2 |
+| LOAD-8.7 | **The remaining component walks on the load path,** enumerated by caller from a fresh profile, and each replaced with what the walk holds (a listed path's directory, name and root-relative form) or shown to be another row's. `walk::path_hash`'s one fold per path stays | fixes R7 | OPEN | LOAD-8.2 to 8.6 and LOAD-8.8 (its profile is read after them) |
+| LOAD-8.8 | **Identity is a `FileId` inside the scope that owns the table, and the resolved path where the scope spans tables.** Diagnostics are keyed by `FileId` until `finalize_results`, which converts each once. The `composer.json` manifests are numbered at load and merged into the rank seed. The language server keys its per-project results by `FileId` and its server-wide state by path | fixes R8 | OPEN | LOAD-8.5 |
+| LOAD-8.9 | **The bytes hashed once in the editor:** with `retain_source` on, the per-file cache key hashes the content hash with the path and flags, where it hashes the bytes a second time today. The batch run is unchanged; measured with `incremental-bench` | fixes R9 | READY | — |
+| LOAD-8.10 | **The walk does not wait for vendor discovery.** The analysed and stub walks start before `vendor.get()`, and the context walks when discovery ends. A walk hands a directory's files over when it is the only walk of the strongest role that reaches the directory. `finish` runs its jobs in `in_place_scope`, and each job keeps its slot in the merge. It undoes the wait that LOAD-1.2 (`7bef998a`) added | fixes R10 | OPEN | LOAD-8.3 |
+| LOAD-8.11 | The plan's R11, the context trees dropped on their workers | fixes R11 | SUPERSEDED: it is LOAD-3.3's load part | — |
+| LOAD-8.12 | The plan's R12, a file's number bound without decoding its signatures | fixes R12 | SUPERSEDED: it is CACHE-12 | — |
+| LOAD-8.13 | **The autoload files' parse not repeated:** the entries `Resolver` reads from the generated autoload files are stored in the per-file cache under the file's content key, so a warm load does not parse `autoload_static.php` (`parse_generated_file`, 163.0 M) | fixes R13 | READY | — |
+| LOAD-8.14 | **The walk takes discovery's resolved paths.** `VendorContext` keeps resolved and as-written paths apart, and a `Resolved` path enters the walk through an entry point that does not resolve it again, with its listing entry's kind. It completes LOAD-1.1's "each link is resolved once" | fixes R14 | OPEN | LOAD-8.2, LOAD-8.6 |
+| LOAD-8.15 | **A batch run does not purge.** `check`, `check-project`, `demo` and `convert-baseline` set mimalloc's `purge_delay` to −1 (`mi_option_set`, option 15) at the start of `main`'s dispatch, through one safe function in `allocator.rs`; `lsp` and `incremental-bench` keep the default | fixes R15 | READY | — |
 
 ### Targets
 
@@ -743,9 +764,10 @@ Merging the sources into one list found six places where two of them disagree, o
 |---|---|---|
 | LOAD-1 | server memory | the server's ≈420 MB of context trees |
 | LOAD-2 | `collect_php_files` 75.3 M serial, `sort_paths` 112.3 M (4 calls, on the main and vendor threads), `strip_prefix` 38.1 M (29,756), `PackageIndex::owner` 69.3 M, `absolute_path` 54.1 M, `FileTable::id_for` 33.7 M, `Components::next` 139.4 M across the run; vendor discovery 321.3 M on its own thread | ≈0.3 G and ≈0.15 s of serial start |
-| LOAD-3 | 267.8 M serial | ≈0.3 G, and 0.58 G off the serial path; peak −≤209 MB |
+| LOAD-3 | 267.8 M serial; at `aa896697` 265.2 M, 72 ms of the main thread in an off run (MEAS-4) | ≈0.3 G, and 0.58 G off the serial path; peak −≤209 MB |
 | LOAD-4 | `insert_numbered_file` 413.9 M serial (its `drop`, 267.8 M, is LOAD-3's; `register_references` 77.2 M over 28,502, which fills the dependents indexes REG-16.4 replaces; `insert_built_decl` 34.8 M); the two path sorts, 20.7 M and 20.6 M | ≈0.25 G |
 | LOAD-5 | none in instructions | the analysed trees, ≈173 MB, freed during the check |
+| LOAD-8 | at `aa896697` (§1's `regress-item5` runs; MEAS-4 for time): the lossy decode, 394.3 M on the pool (8.1); `Path::hash`, 194.3 M of self cost, and about 266 M of component walks, not all on the load path (8.2 to 8.7); 27.3 M of path hashes in the walk's hand-over (8.4) and 27.3 M in the per-file tables (8.5); about 34 M of identity hashing (8.8); the cache key's XXH3, 24.1 M warm, the editor's only (8.9); the warm run's 120 ms wait for `vendor.get()`, with the pool idle (8.10); `parse_generated_file`, 163.0 M on the discovery thread (8.13); 14 to 16 ms of serial root resolution (8.14); purging, 5.4% of the off run's wall time (8.15) | none: the plan claims a saving only from a measurement |
 
 ### Notes
 
@@ -755,7 +777,7 @@ Merging the sources into one list found six places where two of them disagree, o
   - The crate split's Stage F (the `Session` and the language server; not tracked here) covers LOAD-1.3 to 1.5 too. Until its F1, `Project::finish_loading` stays the batch entry point (REG-7.8).
 - **The off drill did not change LOAD-2.**
 - **LOAD-3's premise was halved by P8b:** skimmed bodies are not trees, so the drop fell from 575.5 M to 267.8 M. The 11,459 context trees are still dropped on the main thread, inside `insert_numbered_file`.
-  - Decision 4's flat tree frees a tree as a few vectors, not node by node, so LOAD-3's drop is measured again after SYN-1.2, before LOAD-3.3 is built.
+  - Decision 4's flat tree frees a tree as a few vectors, not node by node. LOAD-3.3 was to wait for it and a new measurement, but `ITEMS_1_TO_3_FIXES_PLAN.md` builds LOAD-3.3's load part first (its R11, kept by its decision 6): MEAS-4 put the drop on the critical path (72 ms of the main thread, off), and dropping each tree on its worker also lowers the peak, which the flat tree changes only in size.
 - **Decision 3's engine takes over LOAD-4's bookkeeping.**
   - LOAD-4.1, 4.2 and 4.6 are superseded.
   - The engine replaces the dependents indexes, `walk_affected` and the finishing passes' scopes (REG-16.4), so the parts of LOAD-4.5 and 4.7 that work on them go when it lands. Their other parts stand.
@@ -772,6 +794,7 @@ Merging the sources into one list found six places where two of them disagree, o
   - `a5d61611`: the corpus gate runner follows item 1's `prepare` and `finalize` changes (LOAD-1.4 and LOAD-1.5).
   - `4bd62127`: a class's display path is built only for a `PHPStan\*` name. It is in the registry, and no LOAD row fits it.
 - **Memory (MEAS-2):** the analysed trees are 151.1 MB at exit, and at the peak of the warm run.
+- **LOAD-8 holds `ITEMS_1_TO_3_FIXES_PLAN.md`'s rows,** but for R11 (LOAD-3.3) and R12 (CACHE-12). The plan's decisions were ruled on 2026-10-17: the finishing passes' unused cores are in REG-7's notes (its decision 1), the stub-base wait in STUB's notes (its decision 5), and the name floor in LOAD-2.2 (its decision 7). R8 and R11 to R15 are older costs than items 1 to 3, kept by its decision 6.
 
 ### Records
 
@@ -1093,7 +1116,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | REG-6 | The checker test harness builds like a project: it merges the stubs before resolving | split C4 harness | READY; a test-expectation delta, approved (decision 14) | — |
 | REG-7 | Per-class resolution replacing the passes, in five levels, each a query of the engine | split C4 memo; decision 3 | OPEN | REG-16.3 |
 | REG-7.1 | **Ancestors level:** the `extends`/`implements` closure in resolution order, the `use` closure in composition order, the `@mixin` targets, the unresolved edges, and the constant declarations composed with the traits'. A cycle through `extends`, `implements` or `use` is detected here and broken: every edge between two classes of the same cycle is dropped, whichever class resolves first | split C4 memo | OPEN | REG-4.2 |
-| REG-7.2 | **Own level:** own members composed with the `use` closure's declared members, `@method` tags, every type resolved in the class's context (imported aliases, `value-of` and class-constant types, constant-named types), and the interim assertion step. It includes item 6's step 1, deferred types on demand: `class_has_deferred_type`, `function_has_deferred_type` and the eager pass go, and the stub cache asserts that no stub record holds a deferred type | split C4 memo; 20 G 6.1 | OPEN | REG-7.1 |
+| REG-7.2 | **Own level:** own members composed with the `use` closure's declared members, `@method` tags, every type resolved in the class's context (imported aliases, `value-of` and class-constant types, constant-named types), and the interim assertion step. It includes item 6's step 1, deferred types on demand: `class_has_deferred_type`, `function_has_deferred_type`, the eager pass and the has-deferred-type fact that CACHE-12's entries carry for it go, and the stub cache asserts that no stub record holds a deferred type | split C4 memo; 20 G 6.1 | OPEN | REG-7.1 |
 | REG-7.3 | **Inherited level:** PHPDoc inheritance and property hooks, from the ancestors' inherited level | split C4 memo | OPEN | REG-7.2 |
 | REG-7.4 | **Members level:** each `@mixin` target's public methods and properties, then the member owners | split C4 memo | OPEN | REG-7.3 |
 | REG-7.5 | **Final level:** each declared type is its native and PHPDoc types combined by decision 8's rule, the relation reading the class hierarchy. A PHPDoc member that shares no value with the native type is dropped; one that shares values with a native kind is intersected with it; a native kind that no member shares values with is kept; a member that resolves later carries the native type until it does. The PHPDoc is read with its aliases resolved. The crate split's text took PHPStan's `TypehintHelper::decideType` whole: decision 8 keeps its added-back union members, its variadic reading and its `iterable` widening (generalized), and replaces the rest. The plan's Appendix H causes for C4 stay here | split C4 memo; decision 8 | OPEN | REG-7.4 |
@@ -1205,6 +1228,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
   - The commit runs the full gate tier. Peak RSS stays at or below the phase start, and a test pins that loading a project and checking one file resolves no class the file doesn't reach.
   - `has_unresolvable_ancestor` reads the unresolved edges. The boolean `is_subclass_of` keeps counting an unresolved name as an ancestor until the crate split's C8.
   - The whole-program passes the plan keeps until its C9 are `resolve_transitive_purity` and `infer_global_variables`. On this branch the first is gone with REG-1, so only `infer_global_variables` (`registry/global_vars.rs:315`) is left.
+  - **Wall time (MEAS-4; `ITEMS_1_TO_3_FIXES_PLAN.md`'s decision 1).** The finishing passes are the largest stretch of unused cores in a run at `aa896697`. They run from 1.16 to 1.52 s of the 2.02 s off run and from 0.75 to 1.19 s of the 1.70 s warm run, at 2 to 3 of the 8 cores, and leave about 0.26 s (off) and 0.28 s (warm) of the cores unused. The thread in `run_finishing_passes` is busy throughout (`is_folded_eq` and `fold_hash` lead its leaves), and the pool takes only part of the work, mostly `flatten_phpdoc_inheritance_one_pass`; 29% of the samples from 0.8 to 1.5 s of the off run are kernel time, mostly task switches. No row speeds the passes up: REG-7 replaces them, REG-4.2 deletes `canonicalize_class_name_case`, and `infer_global_variables_of` stays. This stretch is REG-7's wall-time baseline.
 - **REG-17 adds work rather than removing it:** each inferred body is checked once per revision, and only the bodies a query reaches. Its cost is measured as it lands, against the check phase of the warm run (MEAS-1).
 - **REG-8.4:** the plan counts `phpstan_class_files` as already gone (the crate split's C3 follow-up), but it is still a field (`registry.rs:276`). See Q-11.
 - **REG-14.1 and REG-7.7 (decision 2).** No declaration holds case references. The rules read the file's record of written names (PROD-5.8), and REG-7.7's scratch is what is left.
@@ -1316,6 +1340,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
   - E1, P1 and P4 (STUB-1, STUB-2, STUB-5) changed how the stub base is built, but not what item 6 reads.
   - The warm run at this code (MEAS-1) decodes 87,146 stub function records.
 - **STUB-7 removes the eager stub build** that STUB-2 to STUB-5 speed up. Until it lands, every cold run pays for that build.
+- **What a cold run still pays, for STUB-10.1 (MEAS-4; `ITEMS_1_TO_3_FIXES_PLAN.md`'s decision 5).** In an off run at `aa896697` the stub build (`build_generated_stub_data`) takes the first 0.21 s at 4.7 to 4.8 cores, beside vendor discovery. Later the main thread is blocked 89 ms in `Stubs::base`, asked by `expect_files` (0.917 to 1.006 s of 2.02 s), while the stub-base thread runs `generated_stubs`, `merge_stubs` and `freeze` (copies and a sort of `(Name, Arc)` pairs) and the base's finishing passes run on the pool. A warm run reads the base from the stub cache and waits about 9 ms. No row speeds this up: STUB-11 removes the build, and STUB-13.2 removes the choice of base and the wait.
 - **STUB-7.1's version key (decision 6).** The crate split's text says "member and parameter gates are inside the files, so the layer parses per version". Decision 6 took the off report's recommendation instead: the gates are data, with one parse per file and no version in any key.
 - **STUB-8, STUB-7.9 and STUB-7.10 decide guards over the same declarations.** Since decision 6 all three are range queries over STUB-7.1's data. STUB-8 adds the extensions as evidence, and the polyfill check.
 - **Decision 7 splits the stub data.**
@@ -1417,7 +1442,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | CACHE-9 | **Names stored once per cache file.** A cache file holds a table of its distinct names, and records refer to them by index; an entry is interned on first need (`OnceLock<Name>`). The per-file cache has one table per file. Format bump | 20 G 6.3 | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | STUB-7.6; the persistence's format (CACHE-13.2; REG-16.1 kept salsa) |
 | CACHE-10 | **Records read, not mapped or copied.** The directory, the keys and the name table are read eagerly. A lazy record is its offset and length, beside a shared `Arc<File>`, read with `read_at` into a per-thread scratch buffer under a decode context. Each record has its own CRC, and failures are recoverable. No `unsafe` and no mapping; `u64` offsets; the stub index's keys are read with the eager sections. Same format bump as CACHE-9 | 20 G 6.5 | BLOCKED: as CACHE-9 | STUB-7.6; the persistence's format (CACHE-13.2; REG-16.1 kept salsa) |
 | CACHE-11 | **A cache file's types stored once,** in a table its records index. Warm-cache runs only | off E8 | OPEN | CACHE-9, CACHE-10 (the name table by index, `read_at` records, a decode context: one format bump) |
-| CACHE-12 | A cached file's origins decoded as the one `Arc<Path>` its file binds | off E11 | OPEN | CACHE-11 (its decode context) |
+| CACHE-12 | **A cached file's origins decoded as the `FileId` its file binds** (an origin is `Origin::File(FileId)` since LOAD-4.5, not an `Arc<Path>`). The file's number is kept in `Lazy` beside the encoded bytes: `bind_file` sets it without decoding, and the decoder takes it, so a decoded value is born `Origin::File(id)`. That number is the decode context, so CACHE-11's is not needed. The encoded function entry also carries whether it holds a deferred type, which `class_has_deferred_type`'s scan reads instead of decoding, until REG-7.2 deletes the scan and the fact. Both caches' formats change | off E11; fixes R12 | READY | — |
 | CACHE-13 | Warm runs: cache entries checked by `stat`, and the engine's results persisted | 20 G 17; decision 3 | OPEN | — |
 | CACHE-13.1 | **Entries checked by `stat`.** A per-project index maps each path to `(size, mtime_ns, ctime_ns, inode, device, content hash)`, from a stat taken before the file's bytes are read. A file, analysed or context, takes the recorded hash without being read when its five stat fields match and both its recorded times are older than the index's own write time (git's rule for racily clean entries, applied to the change time too). That holds only on a file system known to keep a change time that no program sets (ext4, xfs, btrfs, APFS and the like); on any other, and on Windows, every file is read and hashed (decision 13) | 20 G 17.1; decision 13 | OPEN | LOAD-1.4 (the hash the read keeps); for analysed files, CACHE-13.2 |
 | CACHE-13.2 | **The engine's results persisted with their dependencies.** Each query's result is saved with the dependencies it recorded, as rustc's incremental compilation saves its query results and its dependency graph. A warm run parses and checks again only the files whose recorded reads changed. The plan's resolved context base and a check-results cache are this persistence, not stores of their own; today an analysed file is always parsed and checked (`project/file_cache.rs:1-8`). It is keyed by the build. The configuration, the version range (decision 6) and each `(path, content hash)` are inputs, not keys. Its format is salsa's `persistence` feature or the cache's own container (CACHE-9, CACHE-10), as REG-16.1 decides | 20 G 17.2; decision 3 | OPEN | REG-16.4 |
@@ -1429,7 +1454,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | CACHE-8 | memory only | −15.3 MB at the cold run's peak, −31.4 MB allocated per cold run |
 | CACHE-9, CACHE-10 | item 6's parts (STUB targets) | ≈40 MB of heap at exit, item 6's |
 | CACHE-11 | types decoded, ≈436.5 M of the warm run (MEAS-1) | ≈ −65 M; ≈ −25 M after item 6 |
-| CACHE-12 | 123.9 M of the warm run (MEAS-1) | ≈ −116 M, per-file cache warm |
+| CACHE-12 | 123.9 M of the warm run (MEAS-1). At `aa896697`, `bind_file`'s decodes: 393.1 M, serial on the main thread (110 ms of the warm run, with the pool idle; MEAS-4), less the decodes later passes make anyway; and the deferred-type scan's 177.8 M of stub decodes | ≈ −116 M, per-file cache warm |
 | CACHE-13 | CACHE-13.1: reads, ≈60-70 M Ir; the per-file decode (≈1,260 M, MEAS-1) is not what a `stat` index removes. CACHE-13.2: on the warm run (MEAS-1), the parse of the analysed files (`parse_with_ignores` 1,967.9 M) and their check (`check_program` 6,414.6 M) where their recorded reads did not change, and the per-file decode | decoding and reads, ≈0.85 core-s (item 17's, before decision 3) |
 
 ### Notes
@@ -1438,9 +1463,9 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 - **CACHE-13 and the per-file decode.** CACHE-13.2's persistence is what replaces the per-file decode of the context files, and the parse and check of unchanged analysed files; CACHE-13.1 does not touch them. CACHE-13.1's weight is syscalls and I/O, which Ir does not count.
 - **CACHE-6 (off E4)** measured the idea nearest to CACHE-13 (the analysed files in the per-file cache) and found no gain worth its cold cost. A hit there still parsed the file and checked it. CACHE-13.2 keeps the check's results, so an unchanged file is neither parsed nor checked.
 - **CACHE-9 and CACHE-10's form waits on the stub layer and on the persistence.**
-  - The crate split reshapes the stub layer, so it decides their form, and with it CACHE-11's and CACHE-12's.
+  - The crate split reshapes the stub layer, so it decides their form, and with it CACHE-11's. CACHE-12 is built in today's format (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12), since its decode context is the file's number.
   - Since decision 7 the stub disk cache goes with STUB-11.
-  - Since decision 3 the per-file cache is CACHE-13.2's persistence, whose format REG-16.1 decides. So what is left for CACHE-9 to CACHE-12 is that format, if it is the cache's own container.
+  - Since decision 3 the per-file cache is CACHE-13.2's persistence, whose format REG-16.1 decides. So what is left for CACHE-9 to CACHE-11 is that format, if it is the cache's own container.
 - **CACHE-7 (off E12) and REG-5 touch the same set,** `names_with_assert_tags`.
 
 ### Records
@@ -1629,13 +1654,14 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 
 ## 14. MEAS: the measurements that set targets
 
-MEAS-1, MEAS-2 and MEAS-3 measured `791d29cb`'s code.
+MEAS-1, MEAS-2 and MEAS-3 measured `791d29cb`'s code, and MEAS-4 `aa896697`'s.
 
 | id | measurement | state | used by |
 |---|---|---|---|
 | MEAS-1 | Warm-mode costs at this branch's code | DONE | the targets of item 6 (REG-7.2, STUB-8, STUB-9, CACHE-9, CACHE-10), CACHE-11, CACHE-12, CACHE-13 |
 | MEAS-2 | Memory at this branch's code | DONE | the memory claims of LOAD-3, REG-13, SYN-1, DOC-2, NAME-2, LOAD-5 |
 | MEAS-3 | **The spread of one off run's total:** two callgrind runs of one binary, and two at one thread (`PHPSTAN_RS_THREADS=1`), each split by function as CHECK-4's record splits P7's run from the build's | DONE (2026-10-15): up to 16.9 M at the default thread count, 1.1 M at one thread (its section below) | the rule on what a total can resolve (Conventions); the changes of §1's table that are tens of M: CHECK-1 (−54.7 M), CHECK-2 (−27.1 M), TYPE-1 (−59.9 M), TYPE-2 (−23.2 M), TYPE-3 (−29.9 M), CHECK-3 (−52.5 M) |
+| MEAS-4 | **Wall time at `aa896697`:** the off and warm runs' timelines under perf, the cores they leave unused, the scaling curve and its CPU growth, instructions per CPU second, and the allocator's purging and huge pages (`ITEMS_1_TO_3_FIXES_PLAN.md`'s Step 0) | DONE (2026-10-17) | LOAD-8, LOAD-3.3 and CACHE-12; REG-7's and STUB's notes; the rule that a wall-time claim is a median of repeated runs |
 
 ### MEAS-1: the warm run, 13.18 G Ir
 
@@ -1723,6 +1749,39 @@ What this does to the plan's memory claims:
 - **Item 6 (≈40 MB of heap):** the stub records are 109.2 MB in the warm run.
 - A warm run's peak is its end: nothing is freed during the check, which is what LOAD-5 (item 19) is about.
 - The check phase allocates 232 MB in 2.16 M blocks in `checker`, and holds 0.6 MB of it at the end: the temporaries of CHECK-6 (item 18).
+
+### MEAS-4: wall time at `aa896697`
+
+`ITEMS_1_TO_3_FIXES_PLAN.md`'s Step 0 (2026-10-17) holds the tables, the commands and the scripts (`scripts/`); this section keeps what the rows read. Piwigo, `check-project --config phpstan-rs.toml --format json`; every kept output was the same, 171,439 bytes with sha256 `8ff144c3…`. The machine is a VM: 8 vCPUs on a 6-core, 12-thread i7-8700, so when all eight run, at least two cores run two each. It has no hardware performance counter and no cpufreq, so clock speed and cache or memory contention cannot be told apart. The 1-minute load was 1.5 to 2.5, with other sessions' processes present, so the figures bound what a row gains.
+
+| | off | warm |
+|---|---|---|
+| plain runs (the frame-pointer `dhat` binary, no perf) | 2,310, 2,296, 2,878 ms | 1,769, 1,602, 1,568 ms |
+| the run under `perf record -F 499 -g` | 2.02 s | 1.70 s |
+| the main thread's CPU | 0.22 s | 0.21 s |
+| the 8 cores' unused capacity | 0.75 s | 0.85 s |
+
+**Where the main thread gates the run** (its own samples; the other stretches are the pool's):
+
+- vendor discovery: blocked in `vendor.get()` 168 ms off, while the stub build keeps the pool at 5.5 cores, and 120 ms warm, with the pool idle (LOAD-8.10);
+- adding the vendor roots after it: 14 ms off, 16 ms warm (LOAD-8.14);
+- the hand-over after the parse: 8 ms in each (LOAD-8.4);
+- `Stubs::base`: 89 ms off, with a cold stub cache; about 9 ms warm (STUB's notes);
+- `insert_numbered_file`: 82 ms off, 72 ms of it freeing the context trees (LOAD-3.3); 8 ms warm;
+- `bind_file`: 10 ms off; 110 ms warm, with the pool idle (CACHE-12).
+
+The streaming parse runs at 6.0 to 6.9 cores off (0.22 to 0.90 s), and the check at 5.9 to 7.6 (1.52 to 2.02 s). The project's finishing passes run at 2 to 3 cores (1.16 to 1.52 s off, 0.75 to 1.19 s warm) and leave the most capacity unused, about 0.26 s and 0.28 s (REG-7's notes).
+
+**Instructions are not time.** Leaf samples against callgrind's self Ir for the same functions: allocation, copies and the lexer's name work run at 1 to 5 G Ir per CPU second (`_mi_theap_malloc_zero` 1.0 G, `Lexer::next_token` 4.6 G), and the byte loops at 10 G or more (`Utf8Chunks::next` and `Components::next` 12 G). So LOAD-8.1 to 8.9 and 8.13 are instruction rows: they serve the Ir total and save a few ms of wall time each, and 8.9 none in a batch run. The wall rows are LOAD-3.3, CACHE-12, LOAD-8.10, 8.14 and 8.15.
+
+**Scaling** (the `gate` binary, hyperfine, 5 runs per point, load 2.6 to 3.5). Medians at 1, 2, 4 and 8 threads: off 6,657, 3,769, 2,597 and 2,123 ms; warm 4,393, 2,530, 1,847 and 1,539 ms. The CPU time grows 70% off and 61% warm from one thread to eight, so a fit of serial + parallel / threads does not measure serial work. Two perf recordings of the off run, at one thread and at eight, split the growth (6.24 to 10.29 s of CPU): our code, 4.86 to 7.02 s; page zeroing, 0.08 to 0.82 s; task switches, 0.07 to 0.51 s; mimalloc, 0.57 to 0.93 s; rayon's idle spinning, 0.01 to 0.05 s. It is the VM's shared cores and memory, not spinning.
+
+**The allocator** (mimalloc v3 with its defaults; off mode):
+
+- Purging (`purge_delay` 1000 ms, each purge a `MADV_DONTNEED`) does 987 purges, 154.8 MiB, per run. With `MIMALLOC_PURGE_DELAY=-1` the medians of 20 runs each go from 2.228 to 2.108 s (−5.4%, Mann-Whitney p = 0.040), the TLB-shootdown IPIs go, and the peak stays at 1.0 GiB of RSS (LOAD-8.15).
+- mimalloc's arenas are `MADV_HUGEPAGE`, and an off run takes about 550 transparent huge pages. With `MIMALLOC_ALLOW_THP=0` it takes 3.6 to 4.1 s, against 2.7 to 2.9 s with them, so they stay.
+- With THP `defrag` at `madvise`, a huge-page fault compacts memory directly when no free 2 MiB page is at hand. One off recording took 6.35 s for that, so a wall-time claim is a median of repeated runs, with the compaction counters logged.
+- Page zeroing is the first touch of the run's 1.1 GiB, nearly all of it huge pages, and the largest single leaf (7 to 9% of the samples). Only a smaller footprint lowers it, as LOAD-3.3 does.
 
 ## 15. Q: not optimizations
 
@@ -1900,7 +1959,7 @@ The 20 G report describes `5fb858c9`. For each finding and each design, these ta
 | R2, five functions per token (1.77 G) | item 10 (SYN-2) | 2,868 M in the six functions over 8.44 M tokens (the off profile also lexes the stub files; 78% is the project's); P8b's skim still pays it per skimmed token |
 | R3, results written into shared declarations; string keys; `Members::eq` 96.9 M | item 4 (REG-13) | gone with P9 (REG-1): `Members::eq` 4.8 M, no eager purity pass |
 | R4, a line index for every file (270 M) | item 11 (SYN-3) | 363.4 M over 25,753 builds (stub files included) |
-| R5, stub members decoded to learn they have no deferred types (178 M) | item 6 (its step 1 is REG-7.2) | the warm run at this code (MEAS-1): 87,146 stub function decodes, 682.5 M |
+| R5, stub members decoded to learn they have no deferred types (178 M) | item 6 (its step 1 is REG-7.2) | the warm run at this code (MEAS-1): 87,146 stub function decodes, 682.5 M. Until REG-7.2, CACHE-12's carried fact (`ITEMS_1_TO_3_FIXES_PLAN.md`'s R12) removes the scan's decodes, 177.8 M warm at `aa896697` |
 | R6, lookups by `&str` (701 M of folding) | item 15 (NAME-1) | 634 M (`fold_hash` 275.7 M, `is_folded_eq` 358.2 M) |
 | R7, products for every body (`BodySummary` 344 M, `InitFlow` 218.5 M, `GlobalFacts` 218.5 M) | item 13 (PROD-5) | cut by P8a and P8b1 (PROD-1, PROD-2) to 83.6 M, 50.8 M and 74 M |
 | R8, stack guards in hot paths | item 9 (SYN-1) | `peeled` 61.2 M (2.54 M calls) |

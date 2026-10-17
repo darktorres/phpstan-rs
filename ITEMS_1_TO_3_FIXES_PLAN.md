@@ -505,7 +505,8 @@ is confirmed.
 
 One commit each, with a pathspec (the checkout is shared). The order (decision 4), from
 the second "go": R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7. R3,
-R4, R6, R7 and R14 use R2's type; R5 and R8 use `FileId`.
+R4, R6, R7 and R14 use R2's type; R5 and R8 use `FileId`. In the ledger, Rn is LOAD-8.n,
+R11 is LOAD-3.3's load part and R12 is CACHE-12.
 
 Where the rows come from (decision 6):
 
@@ -893,8 +894,8 @@ own field and the number as the decoder's argument, are one design:
   (`provenance.rs:110`, `:135`). A decoded entry is therefore pending until bound, and
   that is why `bind_file` decodes today.
 - **The ledger.** This is CACHE-12's decode context, for a `FileId` instead of an
-  `Arc<Path>`. CACHE-12 takes it over; CACHE-11, whose decode context CACHE-12 waits on,
-  is BLOCKED.
+  `Arc<Path>`. CACHE-12 takes it over, so it no longer waits on CACHE-11's decode
+  context (CACHE-11 waits on CACHE-9 and CACHE-10, which are BLOCKED).
 - **The number alone does not save the decode.** `resolve_deferred_value_of` asks
   `class_has_deferred_type` about every class in scope, project and stub alike
   (`resolve.rs:539`, `:592`, `:1486`). That call decodes every method to learn whether
@@ -1103,23 +1104,21 @@ distorts is taken again):
 
 ## Bookkeeping
 
-- `WORK_STACK.md`: level 9 tracks this plan (added 2026-10-17, above level 8, which waits
-  before its item 8). Name the ledger rows there as they are made, and delete the level
-  when the plan is finished (the project rule: the level's own documents keep the record).
-- Ledger: new rows under LOAD for the rows that have none, with the §1 range rows updated
-  as each lands. Two rows already have ledger rows and get none: R11 is LOAD-3.3, and R12
-  is CACHE-12's decode context for a `FileId`. R10's new row says that it undoes LOAD-1.2's
-  wait. Correct LOAD-3.4's note and LOAD-6's record, and fix the stale comment at
-  `session.rs:1081`.
-- Ledger: record Step 0, the first wall-time measurement of this code, beside §1's Ir
-  ranges: the timelines, the unused capacity, the scaling set and its CPU-growth reading,
-  the Ir-per-second table, and the allocator runs (Kernel time). By decisions 1 and 5,
-  the finishing passes' utilization goes in REG-7's record and the stub-base wait in
-  STUB-10.1's. Item 6's R5 (line 1903) cites R12's carried fact. REG-7.2's record says
-  it deletes that fact with the scan.
-- Record item 2's LOAD-2.2 name floor in the ledger and in WORK_STACK once the user
-  confirms it (decision 7): vendor by resolved path now, plus the `.git` and
-  `node_modules` names until `exclude_paths` exists.
+- `WORK_STACK.md`: level 9 tracks this plan (added 2026-10-17, above level 8) and names
+  the ledger rows. Delete the level when the plan is finished (the project rule: the
+  level's own documents keep the record).
+- Done on 2026-10-17, after the rulings:
+  - the ledger's rows: LOAD-8.n is Rn (LOAD-8.10 says it undoes LOAD-1.2's wait); R11 is
+    LOAD-3.3's load part, and R12 is CACHE-12, whose decode context is now the file's
+    number, so it no longer waits on CACHE-11; LOAD-8.11 and 8.12 point to them;
+  - Step 0 as the ledger's MEAS-4, with a paragraph in §1 beside the Ir ranges;
+  - the finishing passes' utilization in REG-7's notes (decision 1), and the stub-base
+    wait in STUB's notes, for STUB-10.1 (decision 5);
+  - item 6's R5 (the ledger's Appendix B.1) and REG-7.2 cite R12's carried fact;
+  - the LOAD-2.2 name floor in the ledger and in WORK_STACK's item 2 (decision 7).
+- Left, with the rows: LOAD-3.4's note and LOAD-6's record (R1); the stale comment at
+  `session.rs:1081` (R10); LOAD-3.3's record, which says that `update_file` waits on
+  LOAD-3.1 (R11); §1's range rows, as each row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit
   with a pathspec; remove scratch worktrees once recorded.
 
