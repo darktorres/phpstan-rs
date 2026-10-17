@@ -3146,7 +3146,14 @@ impl ParsedFile {
 /// top-level scan in one non-recursive, correctly-measured call instead -
 /// see that function's own doc comment for the real number this found.
 pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
-    collect_php_files_excluding(path, &[], out);
+    let mut walk = walk::Walk::new(Arc::default());
+    walk.add(path, walk::Role::Analysed, &[]);
+    out.extend(
+        walk.finish(&worker_pool())
+            .files
+            .into_iter()
+            .map(|listed| listed.path),
+    );
 }
 
 /// Directory names a workspace-wide scan skips by default when no real
@@ -3157,9 +3164,8 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
 pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &["vendor", ".git", "node_modules"];
 
 /// `true` if any component of `path` is named exactly one of
-/// `excluded_dir_names` - a pure name check, no filesystem access. Used
-/// both to prune `collect_php_files_excluding`'s own walk and, in
-/// `Project::update_file`, as a never-before-seen path's default
+/// `excluded_dir_names` - a pure name check, no filesystem access. Used in
+/// `Project::update_file_cancellable`, as a never-before-seen path's default
 /// `analyzed` classification (see that call site's own doc comment).
 pub fn path_under_excluded_dir(path: &Path, excluded_dir_names: &[&str]) -> bool {
     path.components().any(|c| {
@@ -3174,19 +3180,6 @@ pub fn path_under_excluded_dir(path: &Path, excluded_dir_names: &[&str]) -> bool
 pub fn shown_path<'p>(root: Option<&Path>, path: &'p Path) -> &'p Path {
     root.and_then(|root| path.strip_prefix(root).ok())
         .unwrap_or(path)
-}
-
-/// Same as `collect_php_files`, but prunes any directory whose name
-/// appears in `excluded_dir_names` before recursing into it - see
-/// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`.
-pub fn collect_php_files_excluding(
-    path: &Path,
-    excluded_dir_names: &[&str],
-    out: &mut Vec<PathBuf>,
-) {
-    let mut walk = walk::Walk::new(Arc::default());
-    walk.add(path, walk::Role::Analysed, excluded_dir_names);
-    out.extend(walk.finish().files.into_iter().map(|listed| listed.path));
 }
 
 /// What `Project::unindex_file` removed.

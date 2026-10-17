@@ -996,7 +996,7 @@ impl Session {
             files,
             index,
             roots,
-        } = walk.finish();
+        } = walk.finish(&self.pool);
         Listing {
             files,
             index,

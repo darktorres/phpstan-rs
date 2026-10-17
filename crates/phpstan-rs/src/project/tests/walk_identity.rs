@@ -17,7 +17,7 @@ fn listing(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
     for (path, role, excluded) in roots {
         walk.add(path, *role, excluded);
     }
-    sorted(walk.finish().files)
+    sorted(walk.finish(&crate::project::worker_pool()).files)
 }
 
 fn sorted(listed: Vec<Listed>) -> Vec<(PathBuf, Role, bool)> {
@@ -62,7 +62,7 @@ fn a_file_under_two_roots_is_listed_once_under_its_resolved_path() {
     walk.add(&base.join("proj"), Role::Analysed, &[]);
 
     assert_eq!(
-        sorted(walk.finish().files),
+        sorted(walk.finish(&crate::project::worker_pool()).files),
         vec![
             (base.join("proj/src/a.php"), Role::Analysed, false),
             (base.join("proj/top.php"), Role::Analysed, false),
@@ -145,12 +145,17 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
 
     let mut by_walk = Walk::new(Arc::default());
     by_walk.add(&file, Role::Context, &[]);
-    assert!(by_walk.finish().files.is_empty());
+    assert!(
+        by_walk
+            .finish(&crate::project::worker_pool())
+            .files
+            .is_empty()
+    );
 
     let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&file, Role::Context);
     assert_eq!(
-        sorted(explicit.finish().files),
+        sorted(explicit.finish(&crate::project::worker_pool()).files),
         vec![(file.clone(), Role::Context, false)]
     );
 }
@@ -404,7 +409,7 @@ fn an_explicit_link_is_listed_under_its_target() {
     let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&base.join("link.php"), Role::Context);
     assert_eq!(
-        sorted(explicit.finish().files),
+        sorted(explicit.finish(&crate::project::worker_pool()).files),
         vec![(base.join("real/lib.php"), Role::Context, false)]
     );
 }
@@ -422,7 +427,7 @@ fn explicit_files_under_a_linked_directory_are_listed_under_its_target() {
     explicit.add_file(&base.join("alias/lib.php"), Role::Context);
     explicit.add_file(&base.join("alias/other.php"), Role::Context);
     assert_eq!(
-        sorted(explicit.finish().files),
+        sorted(explicit.finish(&crate::project::worker_pool()).files),
         vec![
             (base.join("real/lib.php"), Role::Context, false),
             (base.join("real/other.php"), Role::Context, false),
@@ -440,7 +445,7 @@ fn an_explicit_file_spelled_through_dot_dot_is_listed_under_its_resolved_path() 
     let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&base.join("proj/config/../lib.php"), Role::Context);
     assert_eq!(
-        sorted(explicit.finish().files),
+        sorted(explicit.finish(&crate::project::worker_pool()).files),
         vec![(base.join("proj/lib.php"), Role::Context, false)]
     );
 }
@@ -454,7 +459,7 @@ fn a_missing_explicit_file_is_listed_under_its_path() {
     let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&base.join("proj/missing.php"), Role::Context);
     assert_eq!(
-        sorted(explicit.finish().files),
+        sorted(explicit.finish(&crate::project::worker_pool()).files),
         vec![(base.join("proj/missing.php"), Role::Context, false)]
     );
 }
@@ -464,7 +469,7 @@ fn a_missing_explicit_file_is_listed_under_its_path() {
 fn walk_through(root: &Path, listings: &Arc<DirListings>) -> Vec<(PathBuf, Role, bool)> {
     let mut walk = Walk::new(Arc::clone(listings));
     walk.add(root, Role::Analysed, &[]);
-    sorted(walk.finish().files)
+    sorted(walk.finish(&crate::project::worker_pool()).files)
 }
 
 #[test]
@@ -478,4 +483,128 @@ fn a_walk_reads_a_directory_once_through_its_listings() {
     assert_eq!(walk_through(&root, &listings), first);
     listings.clear();
     assert_eq!(walk_through(&root, &listings).len(), 2);
+}
+
+/// The directories of the link tree `oracle_tree` builds.
+#[cfg(unix)]
+struct OracleTree {
+    app: PathBuf,
+    ctx: PathBuf,
+    outside: PathBuf,
+    locked: PathBuf,
+}
+
+/// A link tree written out by hand, with every case one run meets: two links
+/// into one outside directory from roots of different roles, a link from an
+/// analysed root into a context root and one back, a self link and a mutual
+/// link, a file link, a dangling link, a link to a non-PHP file, an unreadable
+/// directory, an explicit file under a context directory, and a context root
+/// inside an analysed one.
+#[cfg(unix)]
+fn oracle_tree(dir: &TempDir) -> OracleTree {
+    dir.write("app/a.php", "<?php");
+    dir.write("app/readme.txt", "not php");
+    dir.write("app/locked/secret.php", "<?php");
+    dir.write("app/pkg/src/p.php", "<?php");
+    dir.write("ctx/c.php", "<?php");
+    dir.write("outside/keep.php", "<?php");
+    dir.write("outside/x.php", "<?php");
+    dir.write("outside/mut_a/m.php", "<?php");
+    dir.write("outside/mut_b/n.php", "<?php");
+    let base = resolved(dir);
+    let tree = OracleTree {
+        app: base.join("app"),
+        ctx: base.join("ctx"),
+        outside: base.join("outside"),
+        locked: base.join("app/locked"),
+    };
+    let symlink = |target: &str, at: PathBuf| std::os::unix::fs::symlink(target, at).unwrap();
+    symlink("../outside", tree.app.join("to_outside"));
+    symlink("../ctx", tree.app.join("to_ctx"));
+    symlink(".", tree.app.join("self"));
+    symlink("../outside/x.php", tree.app.join("copy.php"));
+    symlink("nowhere.php", tree.app.join("dangling.php"));
+    symlink("readme.txt", tree.app.join("notes.php"));
+    symlink("../outside", tree.ctx.join("go"));
+    symlink("../app", tree.ctx.join("back"));
+    symlink("../mut_b", tree.outside.join("mut_a/back"));
+    symlink("../mut_a", tree.outside.join("mut_b/back"));
+    symlink(".", tree.outside.join("self"));
+    tree
+}
+
+/// What `oracle_tree`'s roots list on `pool`, in the order the walk gives it.
+#[cfg(unix)]
+fn oracle_walk(tree: &OracleTree, pool: &rayon::ThreadPool) -> Vec<Listed> {
+    let mut walk = Walk::new(Arc::default());
+    walk.add(&tree.app, Role::Analysed, &[]);
+    walk.add(&tree.app.join("pkg/src"), Role::Context, &[]);
+    walk.add(&tree.ctx, Role::Context, &[]);
+    walk.add_file(&tree.ctx.join("c.php"), Role::Context);
+    walk.finish(pool).files
+}
+
+/// Sets the mode of the unreadable directory, `0o000` or `0o755`.
+#[cfg(unix)]
+fn set_locked(tree: &OracleTree, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&tree.locked, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_tree_is_listed_as_written_by_hand() {
+    let dir = TempDir::new("walk_oracle");
+    let tree = oracle_tree(&dir);
+    set_locked(&tree, 0o000);
+    // A user who can read a directory of mode 000 (root) has nothing to test.
+    let unreadable = fs::read_dir(&tree.locked).is_err();
+    let found = sorted(oracle_walk(&tree, &crate::project::worker_pool()));
+    set_locked(&tree, 0o755);
+    if !unreadable {
+        return;
+    }
+
+    let (app, ctx, outside) = (&tree.app, &tree.ctx, &tree.outside);
+    assert_eq!(
+        found,
+        vec![
+            (app.join("a.php"), Role::Analysed, false),
+            (app.join("dangling.php"), Role::Analysed, false),
+            (app.join("pkg/src/p.php"), Role::Analysed, false),
+            (ctx.join("c.php"), Role::Context, false),
+            (outside.join("keep.php"), Role::Analysed, false),
+            (outside.join("mut_a/m.php"), Role::Analysed, false),
+            (outside.join("mut_b/n.php"), Role::Analysed, false),
+            (outside.join("x.php"), Role::Analysed, false),
+        ]
+    );
+}
+
+/// The listing comes out in the same order on one thread, on four, on the
+/// worker pool, and again on the worker pool.
+#[cfg(unix)]
+#[test]
+fn the_listing_order_does_not_depend_on_the_thread_count() {
+    let dir = TempDir::new("walk_threads");
+    let tree = oracle_tree(&dir);
+    set_locked(&tree, 0o000);
+    let single = oracle_walk(&tree, &thread_pool(1));
+    let four = oracle_walk(&tree, &thread_pool(4));
+    let default = oracle_walk(&tree, &crate::project::worker_pool());
+    let again = oracle_walk(&tree, &crate::project::worker_pool());
+    set_locked(&tree, 0o755);
+
+    assert!(!single.is_empty());
+    assert_eq!(single, four);
+    assert_eq!(single, default);
+    assert_eq!(default, again);
+}
+
+#[cfg(unix)]
+fn thread_pool(threads: usize) -> rayon::ThreadPool {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .unwrap()
 }
