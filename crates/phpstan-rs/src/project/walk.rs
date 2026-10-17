@@ -13,7 +13,9 @@ use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use composer::dir_listings::DirListings;
 use hashbrown::hash_map::EntryRef;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use same_file::Handle;
@@ -78,16 +80,21 @@ pub(crate) struct Walk<'a> {
     /// The resolved path of each directory an explicit file was listed in, by
     /// the directory as it was given.
     directories: hashbrown::HashMap<PathBuf, PathBuf, FxBuildHasher>,
+    /// The listings of the directories the walk reads. A load shares them with
+    /// its vendor discovery, so each directory is read once.
+    listings: Arc<DirListings>,
 }
 
 impl<'a> Walk<'a> {
-    pub(crate) fn new() -> Self {
+    /// A walk that reads its directories through `listings`.
+    pub(crate) fn new(listings: Arc<DirListings>) -> Self {
         Walk {
             roots: Vec::new(),
             targets: Default::default(),
             listed: Vec::new(),
             index: FileIndex::default(),
             directories: Default::default(),
+            listings,
         }
     }
 
@@ -166,24 +173,19 @@ impl<'a> Walk<'a> {
         chain: &mut Vec<Handle>,
         outside: bool,
     ) {
-        let Ok(read) = fs::read_dir(dir) else {
+        let Some(listing) = self.listings.listing(dir) else {
             return;
         };
-        let mut entries: Vec<fs::DirEntry> = read.flatten().collect();
-        entries.sort_by_cached_key(fs::DirEntry::file_name);
-        for entry in entries {
-            let name = entry.file_name();
-            let child = dir.join(&name);
-            let file_type = match entry.file_type() {
-                Ok(file_type) => file_type,
-                Err(_) => match fs::symlink_metadata(&child) {
-                    Ok(metadata) => metadata.file_type(),
-                    Err(_) => continue,
-                },
+        for entry in &listing.entries {
+            // An entry whose type cannot be read is not listed.
+            let Some(file_type) = entry.kind else {
+                continue;
             };
+            let name = &entry.name;
+            let child = dir.join(name);
             let under_root = outside && self.under_root(&child);
             if file_type.is_symlink() {
-                if excludes(excluded, &name) {
+                if excludes(excluded, name) {
                     continue;
                 }
                 match fs::canonicalize(&child) {
@@ -194,7 +196,7 @@ impl<'a> Walk<'a> {
                     Err(_) => {}
                 }
             } else if file_type.is_dir() {
-                if excludes(excluded, &name) || under_root {
+                if excludes(excluded, name) || under_root {
                     continue;
                 }
                 let Ok(handle) = Handle::from_path(&child) else {

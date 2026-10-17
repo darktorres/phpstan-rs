@@ -251,6 +251,7 @@ fn referencing_a_renamed_php_parser_4_class_via_class_constant_is_flagged() {
 // always passes `None`).
 mod namespace_in_3rd_party_package {
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     use super::super::check_phpstan_api_usage;
     use crate::registry::Registry;
@@ -299,7 +300,7 @@ mod namespace_in_3rd_party_package {
         let registry = Registry::build(&program);
         let absolute_root = std::fs::canonicalize(&root.0).unwrap();
         let packages = composer::PackageIndex::new(
-            composer::PackageContext::load(&absolute_root, &absolute_root)
+            composer::PackageContext::load(&absolute_root, &absolute_root, &Arc::default())
                 .manifest
                 .into_iter()
                 .collect(),

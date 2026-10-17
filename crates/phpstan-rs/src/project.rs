@@ -3184,7 +3184,7 @@ pub fn collect_php_files_excluding(
     excluded_dir_names: &[&str],
     out: &mut Vec<PathBuf>,
 ) {
-    let mut walk = walk::Walk::new();
+    let mut walk = walk::Walk::new(Arc::default());
     walk.add(path, walk::Role::Analysed, excluded_dir_names);
     out.extend(walk.finish().files.into_iter().map(|listed| listed.path));
 }

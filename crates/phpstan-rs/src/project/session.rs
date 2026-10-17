@@ -14,6 +14,7 @@ use syntax::span::Span;
 
 use rayon::prelude::*;
 
+use composer::dir_listings::DirListings;
 use config::ConfigFile;
 use serde::Deserialize;
 
@@ -160,6 +161,9 @@ pub struct Session {
     /// promoted to analysed paths, which are left out of them.
     vendors: Vec<composer::PendingVendor>,
     promoted: Vec<PathBuf>,
+    /// The directory listings that the vendor discovery and the walk share,
+    /// held until the listing is walked.
+    dir_listings: Arc<DirListings>,
     stub_dirs: Vec<PathBuf>,
     level: u8,
     emission_order: bool,
@@ -693,6 +697,7 @@ impl Session {
                 .collect()
         };
         let mut scan_files: Vec<PathBuf> = Vec::new();
+        let dir_listings = Arc::new(DirListings::default());
         let mut vendors = Vec::new();
         let mut promoted: Vec<PathBuf> = Vec::new();
         let mut phpstan_api_check_enabled = false;
@@ -704,7 +709,8 @@ impl Session {
             for composer_root in composer_roots(&dirs, &absolute_root) {
                 // The manifest's paths are resolved, as the files they are
                 // compared with are.
-                let package = composer::PackageContext::load(&composer_root, &composer_root);
+                let package =
+                    composer::PackageContext::load(&composer_root, &composer_root, &dir_listings);
                 if composer_root == absolute_root {
                     composer_php_versions = declared_php_versions(&package);
                     root_manifest = package.manifest.clone();
@@ -804,6 +810,7 @@ impl Session {
             scan_files,
             vendors,
             promoted,
+            dir_listings,
             stub_dirs,
             level,
             emission_order: overrides.emission_order,
@@ -932,9 +939,15 @@ impl Session {
         self.listing_of().files.clone()
     }
 
-    /// The listing, walked on first use and kept for the session.
+    /// The listing, walked on first use and kept for the session. The directory
+    /// listings the walk and the vendor discovery read are released once it is
+    /// walked.
     fn listing_of(&self) -> &Listing {
-        self.listing.get_or_init(|| self.walk_listing())
+        self.listing.get_or_init(|| {
+            let listing = self.walk_listing();
+            self.dir_listings.clear();
+            listing
+        })
     }
 
     fn walk_listing(&self) -> Listing {
@@ -950,7 +963,7 @@ impl Session {
                 roots: Vec::new(),
             };
         }
-        let mut walk = Walk::new();
+        let mut walk = Walk::new(Arc::clone(&self.dir_listings));
         for dir in &self.dirs {
             let excluded: &'static [&'static str] = if self.promoted.contains(dir) {
                 &[]

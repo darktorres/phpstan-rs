@@ -3,6 +3,7 @@
 //! autoloader.
 
 use super::helpers::*;
+use crate::dir_listings::DirListings;
 use crate::vendor::*;
 use syntax::ast::*;
 use syntax::lexer::Lexer;
@@ -12,7 +13,7 @@ use syntax::parser::Parser;
 fn no_composer_json_means_no_context() {
     let dir = TempDir::new("no_composer_json");
     assert_eq!(
-        discover_vendor_context(dir.path()),
+        discover_vendor_context(dir.path(), &DirListings::default()),
         VendorContext::default()
     );
 }
@@ -22,7 +23,7 @@ fn composer_json_without_installed_vendor_means_no_context() {
     let dir = TempDir::new("no_vendor");
     dir.write("composer.json", "{}");
     assert_eq!(
-        discover_vendor_context(dir.path()),
+        discover_vendor_context(dir.path(), &DirListings::default()),
         VendorContext::default()
     );
 }
@@ -54,7 +55,7 @@ return array(
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
     let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
     let src_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src")).unwrap();
     assert_eq!(ctx.files, vec![foo]);
@@ -82,7 +83,7 @@ return array();
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
     let class_loader =
         std::fs::canonicalize(dir.path().join("vendor/composer/ClassLoader.php")).unwrap();
     assert!(
@@ -143,7 +144,7 @@ class ComposerStaticInitTest
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
     let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
     let other = std::fs::canonicalize(dir.path().join("vendor/acme/other/Other.php")).unwrap();
     let acme_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
@@ -208,7 +209,7 @@ return array(
     );
     dir.write("src/App.php", "<?php class App {}");
 
-    let ctx = discover_vendor_context(dir.path());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
     assert_eq!(ctx.dirs.len(), 1, "{:?}", ctx.dirs);
     assert!(ctx.dirs[0].ends_with("vendor/acme/b/src"), "{:?}", ctx.dirs);
 }
@@ -249,7 +250,7 @@ return array(
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
     let lib = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
     // The directory loads `Bar.php`. `Foo.php` lies beside the directory, and
     // `helpers.inc` is not PHP, so the walk does not take it: both stay.
@@ -298,7 +299,7 @@ return array(
     let hidden = dir.path().join("vendor/acme/lib/src/hidden");
     std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o111)).unwrap();
 
-    let ctx = discover_vendor_context(dir.path());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
     // A root reads any directory, and then the walk lists the file, so the
     // file is left out exactly when its directory can be read. The mode is
     // restored before any assertion can fail, so the directory is removed.

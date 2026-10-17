@@ -3,12 +3,13 @@
 
 use super::super::*;
 use super::helpers::*;
+use std::sync::Arc;
 
 /// The package index of the project at `dir`, read as a session reads it.
 fn index(dir: &TempDir) -> PackageIndex {
     let root = std::fs::canonicalize(dir.path()).unwrap();
     PackageIndex::new(
-        PackageContext::load(&root, &root)
+        PackageContext::load(&root, &root, &Arc::default())
             .manifest
             .into_iter()
             .collect(),

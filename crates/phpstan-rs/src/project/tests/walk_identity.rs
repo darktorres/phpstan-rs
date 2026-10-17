@@ -5,13 +5,15 @@
 
 use super::super::walk::{Listed, Role, Walk};
 use super::helpers::*;
+use composer::dir_listings::DirListings;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Lists each `(root, role, excluded)` in order, and returns the listing
 /// sorted by path as `(path, role, stub)`.
 fn listing(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
-    let mut walk = Walk::new();
+    let mut walk = Walk::new(Arc::default());
     for (path, role, excluded) in roots {
         walk.add(path, *role, excluded);
     }
@@ -55,7 +57,7 @@ fn a_file_under_two_roots_is_listed_once_under_its_resolved_path() {
     dir.write("proj/src/a.php", "<?php");
     dir.write("proj/top.php", "<?php");
     let base = resolved(&dir);
-    let mut walk = Walk::new();
+    let mut walk = Walk::new(Arc::default());
     walk.add(&base.join("proj/src"), Role::Analysed, &[]);
     walk.add(&base.join("proj"), Role::Analysed, &[]);
 
@@ -141,11 +143,11 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
     dir.write("config/bootstrap.inc", "<?php");
     let file = resolved(&dir).join("config/bootstrap.inc");
 
-    let mut by_walk = Walk::new();
+    let mut by_walk = Walk::new(Arc::default());
     by_walk.add(&file, Role::Context, &[]);
     assert!(by_walk.finish().files.is_empty());
 
-    let mut explicit = Walk::new();
+    let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&file, Role::Context);
     assert_eq!(
         sorted(explicit.finish().files),
@@ -399,7 +401,7 @@ fn an_explicit_link_is_listed_under_its_target() {
     let base = resolved(&dir);
     std::os::unix::fs::symlink("real/lib.php", base.join("link.php")).unwrap();
 
-    let mut explicit = Walk::new();
+    let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&base.join("link.php"), Role::Context);
     assert_eq!(
         sorted(explicit.finish().files),
@@ -416,7 +418,7 @@ fn explicit_files_under_a_linked_directory_are_listed_under_its_target() {
     let base = resolved(&dir);
     std::os::unix::fs::symlink("real", base.join("alias")).unwrap();
 
-    let mut explicit = Walk::new();
+    let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&base.join("alias/lib.php"), Role::Context);
     explicit.add_file(&base.join("alias/other.php"), Role::Context);
     assert_eq!(
@@ -435,7 +437,7 @@ fn an_explicit_file_spelled_through_dot_dot_is_listed_under_its_resolved_path() 
     dir.write("proj/lib.php", "<?php");
     let base = resolved(&dir);
 
-    let mut explicit = Walk::new();
+    let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&base.join("proj/config/../lib.php"), Role::Context);
     assert_eq!(
         sorted(explicit.finish().files),
@@ -449,10 +451,31 @@ fn a_missing_explicit_file_is_listed_under_its_path() {
     dir.write("proj/keep.txt", "");
     let base = resolved(&dir);
 
-    let mut explicit = Walk::new();
+    let mut explicit = Walk::new(Arc::default());
     explicit.add_file(&base.join("proj/missing.php"), Role::Context);
     assert_eq!(
         sorted(explicit.finish().files),
         vec![(base.join("proj/missing.php"), Role::Context, false)]
     );
+}
+
+/// Walks `root` as analysed, reading its directories through `listings`, and
+/// returns the listed files.
+fn walk_through(root: &Path, listings: &Arc<DirListings>) -> Vec<(PathBuf, Role, bool)> {
+    let mut walk = Walk::new(Arc::clone(listings));
+    walk.add(root, Role::Analysed, &[]);
+    sorted(walk.finish().files)
+}
+
+#[test]
+fn a_walk_reads_a_directory_once_through_its_listings() {
+    let dir = TempDir::new("walk_listings");
+    dir.write("a.php", "<?php");
+    let root = resolved(&dir);
+    let listings = Arc::new(DirListings::default());
+    let first = walk_through(&root, &listings);
+    dir.write("b.php", "<?php");
+    assert_eq!(walk_through(&root, &listings), first);
+    listings.clear();
+    assert_eq!(walk_through(&root, &listings).len(), 2);
 }
