@@ -11,9 +11,9 @@ ceilings, not savings, and they are not time: Step 0 measured the wall time with
 hyperfine, and one Ir costs from 1 to about 30 G Ir per CPU second depending on the
 function, so the byte loops most rows target cost far less time than their Ir suggests
 (Step 0 results, "Ir is not time"). No saving is claimed without a measurement.
-**`~/.cache` is being cleared**: every number, command and script this plan needs from
-there is recorded in "Step 0 results", "Recorded measurements" and "Appendix" at the end,
-so the plan stands alone.
+**`~/.cache` is being cleared**: every number and command this plan needs from there is
+recorded in "Step 0 results", "Recorded measurements" and "Appendix" at the end, and every
+script is in `scripts/` at the repository root, so the plan and that folder stand alone.
 
 | cost | at HEAD | state |
 |---|---:|---|
@@ -74,14 +74,14 @@ session's builds) are not disturbed.
    (`PHPSTAN_RS_NO_FILE_CACHE=1 PHPSTAN_RS_NO_STUB_CACHE=1`) and warm mode (a cache dir of its
    own, as `run-all.sh` does). Dump each recording once with `perf script -i <file>
    --no-inline -F tid,time,ip,sym > <dump>` (with the stacks, so no `-G`; about 1 s) and
-   read the dump with Appendix D's `perfdump.py`: the first and last sample of every thread
+   read the dump with `scripts/perfdump.py` (Appendix D): the first and last sample of every thread
    (`threads`: the exact answer to "when does thread 11 end and when does the first
    analysed parse start"), cores busy and the role mix per window (`phases`, 0.1 s off and
    0.05 s warm), the unused capacity per stretch (`unused`), the main thread's order
    (`main`), and the samples of each row's code (`incl`, `leaf`, `above`, `split`).
 2. **Scaling curve.** A `gate`-profile binary at HEAD, then `hyperfine -N --warmup` over
-   `PHPSTAN_RS_THREADS=1,2,4,8` (`scaling.sh`, Appendix D); fit wall = serial + parallel /
-   threads (`fit.py`) and read the CPU time beside it: the form holds only while the CPU
+   `PHPSTAN_RS_THREADS=1,2,4,8` (`scripts/scaling.sh`, Appendix D); fit wall = serial +
+   parallel / threads (`scripts/fit.py`) and read the CPU time beside it: the form holds only while the CPU
    time stays the same as threads are added.
 3. **Report** the timeline, the serial fraction, and the wall-time size of R10, R4, R6,
    R11 (main thread, off), R12 (main thread, warm) and R13 (thread 11): the three costs
@@ -108,7 +108,7 @@ does not resolve what `-g` costs at 499 Hz: off runs under `perf record -F 499 -
 main thread tid 75945, vendor thread 75969, the eight pool threads 75951 to 75961) and
 `warm/perf.data` (3,391 samples, the last at 1.703 s; main 79694, vendor 79704), each
 dumped once with `perf script -i <file> --no-inline -F tid,time,ip,sym > <dump>` (about 1 s)
-and read with Appendix D's `perfdump.py` (Appendix D lists the command behind each table).
+and read with `scripts/perfdump.py` (Appendix D lists the command behind each table).
 Times are from each recording's first sample.
 
 **Plain wall times (no perf):** off 2,310, 2,296, 2,878 ms; warm 1,769, 1,602, 1,568 ms;
@@ -120,8 +120,8 @@ one. Its vendor thread ran 1.6 s and its pool idled from 0.75 s, which R10 was b
 `/proc/vmstat` shows `compact_stall` rising by 1,076 and `pgmigrate_success` by 323,269 in
 one ordinary run: this machine compacts memory during the load. In the slow recording the
 vendor thread's stack is in `io_schedule`, `migrate_pages` and `try_to_compact_pages`
-(direct compaction), not in discovery. An isolated `discover_vendor_context` (probe in
-`wall-2026-10-17/probe-vendor`, 7 runs; Appendix D) takes 103.5 to 133.5 ms (median 109.5). The `/proc/vmstat` counters
+(direct compaction), not in discovery. An isolated `discover_vendor_context` (the probe
+`scripts/probe-vendor`, built in `wall-2026-10-17/probe-vendor`, 7 runs; Appendix D) takes 103.5 to 133.5 ms (median 109.5). The `/proc/vmstat` counters
 are system-wide, so other processes count in them too (`compact_fail` rose by 983 and
 `compact_success` by 93 in the same run); the vendor thread's own stack is what ties the
 slow run to compaction. What asked for the high-order pages is the run itself: mimalloc
@@ -251,7 +251,8 @@ region compacts memory directly when no free 2 MiB page is at hand, and every mT
 one thread, 1.82 s at eight, off; Scaling, below).
 
 **The allocator runs** (decision 2; 2026-10-17, 13:36 to 13:41; off mode; every output the
-oracle's; `mimalloc-runs.sh` and `thp-probe.py`, Appendix D). mimalloc reads its options
+oracle's; `scripts/mimalloc-runs.sh`, `scripts/thp-probe.py` and `scripts/hfpool.py`,
+Appendix D). mimalloc reads its options
 from the environment, so none of these needed a build:
 
 - **mimalloc's statistics at exit** (`MIMALLOC_SHOW_STATS=1`, gate binary, one run each,
@@ -336,7 +337,7 @@ does not cover it (it removes component walks, not system calls): R14 does, and 
 calls per thread.
 
 **Scaling curve** (gate binary at HEAD, built in `wall-2026-10-17/target-gate` in 6 min 16 s;
-`scaling.sh`, Appendix D: hyperfine `-N --warmup 1 --runs 5`, `PHPSTAN_RS_THREADS=1,2,4,8`;
+`scripts/scaling.sh`, Appendix D: hyperfine `-N --warmup 1 --runs 5`, `PHPSTAN_RS_THREADS=1,2,4,8`;
 1-minute load 2.62 at the start of the off set and 3.51 at the start of the warm set, so
 noise, not a quiet machine; the warm set wrote 0 cache files). Wall in ms; CPU is hyperfine's
 mean user + system time:
@@ -360,7 +361,7 @@ and 0.85 s warm at 8 threads ("Where the 8 cores go unused" above).
 **Where the CPU growth goes** (off). Two `head-cg` recordings were taken one right after
 the other at 13:52, at one thread and at eight: 3,114 and 5,136 samples, the oracle's
 output both times. Load was 1.9 and 2.1, with another session's test suite on one vCPU.
-They were read with `cpugrowth.py` (Appendix D), which puts each sample in one class by its
+They were read with `scripts/cpugrowth.py` (Appendix D), which puts each sample in one class by its
 leaf. A first one-thread recording, at 13:44, is not used. It ran 20.0 s with 5,766 samples
 (11.5 s of CPU, against 6.2 s in the pair) at 55 to 77% of one vCPU through the parse and
 the check. Load was 2.64 at its start, and another session's test binary was running at
@@ -1079,7 +1080,8 @@ distorts is taken again):
 - Ir: off-mode callgrind on Piwigo with the commands of Appendix B (the harness `run-all.sh`
   is cleared with the cache), against `aa896697`'s 21,331,572,685, and the warm run for
   the rows with a warm cost (R1, R9, R12, R13); judge by the inclusive Ir of the functions
-  changed (callers via Appendix C's `callers.py`, differences via `cgfn.py`), total beside it.
+  changed (callers via `scripts/callers.py`, differences via `scripts/cgfn.py`; Appendix C),
+  total beside it.
 - Wall time: a perf recording in the mode the row targets (off for R11 and R15; warm for
   R10, R12 and R14), read for the stretch the row shortens against Step 0's tables (Appendix D's
   commands); and `hyperfine -N` on `gate` binaries, alternating A B A B, at least 5 runs
@@ -1117,8 +1119,9 @@ distorts is taken again):
 `Listed.hash` and `child_hash` (the walk's incremental hash); `FileTable`'s
 `ids: HashTable<FileId>` and `number(path, hash)` (`file_table.rs`); `FileIndex::of`
 (`walk.rs:105`); `Listing::entry` and `DirListings` (`crates/composer/src/dir_listings.rs`);
-the tests `load_text.rs` and `walk_identity.rs`; the analysis scripts (`callers.py`,
-`cgfn.py`, `perfdump.py`, `fit.py`, `scaling.sh`) and the harness commands, reproduced in
+the tests `load_text.rs` and `walk_identity.rs`; the scripts in `scripts/` (`callers.py`,
+`cgfn.py`, `perfdump.py`, `cpugrowth.py`, `fit.py`, `hfpool.py`, `thp-probe.py`,
+`scaling.sh`, `mimalloc-runs.sh` and the `probe-vendor` crate) and the harness commands in
 the Appendix (the originals under `~/.cache/prs-profile/` are cleared).
 
 ## Recorded measurements (read 2026-10-17 from `~/.cache/prs-profile/regress-item5`, before it was cleared)
@@ -1289,6 +1292,10 @@ rehash 1.5 M, `keep_first` 4.5 M + `dedup` 0.2 M + rehash 2.2 M.
 
 ## Appendix: tooling that lived in the cache
 
+The scripts are in `scripts/` at the repository root, and each gives its usage at its top.
+Run the Python ones as `python3 -I scripts/<name>.py`; the paths written in the two shell
+scripts are those of the 2026-10-17 runs.
+
 **A. Rebuild the profiling binary** (nothing is kept): from a checkout at `aa896697`'s code
 (HEAD while only docs follow it), `RUSTFLAGS="-C force-frame-pointers=yes"
 CARGO_TARGET_DIR=<dir>/target nice -n 19 cargo build --profile dhat -p phpstan-rs --bin
@@ -1313,169 +1320,18 @@ phpstan-rs`; the binary is `<dir>/target/dhat/phpstan-rs`. The heap variant adds
 - log each step with `date -Is` and the first three fields of `/proc/loadavg`; abort if
   `$PIW/dhat-heap.json` exists before a heap run.
 
-**C. Analysis scripts** (run with `python3 -I`; save as `cgfn.py` and `callers.py`).
+**C. Analysis scripts**: `scripts/callers.py` and `scripts/cgfn.py`.
 
-`callers.py`, usage `callers.py <run dir> <regex> [n]`: inclusive Ir of calls from each caller
-to callees matching the regex, summed over a run's `cg.out-*` files.
-
-```python
-import glob, os, re, sys
-from collections import defaultdict
-
-def parse(path, pat, edges):
-    names = {}
-    def resolve(text):
-        if text.startswith('('):
-            ident, _, rest = text.partition(')')
-            key = ident + ')'
-            if rest.strip():
-                names[key] = rest.strip()
-            return names.get(key, key)
-        return text
-    fn = cfn = None
-    in_call = False
-    with open(path, encoding='utf-8', errors='replace') as fh:
-        for line in fh:
-            if line.startswith('fn='):
-                fn = resolve(line[3:].strip())
-            elif line.startswith('cfn='):
-                cfn = resolve(line[4:].strip())
-            elif line.startswith('calls='):
-                in_call = True
-            elif in_call and (line[:1].isdigit() or line[:1] in '+-*'):
-                cost = int(line.split()[-1])
-                if pat.search(cfn or ''):
-                    edges[(fn, cfn)] += cost
-                in_call = False
-
-def run(d, pat):
-    edges = defaultdict(int)
-    for f in sorted(glob.glob(os.path.join(d, 'cg.out-*'))):
-        parse(f, pat, edges)
-    return edges
-
-pat = re.compile(sys.argv[2])
-n = int(sys.argv[3]) if len(sys.argv) > 3 else 15
-e = run(sys.argv[1], pat)
-by_caller = defaultdict(int)
-for (a, b), c in e.items():
-    by_caller[a] += c
-for a, c in sorted(by_caller.items(), key=lambda kv: -kv[1])[:n]:
-    print(f'{c:16,}  {a[:150]}')
-```
-
-`cgfn.py`, usage `cgfn.py <run dir> [<run dir> [n]]`: the run's total and per-thread Ir, the
-largest self and inclusive costs; with a second run, the difference by function name. Each
-file's `summary:` line must equal the sum of its self costs (checks the parse). A cost line
-right after `calls=` is the call's inclusive cost, charged to the caller's inclusive total
-only. For one thread's file, import `parse(path)` from it (returns total, self, inclusive).
-
-```python
-import glob
-import os
-import sys
-from collections import defaultdict
-
-
-def parse(path):
-    names = {}
-    self_c = defaultdict(int)
-    incl_c = defaultdict(int)
-    total = None
-    events = None
-    fn = None
-    in_call = False
-
-    def resolve(text):
-        # `(12) name` defines id 12; `(12)` refers to it.
-        if text.startswith('('):
-            ident, _, rest = text.partition(')')
-            key = ident + ')'
-            if rest.strip():
-                names[key] = rest.strip()
-            return names.get(key, key)
-        return text
-
-    with open(path, encoding='utf-8', errors='replace') as fh:
-        for line in fh:
-            if line.startswith('fn='):
-                fn = resolve(line[3:].strip())
-            elif line.startswith('cfn='):
-                resolve(line[4:].strip())
-            elif line.startswith('calls='):
-                in_call = True
-            elif line.startswith('events:'):
-                events = line.split(':', 1)[1].split()
-            elif line.startswith('summary:'):
-                total = int(line.split(':', 1)[1].split()[0])
-            elif line[:1].isdigit() or line[:1] in '+-*':
-                cost = int(line.split()[-1])
-                if in_call:
-                    in_call = False
-                    incl_c[fn] += cost
-                else:
-                    self_c[fn] += cost
-                    incl_c[fn] += cost
-    if events != ['Ir']:
-        raise SystemExit(f'{path}: events {events}, expected Ir')
-    if total is None or sum(self_c.values()) != total:
-        raise SystemExit(f'{path}: self costs {sum(self_c.values())} != summary {total}')
-    return total, self_c, incl_c
-
-
-def run_totals(d):
-    files = sorted(glob.glob(os.path.join(d, 'cg.out-*')))
-    if not files:
-        raise SystemExit(f'{d}: no cg.out-* files')
-    total = 0
-    self_c = defaultdict(int)
-    incl_c = defaultdict(int)
-    per_thread = []
-    for f in files:
-        t, s, i = parse(f)
-        total += t
-        per_thread.append((t, os.path.basename(f)))
-        for k, v in s.items():
-            self_c[k] += v
-        for k, v in i.items():
-            incl_c[k] += v
-    return total, per_thread, self_c, incl_c
-
-
-def top(label, d, n):
-    print(f'\n-- {label}, top {n}')
-    for k in sorted(d, key=lambda k: -d[k])[:n]:
-        print(f'{d[k]:16,}  {k}')
-
-
-def main():
-    a = sys.argv[1]
-    b = sys.argv[2] if len(sys.argv) > 2 else None
-    n = int(sys.argv[3]) if len(sys.argv) > 3 else 40
-    ta, pta, sa, ia = run_totals(a)
-    print(f'{a}: Ir {ta:,}')
-    for t, name in pta:
-        print(f'  {name}: {t:,}')
-    if b is None:
-        top('self', sa, n)
-        top('inclusive', ia, n)
-        return
-    tb, ptb, sb, ib = run_totals(b)
-    print(f'{b}: Ir {tb:,}')
-    for t, name in ptb:
-        print(f'  {name}: {t:,}')
-    print(f'\ndifference {a} minus {b}: {ta - tb:+,} ({(ta - tb) / tb * 100:+.4f}% of {b})')
-    for label, da, db in (('self', sa, sb), ('inclusive', ia, ib)):
-        d = {k: da.get(k, 0) - db.get(k, 0) for k in set(da) | set(db)}
-        print(f'\n-- {label}, largest differences ({a} minus {b}):')
-        print(f'{"delta":>16} {a:>16} {b:>16}  function')
-        for k in sorted(d, key=lambda k: -abs(d[k]))[:n]:
-            print(f'{d[k]:+16,} {da.get(k, 0):16,} {db.get(k, 0):16,}  {k}')
-
-
-if __name__ == '__main__':
-    main()
-```
+- `callers.py <run dir> <regex> [n]`: inclusive Ir of calls from each caller to callees
+  matching the regex, summed over a run's `cg.out-*` files.
+- `cgfn.py <run dir> [<run dir> [n]]`: the run's total and per-thread Ir, and the largest
+  self and inclusive costs; with a second run, the difference by function name.
+  - Each file's `summary:` line must equal the sum of its self costs, which checks the
+    parse.
+  - A cost line right after `calls=` is the call's inclusive cost, charged to the
+    caller's inclusive total only.
+  - For one thread's file, import `parse(path)` from it; it returns the total, the self
+    costs and the inclusive costs.
 
 Per-thread tables and callee edges above came from `cgfn.parse` per file, plus a callee-edge
 variant of `callers.py` that filters on the caller (`fn`) instead of the callee (`cfn`).
@@ -1499,69 +1355,34 @@ have the oracle's sha256.
   <binary> $CHECK > <dir>/strace-out.json` (exact counts; `-w` gives each call's wall time,
   inflated by ptrace); `strace -ff -e trace=readlink,statx -o <dir>/st env <mode> <binary>
   $CHECK` writes one file per thread (`st.<tid>`), which splits the counts by thread (R14).
-- Vendor discovery alone: `probe-vendor`, a crate outside the workspace that calls
-  `discover_vendor_context` with a fresh `DirListings` per run. Its directory holds the two
-  files below and a copy of the workspace's `Cargo.lock`. Build it with `nice -n 19 env
-  CARGO_TARGET_DIR=<probe dir>/target cargo build --release --offline` (18.5 s) and run
-  `nice -n 19 <probe dir>/target/release/probe-vendor /home/torres/piwigo17-frozen 7`. On
-  2026-10-17 the runs took 133.5, 127.2, 122.9, 104.6, 109.5, 103.5 and 108.9 ms, each with
-  1,744 files and 249 dirs. `Cargo.toml`:
-
-  ```toml
-  [package]
-  name = "probe-vendor"
-  version = "0.0.0"
-  edition = "2024"
-  publish = false
-
-  [dependencies]
-  composer = { package = "phpstan-rs-composer", path = "/home/torres/projects/phpstan-rs/crates/composer" }
-
-  [workspace]
-  ```
-
-  `src/main.rs`:
-
-  ```rust
-  //! Times `discover_vendor_context` alone, with a fresh listing table per run,
-  //! as one load would. Nothing else runs in this process.
-  //! usage: probe-vendor <project root> [runs]
-
-  use std::path::Path;
-  use std::time::Instant;
-
-  fn main() {
-      let mut args = std::env::args().skip(1);
-      let root = args.next().expect("usage: probe-vendor <project root> [runs]");
-      let runs: usize = args.next().map_or(5, |n| n.parse().expect("runs"));
-      for run in 0..runs {
-          let listings = composer::dir_listings::DirListings::default();
-          let start = Instant::now();
-          let found = composer::vendor::discover_vendor_context(Path::new(&root), &listings);
-          let elapsed = start.elapsed();
-          println!(
-              "run {run}: {:.1} ms, {} files, {} dirs",
-              elapsed.as_secs_f64() * 1e3,
-              found.files.len(),
-              found.dirs.len()
-          );
-      }
-  }
-  ```
+- Vendor discovery alone: `scripts/probe-vendor/`, a crate that calls
+  `discover_vendor_context` with a fresh `DirListings` per run.
+  - It is not a workspace member: its `Cargo.toml` has a `[workspace]` of its own, and
+    its dependency on the `composer` crate is a path into the main checkout.
+  - Build a copy outside the repository. Copy the directory to a run directory under
+    `~/.cache/prs-profile/`, copy the workspace's `Cargo.lock` into the copy, and build
+    there with `nice -n 19 env CARGO_TARGET_DIR=<probe dir>/target cargo build --release
+    --offline` (18.5 s).
+  - Run `nice -n 19 <probe dir>/target/release/probe-vendor /home/torres/piwigo17-frozen 7`.
+  - On 2026-10-17 the runs took 133.5, 127.2, 122.9, 104.6, 109.5, 103.5 and 108.9 ms, each
+    with 1,744 files and 249 dirs.
 - mimalloc (decision 2):
-  - `mimalloc-runs.sh` below runs mimalloc's statistics at exit with and without purging,
-    then two hyperfine rounds in alternating order, then one perf recording of each with
-    the `/proc/vmstat` counters around it. It takes about 2 minutes.
-  - The rounds are pooled from both `--export-json` files' `times`, with Python's
-    `statistics` and a two-sided Mann-Whitney U in the normal approximation.
-  - `thp-probe.py` below is run as `nice -n 19 python3 -I thp-probe.py <gate binary>
-    <out.json> [MIMALLOC_ALLOW_THP=0]`, twice each, alternating.
+  - `scripts/mimalloc-runs.sh` runs mimalloc's statistics at exit with and without
+    purging, then two hyperfine rounds in alternating order, then one perf recording of
+    each with the `/proc/vmstat` counters around it. It takes about 2 minutes. `GATE` is
+    the gate binary and `CG` the `dhat` frame-pointer binary.
+  - `python3 -I scripts/hfpool.py PURGE_DELAY=-1 <dir>/hf1.json <dir>/hf2.json` pools the
+    rounds. It splits both `--export-json` files' runs by whether the command contains
+    the marker, pools their `times`, and gives a two-sided Mann-Whitney U in the normal
+    approximation.
+  - `scripts/thp-probe.py` is run as `nice -n 19 python3 -I scripts/thp-probe.py <gate
+    binary> <out.json> [MIMALLOC_ALLOW_THP=0]`, twice each, alternating.
   - mimalloc's options are documented in `c_src/mimalloc/v3/include/mimalloc.h` (the
     `mi_option_e` enum, in index order) and `src/options.c` (the defaults).
 - CPU growth with the thread count:
   - Record the off run with `PHPSTAN_RS_THREADS=1` and then with `=8`, one right after the
     other (`perf record -F 499 -g` as above), and dump both.
-  - Then `python3 -I cpugrowth.py <1-thread dump> <8-thread dump>` (below). It imports
+  - Then `python3 -I scripts/cpugrowth.py <1-thread dump> <8-thread dump>`. It imports
     `perfdump.py` from its own directory.
   - Counts: `nice -n 19 perf stat -r 3 -e task-clock,context-switches,cpu-migrations,page-faults
     -o <file> -- env <off mode> PHPSTAN_RS_THREADS=<n> <gate binary> $CHECK > <out>`, for
@@ -1572,7 +1393,7 @@ have the oracle's sha256.
   - Run `ps -eo ni,pcpu,comm --sort=-pcpu | head` before each recording. A heavy job at
     normal priority beside the `nice -n 19` run distorts it: the 20 s one-thread recording
     was taken that way.
-- Step 0's tables from the dumps, with `P="python3 -I perfdump.py"`. Checked on 2026-10-17:
+- Step 0's tables from the dumps, with `P="python3 -I scripts/perfdump.py"`. Checked on 2026-10-17:
   `perfdump.py`'s commands give the same output as the ten scripts Step 0 used, byte for
   byte on both dumps, and `threads` and `kernel` give the numbers the earlier ad hoc
   readings gave.
@@ -1598,637 +1419,12 @@ have the oracle's sha256.
     rehash, `next_token` the phpdoc lexer's);
   - kernel time: `$P kernel <dump> 0 2.1`, and `$P kernel off.script 0.8 1.5` for the
     finishing stretch.
-- Scaling: `scaling.sh` below (5 runs per thread count, both modes), then `python3 -I fit.py
-  <dir>/scaling-off.json <dir>/scaling-warm.json`, which prints the Scaling table and fits.
-
-`perfdump.py`:
-
-```python
-"""Reads a `perf script --no-inline -F tid,time,ip,sym` dump of a phpstan-rs
-recording (`perf record -F 499 -g`, frame pointers). Times are seconds from
-the dump's first sample; one sample is 1/hz s of one thread's CPU. A marker
-matches a frame that contains it; a regex is searched for in the frame.
-
-usage: perfdump.py <command> <dump> [args]
-  threads                         per thread: first and last sample, samples, roles
-  phases <main tid> [window] [hz] per window: cores busy, the role mix, the main
-                                  thread's roles; then the main thread's frames
-                                  under Session::load, and the role `other`
-  unused <t,t,...> [hz] [cores]   per stretch from each t to the next (the last
-                                  to the end): (cores x span - CPU s) / cores
-  main <main tid> <from> <to>     the main thread's samples in [from, to): time,
-                                  the marker frames it is under, the leaf
-  incl <marker>...                samples with a frame containing each marker
-  leaf <regex>...                 samples whose leaf matches each regex; top leaves
-  leafunder <regex> <m,m,...>     samples whose leaf matches, by the nearest
-                                  frame above it that contains a marker
-  above <regex> <depth>           samples whose leaf matches, by the frames above
-  mark <marker> [n] [per s]       samples under a marker: histogram (10 or 100
-                                  buckets per second), threads, top n leaves
-  split <outer> <inner>...        samples under outer, by the first inner marker
-                                  below it (in the order given)
-  kernel <from> <to>              samples in [from, to) with a kernel-address leaf
-"""
-import re
-import sys
-from collections import Counter, defaultdict
-
-HEAD = re.compile(r'^\s*(\d+)\s+(\d+\.\d+):')
-FRAME = re.compile(r'^\s+([0-9a-f]+)\s+(.*?)(?:\+0x[0-9a-f]+)?\s*(?:\(.*\))?$')
-
-# The frame that marks a stretch of the load; the first role whose marker a
-# stack holds wins.
-ROLES = [
-    ('vendor', 'discover_vendor_context'),
-    ('stub', 'build_generated_stub_data'),
-    ('stub', 'Stubs>::base'),
-    ('parse', 'read_indexed'),
-    ('finish', 'run_finishing_passes'),
-    ('check', 'check_files'),
-    ('merge', 'merge_by_shard'),
-    ('walk', 'Walk>::run'),
-    ('numbered', 'insert_numbered_file'),
-    ('bind', 'bind_file'),
-    ('load', 'Session>::load'),
-]
-IDLE = ('rayon_core::sleep', 'rayon_core::registry::WorkerThread::wait_until',
-        'sched_yield', 'futex', 'do_sched_yield', 'schedule')
-MAIN_MARKS = ('bind_file', 'Stubs>::base', 'split_decl_tables', 'join_decl_tables',
-              'merge_by_shard', 'join_project_tables', 'insert_numbered_file',
-              'run_finishing_passes', 'check_files', 'expect_files', 'into_parsed',
-              'Walk>::finish', 'walk_listing', 'number_files', 'set_path_order',
-              'judge_property_types', 'finalize_results', 'vendor', 'PendingVendor',
-              'resolved_stubs', 'generated_stubs', 'merge_stubs', 'freeze', 'Walk>::add',
-              'add_file')
-
-
-def samples(path):
-    """(tid, time, frames leaf first, the leaf's address) per sample."""
-    tid = t = t0 = None
-    frames, ips = [], []
-    with open(path, errors='replace') as fh:
-        for line in fh:
-            m = HEAD.match(line)
-            if m:
-                if tid is not None:
-                    yield tid, t - t0, frames, ips[0] if ips else None
-                tid, t = int(m.group(1)), float(m.group(2))
-                if t0 is None:
-                    t0 = t
-                frames, ips = [], []
-                continue
-            if tid is not None and line.strip():
-                f = FRAME.match(line)
-                if f:
-                    ips.append(f.group(1))
-                    frames.append(f.group(2).strip())
-    if tid is not None:
-        yield tid, t - t0, frames, ips[0] if ips else None
-
-
-def role_of(frames):
-    for role, marker in ROLES:
-        if any(marker in f for f in frames):
-            return role
-    if frames and any(any(m in f for m in IDLE) for f in frames[:12]):
-        return 'idle'
-    return 'other'
-
-
-def short(name, width):
-    name = re.sub(r'<[^<>]*>', '', name)
-    name = re.sub(r'<[^<>]*>', '', name)
-    return name[:width]
-
-
-def threads(path):
-    per = {}
-    for tid, t, frames, _ in samples(path):
-        s = per.setdefault(tid, {'first': t, 'last': t, 'n': 0, 'roles': Counter()})
-        s['last'] = t
-        s['n'] += 1
-        s['roles'][role_of(frames)] += 1
-    print(f'{"tid":>8} {"first":>8} {"last":>8} {"samples":>8}  roles')
-    for tid, s in sorted(per.items(), key=lambda kv: kv[1]['first']):
-        roles = ', '.join(f'{r} {c}' for r, c in s['roles'].most_common(4))
-        print(f'{tid:>8} {s["first"]:8.3f} {s["last"]:8.3f} {s["n"]:8,}  {roles}')
-
-
-def phases(path, main, window=0.1, hz=499.0):
-    win = defaultdict(Counter)
-    main_win = defaultdict(Counter)
-    main_load = Counter()
-    other_leaf = Counter()
-    other_frame = Counter()
-    n = 0
-    for tid, t, frames, _ in samples(path):
-        n += 1
-        w = int(t / window)
-        role = role_of(frames)
-        win[w][role] += 1
-        if tid == main:
-            main_win[w][role] += 1
-            if any('Session>::load' in f for f in frames):
-                deep = next((f for f in frames if 'phpstan_rs' in f), frames[0] if frames else '?')
-                main_load[(short(deep, 90), short(frames[0], 90) if frames else '?')] += 1
-        elif role == 'other':
-            other_leaf[short(frames[0], 90) if frames else '?'] += 1
-            deep = next((f for f in frames if 'phpstan_rs' in f), None)
-            other_frame[short(deep, 90) if deep else '(no phpstan frame)'] += 1
-    per = hz * window
-    print(f'{n:,} samples; window {window} s; cores = samples / {per:.1f}')
-    print(f'{"t":>5} {"cores":>5}  roles (all threads)  ||  main thread')
-    for w in range(max(win) + 1):
-        busy = sum(win[w].values()) / per
-        mix = ' '.join(f'{r}:{c / per:.1f}' for r, c in win[w].most_common())
-        mm = ' '.join(f'{r}:{c}' for r, c in main_win[w].most_common())
-        print(f'{w * window:5.2f} {busy:5.2f}  {mix}  ||  {mm}')
-    print('\n-- main thread under Session::load: deepest phpstan frame, leaf (samples)')
-    for (deep, leaf), c in main_load.most_common(40):
-        print(f'{c:5}  {deep}  <-  {leaf}')
-    print('\n-- pool/other threads, role other: deepest phpstan frame')
-    for k, c in other_frame.most_common(25):
-        print(f'{c:5}  {k}')
-    print('\n-- pool/other threads, role other: leaf')
-    for k, c in other_leaf.most_common(25):
-        print(f'{c:5}  {k}')
-
-
-def unused(path, edges, hz=499.0, cores=8):
-    rel = [t for _, t, _, _ in samples(path)]
-    end = max(rel)
-    edges = edges + [end]
-    total = 0.0
-    print(f'{len(rel):,} samples, last at {end:.3f} s, busy {len(rel) / hz:.3f} core-s')
-    for a, b in zip(edges, edges[1:]):
-        busy = sum(1 for t in rel if a <= t < b) / hz
-        span = b - a
-        left = (cores * span - busy) / cores
-        total += left
-        print(f'{a:6.3f} to {b:6.3f}  span {span:5.3f}  cores {busy / span:4.2f}  unused {left:5.3f} s')
-    print(f'total unused {total:.3f} s; run {end:.3f} - busy/{cores} {len(rel) / hz / cores:.3f}'
-          f' = {end - len(rel) / hz / cores:.3f}')
-
-
-def main_thread(path, main, a, b):
-    for tid, t, frames, _ in samples(path):
-        if tid == main and a <= t < b:
-            hits = [m for m in MAIN_MARKS if any(m in f for f in frames)]
-            leaf = frames[0][:50] if frames else '?'
-            print(f'{t:7.3f}  {",".join(hits[:3]):60}  {leaf}')
-
-
-def incl(path, marks):
-    inc = Counter()
-    n = 0
-    for _, _, frames, _ in samples(path):
-        n += 1
-        for m in marks:
-            if any(m in f for f in frames):
-                inc[m] += 1
-    print(f'{n} samples; inclusive counts (2 ms of CPU each at 499 Hz)')
-    for m in marks:
-        print(f'{inc[m]:6}  {m}')
-
-
-def leaf(path, patterns):
-    pats = [(p, re.compile(p)) for p in patterns]
-    leaves = Counter()
-    want = Counter()
-    n = 0
-    for _, _, frames, _ in samples(path):
-        n += 1
-        if not frames:
-            continue
-        leaves[frames[0]] += 1
-        for p, rx in pats:
-            if rx.search(frames[0]):
-                want[p] += 1
-    print(f'{n} samples')
-    for p, _ in pats:
-        print(f'{want[p]:6}  /{p}/')
-    print('-- top leaves')
-    for k, c in leaves.most_common(25):
-        print(f'{c:6}  {k[:110]}')
-
-
-def leafunder(path, pattern, markers):
-    rx = re.compile(pattern)
-    by = Counter()
-    total = 0
-    for _, _, frames, _ in samples(path):
-        if frames and rx.search(frames[0]):
-            total += 1
-            by[next((m for f in frames[1:] for m in markers if m in f), '(none)')] += 1
-    print(f'{total} samples with leaf /{pattern}/')
-    for k, c in by.most_common():
-        print(f'{c:6}  {k}')
-
-
-def above(path, pattern, depth):
-    rx = re.compile(pattern)
-    by = Counter()
-    for _, _, frames, _ in samples(path):
-        if frames and rx.search(frames[0]):
-            by[' | '.join(short(f, 60) for f in frames[1:1 + depth])] += 1
-    for k, c in by.most_common(20):
-        print(f'{c:5}  {k}')
-
-
-def mark(path, marker, nleaf=12, per=10):
-    hist = Counter()
-    tids = Counter()
-    leaves = Counter()
-    for tid, t, frames, _ in samples(path):
-        if any(marker in f for f in frames):
-            hist[int(t * per)] += 1
-            tids[tid] += 1
-            leaves[short(frames[0], 80) if frames else '?'] += 1
-    digits = len(str(per)) - 1
-    print(f'{marker}: {sum(hist.values())} samples; threads {len(tids)}')
-    print('  time: ' + ' '.join(f'{k / per:.{digits}f}:{v}' for k, v in sorted(hist.items())))
-    for k, c in leaves.most_common(nleaf):
-        print(f'  {c:5}  {k}')
-
-
-def split(path, outer, inner):
-    by = Counter()
-    child = Counter()
-    for _, _, frames, _ in samples(path):
-        idx = next((i for i, f in enumerate(frames) if outer in f), None)
-        if idx is None:
-            continue
-        hit = next((m for m in inner if any(m in f for f in frames[:idx])), '(other)')
-        by[hit] += 1
-        if hit == '(other)' and idx > 0:
-            child[short(frames[idx - 1], 70)] += 1
-    print(f'under {outer}: {sum(by.values())}')
-    for k, c in by.most_common():
-        print(f'{c:6}  {k}')
-    print('  (other) by the frame right below the outer one:')
-    for k, c in child.most_common(10):
-        print(f'  {c:6}  {k}')
-
-
-def kernel(path, a, b):
-    n = k = ipi = 0
-    leaves = Counter()
-    for _, t, frames, ip in samples(path):
-        if a <= t < b and frames:
-            n += 1
-            if ip.startswith('ffff'):
-                k += 1
-                leaves[frames[0][:40]] += 1
-                if any('smp_call_function' in f or 'flush_tlb' in f or 'send_IPI' in f
-                       for f in frames):
-                    ipi += 1
-    print(f'{a}-{b} s: {n} samples, kernel leaf {k} ({k / max(n, 1) * 100:.0f}%), '
-          f'TLB or IPI stacks {ipi} ({ipi / max(n, 1) * 100:.0f}%)')
-    for name, c in leaves.most_common(8):
-        print(f'{c:6}  {name}')
-
-
-def run(argv):
-    if len(argv) < 3:
-        raise SystemExit(__doc__)
-    cmd, path, args = argv[1], argv[2], argv[3:]
-    if cmd == 'threads':
-        threads(path)
-    elif cmd == 'phases':
-        phases(path, int(args[0]), *(float(x) for x in args[1:3]))
-    elif cmd == 'unused':
-        unused(path, [float(x) for x in args[0].split(',')],
-               float(args[1]) if len(args) > 1 else 499.0,
-               int(args[2]) if len(args) > 2 else 8)
-    elif cmd == 'main':
-        main_thread(path, int(args[0]), float(args[1]), float(args[2]))
-    elif cmd == 'incl':
-        incl(path, args)
-    elif cmd == 'leaf':
-        leaf(path, args)
-    elif cmd == 'leafunder':
-        leafunder(path, args[0], args[1].split(','))
-    elif cmd == 'above':
-        above(path, args[0], int(args[1]))
-    elif cmd == 'mark':
-        mark(path, args[0], *(int(x) for x in args[1:3]))
-    elif cmd == 'split':
-        split(path, args[0], args[1:])
-    elif cmd == 'kernel':
-        kernel(path, float(args[0]), float(args[1]))
-    else:
-        raise SystemExit(__doc__)
-
-
-if __name__ == '__main__':
-    run(sys.argv)
-```
-
-`fit.py`:
-
-```python
-"""Scaling table and fit from a hyperfine --export-json over PHPSTAN_RS_THREADS.
-
-usage: fit.py <hyperfine json>...
-
-Per thread count: wall mean (sigma), median, and CPU (user + system means).
-Then least squares of wall = serial + parallel / threads, on the means and on
-the medians, with each point's fit minus measured, in % of measured. The form
-assumes the CPU time stays the same as threads are added; the CPU column shows
-whether it does.
-"""
-import json
-import re
-import sys
-
-
-def fit(points):
-    xs = [1 / t for t, _ in points]
-    ys = [w for _, w in points]
-    n = len(xs)
-    mx, my = sum(xs) / n, sum(ys) / n
-    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
-    return my - b * mx, b
-
-
-for path in sys.argv[1:]:
-    rows = []
-    for r in json.load(open(path))['results']:
-        threads = int(re.search(r'PHPSTAN_RS_THREADS=(\d+)', r['command']).group(1))
-        rows.append((threads, r['mean'] * 1000, r['stddev'] * 1000, r['median'] * 1000,
-                     r['user'], r['system']))
-    rows.sort()
-    print(path)
-    print(f'{"threads":>7} {"mean":>7} {"sigma":>6} {"median":>7} {"CPU s":>6} {"user":>6} {"sys":>5}')
-    for t, mean, sd, med, user, system in rows:
-        print(f'{t:7} {mean:7,.0f} {sd:6,.0f} {med:7,.0f} {user + system:6.2f} {user:6.2f} {system:5.2f}')
-    for label, col in (('means', 1), ('medians', 3)):
-        points = [(r[0], r[col]) for r in rows]
-        serial, parallel = fit(points)
-        res = ', '.join(f'{((serial + parallel / t) - w) / w * 100:+.1f}%' for t, w in points)
-        print(f'fit on the {label}: serial {serial:,.0f} ms, parallel {parallel:,.0f} ms; '
-              f'fit minus measured {res}')
-```
-
-`scaling.sh` (`W` is the run directory, `BIN` the gate binary; the warm cache dir is filled
-first). The script run on 2026-10-17 had no hash check, though its header said it did, so
-the gate binary's output was not checked that day. Every run exited 0, since hyperfine
-fails a command that exits non-zero. The `ORACLE` line and the three lines after
-`hyperfine $mode exit` below add the check:
-
-```bash
-#!/bin/bash
-# Scaling curve of the gate binary on Piwigo: hyperfine -N over the worker
-# counts, off mode and warm mode. hyperfine discards stdout, so one more run
-# per mode writes it, and its sha256 must be the oracle's.
-W=/home/torres/.cache/prs-profile/wall-2026-10-17
-BIN=$W/target-gate/gate/phpstan-rs
-PIW=/home/torres/piwigo17-frozen
-CHECK="check-project --config phpstan-rs.toml --format json"
-ORACLE=8ff144c3fee775166369b993a58814e0f247845fbf850f94d0c41b57924488b1
-cd "$PIW" || exit 1
-for mode in off warm; do
-  if [ $mode = off ]; then
-    ENV="PHPSTAN_RS_NO_FILE_CACHE=1 PHPSTAN_RS_NO_STUB_CACHE=1"
-  else
-    ENV="PHPSTAN_RS_CACHE_DIR=$W/cache-warm"
-  fi
-  CMDS=()
-  for t in 1 2 4 8; do
-    CMDS+=("env PHPSTAN_RS_THREADS=$t $ENV $BIN $CHECK")
-  done
-  [ $mode = warm ] && touch "$W/warm-marker"
-  echo "$(date -Is) hyperfine $mode loadavg=$(cut -d' ' -f1-3 /proc/loadavg)"
-  nice -n 19 hyperfine -N --warmup 1 --runs 5 --export-json "$W/scaling-$mode.json" \
-    "${CMDS[0]}" "${CMDS[1]}" "${CMDS[2]}" "${CMDS[3]}"
-  echo "$(date -Is) hyperfine $mode exit $?"
-  env $ENV $BIN $CHECK > "$W/scaling-$mode-out.json"
-  sum=$(sha256sum < "$W/scaling-$mode-out.json" | cut -d' ' -f1)
-  [ "$sum" = "$ORACLE" ] && echo "$mode output is the oracle's" || echo "$mode output DIFFERS: $sum"
-done
-echo "cache files written during the warm runs: $(find "$W/cache-warm" -type f -newer "$W/warm-marker" | wc -l)"
-```
-
-`mimalloc-runs.sh` (decision 2; `GATE` is the gate binary, `CG` the `dhat` frame-pointer
-binary):
-
-```bash
-#!/bin/bash
-# Decision 2: does mimalloc's purging cost the off run its page zeroing?
-# Off mode on Piwigo, default options against MIMALLOC_PURGE_DELAY=-1 (no
-# purging): mimalloc's exit statistics for each, two hyperfine rounds in
-# alternating order on the gate binary, then one perf recording of each on
-# the frame-pointer binary of Step 0. Every output is checked against the
-# oracle's sha256.
-W=/home/torres/.cache/prs-profile/mimalloc-2026-10-17
-GATE=/home/torres/.cache/prs-profile/wall-2026-10-17/target-gate/gate/phpstan-rs
-CG=/home/torres/.cache/prs-profile/regress-item5/bin/head-cg
-PIW=/home/torres/piwigo17-frozen
-CHECK="check-project --config phpstan-rs.toml --format json"
-OFF="PHPSTAN_RS_NO_FILE_CACHE=1 PHPSTAN_RS_NO_STUB_CACHE=1"
-ORACLE=8ff144c3fee775166369b993a58814e0f247845fbf850f94d0c41b57924488b1
-mkdir -p "$W"
-cd "$PIW" || exit 1
-log() { echo "$(date -Is) $* loadavg=$(cut -d' ' -f1-3 /proc/loadavg)" | tee -a "$W/steps.log"; }
-vm() { grep -E '^(compact_stall|compact_fail|compact_success|pgmigrate_success|thp_fault_alloc|pgfault|pgmajfault) ' /proc/vmstat > "$W/vmstat-$1.txt"; }
-check() {
-  local sum
-  sum=$(sha256sum < "$1" | cut -d' ' -f1)
-  [ "$sum" = "$ORACLE" ] && echo "$2: output is the oracle's" || echo "$2: output DIFFERS ($sum)"
-}
-for mode in default nopurge; do
-  E=""
-  [ $mode = nopurge ] && E="MIMALLOC_PURGE_DELAY=-1"
-  log "stats $mode"
-  env $OFF $E MIMALLOC_SHOW_STATS=1 nice -n 19 "$GATE" $CHECK > "$W/stats-$mode-out.json" 2> "$W/stats-$mode.txt"
-  check "$W/stats-$mode-out.json" "stats $mode"
-done
-vm hf-before
-log "hyperfine round 1 (default, nopurge)"
-nice -n 19 hyperfine -N --warmup 2 --runs 10 --export-json "$W/hf1.json" \
-  "env $OFF $GATE $CHECK" "env $OFF MIMALLOC_PURGE_DELAY=-1 $GATE $CHECK" > "$W/hf1.txt" 2>&1
-log "hyperfine round 2 (nopurge, default)"
-nice -n 19 hyperfine -N --warmup 2 --runs 10 --export-json "$W/hf2.json" \
-  "env $OFF MIMALLOC_PURGE_DELAY=-1 $GATE $CHECK" "env $OFF $GATE $CHECK" > "$W/hf2.txt" 2>&1
-vm hf-after
-for mode in default nopurge; do
-  E=""
-  [ $mode = nopurge ] && E="MIMALLOC_PURGE_DELAY=-1"
-  env $OFF $E nice -n 19 "$CG" $CHECK > /dev/null 2>&1
-  vm "perf-$mode-before"
-  log "perf $mode"
-  nice -n 19 perf record -o "$W/perf-$mode.data" -F 499 -g -- env $OFF $E "$CG" $CHECK \
-    > "$W/perf-$mode-out.json" 2> "$W/perf-$mode-stderr.txt"
-  vm "perf-$mode-after"
-  check "$W/perf-$mode-out.json" "perf $mode"
-  perf script -i "$W/perf-$mode.data" --no-inline -F tid,time,ip,sym > "$W/$mode.script" 2> "$W/$mode.script.err"
-done
-log "done"
-```
-
-`thp-probe.py`:
-
-```python
-"""Runs one off-mode Piwigo check and samples the process's memory every
-20 ms: the largest Rss and AnonHugePages of /proc/<pid>/smaps_rollup, and the
-system's thp_fault_alloc before and after. Extra NAME=VALUE arguments go into
-the environment.
-
-usage: thp-probe.py <binary> <out.json> [NAME=VALUE]...
-"""
-import hashlib
-import os
-import subprocess
-import sys
-import time
-
-ORACLE = '8ff144c3fee775166369b993a58814e0f247845fbf850f94d0c41b57924488b1'
-
-
-def vmstat(name):
-    with open('/proc/vmstat') as fh:
-        for line in fh:
-            key, value = line.split()
-            if key == name:
-                return int(value)
-    return 0
-
-
-def rollup(pid):
-    out = {}
-    try:
-        with open(f'/proc/{pid}/smaps_rollup') as fh:
-            for line in fh:
-                parts = line.split()
-                if len(parts) >= 3 and parts[2] == 'kB':
-                    out[parts[0].rstrip(':')] = int(parts[1])
-    except OSError:
-        pass
-    return out
-
-
-binary, out_path = sys.argv[1], sys.argv[2]
-env = dict(os.environ, PHPSTAN_RS_NO_FILE_CACHE='1', PHPSTAN_RS_NO_STUB_CACHE='1')
-for arg in sys.argv[3:]:
-    key, _, value = arg.partition('=')
-    env[key] = value
-args = [binary, 'check-project', '--config', 'phpstan-rs.toml', '--format', 'json']
-faults_before = vmstat('thp_fault_alloc')
-start = time.monotonic()
-with open(out_path, 'wb') as out:
-    proc = subprocess.Popen(args, cwd='/home/torres/piwigo17-frozen', env=env, stdout=out,
-                            stderr=subprocess.DEVNULL)
-    peak_rss = peak_huge = 0
-    while proc.poll() is None:
-        r = rollup(proc.pid)
-        peak_rss = max(peak_rss, r.get('Rss', 0))
-        peak_huge = max(peak_huge, r.get('AnonHugePages', 0))
-        time.sleep(0.02)
-wall = time.monotonic() - start
-faults = vmstat('thp_fault_alloc') - faults_before
-with open(out_path, 'rb') as fh:
-    digest = hashlib.sha256(fh.read()).hexdigest()
-print(f'{" ".join(sys.argv[3:]) or "default"}: wall {wall:.3f} s, peak Rss {peak_rss / 1024:.0f} MiB, '
-      f'peak AnonHugePages {peak_huge / 1024:.0f} MiB, thp_fault_alloc +{faults}, '
-      f'output {"is the oracle" if digest == ORACLE else "DIFFERS " + digest}')
-```
-
-`cpugrowth.py` (beside `perfdump.py`, which it imports):
-
-```python
-"""Where the CPU time of a run grows with the thread count: two dumps of the
-same command (`perf script --no-inline -F tid,time,ip,sym`, task-clock at the
-same rate), the first at fewer threads. Each sample is put in one class by its
-leaf, then the classes and the roles (perfdump.ROLES) are compared.
-
-usage: cpugrowth.py <dump at few threads> <dump at more threads> [hz]
-"""
-import os
-import re
-import sys
-from collections import Counter
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from perfdump import IDLE, role_of, samples, short  # noqa: E402
-
-KERNEL = [
-    ('kernel: page zeroing', ('__clear_pages', 'clear_page')),
-    ('kernel: TLB shootdown, IPI', ('smp_call_function', 'flush_tlb', 'send_IPI',
-                                    'native_flush_tlb', 'llist_add_batch')),
-    ('kernel: task switch', ('finish_task_switch', '__schedule', 'schedule',
-                             'preempt_schedule', 'pick_next')),
-    ('kernel: futex, yield', ('futex', 'sched_yield', 'do_sched_yield')),
-    ('kernel: softirq, irq exit', ('handle_softirqs', 'irqentry_exit', '__do_softirq')),
-    ('kernel: compaction, migration', ('compact', 'migrate', 'isolate_')),
-    ('kernel: file system', ('d_lookup', 'link_path_walk', 'statx', 'getdents',
-                             'filemap', 'copy_page_to_iter', 'rep_movs')),
-]
-SPIN = ('rayon_core', 'crossbeam', 'std::thread::yield_now', 'sched_yield',
-        'core::hint::spin_loop', '__sched_yield')
-
-
-def classify(frames, ip):
-    leaf = frames[0] if frames else '?'
-    if ip and ip.startswith('ffff'):
-        for name, keys in KERNEL:
-            if any(k in leaf for k in keys):
-                return name
-        return 'kernel: other'
-    if any(k in leaf for k in SPIN) or (
-            any(any(m in f for m in IDLE) for f in frames[:12])
-            and not any('phpstan_rs' in f or 'syntax::' in f or 'types::' in f
-                        for f in frames[:6])):
-        return 'user: pool idle, spinning'
-    if re.search(r'(^|[^a-z])_?mi_', leaf):
-        return 'user: mimalloc'
-    if 'memmove' in leaf or 'memcpy' in leaf or 'memset' in leaf or 'memcmp' in leaf:
-        return 'user: libc mem*'
-    return 'user: our code'
-
-
-def tally(path):
-    cls = Counter()
-    role = Counter()
-    both = Counter()
-    leaf_by_cls = {}
-    for _, _, frames, ip in samples(path):
-        c = classify(frames, ip)
-        r = role_of(frames)
-        cls[c] += 1
-        role[r] += 1
-        both[(r, c)] += 1
-        leaf_by_cls.setdefault(c, Counter())[short(frames[0], 70) if frames else '?'] += 1
-    return cls, role, both, leaf_by_cls
-
-
-def table(title, a, b, hz):
-    keys = sorted(set(a) | set(b), key=lambda k: -(b.get(k, 0) - a.get(k, 0)))
-    print(f'\n-- {title} (CPU seconds; {hz:.0f} samples per second)')
-    print(f'{"":36} {"few":>7} {"more":>7} {"more-few":>9}')
-    for k in keys:
-        x, y = a.get(k, 0) / hz, b.get(k, 0) / hz
-        name = k if isinstance(k, str) else ' / '.join(k)
-        print(f'{name[:36]:36} {x:7.3f} {y:7.3f} {y - x:+9.3f}')
-    x, y = sum(a.values()) / hz, sum(b.values()) / hz
-    print(f'{"total":36} {x:7.3f} {y:7.3f} {y - x:+9.3f}')
-
-
-def main():
-    few, more = sys.argv[1], sys.argv[2]
-    hz = float(sys.argv[3]) if len(sys.argv) > 3 else 499.0
-    ca, ra, ba, la = tally(few)
-    cb, rb, bb, lb = tally(more)
-    table('by class of leaf', ca, cb, hz)
-    table('by role', ra, rb, hz)
-    table('by role and class (largest growth first)', ba, bb, hz)
-    for c in ('user: pool idle, spinning', 'kernel: other', 'user: our code', 'user: mimalloc'):
-        print(f'\n-- {c}: top leaves, few / more')
-        keys = sorted(set(la.get(c, {})) | set(lb.get(c, {})),
-                      key=lambda k: -(lb.get(c, Counter())[k] - la.get(c, Counter())[k]))
-        for k in keys[:15]:
-            print(f'{la.get(c, Counter())[k]:6} {lb.get(c, Counter())[k]:6}  {k}')
-
-
-if __name__ == '__main__':
-    main()
-```
+- Scaling: `scripts/scaling.sh` runs 5 runs per thread count, in both modes. `W` is the
+  run directory and `BIN` the gate binary, and the warm cache dir is filled first.
+  - Then `python3 -I scripts/fit.py <dir>/scaling-off.json <dir>/scaling-warm.json`
+    prints the Scaling table and the fits.
+  - The script run on 2026-10-17 had no hash check, though its header said it did, so
+    the gate binary's output was not checked that day. Every run exited 0, since
+    hyperfine fails a command that exits non-zero.
+  - `scripts/scaling.sh` has the check: the `ORACLE` line and the three lines after
+    `hyperfine $mode exit`.

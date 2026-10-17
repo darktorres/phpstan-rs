@@ -13,3 +13,7 @@
 /editors/vscode/out
 /editors/vscode/*.vsix
 /editors/vscode/.vscode-test
+
+# Python's bytecode cache, which scripts/cpugrowth.py writes when it imports
+# scripts/perfdump.py.
+/scripts/__pycache__/

@@ -252,8 +252,8 @@ The off-run rows still open:
 Started on 2026-10-17, before level 8's item 8. The ledger's §1 attributes the Ir
 that items 1 to 3 of the 20 G plan added (`4c425d14`, `9aed606b`). The plan fixes
 what that found, and the serial stretches of the load that its Step 0 measured. It
-holds every number, command and script it uses, because the profiles it was read
-from (under `~/.cache/prs-profile/`) are not kept.
+holds every number and command it uses, and its scripts are in `scripts/`, because
+the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
 
 - Step 0, the wall-time measurement, is done (the plan's "Step 0 results"). So are
   the allocator runs (purging, huge pages) and the reading of where the CPU time

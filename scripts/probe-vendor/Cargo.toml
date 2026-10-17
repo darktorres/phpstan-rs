@@ -1,0 +1,10 @@
+[package]
+name = "probe-vendor"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+composer = { package = "phpstan-rs-composer", path = "/home/torres/projects/phpstan-rs/crates/composer" }
+
+[workspace]
