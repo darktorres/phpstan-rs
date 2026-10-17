@@ -32,8 +32,11 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     fold of the carried rule over its ancestors, not the old scan (its Built).
   - R4 (`1ba57cc0`): −47.0 M off, of which the main thread's −27.8 M is the row's, with no
     wall change beyond the noise over 60 pairs.
+  - R6 (`59bf55bc`): −124.2 M off and −130.6 M warm, all of it the discovery thread's, and
+    −38.3 ms of the warm run's 1.33 s (p = 0.011), with no off wall change beyond the noise.
+    The drop reads a directory's kind from its parent's listing too (its Built).
 
-  R6 is next.
+  R14 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -42,7 +45,7 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   `class_info.rs`, `function_sig.rs` and `provenance.rs`, R15 `allocator.rs`, `lib.rs` and
   `main.rs`, R2 `walk.rs`, `session.rs`, `file_table.rs`, `project.rs`, `lsp.rs`,
   `dir_listings.rs` and `vendor.rs`, with `PathHash` and `path_hash` now in the composer
-  crate's `hashed_path.rs`, R3 `walk.rs`, and R4 `session.rs`.
+  crate's `hashed_path.rs`, R3 `walk.rs`, R4 `session.rs`, and R6 `vendor.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -633,6 +636,21 @@ to about 65 ms: the retain closure's 40 ms, 24 ms of it the per-file `statx`;
 163 M of its 393 M) counted apart, and the warm vendor wait in a perf recording. The main
 thread's second resolution of discovery's paths is R14's.
 
+**Built** as `59bf55bc`: −124.2 M off, −130.6 M warm, and −38.3 ms of the warm run's 1.33 s
+(p = 0.011), where the vendor wait fell from 102 to 69 ms in one recording each. Where it
+differs from the Change:
+
+- `DirListings` was keyed by the carried hash already (R2), and `hashbrown` was a composer
+  dependency already.
+- The drop reads the kind of each directory between a file and the walk's directory from its
+  parent's listing too, and checks the walk's own directory (a directory, not a link,
+  listed) once per directory, not once per file.
+- The drop and the deduplication run after the silenced panic hook is restored, so a panic in
+  them is reported; the old per-file check stays as the test oracle, asserted for every file.
+- `Place` is the composer crate's, for its property test against `Path::starts_with`.
+
+The ledger's LOAD-8.6 has the numbers.
+
 ### 9. R14: the walk takes discovery's resolved paths
 
 *LOAD-8.14. A wall row until R10, then CPU and system calls. Needs R2 and R6.*
@@ -1090,6 +1108,8 @@ ours is noted, and a run it distorts is taken again.
   table; LOAD-8.7's known site, the file roots' reach; LOAD-8.10 is READY.
 - Done with R4: LOAD-8.4's row, with the 60 pairs and the peak RSS set that did not
   reproduce; its row in §1's table.
+- Done with R6: LOAD-8.6's row, with the kinds read from the listings; its row in §1's table;
+  LOAD-8.14 is READY.
 - Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
   row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
