@@ -11,7 +11,7 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-17, `aa896697` on branch `callgrind-20g`. Counts below were
+State as of 2026-10-17, `a5a4d85f` on branch `callgrind-20g`. Counts below were
 read from the files on that date. This file covers this branch only.
 
 ## Where to resume
@@ -22,8 +22,9 @@ exception is level 7's designs, which are rows of the 20 G plan and are worked i
 level 8's order; DOC-2.1 stays deferred.
 
 Level 9 is the one active level: the fixes for the costs that the attribution of
-the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done and its decisions
-were ruled on 2026-10-17; its rows wait on the user's second "go".
+the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done, its decisions
+were ruled on 2026-10-17, and its rows are being built in the plan's order since
+the user's second "go" that day: R1 and R11 are in, and R12 is next.
 
 Level 8 waits under it. It holds the 20 G plan and the off drill, and its order is
 in its section below. When level 9 is done, work the lowest item that has a READY
@@ -260,8 +261,11 @@ the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
 - Rows R1 to R15, one commit each. R1 to R9 and R13 save Ir; R10 to R12, R14 and
   R15 shorten serial stretches or the run. R8 and R11 to R15 are older costs than
   items 1 to 3. R15 (a batch run does not purge) came from the allocator runs.
-- No row starts before the user's second "go". The plan's decisions 1 to 7 were
-  ruled on 2026-10-17, each as the plan recommended:
+- Built (since the user's second "go", 2026-10-17): R1 (`6016499f`) and R11
+  (`a5a4d85f`), measured on their ledger rows (LOAD-8.1, LOAD-3.3). Next: R12, then
+  R15, R2, R3, R4, R6, R14, R13, R10, R5, R8, R9 and R7.
+- The plan's decisions 1 to 7 were ruled on 2026-10-17, each as the plan
+  recommended:
   1. the finishing passes' unused cores: REG-7's record;
   2. the zeroing and purging: R15, and the huge pages stay;
   3. R14: its own row, after R2 and R6 and before R10;
@@ -276,9 +280,8 @@ the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
   (LOAD-8.11 and 8.12 point to them). Step 0 is the ledger's MEAS-4, with a paragraph
   in §1; REG-7's and STUB's notes hold the finishing passes' and the stub-base wait's
   numbers (decisions 1 and 5).
-- Bookkeeping left, with the rows: LOAD-3.4's note and LOAD-6's record (R1); the
-  comment at `session.rs:1081` (R10); LOAD-3.3's record (R11); §1's range rows as
-  each row lands.
+- Bookkeeping left, with the rows: the comment at `session.rs:1081` (R10); §1's
+  range rows as each row lands.
 
 ## Documents with no place in the stack
 

@@ -12,13 +12,17 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   up.
 - **The decisions are ruled.** All seven were taken as recommended, and decision 7 was
   confirmed ("Decisions", below).
-- **No row has started.** The rows start on the user's second "go", in the order below, one
-  commit each, with a pathspec, since another session shares the checkout.
+- **The rows are being built,** since the user's second "go" (2026-10-17), in the order
+  below, one commit each, with a pathspec, since another session shares the checkout. R1
+  (`6016499f`) and R11 (`a5a4d85f`) are in, and their measurements are on the ledger's rows
+  (LOAD-8.1, LOAD-3.3): R1 −381.2 M off, with no wall change beyond the noise; R11 −0.22 s
+  of the off run's 1.98 s and −214 MiB of peak RSS, most of it the kernel's page zeroing,
+  since the parse reuses the freed trees' memory. R12 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
-- **The code is `aa896697`'s.** `git diff aa896697 HEAD -- crates/ Cargo.toml Cargo.lock` is
-  empty: the commits since change only documents, `scripts/` and `.gitignore`. So each file
-  and line cited here is as read at that commit.
+- **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
+  built since move some of them: R1 changes `session.rs`, `project.rs`, `lsp.rs` and
+  `source.rs`, and R11 `session.rs` and `project.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -290,43 +294,70 @@ must decode: `Provenance` encodes `Origin::File(_)` and `Origin::PendingFile` al
 `OriginData::File`, which decodes to `PendingFile` (`provenance.rs:110`, `:135`), so a decoded
 entry is pending until bound.
 
-**Change** (read in the code on 2026-10-17).
+**Change** (read in the code on 2026-10-17, and again when the row was written).
 
 - **The number is bound without decoding.** `Lazy` keeps the file's number beside the encoded
-  bytes, and `bind_file` sets it without decoding. `get` passes it to the decoder, so a
-  decoded value is born `Origin::File(id)`. This is CACHE-12's decode context, for a `FileId`
-  where CACHE-12 had an `Arc<Path>`, so CACHE-12 no longer waits on CACHE-11's (CACHE-11
-  waits on CACHE-9 and CACHE-10, which are BLOCKED).
-- **The encoded entry also carries whether it holds a deferred type.** Without that fact the
-  393 M only moves: `resolve_deferred_value_of` asks `class_has_deferred_type` about every
-  class in scope, project and stub alike (`resolve.rs:539`, `:592`, `:1486`), and that call
-  decodes every method to learn whether any type in it is deferred, as CACHE-7's 420 M moved
-  to the workers (SKIP: no wall change). The fact is computed when the entry is built or
-  encoded, and the scan reads it.
-- **The fact is on every encoded function entry, stubs included,** so it also removes the
-  scan's 177.8 M of stub decodes in the warm run: the 20 G plan's item 6 R5 (the ledger's
-  Appendix B.1). REG-7.2 (deferred types on demand) later deletes the scan,
-  `function_has_deferred_type` and the fact together.
-- **Both caches' formats change.** They are per build, so the change is a cold start, as any
-  rebuild is.
-- **The third decoder is not yet traced.** `Members::eq` (87.9 M warm) is inlined into
-  `run_finishing_passes`, and callgrind shows no other caller; which pass compares is found
-  when the row is written.
+  bytes, and its `bind_file` sets it without decoding; `get` binds the value it decodes before
+  it hands it out, so no reader sees a pending entry. This is CACHE-12's decode context, for a
+  `FileId` where CACHE-12 had an `Arc<Path>`, so CACHE-12 no longer waits on CACHE-11's
+  (CACHE-11 waits on CACHE-9 and CACHE-10, which are BLOCKED). `Members::bind_file` binds each
+  member so, and `ClassReflection::bind_file` calls it where it walks `iter_mut` today.
+- **The bytes stay while they describe the value.** `Lazy::get_mut` drops them, since a write
+  may change the value; a read keeps them, and so does a binding, which the bytes and the
+  number describe together. Two values that both still hold their bytes are equal when their
+  bytes and numbers are, with no decode; otherwise both are decoded and compared, as now. A
+  value stored again writes its bytes while it holds them, decoded or not.
+- **That is for the third decoder, `changed_since`'s comparison.** `Members::eq` (87.9 M warm,
+  95.7 M inclusive) is called from code inlined into `run_finishing_passes`, right after
+  `drop_doc_members_excluded_by_native` (`project.rs:1568`): `changed_since`'s `differs`
+  (`registry.rs:204`) compares each class a pass rewrote with the form that
+  `end_declaration_changes` took out before the passes, through `ClassReflection`'s derived
+  `PartialEq` (its `methods` field, `class_info.rs:379`). A pass that writes a class's methods
+  through `iter_mut`, `values_mut` or `retain` copies each shared member (`Arc::make_mut`), so
+  the two sides hold distinct `Lazy` values, and the comparison decodes the side taken out.
+  The warm run's project registry holds resolved declarations (`reset_scoped` 34.2 M for the
+  classes, 12.8 M for the functions), so the comparison runs there, serially, on the finishing
+  passes' thread. Traced on 2026-10-17 (`callers.py` on
+  `OnceLock<…FunctionReflection>::initialize`, warm): the decodes by caller are
+  `ParsedFile::bind_file` 393.4 M, the deferred-type scan 177.8 M, `Members::eq` 87.9 M,
+  `flatten_traits_one_pass` 3.0 M and `flatten_phpdoc_inheritance_one_pass` 0.2 M. With the
+  bytes kept, a member no pass wrote compares by its bytes, the as-built form's against the
+  resolved form's, which are the same bytes for a method the passes left as it was; only a
+  member a pass wrote, or one whose resolved form differs, is decoded.
+- **No deferred-type fact.** This row was to carry, in each encoded entry, whether it holds a
+  deferred type, for `class_has_deferred_type`'s scan (`resolve.rs:592`, `:1486`) to read
+  instead of decoding. Read in the code, the fact would save nothing. In a fresh load every
+  name a project file declares is in the passes' scope, and three later passes read every
+  method of every class in it: `flatten_phpdoc_inheritance_one_pass` (`resolve.rs:1162`, each
+  method's `has_own_doc`), `resolve_constant_named_types` (`:1946`) and
+  `drop_doc_members_excluded_by_native` (`:1759`). So the scan's decodes would only move to the
+  first of them, as CACHE-7's 420 M moved to the workers. Those reads are REG-7's to remove
+  (decision 1), and the scan goes with REG-7.2.
+- **Where the decode lands.** Before the passes, the declaration merge's `bucket`
+  (`declaration_merge.rs:235`, run on the pool by `merge_by_shard` in 32 chunks) reads every
+  method of every class it merges for the class's assert-tagged names
+  (`for_each_assert_tagged_name`, `index.rs:570`). Once `bind_file` does not decode, that is
+  the first reader, so the decode moves from the serial main thread to the merge's parallel
+  bucketing.
+- **The caches' formats stay.** The bytes and their encoding do not change; only what a `Lazy`
+  keeps in memory does.
 - **Rejected:** running `bind_numbers` (`session.rs:634`, a serial loop over the files) on the
   pool. It spreads the decode over the pool, but it still decodes every method of every cached
   class to write one field.
 
-**Gain.** Up to 393 M off the main thread. A later pass that reads an entry `bind_file` used to
-decode then decodes it itself, so the Ir saving is only the entries no later pass reads, and
-the rest of the decode moves off the main thread. In wall time that is up to about 0.10 s
-warm, less what those decodes add where they land: in the finishing passes, whose own thread
-is busy throughout, a decode lengthens that stretch. Both are measured, not assumed.
+**Gain.** Up to 393 M off the main thread, and up to about 0.10 s warm, less what the decode
+costs where it lands, in the merge's bucketing on the pool. The binding saves no Ir: the merge
+decodes what `bind_file` decoded. The comparison's 87.9 M, serial on the finishing passes'
+thread, falls by the members compared by their bytes. Both are measured, not assumed.
 
-**Test.** A warm load's `is_encoded()` entries stay encoded after `bind_file` and after the
-scan; a decoded entry reports the right `Origin::File`; the warm Piwigo oracle.
+**Test.** A stored class's members take their file's number without being decoded, and a member
+decoded afterwards names its file; two read-backs of the same members are equal with no decode,
+a written member is compared by value, and members bound to different files are not equal; the
+warm Piwigo oracle.
 
-**Measure.** Warm callgrind; the warm run's `bind_file` stretch and finishing passes in a perf
-recording; hyperfine medians, warm.
+**Measure.** Warm callgrind: `bind_file`, the decodes by caller, `Members::eq`. The warm run's
+`bind_file` stretch, the merge and the finishing passes in a perf recording, against the row
+before it; `scripts/abab.py`, warm.
 
 ### 4. R15: a batch run does not purge
 
@@ -948,17 +979,25 @@ build on it.
 time, under `nice -n 19`, with the load average logged; another session's heavy job beside
 ours is noted, and a run it distorts is taken again.
 
-- **Ir:** off-mode callgrind on Piwigo with the commands of Appendix B, against `aa896697`'s
-  21,331,572,685, and the warm run where a row's Measure names it (R1, R6, R12, R13); R9 is
-  measured in the editor's workload. Judge by the inclusive Ir of the functions changed
-  (callers with `scripts/callers.py`, differences with `scripts/cgfn.py`; Appendix C), with the
-  total beside it.
+- **Ir:** off-mode callgrind on Piwigo with the commands of Appendix B, against the previous
+  row's binary, built again and measured in the same way (`aa896697`'s code measured
+  21,329,725,495 so, against Step 0's 21,331,572,685), and the warm run where a row's Measure
+  names it (R1, R6, R12, R13); R9 is measured in the editor's workload. Judge by the inclusive
+  Ir of the functions changed (callers with `scripts/callers.py`, differences with
+  `scripts/cgfn.py`; Appendix C), with the total beside it.
 - **Wall time:** a perf recording in the mode the row targets (off for R11 and R15; warm for
-  R10 and R12; both for R14), read for the stretch the row shortens against Step 0's tables (Appendix
-  D's commands); and `hyperfine -N` on `gate` binaries, alternating A B A B, at least 5 runs
-  each, medians with σ, the load average noted, and the `/proc/vmstat` compaction counters
-  logged before and after each set. One run decides nothing: the 6.35 s recording was
-  compaction ("Memory compaction").
+  R10 and R12; both for R14), read for the stretch the row shortens against Step 0's tables
+  and against the previous row's recording (Appendix D's commands); and `scripts/abab.py` on
+  `gate` binaries, the previous row's against the row's: 20 pairs whose order alternates
+  (A B, B A, ...), every output checked against the oracle, judged by the paired difference
+  with a Wilcoxon signed-rank test, with each run's peak RSS and CPU time beside it and the
+  load average noted. A row's "hyperfine medians" are these. One run decides nothing: the
+  6.35 s recording was compaction ("Memory compaction").
+  - **Not hyperfine.** R1's first comparison ran hyperfine's two rounds in alternating order
+    (10 runs each) under load 8.5 to 14.6 from another session, and σ was 0.85 to 1.28 s in its
+    first round. In the rerun (load 6.6 to 8.3) the second command of each round ran slower
+    than the first, whichever binary it was: medians 2.052 then 2.247 s, and 2.024 then
+    2.198 s. The pairs give each order the same share of the machine's drift.
 - **Claims:** an Ir row (R1 to R9, R13) is called an Ir saving, with its wall time shown not to
   regress beyond the noise; a wall row (R10 to R12, R14, R15) is called a saving on the stretch
   it shortens and on the medians, never on Ir alone.
@@ -975,11 +1014,14 @@ ours is noted, and a run it distorts is taken again.
   - Step 0 as the ledger's MEAS-4, with a paragraph in §1 beside the Ir ranges;
   - the finishing passes' unused cores in REG-7's notes (decision 1), and the stub-base wait
     in STUB's notes, for STUB-10.1 (decision 5);
-  - item 6's R5 (the ledger's Appendix B.1) and REG-7.2 cite R12's carried fact;
+  - item 6's R5 (the ledger's Appendix B.1) and REG-7.2 cited R12's carried fact; since R12
+    carries none (its Change), they say instead that the scan's decodes stay until REG-7;
   - the LOAD-2.2 name floor in the ledger and in `WORK_STACK.md`'s item 2 (decision 7).
-- Left, with the rows: LOAD-3.4's note and LOAD-6's record (R1); the stale comment at
-  `session.rs:1081` (R10); LOAD-3.3's record, which says that `update_file` waits on LOAD-3.1
-  (R11); §1's range rows, as each row lands.
+- Done with R1 and R11: LOAD-3.4's note and LOAD-6's record; LOAD-3.3's record, which says
+  that `update_file` waits on LOAD-3.1; their rows in §1's table; CACHE-12's row, for R12's
+  corrected change.
+- Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
+  row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
   a pathspec; remove scratch worktrees once they are recorded.
 
@@ -1567,6 +1609,14 @@ the oracle's sha256.
 - **Build:** the `dhat` binary of A for perf; for timing,
   `CARGO_TARGET_DIR=<dir>/target-gate nice -n 19 cargo build --profile gate -p phpstan-rs --bin phpstan-rs`
   (6 min 16 s cold).
+- **A row against the one before it:**
+  `nice -n 19 python3 -I scripts/abab.py <out dir> 20 <off|warm> <name A> <name B>`, where a
+  name is a directory of `.corpus-runs/gate/bin` holding `gate/phpstan-rs`. It runs 4
+  unrecorded runs (A B A B; in warm mode they also fill each binary's own cache dir under
+  `<out dir>`), then the pairs, and stops at the first output that is not the oracle's. It
+  writes `times.json` (wall, peak RSS and CPU time per run) and `run.log` (the load at the
+  start and the end), and prints the medians, the paired median and mean of B − A, how many
+  pairs B lost, and the Wilcoxon W+, z and p, for wall time, peak RSS and CPU time.
 - **Record,** after one unrecorded run:
   `nice -n 19 perf record -o <dir>/perf.data -F 499 -g -- env <mode> <dhat binary> $CHECK > <dir>/out.json 2> <dir>/perf-stderr.txt`;
   then `perf script -i <dir>/perf.data --no-inline -F tid,time,ip,sym > <dir>/<name>.script`
