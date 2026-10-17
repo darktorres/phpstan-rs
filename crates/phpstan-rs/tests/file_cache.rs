@@ -144,3 +144,65 @@ fn the_cache_is_off_when_asked() {
     assert!(output.status.success());
     assert!(entries(cache.path()).is_empty());
 }
+
+/// A Composer project whose vendor class is found through its generated
+/// autoload file alone.
+fn composer_project() -> TempDir {
+    let dir = TempDir::new("file_cache_composer");
+    dir.write("phpstan-rs.toml", "paths = [\"src\"]\n");
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/lib/src/Base.php", BASE);
+    dir.write(
+        "vendor/composer/autoload_static.php",
+        r#"<?php
+
+namespace Composer\Autoload;
+
+class ComposerStaticInitFileCache
+{
+    public static $prefixDirsPsr4 = array (
+        'Lib\\' =>
+        array (
+            0 => __DIR__ . '/..' . '/acme/lib/src',
+        ),
+    );
+}
+"#,
+    );
+    dir.write("src/run.php", USER);
+    dir
+}
+
+/// The entries the per-file cache holds for generated autoload files.
+fn autoload_entries(cache: &Path) -> Vec<PathBuf> {
+    entries(cache)
+        .into_iter()
+        .filter(|entry| entry.to_string_lossy().ends_with(".autoload.bin"))
+        .collect()
+}
+
+fn modified(path: &Path) -> std::time::SystemTime {
+    std::fs::metadata(path).unwrap().modified().unwrap()
+}
+
+#[test]
+fn a_warm_run_reads_a_generated_autoload_files_entries_back() {
+    let dir = composer_project();
+    let cache = TempDir::new("file_cache_autoload");
+    let cold = run(&dir, cache.path());
+    assert!(
+        cold.contains("undefined method"),
+        "the vendor class is found: {cold}"
+    );
+    let stored = autoload_entries(cache.path());
+    assert_eq!(stored.len(), 1, "{stored:?}");
+    let written = modified(&stored[0]);
+    assert_eq!(run(&dir, cache.path()), cold);
+    assert_eq!(modified(&stored[0]), written, "the warm run read it back");
+
+    // A damaged entry is read again from the file, and stored whole.
+    let bytes = std::fs::read(&stored[0]).unwrap();
+    std::fs::write(&stored[0], &bytes[..bytes.len() / 2]).unwrap();
+    assert_eq!(run(&dir, cache.path()), cold, "a truncated entry");
+    assert_eq!(std::fs::read(&stored[0]).unwrap(), bytes);
+}

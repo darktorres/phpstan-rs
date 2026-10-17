@@ -8,7 +8,9 @@ use std::sync::Arc;
 #[test]
 fn no_composer_json_means_not_detected() {
     let dir = TempDir::new("api_no_composer_json");
-    assert!(!PackageContext::load(dir.path(), dir.path(), &Arc::default()).requires_phpstan());
+    assert!(
+        !PackageContext::load(dir.path(), dir.path(), &Arc::default(), None).requires_phpstan()
+    );
 }
 
 #[test]
@@ -23,7 +25,9 @@ fn a_composer_json_with_unrelated_dependencies_is_not_detected() {
             }
         }"#,
     );
-    assert!(!PackageContext::load(dir.path(), dir.path(), &Arc::default()).requires_phpstan());
+    assert!(
+        !PackageContext::load(dir.path(), dir.path(), &Arc::default(), None).requires_phpstan()
+    );
 }
 
 #[test]
@@ -38,7 +42,7 @@ fn phpstan_phpstan_in_require_is_detected() {
             }
         }"#,
     );
-    assert!(PackageContext::load(dir.path(), dir.path(), &Arc::default()).requires_phpstan());
+    assert!(PackageContext::load(dir.path(), dir.path(), &Arc::default(), None).requires_phpstan());
 }
 
 #[test]
@@ -52,12 +56,14 @@ fn phpstan_extension_installer_in_require_dev_is_detected() {
             }
         }"#,
     );
-    assert!(PackageContext::load(dir.path(), dir.path(), &Arc::default()).requires_phpstan());
+    assert!(PackageContext::load(dir.path(), dir.path(), &Arc::default(), None).requires_phpstan());
 }
 
 #[test]
 fn malformed_json_degrades_to_not_detected_rather_than_panicking() {
     let dir = TempDir::new("api_malformed_json");
     dir.write("composer.json", "{ this is not valid json");
-    assert!(!PackageContext::load(dir.path(), dir.path(), &Arc::default()).requires_phpstan());
+    assert!(
+        !PackageContext::load(dir.path(), dir.path(), &Arc::default(), None).requires_phpstan()
+    );
 }

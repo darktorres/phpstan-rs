@@ -818,8 +818,12 @@ impl Session {
             for composer_root in composer_roots(&dirs, &absolute_root) {
                 // The manifest's paths are resolved, as the files they are
                 // compared with are.
-                let package =
-                    composer::PackageContext::load(&composer_root, &composer_root, &dir_listings);
+                let package = composer::PackageContext::load(
+                    &composer_root,
+                    &composer_root,
+                    &dir_listings,
+                    Some(&file_cache::GENERATED),
+                );
                 if composer_root == absolute_root {
                     composer_php_versions = declared_php_versions(&package);
                     root_manifest = package.manifest.clone();

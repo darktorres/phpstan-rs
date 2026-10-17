@@ -23,7 +23,7 @@ fn paths(listed: &[VendorPath]) -> Vec<PathBuf> {
 fn no_composer_json_means_no_context() {
     let dir = TempDir::new("no_composer_json");
     assert_eq!(
-        discover_vendor_context(dir.path(), &DirListings::default()),
+        discover_vendor_context(dir.path(), &DirListings::default(), None),
         VendorContext::default()
     );
 }
@@ -33,7 +33,7 @@ fn composer_json_without_installed_vendor_means_no_context() {
     let dir = TempDir::new("no_vendor");
     dir.write("composer.json", "{}");
     assert_eq!(
-        discover_vendor_context(dir.path(), &DirListings::default()),
+        discover_vendor_context(dir.path(), &DirListings::default(), None),
         VendorContext::default()
     );
 }
@@ -65,7 +65,7 @@ return array(
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
     let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
     let src_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src")).unwrap();
     // Both are entries of listed directories that are not links, so the walk
@@ -101,7 +101,7 @@ return array();
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
     let class_loader =
         std::fs::canonicalize(dir.path().join("vendor/composer/ClassLoader.php")).unwrap();
     assert!(
@@ -163,7 +163,7 @@ class ComposerStaticInitTest
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
     let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
     let other = std::fs::canonicalize(dir.path().join("vendor/acme/other/Other.php")).unwrap();
     let acme_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
@@ -195,7 +195,8 @@ class ComposerStaticInitTest
 fn dunder_dir_lexes_and_parses_as_a_bare_name() {
     // Sanity check this project's own parser treats `__DIR__` as an
     // ordinary bareword constant reference, same as any other bare
-    // constant - the assumption `eval_concat` depends on entirely.
+    // constant - the assumption the spelling of a generated file's paths
+    // depends on entirely.
     let tokens = Lexer::new("<?php return __DIR__;").tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     assert_eq!(program.len(), 1);
@@ -232,7 +233,7 @@ return array(
     );
     dir.write("src/App.php", "<?php class App {}");
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
     assert_eq!(ctx.dirs.len(), 1, "{:?}", ctx.dirs);
     // Kept as written, so the walk resolves it.
     assert!(
@@ -278,7 +279,7 @@ return array(
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
     let lib = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
     // The directory loads `Bar.php`. `Foo.php` lies beside the directory, and
     // `helpers.inc` is not PHP, so the walk does not take it: both stay.
@@ -327,7 +328,7 @@ return array(
     let hidden = dir.path().join("vendor/acme/lib/src/hidden");
     std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o111)).unwrap();
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
     // A root reads any directory, and then the walk lists the file, so the
     // file is left out exactly when its directory can be read. The mode is
     // restored before any assertion can fail, so the directory is removed.
@@ -414,7 +415,7 @@ return array(
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default());
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
     let mut kept: Vec<&str> = ctx
         .files
         .iter()
@@ -479,4 +480,163 @@ fn an_entry_lies_in_a_base_as_its_directory_is_placed() {
             }
         }
     }
+}
+
+/// A cache in memory, which counts what it finds and what it keeps.
+#[derive(Default)]
+struct Kept {
+    entries: std::sync::Mutex<Vec<(Reading, Vec<u8>, GeneratedEntries)>>,
+    found: std::sync::atomic::AtomicUsize,
+    stored: std::sync::atomic::AtomicUsize,
+}
+
+impl Kept {
+    /// How many entries it found and how many it kept.
+    fn counts(&self) -> (usize, usize) {
+        use std::sync::atomic::Ordering::Relaxed;
+        (self.found.load(Relaxed), self.stored.load(Relaxed))
+    }
+}
+
+impl GeneratedCache for Kept {
+    fn load(&self, reading: Reading, bytes: &[u8]) -> Option<GeneratedEntries> {
+        let entries = self.entries.lock().unwrap();
+        let found = entries
+            .iter()
+            .find(|(kept, kept_bytes, _)| *kept == reading && kept_bytes == bytes)
+            .map(|(.., entries)| entries.clone());
+        if found.is_some() {
+            self.found
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        found
+    }
+
+    fn store(&self, reading: Reading, bytes: &[u8], entries: &GeneratedEntries) {
+        self.stored
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.entries
+            .lock()
+            .unwrap()
+            .push((reading, bytes.to_vec(), entries.clone()));
+    }
+}
+
+const STATIC_FILE: &str = r#"<?php
+
+namespace Composer\Autoload;
+
+class ComposerStaticInitKept
+{
+    public static $files = array (
+        'f0' => __DIR__ . '/..' . '/acme/lib/functions.php',
+    );
+
+    public static $prefixDirsPsr4 = array (
+        'Acme\\' =>
+        array (
+            0 => __DIR__ . '/..' . '/acme/lib/src',
+        ),
+    );
+
+    public static $classMap = array (
+        'Acme\\Foo' => __DIR__ . '/..' . '/acme/lib/src/Foo.php',
+        'Acme\\Other' => __DIR__ . '/..' . '/acme/other/Other.php',
+    );
+}
+"#;
+
+#[test]
+fn a_generated_files_entries_are_kept_by_its_bytes_and_resolved_each_time() {
+    let dir = TempDir::new("kept_entries");
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/lib/functions.php", "<?php function f() {}");
+    dir.write("vendor/acme/lib/src/Foo.php", "<?php class Foo {}");
+    dir.write("vendor/acme/other/Other.php", "<?php class Other {}");
+    dir.write("vendor/composer/autoload_static.php", STATIC_FILE);
+    let discover = |cache: Option<&dyn GeneratedCache>| {
+        discover_vendor_context(dir.path(), &DirListings::default(), cache)
+    };
+    let uncached = discover(None);
+    assert_eq!(paths(&uncached.files).len(), 2, "{:?}", uncached.files);
+    assert_eq!(paths(&uncached.dirs).len(), 1, "{:?}", uncached.dirs);
+
+    let kept = Kept::default();
+    assert_eq!(discover(Some(&kept)), uncached);
+    assert_eq!(
+        kept.counts(),
+        (0, 1),
+        "the file is read and its entries kept"
+    );
+    assert_eq!(discover(Some(&kept)), uncached);
+    assert_eq!(kept.counts(), (1, 1), "the kept entries are found");
+
+    // The entries kept are what is resolved: the file is not read again.
+    kept.entries.lock().unwrap()[0].2 = GeneratedEntries::default();
+    let emptied = discover(Some(&kept));
+    assert!(
+        emptied.files.is_empty() && emptied.dirs.is_empty(),
+        "{emptied:?}"
+    );
+
+    // The paths are resolved each time: a file that is gone is not listed.
+    kept.entries.lock().unwrap().clear();
+    let _ = discover(Some(&kept));
+    std::fs::remove_file(dir.path().join("vendor/acme/other/Other.php")).unwrap();
+    let found = discover(Some(&kept));
+    assert_eq!(kept.counts(), (3, 2));
+    assert_eq!(paths(&found.files).len(), 1, "{:?}", found.files);
+    assert_eq!(found, discover(None));
+
+    // A file of other bytes is read again.
+    dir.write(
+        "vendor/composer/autoload_static.php",
+        &STATIC_FILE.replace("'f0' => __DIR__ . '/..' . '/acme/lib/functions.php',", ""),
+    );
+    let edited = discover(Some(&kept));
+    assert_eq!(kept.counts(), (3, 3));
+    assert!(edited.files.is_empty(), "{:?}", edited.files);
+}
+
+#[test]
+fn the_separate_generated_files_are_kept_each_by_its_own_bytes() {
+    let dir = TempDir::new("kept_separate");
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/lib/src/Foo.php", "<?php class Foo {}");
+    dir.write("vendor/acme/lib/Beside.php", "<?php class Beside {}");
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'Beside' => $vendorDir . '/acme/lib/Beside.php',
+);
+"#,
+    );
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'Acme\\' => array($vendorDir . '/acme/lib/src'),
+);
+"#,
+    );
+    let uncached = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    assert_eq!(paths(&uncached.files).len(), 1, "{:?}", uncached.files);
+    assert_eq!(paths(&uncached.dirs).len(), 1, "{:?}", uncached.dirs);
+    let kept = Kept::default();
+    for counts in [(0, 2), (2, 2)] {
+        let found = discover_vendor_context(dir.path(), &DirListings::default(), Some(&kept));
+        assert_eq!(found, uncached);
+        assert_eq!(kept.counts(), counts);
+    }
+    let readings: Vec<Reading> = kept
+        .entries
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(reading, ..)| *reading)
+        .collect();
+    assert_eq!(readings, [Reading::Files, Reading::Dirs]);
 }

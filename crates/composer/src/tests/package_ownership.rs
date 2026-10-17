@@ -11,7 +11,7 @@ use std::sync::Arc;
 fn index(dir: &TempDir) -> PackageIndex {
     let root = std::fs::canonicalize(dir.path()).unwrap();
     PackageIndex::new(
-        PackageContext::load(&root, &root, &Arc::default())
+        PackageContext::load(&root, &root, &Arc::default(), None)
             .manifest
             .into_iter()
             .collect(),

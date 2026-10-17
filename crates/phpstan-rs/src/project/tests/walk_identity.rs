@@ -1046,7 +1046,7 @@ return array(
     );
 
     let listings = Arc::new(DirListings::default());
-    let found = composer::vendor::discover_vendor_context(&base, &listings);
+    let found = composer::vendor::discover_vendor_context(&base, &listings, None);
     let resolved_ones = |paths: &[VendorPath]| {
         paths
             .iter()

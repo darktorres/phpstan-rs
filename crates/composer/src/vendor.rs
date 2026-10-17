@@ -21,6 +21,11 @@
 //! filter, a project's own source could get silently folded into "loaded
 //! for context, never reported" and its bugs would stop being reported
 //! with no warning.
+//!
+//! What a generated file lists depends on its bytes alone, so it is kept by
+//! them (`GeneratedCache`), and a file read before is not parsed again. The
+//! paths it lists are resolved on every run, as resolving reads the file
+//! system.
 
 use hashbrown::{HashTable, hash_table};
 use rustc_hash::FxHashMap;
@@ -67,12 +72,43 @@ impl VendorPath {
     }
 }
 
+/// How a generated autoload file is read: which of its arrays list paths,
+/// and whether those are files or directories.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Reading {
+    /// `autoload_static.php`: a class whose static `classMap` and `files`
+    /// list files and whose `prefixDirsPsr4` lists directories.
+    StaticClass,
+    /// A file that returns an array of files: `autoload_classmap.php` and
+    /// `autoload_files.php`.
+    Files,
+    /// A file that returns an array of arrays of directories:
+    /// `autoload_psr4.php` and `autoload_namespaces.php`.
+    Dirs,
+}
+
+/// Keeps what reading a generated autoload file gives, by the file's bytes
+/// and its reading, which are all it depends on.
+pub trait GeneratedCache: Send + Sync {
+    /// The entries kept for a file of `bytes` read as `reading` says.
+    fn load(&self, reading: Reading, bytes: &[u8]) -> Option<GeneratedEntries>;
+
+    /// Keeps `entries`, which a file of `bytes` read as `reading` says gave.
+    fn store(&self, reading: Reading, bytes: &[u8], entries: &GeneratedEntries);
+}
+
 /// Discovers `vendor/` context for the Composer project rooted at
 /// `project_dir`, or an empty `VendorContext` if `project_dir` isn't a
 /// Composer project (no `composer.json`) or hasn't been installed yet (no
 /// `vendor/composer/`). The directories it reads are read through `listings`,
-/// which the walk of the same load shares.
-pub fn discover_vendor_context(project_dir: &Path, listings: &DirListings) -> VendorContext {
+/// which the walk of the same load shares, and what the generated files list
+/// is kept in `cache`, when there is one.
+pub fn discover_vendor_context(
+    project_dir: &Path,
+    listings: &DirListings,
+    cache: Option<&dyn GeneratedCache>,
+) -> VendorContext {
     if !project_dir.join("composer.json").is_file() {
         return VendorContext::default();
     }
@@ -96,26 +132,45 @@ pub fn discover_vendor_context(project_dir: &Path, listings: &DirListings) -> Ve
     // what should be a quiet "skip this source of context" degrade.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let entries = discover_inner(&composer_dir, &vendor_dir, &base_dir, listings);
+    let entries = discover_inner(&composer_dir, &vendor_dir, &base_dir, listings, cache);
     std::panic::set_hook(default_hook);
     entries.into_context(listings)
 }
+
+/// The older separate generated files, each with its reading, in the order
+/// their entries are taken.
+const SEPARATE_FILES: [(&str, Reading); 4] = [
+    ("autoload_classmap.php", Reading::Files),
+    ("autoload_files.php", Reading::Files),
+    ("autoload_psr4.php", Reading::Dirs),
+    ("autoload_namespaces.php", Reading::Dirs),
+];
 
 fn discover_inner(
     composer_dir: &Path,
     vendor_dir: &Path,
     base_dir: &Path,
     listings: &DirListings,
+    cache: Option<&dyn GeneratedCache>,
 ) -> Entries {
-    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, listings);
     let static_path = composer_dir.join("autoload_static.php");
-    let mut entries = if static_path.is_file()
-        && let Some(entries) = parse_static_file(&static_path, &mut resolver)
+    let generated = match static_path
+        .is_file()
+        .then(|| read_generated(&static_path, Reading::StaticClass, cache))
+        .flatten()
     {
-        entries
-    } else {
-        parse_separate_files(composer_dir, &mut resolver)
+        Some(entries) => vec![entries],
+        None => SEPARATE_FILES
+            .into_iter()
+            .filter_map(|(name, reading)| read_generated(&composer_dir.join(name), reading, cache))
+            .collect(),
     };
+    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, listings);
+    let mut entries = Entries::default();
+    for generated in &generated {
+        resolver.collect(&generated.files, &mut entries.files);
+        resolver.collect(&generated.dirs, &mut entries.dirs);
+    }
     // Composer's own bootstrap loader class - unlike every other file
     // this function discovers, it's never listed in any of the generated
     // autoload maps at all (it's what *runs* them: `vendor/autoload.php`
@@ -133,50 +188,31 @@ fn discover_inner(
     entries
 }
 
-fn parse_static_file(path: &Path, resolver: &mut Resolver<'_>) -> Option<Entries> {
-    let stmts = parse_generated_file(path)?;
-    let class = find_class_decl(&stmts)?;
-
-    let mut entries = Entries::default();
-    for prop in &class.def.properties {
-        if !prop.is_static {
-            continue;
-        }
-        let Some(default) = &prop.default else {
-            continue;
-        };
-        match prop.name.as_ref() {
-            "classMap" | "files" => resolver.collect_files(default, &mut entries.files),
-            "prefixDirsPsr4" => resolver.collect_dirs(default, &mut entries.dirs),
-            _ => {}
-        }
+/// What the generated file at `path` lists, read as `reading` says: from
+/// `cache` when it keeps the entries of a file of these bytes, and otherwise
+/// from the file's tree, then kept there. `None` when the file can't be
+/// read, or is not of the shape `reading` expects.
+///
+/// Same pattern as `main.rs::check_chunk`: PHP source isn't guaranteed
+/// UTF-8, so a lossy read rather than a strict one; a malformed/future-
+/// syntax generated file must degrade to "no context from this file",
+/// never crash `check-project` - `parse_program`'s own `Result` already
+/// gives that for free, no `catch_unwind` needed.
+fn read_generated(
+    path: &Path,
+    reading: Reading,
+    cache: Option<&dyn GeneratedCache>,
+) -> Option<GeneratedEntries> {
+    let bytes = std::fs::read(path).ok()?;
+    if let Some(entries) = cache.and_then(|cache| cache.load(reading, &bytes)) {
+        return Some(entries);
+    }
+    let stmts = syntax::parse(&bytes).ok()?.stmts;
+    let entries = GeneratedEntries::read(&stmts, reading)?;
+    if let Some(cache) = cache {
+        cache.store(reading, &bytes, &entries);
     }
     Some(entries)
-}
-
-fn parse_separate_files(composer_dir: &Path, resolver: &mut Resolver<'_>) -> Entries {
-    let mut entries = Entries::default();
-    for name in ["autoload_classmap.php", "autoload_files.php"] {
-        let path = composer_dir.join(name);
-        if let Some(arr) = parse_top_level_array(&path) {
-            resolver.collect_files(&arr, &mut entries.files);
-        }
-    }
-    for name in ["autoload_psr4.php", "autoload_namespaces.php"] {
-        let path = composer_dir.join(name);
-        if let Some(arr) = parse_top_level_array(&path) {
-            resolver.collect_dirs(&arr, &mut entries.dirs);
-        }
-    }
-    entries
-}
-
-fn parse_top_level_array(path: &Path) -> Option<Expr> {
-    let stmts = parse_generated_file(path)?;
-    stmts.into_iter().find_map(|s| match s.into_kind() {
-        StmtKind::Return(Some(e)) if matches!(e.kind, ExprKind::ArrayLiteral(_)) => Some(e),
-        _ => None,
-    })
 }
 
 fn find_class_decl(stmts: &[Stmt]) -> Option<&ClassDecl> {
@@ -186,14 +222,209 @@ fn find_class_decl(stmts: &[Stmt]) -> Option<&ClassDecl> {
     })
 }
 
-/// Same pattern as `main.rs::check_chunk`: PHP source isn't guaranteed
-/// UTF-8, so a lossy read rather than a strict one; a malformed/future-
-/// syntax generated file must degrade to "no context from this file",
-/// never crash `check-project` - `parse_program`'s own `Result` already
-/// gives that for free, no `catch_unwind` needed.
-fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
-    let bytes = std::fs::read(path).ok()?;
-    syntax::parse(&bytes).ok().map(|parsed| parsed.stmts)
+/// The array a generated file returns.
+fn top_level_array(stmts: &[Stmt]) -> Option<&Expr> {
+    stmts.iter().find_map(|s| match &s.kind {
+        StmtKind::Return(Some(e)) if matches!(e.kind, ExprKind::ArrayLiteral(_)) => Some(e),
+        _ => None,
+    })
+}
+
+/// What a generated autoload file lists, as its expressions spell the paths,
+/// before the directories they name are put in: what reading the file
+/// gives, which depends on its bytes alone.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GeneratedEntries {
+    /// The files to load: classmap and files entries.
+    files: Spelled,
+    /// The directories to load: PSR-4 and PSR-0 entries.
+    dirs: Spelled,
+}
+
+impl GeneratedEntries {
+    /// What `stmts`, a generated file's, list when read as `reading` says;
+    /// `None` when they are not of the shape it expects.
+    fn read(stmts: &[Stmt], reading: Reading) -> Option<GeneratedEntries> {
+        let mut entries = GeneratedEntries::default();
+        match reading {
+            Reading::StaticClass => {
+                let class = find_class_decl(stmts)?;
+                for prop in &class.def.properties {
+                    if !prop.is_static {
+                        continue;
+                    }
+                    let Some(default) = &prop.default else {
+                        continue;
+                    };
+                    match prop.name.as_ref() {
+                        "classMap" | "files" => entries.files.push_items(default),
+                        "prefixDirsPsr4" => entries.dirs.push_nested_items(default),
+                        _ => {}
+                    }
+                }
+            }
+            Reading::Files => entries.files.push_items(top_level_array(stmts)?),
+            Reading::Dirs => entries.dirs.push_nested_items(top_level_array(stmts)?),
+        }
+        Some(entries)
+    }
+}
+
+/// Paths spelled in pieces, one path after another, each ended by
+/// `Piece::End`, and the text of their literals, in order.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct Spelled {
+    text: Bytes,
+    pieces: Vec<Piece>,
+}
+
+/// A piece of a spelled path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum Piece {
+    /// The next this many bytes of the text.
+    Text(u32),
+    /// `__DIR__`: the directory containing the generated file itself, i.e.
+    /// `vendor/composer/` - `autoload_static.php` concatenates `/..` or
+    /// `/../..` onto this to reach `vendor/` or the project root.
+    GeneratedDir,
+    /// `$vendorDir`, which only the separate, non-static files use.
+    VendorDir,
+    /// `$baseDir`, which only the separate, non-static files use.
+    BaseDir,
+    /// The end of a path.
+    End,
+}
+
+impl Spelled {
+    /// Appends the path of each item of `array`.
+    fn push_items(&mut self, array: &Expr) {
+        let ExprKind::ArrayLiteral(items) = &array.kind else {
+            return;
+        };
+        for item in items {
+            self.push(&item.value);
+        }
+    }
+
+    /// Appends the paths of each array that is an item of `array`.
+    fn push_nested_items(&mut self, array: &Expr) {
+        let ExprKind::ArrayLiteral(items) = &array.kind else {
+            return;
+        };
+        for item in items {
+            self.push_items(&item.value);
+        }
+    }
+
+    /// Appends the path `expr` spells, or nothing when it is not a path a
+    /// generated file writes.
+    fn push(&mut self, expr: &Expr) {
+        let (text, pieces) = (self.text.0.len(), self.pieces.len());
+        if self.append(expr).is_some() {
+            self.pieces.push(Piece::End);
+        } else {
+            self.text.0.truncate(text);
+            self.pieces.truncate(pieces);
+        }
+    }
+
+    /// Appends the pieces `expr` spells. Required because real generated code
+    /// chains multiple concatenations (`__DIR__ . '/..' . '/pkg/path'`), not
+    /// a flat two-operand shape. `None` when `expr` is not such a path; the
+    /// pieces appended before that are then not used.
+    fn append(&mut self, expr: &Expr) -> Option<()> {
+        syntax::stack::guard(|| {
+            let expr = expr.peeled();
+            match &expr.kind {
+                ExprKind::Literal(Literal::String(s)) => self.append_text(s.as_bytes())?,
+                ExprKind::Name(n) if n == "__DIR__" => self.pieces.push(Piece::GeneratedDir),
+                ExprKind::Variable(n) if **n == *"vendorDir" => self.pieces.push(Piece::VendorDir),
+                ExprKind::Variable(n) if **n == *"baseDir" => self.pieces.push(Piece::BaseDir),
+                ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
+                    self.append(lhs)?;
+                    self.append(rhs)?;
+                }
+                _ => return None,
+            }
+            Some(())
+        })
+    }
+
+    /// Appends `bytes` to the text, in the piece of text right before them
+    /// when there is one.
+    fn append_text(&mut self, bytes: &[u8]) -> Option<()> {
+        let len = u32::try_from(bytes.len()).ok()?;
+        match self.pieces.last_mut() {
+            Some(Piece::Text(before)) => *before = before.checked_add(len)?,
+            _ => self.pieces.push(Piece::Text(len)),
+        }
+        self.text.0.extend_from_slice(bytes);
+        Some(())
+    }
+
+    /// Each path, its pieces put together, with `generated_dir`, `vendor_dir`
+    /// and `base_dir` for the directories they name.
+    fn each(
+        &self,
+        generated_dir: &Path,
+        vendor_dir: &Path,
+        base_dir: &Path,
+        mut each: impl FnMut(&[u8]),
+    ) {
+        let mut path = Vec::new();
+        let mut text = 0;
+        for piece in &self.pieces {
+            let dir = match *piece {
+                Piece::Text(len) => {
+                    let end = text + len as usize;
+                    path.extend_from_slice(&self.text.0[text..end]);
+                    text = end;
+                    continue;
+                }
+                Piece::GeneratedDir => generated_dir,
+                Piece::VendorDir => vendor_dir,
+                Piece::BaseDir => base_dir,
+                Piece::End => {
+                    each(&path);
+                    path.clear();
+                    continue;
+                }
+            };
+            path.extend_from_slice(dir.as_os_str().as_encoded_bytes());
+        }
+    }
+}
+
+/// Bytes serialized as one byte string.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Bytes(Vec<u8>);
+
+impl serde::Serialize for Bytes {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Bytes {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = Bytes;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a byte string")
+            }
+
+            fn visit_bytes<E: serde::de::Error>(self, bytes: &[u8]) -> Result<Bytes, E> {
+                Ok(Bytes(bytes.to_vec()))
+            }
+
+            fn visit_byte_buf<E: serde::de::Error>(self, bytes: Vec<u8>) -> Result<Bytes, E> {
+                Ok(Bytes(bytes))
+            }
+        }
+        deserializer.deserialize_byte_buf(Visitor)
+    }
 }
 
 /// What the generated files list, resolved: the files and the directories,
@@ -343,47 +574,25 @@ impl<'p> Resolver<'p> {
         }
     }
 
-    fn collect_files(&mut self, array: &Expr, out: &mut Vec<Located>) {
-        let ExprKind::ArrayLiteral(items) = &array.kind else {
-            return;
-        };
-        for item in items {
-            if let Some(path) = self.path(&item.value) {
-                out.push(path);
+    /// Each of `paths` that `locate` finds, onto `out`.
+    fn collect(&mut self, paths: &Spelled, out: &mut Vec<Located>) {
+        let (generated_dir, vendor_dir, base_dir) =
+            (self.generated_dir, self.vendor_dir, self.base_dir);
+        paths.each(generated_dir, vendor_dir, base_dir, |raw| {
+            if let Some(found) = self.locate(path_of(raw)) {
+                out.push(found);
             }
-        }
+        });
     }
 
-    fn collect_dirs(&mut self, array: &Expr, out: &mut Vec<Located>) {
-        let ExprKind::ArrayLiteral(items) = &array.kind else {
-            return;
-        };
-        for item in items {
-            let ExprKind::ArrayLiteral(dirs) = &item.value.kind else {
-                continue;
-            };
-            for dir_item in dirs {
-                if let Some(path) = self.path(&dir_item.value) {
-                    out.push(path);
-                }
-            }
-        }
-    }
-
-    /// Resolves one array value to an absolute path under `vendor_dir`, or
-    /// `None` if it can't be evaluated, doesn't exist, or (the common,
+    /// Resolves one path a generated file lists to an absolute path under
+    /// `vendor_dir`, or `None` if it doesn't exist, or (the common,
     /// load-bearing case) resolves outside `vendor_dir` entirely - a
     /// `$baseDir`/`__DIR__`-with-extra-`/..`-rooted, first-party location,
     /// which must never be silently treated as vendor context. A path that
     /// resolves outside it but is written inside it is kept as written: a
     /// path-repository package is a `vendor/<name>` symlink to a directory
     /// outside `vendor/`, and still belongs to vendor context.
-    fn path(&mut self, expr: &Expr) -> Option<Located> {
-        let raw = eval_concat(expr, self.vendor_dir, self.base_dir, self.generated_dir)?;
-        self.locate(path_of(&raw))
-    }
-
-    /// `raw` resolved as `path` resolves an array value's path.
     fn locate(&mut self, raw: &Path) -> Option<Located> {
         let unknown = |path| Located { path, kind: None };
         let (Some(dir), Some(name)) = (raw.parent(), raw.file_name()) else {
@@ -559,58 +768,6 @@ fn lexically_normalized(path: &Path) -> PathBuf {
         }
     }
     out
-}
-
-/// Builds the bytes of the literal string a generated autoloader file's path
-/// expression evaluates to. Required because real generated code chains
-/// multiple concatenations (`__DIR__ . '/..' . '/pkg/path'`), not a flat
-/// two-operand shape.
-fn eval_concat(
-    expr: &Expr,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    generated_dir: &Path,
-) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    append_concat(expr, vendor_dir, base_dir, generated_dir, &mut out)?;
-    Some(out)
-}
-
-/// Appends the bytes `expr` evaluates to onto `out`, which one `eval_concat`
-/// call builds for the whole chain. `None` when `expr` is not such a literal;
-/// the bytes appended before that are then not used.
-fn append_concat(
-    expr: &Expr,
-    vendor_dir: &Path,
-    base_dir: &Path,
-    generated_dir: &Path,
-    out: &mut Vec<u8>,
-) -> Option<()> {
-    syntax::stack::guard(|| {
-        let expr = expr.peeled();
-        match &expr.kind {
-            ExprKind::Literal(Literal::String(s)) => out.extend_from_slice(s.as_bytes()),
-            // The directory containing the generated file itself, i.e.
-            // `vendor/composer/` - `autoload_static.php` concatenates `/..`
-            // or `/../..` onto this to reach `vendor/` or the project root.
-            ExprKind::Name(n) if n == "__DIR__" => {
-                out.extend_from_slice(generated_dir.as_os_str().as_encoded_bytes());
-            }
-            // Only appears in the separate, non-static autoload_*.php files.
-            ExprKind::Variable(n) if **n == *"vendorDir" => {
-                out.extend_from_slice(vendor_dir.as_os_str().as_encoded_bytes());
-            }
-            ExprKind::Variable(n) if **n == *"baseDir" => {
-                out.extend_from_slice(base_dir.as_os_str().as_encoded_bytes());
-            }
-            ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
-                append_concat(lhs, vendor_dir, base_dir, generated_dir, out)?;
-                append_concat(rhs, vendor_dir, base_dir, generated_dir, out)?;
-            }
-            _ => return None,
-        }
-        Some(())
-    })
 }
 
 /// Keeps the first of each path in `paths`, in their order.

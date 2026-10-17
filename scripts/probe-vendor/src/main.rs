@@ -12,7 +12,7 @@ fn main() {
     for run in 0..runs {
         let listings = composer::dir_listings::DirListings::default();
         let start = Instant::now();
-        let found = composer::vendor::discover_vendor_context(Path::new(&root), &listings);
+        let found = composer::vendor::discover_vendor_context(Path::new(&root), &listings, None);
         let elapsed = start.elapsed();
         println!(
             "run {run}: {:.1} ms, {} files, {} dirs",

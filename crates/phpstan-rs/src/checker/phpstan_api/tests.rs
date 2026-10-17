@@ -300,7 +300,7 @@ mod namespace_in_3rd_party_package {
         let registry = Registry::build(&program);
         let absolute_root = std::fs::canonicalize(&root.0).unwrap();
         let packages = composer::PackageIndex::new(
-            composer::PackageContext::load(&absolute_root, &absolute_root, &Arc::default())
+            composer::PackageContext::load(&absolute_root, &absolute_root, &Arc::default(), None)
                 .manifest
                 .into_iter()
                 .collect(),

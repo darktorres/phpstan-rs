@@ -6,6 +6,8 @@
 //! declarations as built, its names and references, the summaries of its
 //! bodies, and its lines. Its tree is not kept, as a batch run drops it at
 //! once. An analysed file is always parsed, since checking needs its tree.
+//! The paths a Composer project's generated autoload files list are kept
+//! too, by each file's bytes and how it is read (`GENERATED`).
 //!
 //! An entry is found by a hash of everything that decides it: the file's
 //! bytes, the path its declarations name it by, how it was parsed
@@ -38,6 +40,7 @@ use super::{Arc, ParsedFile};
 use crate::deps::RefKey;
 use crate::pest_config::PestFacts;
 use crate::registry::{BuiltDecl, FileBodies, GlobalFacts};
+use composer::vendor::{GeneratedCache, GeneratedEntries, Reading};
 
 /// The build's source hash: an entry carries it in its path.
 const BUILD: &str = env!("PHPSTAN_RS_SOURCE_HASH");
@@ -262,14 +265,58 @@ pub(super) fn key(
     })
 }
 
+/// The entries of the generated autoload files, kept by each file's bytes
+/// and its reading.
+pub(super) static GENERATED: Generated = Generated;
+
+/// `GENERATED`'s type.
+pub(super) struct Generated;
+
+impl GeneratedCache for Generated {
+    fn load(&self, reading: Reading, bytes: &[u8]) -> Option<GeneratedEntries> {
+        read_entry(&generated_key(reading, bytes)?)
+    }
+
+    fn store(&self, reading: Reading, bytes: &[u8], entries: &GeneratedEntries) {
+        if let Some(key) = generated_key(reading, bytes)
+            && can_store()
+        {
+            write_entry(&key, entries);
+        }
+    }
+}
+
+/// The entry of a generated autoload file with these `bytes`, read as
+/// `reading` says; `None` when the cache is off. Its name sets it apart
+/// from the files' entries.
+fn generated_key(reading: Reading, bytes: &[u8]) -> Option<Key> {
+    let directory = directory()?;
+    let mut hasher = twox_hash::XxHash3_128::new();
+    hasher.write(bytes);
+    hasher.write(&(bytes.len() as u64).to_le_bytes());
+    hasher.write(&[reading as u8]);
+    let digest = hasher.finish_128();
+    let hex = format!("{digest:032x}");
+    Some(Key {
+        file: directory
+            .join(&hex[..2])
+            .join(format!("{hex}.autoload.bin")),
+    })
+}
+
 /// The entry under `key`, when there is one that is whole.
 pub(super) fn load(key: &Key) -> Option<CachedFile> {
+    read_entry(key)
+}
+
+/// The value stored under `key`, when its entry is whole.
+fn read_entry<T: serde::de::DeserializeOwned>(key: &Key) -> Option<T> {
     let mut file = fs::File::open(&key.file).ok()?;
     let modified = file.metadata().ok().and_then(|m| m.modified().ok());
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut file, &mut bytes).ok()?;
     let payload = payload(&bytes)?;
-    match postcard::from_bytes::<CachedFile>(payload) {
+    match postcard::from_bytes::<T>(payload) {
         Ok(cached) => {
             if modified
                 .and_then(|modified| modified.elapsed().ok())
@@ -305,13 +352,18 @@ fn payload(bytes: &[u8]) -> Option<&[u8]> {
 /// file to be parsed again next time. The caller has found that entries
 /// can be stored (`can_store`), which made the shard directories.
 pub(super) fn store(key: &Key, cached: &CachedFile) {
-    let Ok(payload) = postcard::to_allocvec(cached) else {
+    write_entry(key, cached);
+}
+
+/// Stores `value` under `key`, as `store` does.
+fn write_entry<T: serde::Serialize + serde::de::DeserializeOwned>(key: &Key, value: &T) {
+    let Ok(payload) = postcard::to_allocvec(value) else {
         return;
     };
     // What is stored reads back as what was.
     #[cfg(debug_assertions)]
     {
-        let decoded: CachedFile = postcard::from_bytes(&payload).expect("what is stored decodes");
+        let decoded: T = postcard::from_bytes(&payload).expect("what is stored decodes");
         assert_eq!(
             postcard::to_allocvec(&decoded).ok().as_deref(),
             Some(payload.as_slice()),

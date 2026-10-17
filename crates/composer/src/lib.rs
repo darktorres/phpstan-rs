@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use dir_listings::DirListings;
 use manifest::ComposerManifest;
-use vendor::VendorContext;
+use vendor::{GeneratedCache, VendorContext};
 
 /// Everything a Composer project root provides, read once.
 #[derive(Debug, Default, Clone)]
@@ -46,9 +46,15 @@ struct PendingVendorInner {
 
 impl PendingVendor {
     /// Starts discovering the vendor context of the project at `root`, reading
-    /// its directories through `listings`.
-    pub fn spawn(root: PathBuf, listings: Arc<DirListings>) -> PendingVendor {
-        let thread = std::thread::spawn(move || vendor::discover_vendor_context(&root, &listings));
+    /// its directories through `listings` and keeping what the generated
+    /// files list in `cache`.
+    pub fn spawn(
+        root: PathBuf,
+        listings: Arc<DirListings>,
+        cache: Option<&'static dyn GeneratedCache>,
+    ) -> PendingVendor {
+        let thread =
+            std::thread::spawn(move || vendor::discover_vendor_context(&root, &listings, cache));
         PendingVendor(Arc::new(PendingVendorInner {
             found: OnceLock::new(),
             thread: Mutex::new(Some(thread)),
@@ -95,11 +101,17 @@ impl std::fmt::Debug for PendingVendor {
 impl PackageContext {
     /// Reads the project at `root`, which is canonical. `spelled_root` is
     /// the root as analysed paths spell it, which the manifest's own paths
-    /// follow. The vendor context is discovered through `listings`.
-    pub fn load(root: &Path, spelled_root: &Path, listings: &Arc<DirListings>) -> PackageContext {
+    /// follow. The vendor context is discovered through `listings`, with what
+    /// the generated files list kept in `cache`.
+    pub fn load(
+        root: &Path,
+        spelled_root: &Path,
+        listings: &Arc<DirListings>,
+        cache: Option<&'static dyn GeneratedCache>,
+    ) -> PackageContext {
         PackageContext {
             manifest: ComposerManifest::load(spelled_root, root),
-            vendor: PendingVendor::spawn(root.to_path_buf(), Arc::clone(listings)),
+            vendor: PendingVendor::spawn(root.to_path_buf(), Arc::clone(listings), cache),
         }
     }
 
