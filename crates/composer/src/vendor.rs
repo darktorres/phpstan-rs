@@ -22,14 +22,15 @@
 //! for context, never reported" and its bugs would stop being reported
 //! with no warning.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {
-    /// Exact files to load (classmap/files entries).
+    /// Exact files to load (classmap/files entries), except the PHP files that
+    /// the walk of a directory of `dirs` lists.
     pub files: Vec<PathBuf>,
     /// Directories to recursively load (PSR-4 base dirs).
     pub dirs: Vec<PathBuf>,
@@ -390,9 +391,75 @@ fn eval_concat(
     })
 }
 
+/// Sorts and deduplicates both lists, then leaves out the files that a
+/// directory of the lists loads.
 fn dedup(ctx: &mut VendorContext) {
-    crate::path_order::sort_paths(&mut ctx.files);
-    ctx.files.dedup();
     crate::path_order::sort_paths(&mut ctx.dirs);
     ctx.dirs.dedup();
+    drop_files_under_dirs(ctx);
+    crate::path_order::sort_paths(&mut ctx.files);
+    ctx.files.dedup();
+}
+
+/// Drops the PHP files that the walk of a directory of `ctx.dirs` is sure to
+/// list: the walk lists them already, and listing them again adds nothing.
+/// Other files stay, as an explicit file is listed whatever its extension.
+fn drop_files_under_dirs(ctx: &mut VendorContext) {
+    let dirs: FxHashSet<&Path> = ctx.dirs.iter().map(PathBuf::as_path).collect();
+    let mut listable = FxHashMap::default();
+    ctx.files
+        .retain(|file| !(is_php(file) && walked_by_a_directory(file, &dirs, &mut listable)));
+}
+
+fn is_php(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "php")
+}
+
+/// Whether the walk of a directory of `dirs` is sure to list `file`: the
+/// directory nearest above the file is one of `dirs`, the file is a regular
+/// file, and that directory and each directory down to the file's own can be
+/// listed. A file that this does not hold for stays listed explicitly, so a
+/// file the walk could miss (a missing one, or one behind a directory that
+/// cannot be read) is still listed.
+fn walked_by_a_directory(
+    file: &Path,
+    dirs: &FxHashSet<&Path>,
+    listable: &mut FxHashMap<PathBuf, bool>,
+) -> bool {
+    let Some(dir) = file
+        .ancestors()
+        .skip(1)
+        .find(|ancestor| dirs.contains(ancestor))
+    else {
+        return false;
+    };
+    if !std::fs::symlink_metadata(file).is_ok_and(|metadata| metadata.is_file()) {
+        return false;
+    }
+    let Some(directories) = file.strip_prefix(dir).ok().and_then(Path::parent) else {
+        return false;
+    };
+    let mut current = dir.to_path_buf();
+    if !listable_dir(&current, listable) {
+        return false;
+    }
+    for part in directories.components() {
+        current.push(part);
+        if !listable_dir(&current, listable) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether a walk can list `dir`: it is a directory and not a link, and it
+/// can be read. Remembered per directory.
+fn listable_dir(dir: &Path, listable: &mut FxHashMap<PathBuf, bool>) -> bool {
+    if let Some(&known) = listable.get(dir) {
+        return known;
+    }
+    let known = std::fs::symlink_metadata(dir).is_ok_and(|metadata| metadata.is_dir())
+        && std::fs::read_dir(dir).is_ok();
+    listable.insert(dir.to_path_buf(), known);
+    known
 }

@@ -102,6 +102,7 @@ fn resolves_the_real_autoload_static_shape_with_chained_dir_concat() {
     dir.write("composer.json", "{}");
     dir.write("vendor/acme/lib/Foo.php", "<?php class Foo {}");
     dir.write("app/FirstParty.php", "<?php class FirstParty {}");
+    dir.write("vendor/acme/other/Other.php", "<?php class Other {}");
     dir.write(
         "vendor/composer/autoload_static.php",
         r#"<?php
@@ -129,6 +130,7 @@ class ComposerStaticInitTest
 
     public static $classMap = array (
         'Acme\\Foo' => __DIR__ . '/..' . '/acme/lib/Foo.php',
+        'Acme\\Other' => __DIR__ . '/..' . '/acme/other/Other.php',
         'App\\FirstParty' => __DIR__ . '/../..' . '/app/FirstParty.php',
     );
 
@@ -143,11 +145,15 @@ class ComposerStaticInitTest
 
     let ctx = discover_vendor_context(dir.path());
     let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
+    let other = std::fs::canonicalize(dir.path().join("vendor/acme/other/Other.php")).unwrap();
     let acme_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
 
-    // The vendor-rooted entries resolve.
-    assert!(ctx.files.contains(&foo), "got: {:?}", ctx.files);
+    // The vendor-rooted entries resolve: the PSR-4 directory, and a classmap
+    // file beside it. The classmap file under the directory is left to the
+    // directory's walk.
     assert!(ctx.dirs.contains(&acme_dir), "got: {:?}", ctx.dirs);
+    assert!(ctx.files.contains(&other), "got: {:?}", ctx.files);
+    assert!(!ctx.files.contains(&foo), "got: {:?}", ctx.files);
 
     // The `__DIR__ . '/../..'`-rooted (first-party, `app/`) entries
     // must be dropped by the vendor-only filter.
@@ -205,4 +211,101 @@ return array(
     let ctx = discover_vendor_context(dir.path());
     assert_eq!(ctx.dirs.len(), 1, "{:?}", ctx.dirs);
     assert!(ctx.dirs[0].ends_with("vendor/acme/b/src"), "{:?}", ctx.dirs);
+}
+
+#[test]
+fn a_php_file_under_a_psr4_directory_is_left_to_the_directory() {
+    let dir = TempDir::new("left_to_directory");
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/lib/Foo.php", "<?php class Foo {}");
+    dir.write("vendor/acme/lib/src/Bar.php", "<?php class Bar {}");
+    dir.write("vendor/acme/lib/src/helpers.inc", "<?php const HELPER = 1;");
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'Acme\\Bar' => $vendorDir . '/acme/lib/src/Bar.php',
+    'Acme\\Foo' => $vendorDir . '/acme/lib/Foo.php',
+);
+"#,
+    );
+    dir.write(
+        "vendor/composer/autoload_files.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    $vendorDir . '/acme/lib/src/helpers.inc',
+);
+"#,
+    );
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'Acme\\' => array($vendorDir . '/acme/lib/src'),
+);
+"#,
+    );
+
+    let ctx = discover_vendor_context(dir.path());
+    let lib = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
+    // The directory loads `Bar.php`. `Foo.php` lies beside the directory, and
+    // `helpers.inc` is not PHP, so the walk does not take it: both stay.
+    assert_eq!(ctx.dirs, vec![lib.join("src")]);
+    assert_eq!(ctx.files.len(), 2, "got: {:?}", ctx.files);
+    assert!(
+        ctx.files.contains(&lib.join("Foo.php")),
+        "got: {:?}",
+        ctx.files
+    );
+    assert!(
+        ctx.files.contains(&lib.join("src/helpers.inc")),
+        "got: {:?}",
+        ctx.files
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_php_file_its_directory_cannot_list_is_kept() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new("unlistable_dir");
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/lib/src/Bar.php", "<?php class Bar {}");
+    dir.write("vendor/acme/lib/src/hidden/Baz.php", "<?php class Baz {}");
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'Acme\\Baz' => $vendorDir . '/acme/lib/src/hidden/Baz.php',
+);
+"#,
+    );
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+return array(
+    'Acme\\' => array($vendorDir . '/acme/lib/src'),
+);
+"#,
+    );
+    // Passable but not readable: the walk of `src` cannot list `hidden`.
+    let hidden = dir.path().join("vendor/acme/lib/src/hidden");
+    std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o111)).unwrap();
+
+    let ctx = discover_vendor_context(dir.path());
+    // A root reads any directory, and then the walk lists the file, so the
+    // file is left out exactly when its directory can be read. The mode is
+    // restored before any assertion can fail, so the directory is removed.
+    let listable = std::fs::read_dir(&hidden).is_ok();
+    std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let baz = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src"))
+        .unwrap()
+        .join("hidden/Baz.php");
+    assert_eq!(ctx.files.contains(&baz), !listable, "got: {:?}", ctx.files);
 }
