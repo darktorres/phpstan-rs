@@ -493,6 +493,11 @@ impl<V> NameMap<V> {
         self.remove_entry(key).map(|(_, value)| value)
     }
 
+    /// Takes every entry out, each with the name it was inserted by.
+    pub fn drain(&mut self) -> impl Iterator<Item = (Name, V)> + '_ {
+        self.table.drain()
+    }
+
     pub fn iter(&self) -> NameMapIter<'_, V> {
         NameMapIter(self.table.iter())
     }
@@ -893,6 +898,11 @@ impl NameSet {
         self.0.remove(key).is_some()
     }
 
+    /// Takes every name out, each with the spelling it was inserted with.
+    pub fn drain(&mut self) -> impl Iterator<Item = Name> + '_ {
+        self.0.drain().map(|(name, ())| name)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Name> {
         self.0.keys()
     }
@@ -1205,6 +1215,11 @@ impl<V> FoldedMap<V> {
         self.remove_entry(key).map(|(_, value)| value)
     }
 
+    /// Takes every entry out, each with the name it was inserted by.
+    pub fn drain(&mut self) -> impl Iterator<Item = (Name, V)> + '_ {
+        self.table.drain()
+    }
+
     pub fn iter(&self) -> FoldedIter<'_, V> {
         FoldedIter(self.table.iter())
     }
@@ -1393,6 +1408,11 @@ impl FoldedSet {
         self.0.remove(key).is_some()
     }
 
+    /// Takes every name out, each with the spelling it was inserted with.
+    pub fn drain(&mut self) -> impl Iterator<Item = Name> + '_ {
+        self.0.drain().map(|(name, ())| name)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Name> {
         self.0.keys()
     }
@@ -1542,6 +1562,43 @@ mod tests {
             serde_json::to_string(&set).unwrap(),
             serde_json::to_string(&again).unwrap()
         );
+    }
+
+    /// A drain takes out every entry with the spelling it went in with, and
+    /// leaves the container empty.
+    #[test]
+    fn a_drain_takes_every_entry_out() {
+        let names = ["Foo", "bar", "Baz"];
+        let mut map: NameMap<usize> = names.into_iter().map(Name::from).zip(0..).collect();
+        let mut taken: Vec<(String, usize)> = map
+            .drain()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect();
+        taken.sort();
+        assert_eq!(
+            taken,
+            [
+                ("Baz".to_owned(), 2),
+                ("Foo".to_owned(), 0),
+                ("bar".to_owned(), 1)
+            ]
+        );
+        assert!(map.is_empty());
+        assert_eq!(map.get("Foo"), None);
+
+        let mut folded: FoldedMap<usize> = names.into_iter().map(Name::from).zip(0..).collect();
+        assert_eq!(folded.drain().count(), 3);
+        assert!(folded.is_empty());
+
+        let mut set: NameSet = names.into_iter().map(Name::from).collect();
+        let mut drained: Vec<String> = set.drain().map(|name| name.to_string()).collect();
+        drained.sort();
+        assert_eq!(drained, ["Baz", "Foo", "bar"]);
+        assert!(set.is_empty());
+
+        let mut folded_set: FoldedSet = names.into_iter().map(Name::from).collect();
+        assert_eq!(folded_set.drain().count(), 3);
+        assert!(folded_set.is_empty());
     }
 
     /// Texts that differ in case, and in what is not ASCII, from a small
