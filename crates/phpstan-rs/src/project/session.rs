@@ -405,6 +405,17 @@ impl AnalysisResult {
         std::mem::forget(project);
         report
     }
+
+    /// The report `options` make of this analysis, which is left as it is: its
+    /// results are copied, where `finalize` moves them.
+    pub fn finalize_copy(&self, options: &Finalize) -> Report {
+        finalize_results(
+            &self.project,
+            self.results.clone(),
+            options,
+            self.project.absolute_root(),
+        )
+    }
 }
 
 /// The report `options` make of `results`, checked in `project`: the level

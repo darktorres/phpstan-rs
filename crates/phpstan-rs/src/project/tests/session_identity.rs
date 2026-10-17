@@ -3,38 +3,11 @@
 //! walk did not list, the role of the roots that hold it.
 
 use super::super::Project;
-use super::super::session::{ErrorPolicy, Overrides, Session};
 use super::super::walk::Role;
-use super::helpers::TempDir;
+use super::helpers::{TempDir, resolved, session};
 use crate::registry::stub_set::Stubs;
-use config::ConfigFile;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// `dir`, resolved, so that the expected paths are the ones the session keys
-/// its files by.
-fn resolved(dir: &TempDir) -> PathBuf {
-    fs::canonicalize(&dir.0).unwrap()
-}
-
-/// A session over `root` with the default configuration, which analyses the
-/// whole root, and `stub_paths` as its stub directories.
-fn session(root: &Path, stub_paths: Vec<PathBuf>) -> Session {
-    let overrides = Overrides {
-        stub_paths,
-        no_composer: true,
-        ..Overrides::default()
-    };
-    Session::resolve(
-        &ConfigFile::empty(),
-        None,
-        root.to_path_buf(),
-        overrides,
-        Stubs::shared().clone(),
-        ErrorPolicy::Degrade,
-    )
-    .unwrap()
-}
 
 #[test]
 fn a_listed_file_is_classified_under_its_resolved_path_with_its_role() {

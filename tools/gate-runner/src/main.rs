@@ -103,7 +103,7 @@ fn run() -> Result<(), String> {
     }
     let stubs = stubs();
     let config = check_project::load_config(&args.request)?;
-    let run = check_project::prepare(&args.request, &config, stubs)?;
+    let run = check_project::prepare_cli(&args.request, &config, stubs)?;
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let analysis = run.session.run(args.dump_types);
@@ -160,7 +160,7 @@ fn drift(args: &Args, old: &Path, new: &Path) -> Result<(), String> {
     } else if args.request.config_file.is_some() || !args.request.paths.is_empty() {
         let stubs = stubs();
         let config = check_project::load_config(&args.request)?;
-        let run = check_project::prepare(&args.request, &config, stubs)?;
+        let run = check_project::prepare_cli(&args.request, &config, stubs)?;
         let loaded = run.session.load()?;
         gate::type_drift_in_project(&loaded.project, &old, &new)
     } else {
@@ -182,7 +182,7 @@ fn write_view(
         phpstan_rs::project::session::Finalize,
     ) -> phpstan_rs::project::session::Finalize,
 ) -> Result<(), String> {
-    let report = analysis.finalize(&adjust(run.finalize_options(None)));
+    let report = analysis.finalize_copy(&adjust(run.finalize_options(None)));
     let mut err = String::new();
     for line in notices.iter().chain(&report.notices()) {
         err.push_str(line);

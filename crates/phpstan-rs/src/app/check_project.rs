@@ -94,6 +94,22 @@ pub fn prepare(
     })
 }
 
+/// Resolves `request` as `check-project` on the command line does: rooted at
+/// the working directory, with a configuration that cannot be used as an error.
+pub fn prepare_cli(
+    request: &CheckRequest,
+    config: &ConfigFile,
+    stubs: Stubs,
+) -> Result<CheckRun, String> {
+    prepare(
+        request,
+        config,
+        stubs,
+        PathBuf::from("."),
+        ErrorPolicy::Fail,
+    )
+}
+
 impl CheckRun {
     /// The baseline to report against, loaded; the error is the line to
     /// report.

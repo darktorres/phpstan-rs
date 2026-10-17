@@ -18,6 +18,7 @@ mod project_settings;
 mod property_assign_facts;
 mod reflection_rule;
 mod session_identity;
+mod session_report;
 mod skipped_bodies;
 mod use_site_index;
 mod walk_identity;

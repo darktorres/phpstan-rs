@@ -1,6 +1,9 @@
+use super::super::session::{ErrorPolicy, Overrides, Session};
 use super::super::*;
+use crate::registry::stub_set::Stubs;
+use config::ConfigFile;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// `missingType.*` (this project's `MissingTypehintCheck` family) fires
 /// on almost any declaration that isn't fully, precisely typed - which
@@ -59,4 +62,29 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+/// `dir`, resolved, so that the expected paths are the ones the session keys
+/// its files by.
+pub(super) fn resolved(dir: &TempDir) -> PathBuf {
+    fs::canonicalize(&dir.0).unwrap()
+}
+
+/// A session over `root` with the default configuration, which analyses the
+/// whole root, and `stub_paths` as its stub directories.
+pub(super) fn session(root: &Path, stub_paths: Vec<PathBuf>) -> Session {
+    let overrides = Overrides {
+        stub_paths,
+        no_composer: true,
+        ..Overrides::default()
+    };
+    Session::resolve(
+        &ConfigFile::empty(),
+        None,
+        root.to_path_buf(),
+        overrides,
+        Stubs::shared().clone(),
+        ErrorPolicy::Degrade,
+    )
+    .unwrap()
 }
