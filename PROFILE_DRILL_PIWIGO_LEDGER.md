@@ -145,12 +145,12 @@ The rows that moved the Ir, in order (callgrind, off mode). Each row's output wa
 | PROD-1 | off P8a | `7726dacf` | 22,014,267,117 | −348.5 M |
 | PROD-2 | off P8b1 | `11837a04` | 21,775,661,606 | −238.6 M |
 | PROD-3 | off P8b | `791d29cb` | 20,928,053,254 | −847.6 M |
-| item 1, LOAD-1 (range, unattributed) | | `428ed943` → `99b1c2e4` | 21,114,767,711 | +226.2 M |
+| item 1, LOAD-1 | | `428ed943` → `99b1c2e4` | 21,114,767,711 | +226.2 M: path keys, their hashing and component walks (`aab67287`, `7bef998a`; about +128 M of self cost); `walk::resolve`'s `canonicalize` of symlinks (+24.6 M, `aab67287`); the content hash of every file (+25 M, `3334ebc9`, LOAD-1.4) |
 | the eight fixes (range; `fixes8`, one run) | | `99b1c2e4` → `ee56851c` | 20,909,227,687 | −205.5 M |
 | items 2 and 3, 28 commits | | `ee56851c` → `d870ddcb` | 21,289,129,115 | +379.9 M: `845efaab` (LOAD-3.4) +394 M, the other 27 commits −14 M |
 | item 5, LOAD-4.3 to 4.5 (range, unattributed) | | `d870ddcb` → `aa896697` | 21,331,572,685 | +42.4 M |
 
-The four range rows are measurements of commit ranges, not rows, so none is attributed to a commit. Each is one off-mode callgrind run per commit with default threads, on the dhat profile, from `~/.cache/prs-profile/`: `item1-regress` (base and head), `fixes8` and `regress-item5`. MEAS-3 puts the noise at up to 16.9 M. The +380 M of items 2 and 3 is attributed (the 28-commit row): `845efaab` (LOAD-3.4) adds a lossy UTF-8 decode of every file's text, for its length, in `read_and_parse_file` (`session.rs:1224`), which is 394 M of `Utf8Chunks::next`'s callers in the off run. The other 27 commits net −14 M. The function diff came from `callers.py` and `cgfn.py` on the two runs' callgrind files, with no new build.
+The four range rows are measurements of commit ranges, not rows. Item 1's and items 2 and 3's are attributed; the eight fixes' and item 5's are not. Each is one off-mode callgrind run per commit with default threads, on the dhat profile, from `~/.cache/prs-profile/`: `item1-regress` (base and head), `fixes8` and `regress-item5`. MEAS-3 puts the noise at up to 16.9 M. The +380 M of items 2 and 3 is attributed (the 28-commit row): `845efaab` (LOAD-3.4) adds a lossy UTF-8 decode of every file's text, for its length, in `read_and_parse_file` (`session.rs:1224`), which is 394 M of `Utf8Chunks::next`'s callers in the off run. The other 27 commits net −14 M. The function diff came from `callers.py` and `cgfn.py` on the two runs' callgrind files, with no new build.
 
 Warm runs (`regress-item5`): `d870ddcb` 13,382,535,920, `aa896697` 13,346,910,728 (−35.6 M). Heap at one thread (`regress-item5`): `d870ddcb` 2,913,109,581 bytes allocated, peak 807,381,174, exit 647,439,034; `aa896697` +23.7 M allocated (+0.82%), peak +2.2 M, exit −5.8 M. Item 1's heap was measured at default threads, so its deltas (allocated +2.7 M, peak +7.7 M, exit +5.7 M) are not comparable with item 5's.
 
