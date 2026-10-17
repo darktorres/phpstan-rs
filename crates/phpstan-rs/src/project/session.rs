@@ -1210,7 +1210,7 @@ impl Session {
             return Read::Loaded(Box::new(ReadFile {
                 text: FileText {
                     len: cached.len,
-                    source: keeps_source.then(|| String::from_utf8_lossy(bytes).into_owned()),
+                    source: keeps_source.then(|| super::source::decode_text(bytes).into_owned()),
                     content_hash,
                 },
                 parsed: cached.into_parsed(bytes),
@@ -1221,7 +1221,7 @@ impl Session {
         // when they are, which the lexer reads in place, and a lossy reading of
         // them when they are not, whose length is what checking weighs the file
         // by. A file that is not UTF-8 is parsed from its bytes.
-        let text = String::from_utf8_lossy(bytes);
+        let text = super::source::decode_text(bytes);
         let len = text.len();
         // A context file's bodies are kept as text. They are not parsed
         // when the load of the file reads nothing in them, unless the use

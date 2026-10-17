@@ -1287,7 +1287,7 @@ impl Server {
             // matches a file that was only ever loaded from disk.
             self.open_uris.insert(path.clone(), (uri, None));
             self.latest_text
-                .insert(path.clone(), String::from_utf8_lossy(&bytes).into_owned());
+                .insert(path.clone(), source::decode_text(&bytes).into_owned());
             let mut recorded = Vec::new();
             for (home, classified) in self.holders(&path) {
                 let slot = self.slot_mut(home);

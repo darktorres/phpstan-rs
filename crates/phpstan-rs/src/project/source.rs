@@ -61,3 +61,17 @@ pub fn content_hash(bytes: &[u8]) -> u128 {
     hasher.write(bytes);
     hasher.finish_128()
 }
+
+/// A file's bytes as text, when they are UTF-8.
+pub fn utf8_text(bytes: &[u8]) -> Option<&str> {
+    simdutf8::basic::from_utf8(bytes).ok()
+}
+
+/// A file's bytes as text: the bytes themselves when they are UTF-8, and a
+/// lossy reading of them, each invalid sequence replaced, when they are not.
+pub fn decode_text(bytes: &[u8]) -> Cow<'_, str> {
+    match utf8_text(bytes) {
+        Some(text) => Cow::Borrowed(text),
+        None => String::from_utf8_lossy(bytes),
+    }
+}

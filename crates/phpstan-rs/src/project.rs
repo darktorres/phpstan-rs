@@ -1,5 +1,6 @@
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use syntax::name::{NameMap, NameSet};
@@ -980,9 +981,9 @@ impl Project {
             return Some(AstRef::Parsed(ast));
         }
         let bytes = self.read_bytes(path).ok()?;
-        let parsed = match std::str::from_utf8(&bytes) {
-            Ok(text) => parse_with_ignores(None, path, text, None, false, false),
-            Err(_) => parse_with_ignores(None, path, &bytes[..], None, false, false),
+        let parsed = match source::utf8_text(&bytes) {
+            Some(text) => parse_with_ignores(None, path, text, None, false, false),
+            None => parse_with_ignores(None, path, &bytes[..], None, false, false),
         }
         .ok()?;
         let ast = Arc::new(parsed.ast);
@@ -1965,11 +1966,14 @@ impl Project {
         // not change what kind of file it is. The flag is read before the
         // parse, which keeps ignore comments for an analysed file only.
         let analyzed = self.files.get(path).map_or(analysed, |file| file.analyzed);
-        let mut parsed = match std::str::from_utf8(bytes) {
-            Ok(text) => {
-                parse_file_with_names(path, root, text, stub, BodyText::Parsed, None, analyzed)
+        // A file that is not UTF-8 is parsed from its bytes; a lossy reading of
+        // them is its text.
+        let text = source::decode_text(bytes);
+        let mut parsed = match &text {
+            Cow::Borrowed(text) => {
+                parse_file_with_names(path, root, *text, stub, BodyText::Parsed, None, analyzed)
             }
-            Err(_) => {
+            Cow::Owned(_) => {
                 parse_file_with_names(path, root, bytes, stub, BodyText::Parsed, None, analyzed)
             }
         }?;
@@ -2044,9 +2048,7 @@ impl Project {
                 declaration_references,
                 ignores,
                 anonymous_classes,
-                source: self
-                    .retain_source
-                    .then(|| String::from_utf8_lossy(bytes).into_owned()),
+                source: self.retain_source.then(|| text.into_owned()),
                 analyzed,
                 owner: self.owner_of_file(path),
                 bodies,

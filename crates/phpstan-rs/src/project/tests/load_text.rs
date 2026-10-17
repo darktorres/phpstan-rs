@@ -1,10 +1,11 @@
 //! What a load keeps of a file's text: the buffer a worker reads each file
-//! into, the source a file keeps (only a file whose tree is kept, and only in
-//! a project that retains source), and the length a file is weighed by.
+//! into, how its bytes are read as text, the source a file keeps (only a file
+//! whose tree is kept, and only in a project that retains source), and the
+//! length a file is weighed by.
 
 use super::super::*;
 use crate::project::session::{OverlayFile, Session, load_test_file, load_test_files};
-use crate::project::source::FileSource;
+use crate::project::source::{self, FileSource};
 use crate::registry::stub_set::Stubs;
 
 const CONTEXT: &str = "<?php namespace Lib; function helper(int $n): int { return $n; }";
@@ -92,4 +93,74 @@ fn a_file_that_is_not_utf8_is_parsed_from_its_bytes_and_weighed_by_its_lossy_len
         .expect("loaded");
     assert_eq!(file.source_len, String::from_utf8_lossy(&bytes).len());
     assert_eq!(file.functions.len(), 1);
+}
+
+#[test]
+fn a_utf8_file_is_parsed_from_its_text_and_weighed_by_its_byte_length() {
+    // Over 64 bytes, which the check reads a chunk at a time, and not ASCII.
+    let text = "<?php namespace Café; function crème_brûlée(): string { return 'déjà vu, 𝄞'; }";
+    let mut project = Project::new();
+    project.retain_source = true;
+    load_test_file(&mut project, PathBuf::from("utf8.php"), text, true);
+    let file = project.files.get(Path::new("utf8.php")).expect("loaded");
+    assert_eq!(file.source_len, text.len());
+    assert_eq!(project.source(Path::new("utf8.php")), Some(text));
+    assert!(
+        project
+            .registry()
+            .functions
+            .contains_key("Café\\crème_brûlée")
+    );
+}
+
+/// Sequences that are not UTF-8: a character cut short, an overlong form, a
+/// surrogate, a code point past U+10FFFF, and bytes no character starts with.
+const NOT_UTF8: [&[u8]; 16] = [
+    b"\xc3",
+    b"\xe2\x82",
+    b"\xf0\x9d\x84",
+    b"\xc0\x80",
+    b"\xc1\xbf",
+    b"\xe0\x80\x80",
+    b"\xe0\x9f\xbf",
+    b"\xf0\x80\x80\x80",
+    b"\xf0\x8f\xbf\xbf",
+    b"\xed\xa0\x80",
+    b"\xed\xbf\xbf",
+    b"\xf4\x90\x80\x80",
+    b"\xf5\x80\x80\x80",
+    b"\xff",
+    b"\x80",
+    b"\xbf",
+];
+
+#[test]
+fn the_check_agrees_with_std_on_every_cut_of_a_text_and_every_bad_sequence_in_one() {
+    // Characters of one to four bytes, over several of the check's chunks.
+    let text = "aé€𝄞".repeat(20);
+    let ascii = "x".repeat(130);
+    let mut inputs: Vec<Vec<u8>> = (0..=text.len())
+        .map(|end| text.as_bytes()[..end].to_vec())
+        .collect();
+    for host in [&text[..100], ascii.as_str()] {
+        for at in (0..=host.len()).filter(|&at| host.is_char_boundary(at)) {
+            for bad in NOT_UTF8 {
+                let mut bytes = host.as_bytes()[..at].to_vec();
+                bytes.extend_from_slice(bad);
+                bytes.extend_from_slice(&host.as_bytes()[at..]);
+                inputs.push(bytes);
+            }
+        }
+    }
+    for bytes in &inputs {
+        let std = std::str::from_utf8(bytes).ok();
+        assert_eq!(source::utf8_text(bytes), std, "{bytes:?}");
+        let decoded = source::decode_text(bytes);
+        assert_eq!(
+            matches!(decoded, Cow::Borrowed(_)),
+            std.is_some(),
+            "{bytes:?}"
+        );
+        assert_eq!(decoded, String::from_utf8_lossy(bytes), "{bytes:?}");
+    }
 }
