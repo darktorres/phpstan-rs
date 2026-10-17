@@ -7,6 +7,7 @@
 //! exercises exactly what `check-project` runs.
 
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
@@ -35,7 +36,7 @@ use super::file_cache;
 use super::source::FileSource;
 use super::walk::{FileIndex, FinalFiles, Listed, Role, Root, Unstreamed, Walk, Walked};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
-use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, ParsedFile, Project, ProjectSettings};
+use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, FileText, ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 
 /// The level reported when neither the command line nor the config sets
@@ -223,21 +224,34 @@ pub(crate) struct Listing {
     roots: Vec<Root<'static>>,
 }
 
-/// The name caches of one load, one for each thread of its pool. A thread
-/// parses its files with the names it has met in the load, and the load's end
-/// drops them, so a pool that outlives the load keeps none of them.
-struct Names(Vec<Mutex<syntax::name::NameCache>>);
+/// What each thread of a pool keeps through one load: the name cache it parses
+/// with, which holds the names it has met in the load, and the buffer it reads
+/// each file into. The load's end drops both, so a pool that outlives the load
+/// keeps neither.
+struct Workers(Vec<Mutex<Worker>>);
 
-impl Names {
+/// What one thread keeps from one file to the next.
+#[derive(Default)]
+struct Worker {
+    names: syntax::name::NameCache,
+    /// The bytes of the file being read, filled in place for each file.
+    bytes: Vec<u8>,
+}
+
+/// The largest read buffer a worker keeps once its file is parsed. A larger one
+/// is freed then, so one large file does not hold its bytes until the load ends.
+const KEPT_READ_CAPACITY: usize = 1 << 20;
+
+impl Workers {
     fn new(threads: usize) -> Self {
-        Names((0..threads.max(1)).map(|_| Mutex::default()).collect())
+        Workers((0..threads.max(1)).map(|_| Mutex::default()).collect())
     }
 
-    /// Runs `parse` with the name cache of the thread it runs on.
-    fn with<T>(&self, parse: impl FnOnce(&mut syntax::name::NameCache) -> T) -> T {
+    /// Runs `work` with the state of the thread it runs on.
+    fn with<T>(&self, work: impl FnOnce(&mut Worker) -> T) -> T {
         let slot = rayon::current_thread_index().unwrap_or(0) % self.0.len();
-        let mut names = self.0[slot].lock().unwrap_or_else(PoisonError::into_inner);
-        parse(&mut names)
+        let mut worker = self.0[slot].lock().unwrap_or_else(PoisonError::into_inner);
+        work(&mut worker)
     }
 }
 
@@ -247,7 +261,7 @@ impl Names {
 struct StreamParse<'l> {
     session: &'l Session,
     project: &'l Project,
-    names: &'l Names,
+    workers: &'l Workers,
     index_use_sites: bool,
     /// Each file parsed so far, with the role it was parsed under.
     parsed: Mutex<Vec<(PathBuf, Role, Read)>>,
@@ -271,11 +285,11 @@ impl FinalFiles for StreamParse<'_> {
             let parsed: Vec<(PathBuf, Role, Read)> = files
                 .into_iter()
                 .map(|file| {
-                    let read = self.names.with(|names| {
+                    let read = self.workers.with(|worker| {
                         self.session.read_indexed(
                             self.project,
                             &file,
-                            names,
+                            worker,
                             file.role != Role::Analysed,
                             self.index_use_sites,
                         )
@@ -575,15 +589,10 @@ fn composer_roots(dirs: &[PathBuf], root: &Path) -> Vec<PathBuf> {
     roots
 }
 
-/// A file read and parsed: how long it is as checking weighs it, its text
-/// when the project keeps it (empty otherwise), and its parse.
+/// A file read and parsed: its text, as the insert keeps it, and its parse.
 struct ReadFile {
-    len: usize,
-    source: String,
+    text: FileText,
     parsed: ParsedFile,
-    /// The digest of the bytes the file was read from, when the project
-    /// retains source.
-    content_hash: Option<u128>,
     /// Where the parse is stored once it is complete, for a file that was
     /// not read back from the per-file cache.
     cache_key: Option<file_cache::Key>,
@@ -1142,60 +1151,52 @@ impl Session {
     /// per-file cache, which a context file may be in a project built once;
     /// `index_use_sites` is whether its use sites are indexed with its parse.
     /// The file's role says whether it is analysed, which keeps its ignore
-    /// comments.
+    /// comments, and whether its text is kept (`Project::keeps_source`).
     fn read_and_parse_file(
         &self,
         project: &Project,
         listed: &Listed,
-        names: &mut syntax::name::NameCache,
+        worker: &mut Worker,
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
         let path = listed.path.as_path();
         let is_stub = listed.stub;
         let analysed = listed.role == Role::Analysed;
-        let Ok(bytes) = project.read_bytes(path) else {
+        let Worker { names, bytes } = worker;
+        if project.read_into(path, bytes).is_err() {
             return Read::Unread;
-        };
-        let bytes = bytes.into_owned();
+        }
+        let bytes: &[u8] = bytes;
         let content_hash = project
             .retain_source
-            .then(|| super::source::content_hash(&bytes));
+            .then(|| super::source::content_hash(bytes));
+        let keeps_source = project.keeps_source(analysed);
         let root = Some(self.absolute_root.as_path());
         let cache_key = if cacheable {
-            file_cache::key(&bytes, path, root, is_stub, index_use_sites)
+            file_cache::key(bytes, path, root, is_stub, index_use_sites)
         } else {
             None
         };
         if let Some(key) = &cache_key
             && let Some(cached) = file_cache::load(key)
         {
-            // The text is kept as a parse keeps it, when the project retains source.
-            let source = if project.retain_source {
-                String::from_utf8_lossy(&bytes).into_owned()
-            } else {
-                String::new()
-            };
             return Read::Loaded(Box::new(ReadFile {
-                len: cached.len,
-                source,
-                parsed: cached.into_parsed(path, &bytes),
-                content_hash,
+                text: FileText {
+                    len: cached.len,
+                    source: keeps_source.then(|| String::from_utf8_lossy(bytes).into_owned()),
+                    content_hash,
+                },
+                parsed: cached.into_parsed(path, bytes),
                 cache_key: None,
             }));
         }
-        // Whether the file is UTF-8 is settled here, once: the text is the
-        // bytes, moved, and the lexer takes it as it is. What checking
-        // costs is told by the length of the text as a lossy reading of the
-        // bytes has it, which is the bytes' own for a file that is UTF-8.
-        let (len, text) = match String::from_utf8(bytes) {
-            Ok(text) => (text.len(), Ok(text)),
-            Err(error) => {
-                let bytes = error.into_bytes();
-                let len = String::from_utf8_lossy(&bytes).len();
-                (len, Err(bytes))
-            }
-        };
+        // Whether the file is UTF-8 is settled here, once. Its text is the bytes
+        // when they are, which the lexer reads in place, and a lossy reading of
+        // them when they are not, whose length is what checking weighs the file
+        // by. A file that is not UTF-8 is parsed from its bytes.
+        let text = String::from_utf8_lossy(bytes);
+        let len = text.len();
         // A context file's bodies are kept as text. They are not parsed
         // when the load of the file reads nothing in them, unless the use
         // sites of the file are indexed from its tree.
@@ -1205,16 +1206,16 @@ impl Session {
             (true, false) => super::BodyText::Skipped,
         };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
-            Ok(text) => super::parse_file_with_names(
+            Cow::Borrowed(text) => super::parse_file_with_names(
                 path,
                 root,
-                text,
+                *text,
                 is_stub,
                 body_text,
                 Some(names),
                 analysed,
             ),
-            Err(bytes) => super::parse_file_with_names(
+            Cow::Owned(_) => super::parse_file_with_names(
                 path,
                 root,
                 bytes,
@@ -1226,13 +1227,9 @@ impl Session {
         })) else {
             return Read::Unread;
         };
-        let parsed = match parsed {
+        let mut parsed = match parsed {
             Ok(parsed) => parsed,
             Err(error) => {
-                let bytes = match &text {
-                    Ok(text) => text.as_bytes(),
-                    Err(bytes) => bytes,
-                };
                 let at = syntax::LineIndex::new(bytes).line_col(error.span.start);
                 return Read::Unparsed(ParseFailure {
                     line: at.line,
@@ -1241,39 +1238,43 @@ impl Session {
                 });
             }
         };
-        // The text of the file is kept only when the project keeps it.
-        let source = match text {
-            Ok(text) if project.retain_source => text,
-            Err(bytes) if project.retain_source => String::from_utf8_lossy(&bytes).into_owned(),
-            _ => String::new(),
-        };
+        // Only the reader holds the text, so the use sites are indexed here.
+        project.index_use_sites(&mut parsed, &text);
+        let source = keeps_source.then(|| text.into_owned());
         Read::Loaded(Box::new(ReadFile {
-            len,
-            source,
+            text: FileText {
+                len,
+                source,
+                content_hash,
+            },
             parsed,
-            content_hash,
             cache_key,
         }))
     }
 
-    /// `read_and_parse_file`, then the parts of a file that are found beside
-    /// its parse, then its entry in the per-file cache.
+    /// `read_and_parse_file`, then the file's entry in the per-file cache.
     fn read_indexed(
         &self,
         project: &Project,
         listed: &Listed,
-        names: &mut syntax::name::NameCache,
+        worker: &mut Worker,
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
-        let mut read = self.read_and_parse_file(project, listed, names, cacheable, index_use_sites);
+        let mut read =
+            self.read_and_parse_file(project, listed, worker, cacheable, index_use_sites);
+        if worker.bytes.capacity() > KEPT_READ_CAPACITY {
+            worker.bytes = Vec::new();
+        }
         if let Read::Loaded(file) = &mut read {
-            project.index_use_sites(&mut file.parsed, &file.source);
             file.parsed.owner = listed.owner;
             if let Some(key) = file.cache_key.take()
                 && file_cache::can_store()
             {
-                file_cache::store(&key, &file_cache::CachedFile::of(&file.parsed, file.len));
+                file_cache::store(
+                    &key,
+                    &file_cache::CachedFile::of(&file.parsed, file.text.len),
+                );
             }
         }
         read
@@ -1301,18 +1302,18 @@ impl Session {
         // project is built once, so only such a project reads the cache.
         let built_once = project.built_once;
         let shared: &Project = project;
-        let names = Names::new(self.pool.current_num_threads());
+        let workers = Workers::new(self.pool.current_num_threads());
         let (parsed, numbering): (Vec<Read>, _) = self.pool.install(|| {
             rayon::join(
                 || {
                     ordered
                         .par_iter()
                         .map(|file| {
-                            names.with(|names| {
+                            workers.with(|worker| {
                                 self.read_indexed(
                                     shared,
                                     file,
-                                    names,
+                                    worker,
                                     built_once && file.role != Role::Analysed,
                                     index_use_sites,
                                 )
@@ -1340,18 +1341,12 @@ impl Session {
         for ((file, read), id) in ordered.iter().zip(parsed).zip(numbers) {
             match read {
                 Read::Loaded(loaded) => {
-                    let ReadFile {
-                        source,
-                        parsed,
-                        content_hash,
-                        ..
-                    } = *loaded;
+                    let ReadFile { text, parsed, .. } = *loaded;
                     project.insert_numbered_file(
                         id,
                         &file.path,
                         parsed,
-                        source,
-                        content_hash,
+                        text,
                         file.role == Role::Analysed,
                     );
                 }
@@ -1420,12 +1415,12 @@ impl Session {
     pub fn load(&self) -> Result<Loaded, String> {
         let mut project = Project::loading();
         self.configure(&mut project);
-        let names = Names::new(self.pool.current_num_threads());
+        let workers = Workers::new(self.pool.current_num_threads());
         let index_use_sites = project.indexes_class_fn_sites();
         let streamed = StreamParse {
             session: self,
             project: &project,
-            names: &names,
+            workers: &workers,
             index_use_sites,
             parsed: Mutex::default(),
         };
@@ -1473,11 +1468,11 @@ impl Session {
                     deferred
                         .par_iter()
                         .map(|&at| {
-                            let read = names.with(|names| {
+                            let read = workers.with(|worker| {
                                 self.read_indexed(
                                     &project,
                                     combined_files[at],
-                                    names,
+                                    worker,
                                     // The context files come first.
                                     at < context_files.len(),
                                     index_use_sites,
@@ -1543,14 +1538,9 @@ impl Session {
             let path = &file.path;
             match parsed {
                 Read::Loaded(loaded) => {
-                    let ReadFile {
-                        source,
-                        parsed,
-                        content_hash,
-                        ..
-                    } = *loaded;
+                    let ReadFile { text, parsed, .. } = *loaded;
                     note_lex_warnings(path, &parsed);
-                    project.insert_numbered_file(id, path, parsed, source, content_hash, false)
+                    project.insert_numbered_file(id, path, parsed, text, false)
                 }
                 Read::Unparsed(failure) => {
                     skipped_context += 1;
@@ -1578,16 +1568,10 @@ impl Session {
             let path = &file.path;
             match parsed {
                 Read::Loaded(loaded) => {
-                    let ReadFile {
-                        len,
-                        source,
-                        parsed,
-                        content_hash,
-                        cache_key: _,
-                    } = *loaded;
+                    let ReadFile { text, parsed, .. } = *loaded;
                     note_lex_warnings(path, &parsed);
-                    analyze_sizes[index] = len;
-                    project.insert_numbered_file(id, path, parsed, source, content_hash, true)
+                    analyze_sizes[index] = text.len;
+                    project.insert_numbered_file(id, path, parsed, text, true)
                 }
                 Read::Unparsed(failure) => {
                     skipped_analyze += 1;

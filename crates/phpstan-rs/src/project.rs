@@ -90,6 +90,15 @@ impl StubFileSet {
     }
 }
 
+/// A loaded file's text as its load hands it over: how long it is, which
+/// checking weighs it by, the text itself when the file keeps one, and the
+/// digest of its bytes when the project retains source.
+pub(crate) struct FileText {
+    pub(crate) len: usize,
+    pub(crate) source: Option<String>,
+    pub(crate) content_hash: Option<u128>,
+}
+
 /// One file's parsed state, kept around so `Project::update_file` can undo
 /// exactly what that file previously contributed - both to the shared
 /// registry and to `dependents` below - before re-indexing its new parse.
@@ -123,10 +132,10 @@ pub(crate) struct FileState {
     ignores: ignore_comments::IgnoreComments,
     // The registry names of the file's anonymous classes.
     anonymous_classes: Vec<Name>,
-    // This file's own raw source text, kept only when
-    // `Project::retain_source` is on (see that field's own doc comment) -
-    // `None` for every ordinary `check-project` batch run, which never
-    // needs it again once this file's own diagnostics are computed.
+    // This file's own raw source text, kept only when `Project::keeps_source`
+    // says so: the project retains source and the file keeps its tree. `None`
+    // for every ordinary `check-project` batch run, which never needs it again
+    // once this file's own diagnostics are computed.
     source: Option<String>,
     // Same meaning as the `analyzed` parameter of `insert_numbered_file` -
     // `true` for a real, first-party file being checked, `false` for
@@ -877,9 +886,9 @@ impl Project {
         self.packages.name(owner)
     }
 
-    /// A loaded file's own retained raw source text, when `retain_source`
-    /// is on and this exact path is currently loaded - `None` otherwise
-    /// (including for a real, loaded file, if retention isn't enabled).
+    /// A loaded file's own retained raw source text, when the file keeps its
+    /// source (`Project::keeps_source`) and this exact path is currently
+    /// loaded - `None` otherwise.
     pub fn source(&self, path: &Path) -> Option<&str> {
         self.files.get(path)?.source.as_deref()
     }
@@ -912,6 +921,26 @@ impl Project {
     /// The bytes of the file at `path`: the document's, else the disk's.
     pub(crate) fn read_bytes(&self, path: &Path) -> std::io::Result<std::borrow::Cow<'_, [u8]>> {
         self.source.read(&self.full_path(path))
+    }
+
+    /// Reads the bytes of the file at `path` into `buf`, which is cleared
+    /// first, so a worker reads each of its files into one buffer.
+    pub(crate) fn read_into(&self, path: &Path, buf: &mut Vec<u8>) -> std::io::Result<()> {
+        self.source.read_into(&self.full_path(path), buf)
+    }
+
+    /// Whether a loaded file keeps its tree: an analysed file's does, and a
+    /// context file's does unless the project is built once, which drops
+    /// each context tree on the thread that parsed it.
+    pub(crate) fn keeps_tree(&self, analyzed: bool) -> bool {
+        analyzed || !self.built_once
+    }
+
+    /// Whether a loaded file keeps its source text: the project retains
+    /// source, and the file keeps its tree. Any other file's text is read and
+    /// parsed on its worker, and dropped there.
+    pub(crate) fn keeps_source(&self, analyzed: bool) -> bool {
+        self.retain_source && self.keeps_tree(analyzed)
     }
 
     /// `path` as the disk names it: under the root, when there is one.
@@ -970,14 +999,15 @@ impl Project {
         numbers
     }
 
-    /// Inserts `parsed` as the file `path`, which `id` numbers.
+    /// Inserts `parsed` as the file `path`, which `id` numbers. The reader of
+    /// the file indexed its use sites from its text (`index_use_sites`)
+    /// before the insert: only the reader holds the text.
     pub(crate) fn insert_numbered_file(
         &mut self,
         id: FileId,
         path: &Path,
         parsed: ParsedFile,
-        source: String,
-        content_hash: Option<u128>,
+        text: FileText,
         analyzed: bool,
     ) {
         let ParsedFile {
@@ -1003,6 +1033,11 @@ impl Project {
             class_fn_refs,
             owner,
         } = parsed;
+        let FileText {
+            len,
+            source,
+            content_hash,
+        } = text;
         self.begin_declaration_changes();
         for decl in &built_decls {
             self.registry.insert_built_decl(decl.clone(), analyzed);
@@ -1011,11 +1046,11 @@ impl Project {
             ast.is_some() || (!analyzed && self.built_once),
             "a file whose tree is needed was read back from the cache"
         );
-        let class_fn_refs = class_fn_refs.unwrap_or_else(|| {
-            ast.as_deref()
-                .map_or_else(Vec::new, |ast| self.class_fn_refs_of(ast, &source))
-        });
-        for (span, target) in class_fn_refs {
+        debug_assert!(
+            class_fn_refs.is_some() || ast.is_none(),
+            "a parse with a tree has its use sites indexed before its insert"
+        );
+        for (span, target) in class_fn_refs.unwrap_or_default() {
             self.use_sites.insert(path, target, span);
         }
         for name in &classes {
@@ -1033,11 +1068,12 @@ impl Project {
         self.globals_stale.insert(id);
         let load_order = self.next_load_order;
         self.next_load_order += 1;
+        let keeps_tree = self.keeps_tree(analyzed);
         self.files.insert_at(
             id,
             FileState {
-                kept_ast: ast.filter(|_| analyzed || !self.built_once),
-                source_len: source.len(),
+                kept_ast: ast.filter(|_| keeps_tree),
+                source_len: len,
                 content_hash,
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
@@ -1048,7 +1084,7 @@ impl Project {
                 declaration_references,
                 ignores,
                 anonymous_classes,
-                source: self.retain_source.then_some(source),
+                source,
                 analyzed,
                 owner,
                 bodies,

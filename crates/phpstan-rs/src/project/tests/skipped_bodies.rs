@@ -29,10 +29,16 @@ fn parsed(skip: BodyText) -> ParsedFile {
 fn insert_context(project: &mut Project, skip: BodyText) {
     let path = PathBuf::from("ctx.php");
     let id = project.files.id_for(&path);
-    let hash = project
-        .retain_source
-        .then(|| crate::project::source::content_hash(CONTEXT.as_bytes()));
-    project.insert_numbered_file(id, &path, parsed(skip), CONTEXT.to_string(), hash, false);
+    let mut file = parsed(skip);
+    project.index_use_sites(&mut file, CONTEXT);
+    let text = FileText {
+        len: CONTEXT.len(),
+        source: project.keeps_source(false).then(|| CONTEXT.to_string()),
+        content_hash: project
+            .retain_source
+            .then(|| crate::project::source::content_hash(CONTEXT.as_bytes())),
+    };
+    project.insert_numbered_file(id, &path, file, text, false);
 }
 
 #[test]

@@ -4,7 +4,7 @@
 
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -32,6 +32,20 @@ impl FileSource {
             Some(bytes) => Ok(Cow::Borrowed(&bytes[..])),
             None => std::fs::read(path).map(Cow::Owned),
         }
+    }
+
+    /// Reads the bytes of `path` into `buf`, which is cleared first: the
+    /// overlay's, else the disk's. A reader that fills one buffer for every
+    /// file allocates only when a file is longer than those before it.
+    pub fn read_into(&self, path: &Path, buf: &mut Vec<u8>) -> io::Result<()> {
+        buf.clear();
+        match self.overlay.get(path) {
+            Some(bytes) => buf.extend_from_slice(&bytes[..]),
+            None => {
+                std::fs::File::open(path)?.read_to_end(buf)?;
+            }
+        }
+        Ok(())
     }
 
     /// The bytes of `path` on the disk, whatever the overlay holds.
