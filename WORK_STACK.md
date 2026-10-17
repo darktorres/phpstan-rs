@@ -11,7 +11,7 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-17, `5cca45c1` on branch `callgrind-20g`. Counts below were
+State as of 2026-10-17, `df804239` on branch `callgrind-20g`. Counts below were
 read from the files on that date. This file covers this branch only.
 
 ## Where to resume
@@ -23,7 +23,7 @@ level 8's order; DOC-2.1 stays deferred.
 
 Level 8 is the one active level. It holds the 20 G plan and the off drill, and
 its order is in its section below. Work the lowest item that has a READY row
-(item 2 on 2026-10-17).
+(item 3 on 2026-10-17).
 
 ## The stack
 
@@ -180,8 +180,8 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 2: LOAD-2.4 (LOAD-2.3, 2.5, 2.6, 2.7 and 2.8 are in: `07595369`,
-  `8590ff55`, `c1db8372`, `c7ff651c`, `2cd13c8e` and `47adfd19`). LOAD-2.2's
+- Item 2: none ready. LOAD-2.3 to 2.8 are in: `07595369`, `8590ff55`,
+  `c1db8372`, `c7ff651c`, `2cd13c8e`, `47adfd19` and `df804239` (LOAD-2.4). LOAD-2.2's
   walk is in (`85a4ecad`). Its last part, deleting
   `path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`, waits on a
   decision: what replaces the name floor for the editor's degrade root (no
@@ -190,8 +190,9 @@ later item waits for that need. The READY rows, item by item:
   vendor directory by its resolved path, as MAGO does (recommended; a `vendor/`
   outside Composer is then walked); (b) keep all three names until
   `exclude_paths` exists; (c) delete all three now, so an editor with no
-  `paths` analyses `vendor/`. LOAD-2.4 needs only the walk, so the decision does
-  not hold it: until it is made, the walk keeps its name list.
+  `paths` analyses `vendor/`. Until the decision is made, the walk keeps its
+  name list. The Piwigo gate and the measurements of items 2's rows (wall time,
+  instructions) have not run; they need approval.
 - Item 3: LOAD-3.2 (3.1 waits on REG-16.4, level 2).
 - Item 5: LOAD-4.3, 4.4, 4.5 and 4.7 (4.4's need, LOAD-2.5, is in: `8590ff55`).
 - Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).
