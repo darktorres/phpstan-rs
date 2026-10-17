@@ -35,8 +35,12 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   - R6 (`59bf55bc`): −124.2 M off and −130.6 M warm, all of it the discovery thread's, and
     −38.3 ms of the warm run's 1.33 s (p = 0.011), with no off wall change beyond the noise.
     The drop reads a directory's kind from its parent's listing too (its Built).
+  - R14 (`1f351379`, `6e49d4e7`): −11.5 M off. The main thread's stretch before the walk fell
+    from 16 to 20 ms to 0 to 4 ms, and its `readlink`s from 7,478 to 3,055. The warm pairs
+    give −65.6 ms (p = 0.033), more than that stretch can give. Most of the `readlink`s left
+    are the installed packages' (the ledger's LOAD-9, READY).
 
-  R14 is next.
+  R13 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -45,7 +49,8 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   `class_info.rs`, `function_sig.rs` and `provenance.rs`, R15 `allocator.rs`, `lib.rs` and
   `main.rs`, R2 `walk.rs`, `session.rs`, `file_table.rs`, `project.rs`, `lsp.rs`,
   `dir_listings.rs` and `vendor.rs`, with `PathHash` and `path_hash` now in the composer
-  crate's `hashed_path.rs`, R3 `walk.rs`, R4 `session.rs`, and R6 `vendor.rs`.
+  crate's `hashed_path.rs`, R3 `walk.rs`, R4 `session.rs`, R6 `vendor.rs`, and R14
+  `hashed_path.rs`, `vendor.rs`, `walk.rs` and `session.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -716,6 +721,26 @@ Piwigo oracle.
 perf recording (0.210 to 0.222 s off and 0.147 to 0.161 s warm today), and the main thread's
 `readlink` and `statx` counts from `strace -ff` (Appendix D), before and after.
 
+**Built** as `1f351379` and `6e49d4e7`: −11.5 M off, and the main thread's `readlink`s 7,478 →
+3,055 and `statx` calls 2,231 → 238. Its stretch before the walk fell from 16 to 20 ms to 0 to
+4 ms, in two recordings each, off and warm. The warm pairs give −65.6 ms (p = 0.033), more than
+that stretch can give, so the stretch is the row's saving and the pairs show only its
+direction. Where it differs from the Change:
+
+- `VendorContext` keeps one list of files and one of directories, each of `VendorPath`s
+  (`Resolved` or `Unresolved`), not a resolved and an as-written list of each.
+- `ClassLoader.php` is located by the resolver, through its directory's listing, as the
+  autoload entries are.
+- The resolver takes the vendor directory and its parent as canonical, so it does not list the
+  directories above them. The first commit compared them as paths, component by component
+  (+2.7 M on the discovery thread); the second compares their bytes.
+- Of the main thread's 3,055 `readlink`s left, 2,654 come from 409 resolutions of the installed
+  packages' directories (`read_installed`, which resolves each package's directory and then its
+  install path, the same directory), and the manifest is read before discovery is spawned: the
+  ledger's LOAD-9.
+
+The ledger's LOAD-8.14 has the numbers.
+
 ### 10. R13: the autoload files' parse not repeated
 
 *LOAD-8.13. An Ir row in warm runs, and a warm wall row until R10. Needs nothing.*
@@ -1110,6 +1135,8 @@ ours is noted, and a run it distorts is taken again.
   reproduce; its row in §1's table.
 - Done with R6: LOAD-8.6's row, with the kinds read from the listings; its row in §1's table;
   LOAD-8.14 is READY.
+- Done with R14: LOAD-8.14's row, with the one list of `VendorPath`s and the pairs against the
+  stretch; its row in §1's table; LOAD-9 (the installed packages' resolutions, READY).
 - Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
   row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
