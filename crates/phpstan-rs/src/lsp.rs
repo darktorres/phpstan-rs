@@ -56,7 +56,7 @@ use crate::project::session::{
 };
 use crate::project::source::{self, FileSource};
 use crate::project::use_sites;
-use crate::project::walk::{self, Listed, Role};
+use crate::project::walk::{Listed, Role};
 use crate::project::{Project, ProjectSettings};
 use crate::registry::stub_set::{StubSource, Stubs};
 use crate::registry::{FunctionReflection, format_signature, param_label};
@@ -691,7 +691,7 @@ impl Server {
         let mut messages = Vec::new();
         let mut added = Vec::new();
         for root in roots {
-            let resolved = walk::resolve(root);
+            let resolved = composer::manifest::resolve(root);
             if self
                 .folders
                 .iter()
@@ -740,7 +740,10 @@ impl Server {
     /// held are published again from the homes that still hold them, and the
     /// open documents move to the homes that hold them now.
     fn remove_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
-        let resolved_roots: Vec<PathBuf> = roots.iter().map(|root| walk::resolve(root)).collect();
+        let resolved_roots: Vec<PathBuf> = roots
+            .iter()
+            .map(|root| composer::manifest::resolve(root))
+            .collect();
         let mut affected: Vec<PathBuf> = Vec::new();
         let mut index = 0;
         while index < self.folders.len() {
@@ -2589,7 +2592,7 @@ struct DebounceHandle {
 /// which holds no session and must not wait for the server's lock. It is
 /// the path `Session::identify` gives a file that exists.
 fn document_key(uri: &Uri) -> Option<PathBuf> {
-    Some(walk::resolve(&uri_to_path(uri)?))
+    Some(composer::manifest::resolve(&uri_to_path(uri)?))
 }
 
 /// Records `path`'s new edit and wakes the debounce worker - a handful

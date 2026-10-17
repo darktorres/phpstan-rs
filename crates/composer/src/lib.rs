@@ -13,11 +13,11 @@ pub mod vendor;
 
 use rustc_hash::FxHashMap;
 use std::ffi::OsString;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dir_listings::DirListings;
-use manifest::{ComposerManifest, lexically_normalized};
+use manifest::ComposerManifest;
 use vendor::VendorContext;
 
 /// Everything a Composer project root provides, read once.
@@ -138,18 +138,13 @@ pub enum PackageOwner {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PackageIndex {
     manifests: Vec<ComposerManifest>,
-    /// Every owned directory, absolute: each root's own, and each
-    /// installed package's `vendor/` link and install directory.
-    dirs: Vec<OwnedDir>,
-    // Indices into `dirs` by directory as written, and by its normalized
-    // form: a file's owners are among its ancestors.
+    /// The owned directories: each root's own, and each installed package's
+    /// `vendor/` directory and install directory.
     by_dir: DirTrie,
-    by_normalized: DirTrie,
 }
 
-/// Directories by their path components, so the owners among a path's
-/// ancestors are found by one walk down its components, hashing each
-/// component once, and not by hashing every ancestor path in full.
+/// Directories by their path components, so the directory that owns a path
+/// is found by one walk down its components, hashing each component once.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct DirTrie {
     root: TrieNode,
@@ -157,13 +152,13 @@ struct DirTrie {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct TrieNode {
-    /// The last of the directories that end here, in the order listed.
-    last: Option<usize>,
+    /// The owner of the directory that ends here: the last one listed.
+    owner: Option<PackageOwner>,
     children: FxHashMap<OsString, TrieNode>,
 }
 
 impl DirTrie {
-    fn insert(&mut self, dir: &Path, index: usize) {
+    fn insert(&mut self, dir: &Path, owner: PackageOwner) {
         let mut node = &mut self.root;
         for component in dir.components() {
             node = node
@@ -172,120 +167,49 @@ impl DirTrie {
                 .or_default();
         }
         // Directories are inserted in listing order.
-        node.last = Some(index);
+        node.owner = Some(owner);
     }
 
-    /// Calls `found` with the directory that ends at each prefix of
-    /// `components` the trie has one for, shortest prefix first.
-    fn for_each_prefix<'a>(
-        &self,
-        components: impl Iterator<Item = Component<'a>>,
-        mut found: impl FnMut(usize),
-    ) {
+    /// The owner of the deepest owned directory that contains `dir`, `dir`
+    /// itself included.
+    fn deepest(&self, dir: &Path) -> Option<PackageOwner> {
         let mut node = &self.root;
-        for component in components {
+        let mut owner = None;
+        for component in dir.components() {
             let Some(next) = node.children.get(component.as_os_str()) else {
-                return;
+                break;
             };
             node = next;
-            if let Some(index) = node.last {
-                found(index);
-            }
+            owner = node.owner.or(owner);
         }
-    }
-}
-
-/// A directory some package owns, with what `PackageIndex::owner`
-/// compares a file against computed once.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OwnedDir {
-    dir: PathBuf,
-    // `dir` with `.` and `..` resolved.
-    normalized: PathBuf,
-    depth: usize,
-    owner: PackageOwner,
-}
-
-impl OwnedDir {
-    fn new(dir: PathBuf, owner: PackageOwner) -> OwnedDir {
-        let normalized = lexically_normalized(&dir);
-        OwnedDir {
-            depth: dir.components().count(),
-            dir,
-            normalized,
-            owner,
-        }
+        owner
     }
 }
 
 impl PackageIndex {
     pub fn new(manifests: Vec<ComposerManifest>) -> PackageIndex {
-        let mut dirs = Vec::new();
+        let mut by_dir = DirTrie::default();
         for (i, manifest) in manifests.iter().enumerate() {
-            dirs.push(OwnedDir::new(
-                manifest.absolute_root.clone(),
-                PackageOwner::Root(i),
-            ));
+            by_dir.insert(&manifest.absolute_root, PackageOwner::Root(i));
             for (j, package) in manifest.installed.iter().enumerate() {
                 let owner = PackageOwner::Installed(i, j);
-                dirs.push(OwnedDir::new(manifest.absolute(&package.vendor_dir), owner));
-                dirs.push(OwnedDir::new(package.install_dir.clone(), owner));
+                by_dir.insert(&package.vendor_dir, owner);
+                by_dir.insert(&package.install_dir, owner);
             }
         }
-        let mut by_dir = DirTrie::default();
-        let mut by_normalized = DirTrie::default();
-        for (index, dir) in dirs.iter().enumerate() {
-            by_dir.insert(&dir.dir, index);
-            by_normalized.insert(&dir.normalized, index);
-        }
-        PackageIndex {
-            manifests,
-            dirs,
-            by_dir,
-            by_normalized,
-        }
+        PackageIndex { manifests, by_dir }
     }
 
     pub fn manifests(&self) -> &[ComposerManifest] {
         &self.manifests
     }
 
-    /// The package owning the absolute `file`: the one whose directory
-    /// containing it is deepest.
-    pub fn owner(&self, file: &Path) -> Option<PackageOwner> {
-        // The directories `path_starts_with(file, dir)` holds for: an
-        // ancestor of `file` as written, or of it normalized. Of equally
-        // deep ones the last listed wins.
-        let mut best: Option<usize> = None;
-        let mut consider = |index: usize| {
-            let key = |i: usize| (self.dirs[i].depth, i);
-            if best.is_none_or(|b| key(index) > key(b)) {
-                best = Some(index);
-            }
-        };
-        self.by_dir
-            .for_each_prefix(file.components(), &mut consider);
-        // `lexically_normalized`, as the components it would have: a `.` is
-        // dropped, and a `..` takes the last one off unless it is all that
-        // is left of a root, in which case it stays.
-        let mut normalized: Vec<Component<'_>> = Vec::new();
-        for component in file.components() {
-            match component {
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    let can_pop = !matches!(normalized.as_slice(), [] | [Component::RootDir]);
-                    if can_pop {
-                        normalized.pop();
-                    } else {
-                        normalized.push(Component::ParentDir);
-                    }
-                }
-                other => normalized.push(other),
-            }
-        }
-        self.by_normalized
-            .for_each_prefix(normalized.into_iter(), &mut consider);
-        best.map(|index| self.dirs[index].owner)
+    /// The package owning the directory `dir`: the one whose owned directory
+    /// containing it is deepest, the last listed among equals. `dir` is an
+    /// absolute path with `.` and `..` taken out and its links followed, as
+    /// `manifest::resolve` gives it. A file belongs to its directory's package.
+    pub fn owner_of_dir(&self, dir: &Path) -> Option<PackageOwner> {
+        self.by_dir.deepest(dir)
     }
 
     /// `owner`'s package name; a root package may have none.

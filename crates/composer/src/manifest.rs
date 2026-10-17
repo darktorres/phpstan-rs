@@ -72,8 +72,8 @@ pub struct InstalledPackage {
     pub kind: String,
     /// Canonical install directory.
     pub install_dir: PathBuf,
-    /// The `vendor/<name>` directory as written, which can be a symlink
-    /// to `install_dir` for a path repository.
+    /// Canonical `vendor/<name>` directory: a symlink to `install_dir` for
+    /// a path repository is followed.
     pub vendor_dir: PathBuf,
     pub provide: Vec<String>,
     pub replace: Vec<String>,
@@ -195,7 +195,7 @@ impl ComposerManifest {
                 manifest.repositories.push(Repository { kind, url });
             }
         }
-        manifest.installed = read_installed(root);
+        manifest.installed = read_installed(absolute_root);
         Some(manifest)
     }
 
@@ -279,8 +279,8 @@ impl ComposerManifest {
     }
 }
 
-fn read_installed(root: &Path) -> Vec<InstalledPackage> {
-    let composer_dir = root.join("vendor").join("composer");
+fn read_installed(absolute_root: &Path) -> Vec<InstalledPackage> {
+    let composer_dir = absolute_root.join("vendor").join("composer");
     let Ok(text) = std::fs::read_to_string(composer_dir.join("installed.json")) else {
         return Vec::new();
     };
@@ -291,12 +291,12 @@ fn read_installed(root: &Path) -> Vec<InstalledPackage> {
         .iter()
         .filter_map(|package| {
             let name: String = package.read("name")?;
-            let vendor_dir = root.join("vendor").join(&name);
+            let vendor_dir = resolve(&absolute_root.join("vendor").join(&name));
             let install_dir = package
                 .read::<String>("install-path")
                 .map(|rel| composer_dir.join(rel))
                 .unwrap_or_else(|| vendor_dir.clone());
-            let install_dir = std::fs::canonicalize(&install_dir).unwrap_or(install_dir);
+            let install_dir = resolve(&install_dir);
             Some(InstalledPackage {
                 kind: package
                     .read("type")
@@ -333,6 +333,24 @@ pub fn lexically_normalized(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// The resolved path of `path`: its links followed and its `.` and `..`
+/// taken out. A path that does not exist resolves through its nearest
+/// ancestor that does, so a file that is gone keeps the path it had while
+/// its directory stands. A path with no existing ancestor is returned as
+/// given.
+pub fn resolve(path: &Path) -> PathBuf {
+    if let Ok(resolved) = std::fs::canonicalize(path) {
+        return resolved;
+    }
+    for ancestor in path.ancestors().skip(1) {
+        if let Ok(resolved) = std::fs::canonicalize(ancestor) {
+            let rest = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
+            return lexically_normalized(&resolved.join(rest));
+        }
+    }
+    path.to_path_buf()
 }
 
 /// Component-wise prefix test of two paths spelled the same way (both
@@ -656,7 +674,8 @@ mod tests {
         assert_eq!(names, vec!["acme/b"]);
         let index = crate::PackageIndex::new(vec![manifest]);
         for file in ["vendor/acme/b/src/B.php", "packages/b/src/B.php"] {
-            let owner = index.owner(&root.join(file)).unwrap();
+            let resolved = resolve(&root.join(file));
+            let owner = index.owner_of_dir(resolved.parent().unwrap()).unwrap();
             assert_eq!(index.name(owner), Some("acme/b"), "{file}");
         }
         let _ = std::fs::remove_dir_all(&root);

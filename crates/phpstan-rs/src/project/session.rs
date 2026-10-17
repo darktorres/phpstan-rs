@@ -33,7 +33,7 @@ use crate::{ext, ignore_errors};
 
 use super::file_cache;
 use super::source::FileSource;
-use super::walk::{self, FileIndex, Listed, Role, Root, Walk, Walked};
+use super::walk::{FileIndex, Listed, Role, Root, Walk, Walked};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
@@ -248,7 +248,7 @@ pub(crate) fn identify_through(
             .unwrap_or_else(PoisonError::into_inner)
             .get(path)
             .cloned()
-            .unwrap_or_else(|| walk::resolve(path)),
+            .unwrap_or_else(|| composer::manifest::resolve(path)),
     }
 }
 
@@ -294,7 +294,7 @@ fn unlisted_role(path: &Path, root: Option<&Path>) -> Role {
 /// How `path` is classified when no session lists the project: its resolved
 /// path, with the role `unlisted_role` gives it, and not a stub.
 pub(crate) fn classify_unlisted(path: &Path) -> Classified {
-    let path = walk::resolve(path);
+    let path = composer::manifest::resolve(path);
     let role = unlisted_role(&path, None);
     Classified {
         path,
@@ -702,7 +702,7 @@ impl Session {
         let mut promoted: Vec<PathBuf> = Vec::new();
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
-        let absolute_root = walk::resolve(&root);
+        let absolute_root = composer::manifest::resolve(&root);
         let mut composer_php_versions = None;
         let mut root_manifest = None;
         if !no_composer {
@@ -728,9 +728,10 @@ impl Session {
                 }
             }
             if !promoted.is_empty() {
-                // Relative scan paths are relative to the root.
+                // Relative scan paths are relative to the root, and resolved as
+                // the promoted directories are.
                 let is_promoted = |p: &Path| {
-                    let p = absolute_root.join(p);
+                    let p = composer::manifest::resolve(&absolute_root.join(p));
                     promoted
                         .iter()
                         .any(|dir| composer::manifest::path_starts_with(&p, dir))

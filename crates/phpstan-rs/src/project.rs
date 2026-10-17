@@ -701,7 +701,7 @@ impl Project {
         let owners: Vec<(PathBuf, Option<composer::PackageOwner>)> = self
             .files
             .keys()
-            .map(|path| (path.clone(), self.packages.owner(&self.absolute_path(path))))
+            .map(|path| (path.clone(), self.owner_of_file(path)))
             .collect();
         for (path, owner) in owners {
             if let Some(file) = self.files.get_mut(&path) {
@@ -857,6 +857,13 @@ impl Project {
             None => path.to_path_buf(),
         };
         composer::manifest::lexically_normalized(&joined)
+    }
+
+    /// The composer package the file `path` belongs to: the one owning the
+    /// directory it is in.
+    fn owner_of_file(&self, path: &Path) -> Option<composer::PackageOwner> {
+        self.packages
+            .owner_of_dir(self.absolute_path(path).parent()?)
     }
 
     /// The root every file's key is under, as it resolves on disk.
@@ -1022,7 +1029,7 @@ impl Project {
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
         self.skipped_bodies |= facts.has_skimmed_bodies;
-        let owner = owner.unwrap_or_else(|| self.packages.owner(&self.absolute_path(path)));
+        let owner = owner.unwrap_or_else(|| self.owner_of_file(path));
         self.globals_stale.insert(id);
         let load_order = self.next_load_order;
         self.next_load_order += 1;
@@ -1101,7 +1108,7 @@ impl Project {
     /// ahead of its insertion, so a caller parsing many files in
     /// parallel does the path work there too.
     pub(crate) fn note_owner(&self, parsed: &mut ParsedFile, path: &Path) {
-        parsed.owner = Some(self.packages.owner(&self.absolute_path(path)));
+        parsed.owner = Some(self.owner_of_file(path));
     }
 
     /// Merges PHPStan's own source in with the built-in stubs while some
@@ -1947,7 +1954,7 @@ impl Project {
                     .retain_source
                     .then(|| String::from_utf8_lossy(bytes).into_owned()),
                 analyzed,
-                owner: self.packages.owner(&self.absolute_path(path)),
+                owner: self.owner_of_file(path),
                 bodies,
                 global_facts,
                 built_decls,

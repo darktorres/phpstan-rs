@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use composer::dir_listings::DirListings;
+use composer::manifest::resolve;
 use hashbrown::hash_map::EntryRef;
 use hashbrown::hash_table::Entry;
 use rayon::prelude::*;
@@ -533,24 +534,6 @@ impl<'a> Walk<'a> {
     fn under_root(&self, path: &Path) -> bool {
         self.roots.iter().any(|root| path.starts_with(&root.path))
     }
-}
-
-/// The resolved path of `path`: its links followed and its `.` and `..`
-/// taken out. A path that does not exist resolves through its nearest
-/// ancestor that does, so a file that is gone keeps the path it had while
-/// its directory stands. A path with no existing ancestor is returned as
-/// given.
-pub(crate) fn resolve(path: &Path) -> PathBuf {
-    if let Ok(resolved) = fs::canonicalize(path) {
-        return resolved;
-    }
-    for ancestor in path.ancestors().skip(1) {
-        if let Ok(resolved) = fs::canonicalize(ancestor) {
-            let rest = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
-            return composer::manifest::lexically_normalized(&resolved.join(rest));
-        }
-    }
-    path.to_path_buf()
 }
 
 /// Whether `name` is one of `excluded`.

@@ -306,7 +306,9 @@ mod namespace_in_3rd_party_package {
                 .collect(),
         );
         let file = absolute_root.join(php_path.strip_prefix(&root.0).unwrap());
-        let package = packages.owner(&file).and_then(|o| packages.name(o));
+        let package = packages
+            .owner_of_dir(file.parent().unwrap())
+            .and_then(|o| packages.name(o));
         check_phpstan_api_usage(
             &program,
             &syntax::span::LineIndex::default(),
