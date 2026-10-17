@@ -16,6 +16,7 @@ use syntax::span::Span;
 use rayon::prelude::*;
 
 use composer::dir_listings::DirListings;
+use composer::hashed_path::HashedPath;
 use config::ConfigFile;
 use serde::Deserialize;
 
@@ -266,25 +267,29 @@ struct StreamParse<'l> {
     workers: &'l Workers,
     index_use_sites: bool,
     /// Each file parsed so far, with the role it was parsed under.
-    parsed: Mutex<Vec<(PathBuf, Role, Read)>>,
+    parsed: Mutex<Vec<(HashedPath, Role, Read)>>,
 }
 
 impl StreamParse<'_> {
-    /// The files parsed so far, by path, with the role each was parsed under.
-    fn into_parsed(self) -> FxHashMap<PathBuf, (Role, Read)> {
-        self.parsed
+    /// The files parsed so far, found by the hashes their paths carry, with the
+    /// role each was parsed under. The walk hands each file over once.
+    fn into_parsed(self) -> hashbrown::HashTable<(HashedPath, Role, Read)> {
+        let parsed = self
+            .parsed
             .into_inner()
-            .unwrap_or_else(PoisonError::into_inner)
-            .into_iter()
-            .map(|(path, role, read)| (path, (role, read)))
-            .collect()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut table = hashbrown::HashTable::with_capacity(parsed.len());
+        for entry in parsed {
+            table.insert_unique(entry.0.hash(), entry, |(path, ..)| path.hash());
+        }
+        table
     }
 }
 
 impl FinalFiles for StreamParse<'_> {
     fn take<'s>(&'s self, scope: &rayon::Scope<'s>, files: Vec<Listed>) {
         scope.spawn(move |_| {
-            let parsed: Vec<(PathBuf, Role, Read)> = files
+            let parsed: Vec<(HashedPath, Role, Read)> = files
                 .into_iter()
                 .map(|file| {
                     let read = self.workers.with(|worker| {
@@ -296,7 +301,7 @@ impl FinalFiles for StreamParse<'_> {
                             self.index_use_sites,
                         )
                     });
-                    (file.path.into_path_buf(), file.role, read)
+                    (file.path, file.role, read)
                 })
                 .collect();
             self.parsed
@@ -1513,10 +1518,12 @@ impl Session {
         let mut slots: Vec<Option<Read>> = combined_files
             .iter()
             .map(|file| {
-                parsed.remove(file.path.as_path()).map(|(role, read)| {
-                    debug_assert_eq!(role, file.role, "a file is parsed under its listed role");
-                    read
-                })
+                let entry = parsed
+                    .find_entry(file.path.hash(), |(path, ..)| *path == file.path)
+                    .ok()?;
+                let ((_, role, read), _) = entry.remove();
+                debug_assert_eq!(role, file.role, "a file is parsed under its listed role");
+                Some(read)
             })
             .collect();
         debug_assert!(parsed.is_empty(), "the walk hands over only listed files");
