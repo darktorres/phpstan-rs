@@ -11,7 +11,7 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-17, `001bd4f2` on branch `callgrind-20g`. Counts below were
+State as of 2026-10-17, `845efaab` on branch `callgrind-20g`. Counts below were
 read from the files on that date. This file covers this branch only.
 
 ## Where to resume
@@ -193,9 +193,10 @@ later item waits for that need. The READY rows, item by item:
   `paths` analyses `vendor/`. Until the decision is made, the walk keeps its
   name list. The Piwigo gate and the measurements of items 2's rows (wall time,
   instructions) have not run; they need approval.
-- Item 3: LOAD-3.2 is in (`001bd4f2`). LOAD-3.4 and 3.6 are READY (3.6's fix is
-  already in: `FileSource::read` takes the overlay before the disk, so 3.6 needs
-  only its test). 3.1 waits on REG-16.4, level 2; 3.3 on 3.1; 3.5 on SYN-1.2.
+- Item 3: LOAD-3.2 is in (`001bd4f2`), and LOAD-3.4 (`845efaab`). LOAD-3.6 is
+  READY (its fix is already in: `FileSource::read` takes the overlay before the
+  disk, so 3.6 needs only its test). 3.1 waits on REG-16.4, level 2; 3.3 on 3.1;
+  3.5 on SYN-1.2.
 - Item 5: LOAD-4.3, 4.4, 4.5 and 4.7 (4.4's need, LOAD-2.5, is in: `8590ff55`).
 - Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).
 - Item 9: SYN-1.1 and 1.2, then 1.3, 1.4, 1.5, 1.7 and 1.8.
