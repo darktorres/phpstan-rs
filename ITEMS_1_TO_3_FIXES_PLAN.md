@@ -21,14 +21,19 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     page zeroing, since the parse reuses the freed trees' memory.
   - R12: −54.3 ms of the warm run's 1.39 s (p = 0.009). The decodes moved from the main
     thread into the merge's bucketing on the pool, so the warm Ir fell by only 31.8 M.
+  - R15 (`d6ca3442`): −21.6 ms of the off run's 1.83 s (60 pairs, p = 0.031), for +18.9 MiB
+    of peak RSS. After R11 the purges are fewer (745, 105.5 MiB, against 987, 154.8 MiB), so
+    Step 0's 5.4% became about 1%. The batch commands' public function is `unsafe`, where
+    the row said safe (its Change).
 
-  R15 is next.
+  R2 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
   built since move some of them: R1 changes `session.rs`, `project.rs`, `lsp.rs` and
-  `source.rs`, R11 `session.rs` and `project.rs`, and R12 `name_table.rs`, `members.rs`,
-  `class_info.rs`, `function_sig.rs` and `provenance.rs`.
+  `source.rs`, R11 `session.rs` and `project.rs`, R12 `name_table.rs`, `members.rs`,
+  `class_info.rs`, `function_sig.rs` and `provenance.rs`, and R15 `allocator.rs`, `lib.rs` and
+  `main.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -138,7 +143,8 @@ Each was taken as recommended, and decision 7 was confirmed.
 2. **The batch run stops purging (R15), and the huge pages stay.** Purging costs a batch run
    about 5% of its wall time and every TLB-shootdown IPI, and gains it nothing. Without huge
    pages the run takes 3.6 to 4.1 s, against 2.7 to 2.9 s. The page zeroing is the first touch
-   of the footprint, which only a smaller footprint lowers (R11).
+   of the footprint, which only a smaller footprint lowers (R11). Measured once R11 was in
+   (R15's Built): purging costs about 1% of the off run, and it lowers the peak RSS by 19 MiB.
 3. **R14 is its own row, after R2 and R6 and before R10.** It changes the walk's entry point (a
    `Resolved` path that is not resolved again), not discovery, and it builds on R2's hashed
    path and on the listing kinds R6 reads. Its 14 to 16 ms can be measured only before R10
@@ -397,26 +403,41 @@ default. These are all six of `main.rs`'s commands.
   way.
 - **`mi_option_set`.** It writes the option (`libmimalloc-sys` `extended.rs:617`;
   `options.c:298-304`). Purging reads the option each time it schedules a purge (`os.c:642`,
-  `arena.c:2022`), so a set after load takes effect.
+  `arena.c:2022`), so a set after load takes effect. The binding declares the options API
+  under its `extended` feature, which adds the `cty` crate (C type names, MIT OR Apache-2.0)
+  and changes nothing in the C build.
 - **The option's index.** The binding defines no constant for v3's `mi_option_purge_delay`.
   It is index 15 of the enum in `include/mimalloc.h`: the binding's 14
   (`mi_option_eager_commit_delay`) and 16 (`mi_option_use_numa_nodes`) bracket it. So the row
   declares it beside the call.
 - **Where the `unsafe` lives.** The call is `unsafe`, since it is an `extern "C"` function. It
   sits in `allocator.rs`, the module that already reaches mimalloc's C API under
-  `#[allow(unsafe_code)]` (`lib.rs:24-26`), as one safe public function with a SAFETY comment.
+  `#[allow(unsafe_code)]` (`lib.rs:24-26`).
+  - **The public function is `unsafe` too,** where this row first said safe. `mi_option_set`
+    writes the option with no synchronization, and the allocator reads it as it purges, so a
+    safe function would let a caller set it while other threads run.
+    `phpstan_rs::keep_freed_memory` states the contract, that no other thread is running, and
+    `main` meets it: it calls the function before any thread starts.
+  - **Not with the `hotpath` feature.** Its guard starts threads before `main`'s body runs, so
+    such a build keeps the default.
 - **Other allocators.** With the `dhat-heap`, `hotpath-alloc` or `system-allocator` features
   that module is not compiled, and the function does nothing.
 - **Not this row:** `allow_thp`, since the huge pages stay (decision 2); and the editor's purge
   settings. Whether the editor's purges should be whole huge pages (`allow_thp` at 2 makes the
   smallest purge 2 MiB) is a question for its own workload.
 
-**Test.** The option reads 1000 by default and −1 after the call. The version is pinned
-(`=0.1.49`), so a bump runs that test again.
+**Test.** The option reads 1000 by default. The version is pinned (`=0.1.49`), so a bump runs
+that test again. The other half, −1 after the call, is not a test: a test binary runs other
+threads, so the call's contract cannot be met there. mimalloc's exit statistics show the
+effect instead: no purge.
 
 **Measure.** After R11, which changes what is freed and when: the hyperfine set of "The
 allocator runs" again, alternating A B A B, with the compaction counters; one perf recording,
 for the IPI count; the Piwigo oracle.
+
+**Built** as `d6ca3442`. After R11 purging costs about 1% of the off run, not 5.4%, and it
+lowers the peak RSS by 19 MiB, which Step 0's statistics (1.0 GiB in both) could not resolve.
+The ledger's LOAD-8.15 has the numbers.
 
 ### 5. R2: a path that carries its hash
 
@@ -1028,6 +1049,8 @@ ours is noted, and a run it distorts is taken again.
   corrected change.
 - Done with R12: CACHE-12's task, target and record (its decode context is the file's
   number, so E8's was not needed); its row in §1's table; §1's open off-drill rows and §2.1.
+- Done with R15: LOAD-8.15's row, with the `unsafe` function and the smaller saving; its row
+  in §1's table, whose Ir comes from R2's baseline run.
 - Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
   row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
