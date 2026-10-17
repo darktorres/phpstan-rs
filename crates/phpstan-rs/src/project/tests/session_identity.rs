@@ -110,12 +110,15 @@ fn a_file_no_root_holds_takes_the_default_role() {
 /// Whether each class declaration `path` holds is a stub site, in the order
 /// the project lists them.
 fn class_site_stubs(project: &Project, path: &Path) -> Vec<bool> {
+    let Some(file) = project.files.id_of(path) else {
+        return Vec::new();
+    };
     project
         .duplicate_class_sites
         .iter()
         .flat_map(|(_, sites)| sites.iter())
-        .filter(|site| site.path.as_path() == path)
-        .map(|site| site.is_stub)
+        .filter(|(site_file, _)| *site_file == file)
+        .map(|(_, site)| site.is_stub)
         .collect()
 }
 

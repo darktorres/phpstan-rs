@@ -69,19 +69,20 @@ fn the_one_walk_finds_what_the_five_walks_found() {
                 built.iter().map(summary).collect::<Vec<_>>(),
                 "built declarations of source {i}"
             );
-            let mut fn_sites = DuplicateFunctionSites::default();
-            fn_sites.index(parsed.ast.as_deref().unwrap(), path);
-            let mut class_sites = DuplicateClassSites::default();
-            class_sites.index(parsed.ast.as_deref().unwrap(), path, is_stub);
-            let fns = |sites: &DuplicateFunctionSites| {
+            let fn_sites = duplicate_fn_sites::decl_sites(parsed.ast.as_deref().unwrap());
+            let class_sites =
+                duplicate_class_sites::decl_sites(parsed.ast.as_deref().unwrap(), is_stub);
+            // Each file's sites by name, in walk order within a name: the stable
+            // sort by name keeps the order the walk found them in.
+            let fns = |sites: &[(String, FnDeclSite)]| {
                 let mut v: Vec<_> = sites
                     .iter()
                     .map(|(name, s)| {
                         (
                             name.clone(),
-                            s.iter()
-                                .map(|s| (s.span, s.param_hints.clone(), s.return_hint.clone()))
-                                .collect::<Vec<_>>(),
+                            s.span,
+                            s.param_hints.clone(),
+                            s.return_hint.clone(),
                         )
                     })
                     .collect();
@@ -93,17 +94,10 @@ fn the_one_walk_finds_what_the_five_walks_found() {
                 fns(&fn_sites),
                 "function sites of source {i}"
             );
-            let classes = |sites: &DuplicateClassSites| {
+            let classes = |sites: &[(String, ClassDeclSite)]| {
                 let mut v: Vec<_> = sites
                     .iter()
-                    .map(|(name, s)| {
-                        (
-                            name.clone(),
-                            s.iter()
-                                .map(|s| (s.span, s.kind, s.is_stub))
-                                .collect::<Vec<_>>(),
-                        )
-                    })
+                    .map(|(name, s)| (name.clone(), s.span, s.kind, s.is_stub))
                     .collect();
                 v.sort_by(|a, b| a.0.cmp(&b.0));
                 format!("{v:?}")

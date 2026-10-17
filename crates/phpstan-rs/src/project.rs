@@ -52,8 +52,8 @@ pub(crate) mod use_sites;
 pub(crate) mod walk;
 mod whole_program;
 
-use duplicate_class_sites::DuplicateClassSites;
-use duplicate_fn_sites::DuplicateFunctionSites;
+use duplicate_class_sites::{ClassDeclSite, DuplicateClassSites};
+use duplicate_fn_sites::{DuplicateFunctionSites, FnDeclSite};
 use use_sites::UseSiteIndex;
 
 /// The files `Project::walk_affected` has reached, with what it has walked,
@@ -1615,9 +1615,9 @@ impl Project {
         self.registry.remove_declarations(&old.functions, &classes);
         self.use_sites.remove_file(path);
         self.duplicate_fn_sites
-            .remove_declarations(path, &old.functions);
+            .remove_declarations(id, &old.functions);
         self.duplicate_class_sites
-            .remove_declarations(path, &old.classes);
+            .remove_declarations(id, &old.classes);
         unregister_references(&mut self.dependents, id, &old.references);
         unregister_references(
             &mut self.signature_dependents,
@@ -2007,9 +2007,13 @@ impl Project {
             rebuilt.constants.extend(previous.constants);
         }
         self.rebuild_declarations(&rebuilt, Some((path, &built_decls, analyzed, load_order)));
-        self.duplicate_fn_sites.merge(duplicate_fn_sites);
-        self.duplicate_class_sites.merge(duplicate_class_sites);
         let id = self.files.id_for(path);
+        for (name, site) in duplicate_fn_sites {
+            self.duplicate_fn_sites.add(name, id, site);
+        }
+        for (name, site) in duplicate_class_sites {
+            self.duplicate_class_sites.add(name, id, site);
+        }
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
         self.globals_stale.insert(id);
@@ -2473,24 +2477,29 @@ impl Project {
     /// `path`'s checker `diagnostics` with the project-level ones added and
     /// sorted.
     fn finish_diagnostics(&self, path: &Path, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-        let Some(file) = self.files.get(path) else {
+        let Some(id) = self.files.id_of(path) else {
+            return diagnostics;
+        };
+        let Some(file) = self.files.get_by_id(id) else {
             return diagnostics;
         };
         if self.settings.rules.check_duplicate_function_declarations {
             diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
-                path,
+                id,
                 self.absolute_root(),
                 &file.line_index,
-                &|path, offset| self.line_in(path, offset),
+                &|site| self.files.path(site),
+                &|site, offset| self.line_in(self.files.path(site), offset),
                 &self.duplicate_fn_sites,
             ));
         }
         if self.settings.rules.check_duplicate_class_declarations {
             diagnostics.extend(duplicate_classes::check_duplicate_class_declarations(
-                path,
+                id,
                 self.absolute_root(),
                 &file.line_index,
-                &|path, offset| self.line_in(path, offset),
+                &|site| self.files.path(site),
+                &|site, offset| self.line_in(self.files.path(site), offset),
                 &self.duplicate_class_sites,
             ));
         }
@@ -3063,22 +3072,15 @@ pub struct ParsedFile {
     pest_facts: Option<PestFacts>,
     // The classes the file declares unconditionally.
     declared_classes: Vec<DeclaredClass>,
-    // This file's own top-level function declaration sites, already
-    // built (see `DuplicateFunctionSites::merge`'s own doc comment) -
-    // `insert_file_tables` merges these into the project-wide table
-    // instead of re-walking `ast` via `DuplicateFunctionSites::index`,
-    // moving the per-function type-hint cloning `record` does into this
-    // already-parallel step. Unlike `built_decls`, this needs `path`
-    // (baked into every `FnDeclSite`), which is why `parse_file` below
-    // takes one now.
-    duplicate_fn_sites: DuplicateFunctionSites,
+    // The file's own top-level function declaration sites, each with its name,
+    // in walk order. `insert_file_tables` adds them to the project-wide table
+    // beside the file's id.
+    duplicate_fn_sites: Vec<(String, FnDeclSite)>,
     // The registry names of the file's anonymous classes.
     anonymous_classes: Vec<Name>,
-    // The class-like counterpart to `duplicate_fn_sites` above, built the
-    // same way and for the same reason - `parse_file`'s own `is_stub`
-    // parameter is baked into every `ClassDeclSite` here (see that
-    // field's own doc comment for why it's needed at all).
-    duplicate_class_sites: DuplicateClassSites,
+    // The class-like counterpart to `duplicate_fn_sites` above. Each site
+    // carries the `is_stub` the parse was given.
+    duplicate_class_sites: Vec<(String, ClassDeclSite)>,
     bodies: FileBodies,
     // What it assigns to globals.
     global_facts: Arc<GlobalFacts>,
@@ -3098,12 +3100,9 @@ pub struct ParsedFile {
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
 /// comment. Safe to call concurrently for many files at once (no shared
-/// state touched at all). `path` tags `duplicate_fn_sites`'s own records
-/// (see `ParsedFile`'s doc comment on that field) and names the file's
-/// anonymous classes; neither is read to make a decision, so it's fine that
-/// a caller building many `ParsedFile`s concurrently passes a different
-/// `path` to each call with no coordination needed between them. The file is
-/// parsed as an analysed one, so its ignore comments are kept.
+/// state touched at all). `path` names the file's declarations' origin and
+/// its anonymous classes. The file is parsed as an analysed one, so its
+/// ignore comments are kept.
 #[hotpath::measure]
 pub fn parse_file<'a>(
     path: &Path,
@@ -3169,7 +3168,7 @@ pub fn parse_file_with_names<'a>(
         duplicate_fn_sites,
         duplicate_class_sites,
         declared_classes,
-    } = file_declarations::collect(&ast, path, is_stub, &origin, &facts);
+    } = file_declarations::collect(&ast, is_stub, &origin, &facts);
     let (references, declaration_references) = file_references(&ast, references);
     // What a walk of the declarations finds.
     #[cfg(debug_assertions)]

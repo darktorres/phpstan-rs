@@ -1,5 +1,3 @@
-use std::path::{Path, PathBuf};
-
 use rustc_hash::FxHashMap;
 
 #[cfg(test)]
@@ -10,17 +8,15 @@ use syntax::declarations::Declared;
 use syntax::name::Name;
 use syntax::span::Span;
 
+use crate::file_id::FileId;
 use crate::shard::{join_map, split_map};
 
-/// One `function` declaration's own site, name-keyed the same way
-/// `Registry` is - but every unconditional
-/// declaration of a name is kept (not just the winning one), since
-/// `check_duplicate_function_declarations` needs to see every occurrence
-/// to build its own full location list, exactly mirroring real PHPStan's
-/// `DuplicateFunctionDeclarationRule`.
+/// One `function` declaration's own site in its file: where its name is, and
+/// its native shape at index time - each parameter's native hint and the
+/// native return hint. The file is not named here; the table holds it beside
+/// the site.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct FnDeclSite {
-    pub(crate) path: PathBuf,
     pub(crate) span: Span,
     // The declaration's native shape at index time: each parameter's
     // native hint and the native return hint.
@@ -28,41 +24,10 @@ pub(crate) struct FnDeclSite {
     pub(crate) return_hint: Option<String>,
 }
 
-/// Every function's own unconditional declaration site(s), across the
-/// whole project - always populated, since `check_duplicate_function_
-/// declarations` needs to run by default for `check-project`, matching
-/// real PHPStan's own always-on `function.duplicate` rule. A conditional
-/// declaration is never tracked (see `index`).
-#[derive(Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone)]
-pub(crate) struct DuplicateFunctionSites {
-    sites: FxHashMap<String, Vec<FnDeclSite>>,
-}
-
-impl DuplicateFunctionSites {
-    /// Records `stmts`' unconditional function declarations. Where
-    /// `registry::build_declarations` still records a conditional one
-    /// (with weaker "first unconditional wins" semantics), this drops it
-    /// entirely: real PHPStan's own rule has no such guard and is a known,
-    /// disclosed false-positive source for the common
-    /// `symfony/polyfill-*`-style `if (!function_exists('foo')) { function
-    /// foo() {} }` idiom (two unrelated packages independently guarding
-    /// the identical polyfill name) - a deliberate, stricter departure
-    /// from literal real-PHPStan behavior, matching this project's own
-    /// "favor false negatives over false positives" precedent.
-    #[cfg(test)]
-    pub(crate) fn index(&mut self, stmts: &[Stmt], path: &Path) {
-        syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
-            if let Declared::Function(f) = declaration.declared
-                && !declaration.conditional
-            {
-                self.record(declaration.name(), path, f);
-            }
-        });
-    }
-
-    pub(crate) fn record(&mut self, fqn: String, path: &Path, f: &FunctionDecl) {
-        self.sites.entry(fqn).or_default().push(FnDeclSite {
-            path: path.to_path_buf(),
+impl FnDeclSite {
+    /// The site of `f`, a declaration a file's walk finds.
+    pub(crate) fn of(f: &FunctionDecl) -> FnDeclSite {
+        FnDeclSite {
             span: f.name.span,
             param_hints: f
                 .params
@@ -70,17 +35,49 @@ impl DuplicateFunctionSites {
                 .map(|p| p.type_hint.as_ref().map(TypeHint::to_string))
                 .collect(),
             return_hint: f.return_type.as_ref().map(TypeHint::to_string),
-        });
+        }
+    }
+}
+
+/// Every function's own unconditional declaration site(s), across the whole
+/// project, each with the file it is in - always populated, since
+/// `check_duplicate_function_declarations` needs to run by default for
+/// `check-project`, matching real PHPStan's own always-on `function.duplicate`
+/// rule. Every unconditional declaration of a name is kept (not just the
+/// winning one), since the check needs to see every occurrence to build its
+/// own full location list, exactly mirroring real PHPStan's
+/// `DuplicateFunctionDeclarationRule`. A conditional declaration is never
+/// tracked: where `registry::build_declarations` still records one (with
+/// weaker "first unconditional wins" semantics), the walk of its file drops
+/// it entirely. Real PHPStan's own rule has no such guard and is a known,
+/// disclosed false-positive source for the common
+/// `symfony/polyfill-*`-style `if (!function_exists('foo')) { function
+/// foo() {} }` idiom (two unrelated packages independently guarding the
+/// identical polyfill name) - a deliberate, stricter departure from literal
+/// real-PHPStan behavior, matching this project's own "favor false negatives
+/// over false positives" precedent.
+#[derive(Default, Debug, PartialEq, Eq, Clone)]
+pub(crate) struct DuplicateFunctionSites {
+    sites: FxHashMap<String, Vec<(FileId, FnDeclSite)>>,
+}
+
+impl DuplicateFunctionSites {
+    /// Adds the site of a function `file` declares unconditionally, under its
+    /// name, after the sites the name already has. The files are added in
+    /// load order, and each file's sites in the order its walk finds them, so
+    /// a name's sites are in that order too.
+    pub(crate) fn add(&mut self, name: String, file: FileId, site: FnDeclSite) {
+        self.sites.entry(name).or_default().push((file, site));
     }
 
-    /// Filters each name's own `Vec` down by `path` rather than a flat
-    /// `.remove()` - one function name here can legitimately have sites in several
-    /// different files at once, so removing `path`'s own contribution
+    /// Filters each name's own `Vec` down by `file` rather than a flat
+    /// `.remove()` - one function name here can legitimately have sites in
+    /// several different files at once, so removing `file`'s own contribution
     /// must leave every other file's site(s) for that same name intact.
-    pub(crate) fn remove_declarations(&mut self, path: &Path, removed_functions: &[Name]) {
+    pub(crate) fn remove_declarations(&mut self, file: FileId, removed_functions: &[Name]) {
         for name in removed_functions {
             if let Some(sites) = self.sites.get_mut(name.as_str()) {
-                sites.retain(|s| s.path != path);
+                sites.retain(|(site_file, _)| *site_file != file);
                 if sites.is_empty() {
                     self.sites.remove(name.as_str());
                 }
@@ -88,37 +85,8 @@ impl DuplicateFunctionSites {
         }
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Vec<FnDeclSite>)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Vec<(FileId, FnDeclSite)>)> {
         self.sites.iter()
-    }
-
-    /// Absorbs `other`'s own sites into `self` - correct regardless of
-    /// which file's own per-file `DuplicateFunctionSites` `self`/`other`
-    /// each hold, since every site already carries its own `path` and
-    /// `record`'s own append-only `Vec` per name never depends on
-    /// insertion order (unlike `Registry::insert_built_decl`'s FQN-
-    /// collision resolution - there is no such collision here, every
-    /// unconditional declaration is kept, not just a winner). Lets
-    /// `check_project.rs`'s parallel parse stage build one
-    /// `DuplicateFunctionSites` per file concurrently and merge them all
-    /// sequentially afterward, instead of calling `index` once per file
-    /// inside the sequential insert loop.
-    pub(crate) fn merge(&mut self, other: DuplicateFunctionSites) {
-        for (name, sites) in other.into_names() {
-            self.merge_name(name, sites);
-        }
-    }
-
-    /// Adds `sites`, the sites one file declares `name` at, after the sites
-    /// `self` holds for it.
-    pub(crate) fn merge_name(&mut self, name: String, sites: Vec<FnDeclSite>) {
-        self.sites.entry(name).or_default().extend(sites);
-    }
-
-    /// The names of the table, each with its sites, for a merge that routes
-    /// each name to its own shard.
-    pub(crate) fn into_names(self) -> impl Iterator<Item = (String, Vec<FnDeclSite>)> {
-        self.sites.into_iter()
     }
 
     /// Takes the table apart into `SHARDS` tables, each holding the names
@@ -136,4 +104,19 @@ impl DuplicateFunctionSites {
             sites: join_map(shards.into_iter().map(|shard| shard.sites).collect()),
         }
     }
+}
+
+/// The unconditional function declarations of `stmts`, by name, in walk order,
+/// as a file's walk records them.
+#[cfg(test)]
+pub(crate) fn decl_sites(stmts: &[Stmt]) -> Vec<(String, FnDeclSite)> {
+    let mut sites = Vec::new();
+    syntax::declarations::for_each_declaration(stmts, |declaration, _, _| {
+        if let Declared::Function(f) = declaration.declared
+            && !declaration.conditional
+        {
+            sites.push((declaration.name(), FnDeclSite::of(f)));
+        }
+    });
+    sites
 }

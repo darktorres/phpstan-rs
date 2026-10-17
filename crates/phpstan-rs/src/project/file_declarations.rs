@@ -8,16 +8,14 @@
 //! `define()` calls and the declarations nested in expressions, and each
 //! making the same name of a declaration again.
 
-use std::path::Path;
-
 use syntax::FileFacts;
 use syntax::ast::Stmt;
 use syntax::declarations::{Declared, for_each_declaration_with};
 use syntax::name::Name;
 
 use super::declared_classes::DeclaredClass;
-use super::duplicate_class_sites::DuplicateClassSites;
-use super::duplicate_fn_sites::DuplicateFunctionSites;
+use super::duplicate_class_sites::ClassDeclSite;
+use super::duplicate_fn_sites::FnDeclSite;
 use crate::registry::{BuiltDecl, Origin, anonymous_class_decls, built_declaration};
 
 /// `collect`'s result.
@@ -30,8 +28,10 @@ pub(super) struct FileDeclarations {
     /// In walk order, then the anonymous classes, as `build_declarations`
     /// returns them.
     pub(super) built_decls: Vec<BuiltDecl>,
-    pub(super) duplicate_fn_sites: DuplicateFunctionSites,
-    pub(super) duplicate_class_sites: DuplicateClassSites,
+    /// Each unconditional function declaration's name and site, in walk order.
+    pub(super) duplicate_fn_sites: Vec<(String, FnDeclSite)>,
+    /// Each unconditional class-like declaration's name and site, in walk order.
+    pub(super) duplicate_class_sites: Vec<(String, ClassDeclSite)>,
     /// The classes it declares unconditionally.
     pub(super) declared_classes: Vec<DeclaredClass>,
 }
@@ -51,14 +51,12 @@ pub(crate) fn declares_in_expressions(facts: &FileFacts) -> bool {
     facts.mentions & MENTIONS_DEFINE != 0 || facts.has_nested_declaration
 }
 
-/// The declarations of `ast`, the file at `path`. `is_stub` is whether the
-/// file falls under a configured stub path. The facts of the file say
-/// whether it has an anonymous class, which is all its walk for them
-/// (`anonymous_class_decls`) can find, and whether its declarations can be
-/// inside expressions.
+/// The declarations of `ast`. `is_stub` is whether the file falls under a
+/// configured stub path. `facts` limits the walk: expressions are entered only
+/// where the file can declare in one, and bodies only where they can hold a
+/// declaration.
 pub(super) fn collect(
     ast: &[Stmt],
-    path: &Path,
     is_stub: bool,
     origin: &Origin,
     facts: &FileFacts,
@@ -70,8 +68,8 @@ pub(super) fn collect(
         classes: Vec::new(),
         constants: Vec::new(),
         built_decls: Vec::new(),
-        duplicate_fn_sites: DuplicateFunctionSites::default(),
-        duplicate_class_sites: DuplicateClassSites::default(),
+        duplicate_fn_sites: Vec::new(),
+        duplicate_class_sites: Vec::new(),
         declared_classes: Vec::new(),
     };
     // A body is entered only where it can hold a declaration.
@@ -85,7 +83,9 @@ pub(super) fn collect(
             match declaration.declared {
                 Declared::Function(f) => {
                     if !declaration.conditional {
-                        found.duplicate_fn_sites.record(name.clone(), path, f);
+                        found
+                            .duplicate_fn_sites
+                            .push((name.clone(), FnDeclSite::of(f)));
                     }
                     found.functions.push(Name::from(name));
                 }
@@ -96,13 +96,14 @@ pub(super) fn collect(
                             declaration.span,
                             c,
                         ));
-                        found.duplicate_class_sites.record(
+                        found.duplicate_class_sites.push((
                             name.clone(),
-                            path,
-                            c.name.span,
-                            c.def.kind,
-                            is_stub,
-                        );
+                            ClassDeclSite {
+                                span: c.name.span,
+                                kind: c.def.kind,
+                                is_stub,
+                            },
+                        ));
                     }
                     found.classes.push(Name::from(name));
                 }

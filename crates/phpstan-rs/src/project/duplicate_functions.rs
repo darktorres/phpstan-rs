@@ -24,6 +24,7 @@
 
 use std::path::Path;
 
+use crate::file_id::FileId;
 use crate::project::duplicate_fn_sites::{DuplicateFunctionSites, FnDeclSite};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::span::LineIndex;
@@ -39,13 +40,15 @@ fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
 /// project's root, as the report names files; a site outside `root` keeps its
 /// path.
 ///
-/// `index` holds the lines of `path`, and `line_in` answers for any loaded
-/// file the line of an offset.
-pub(crate) fn check_duplicate_function_declarations(
-    path: &Path,
+/// `file` is the file being checked, and `index` holds its lines. `path_of`
+/// names the file of a site, and `line_in` answers for any loaded file the
+/// line of an offset.
+pub(crate) fn check_duplicate_function_declarations<'a>(
+    file: FileId,
     root: Option<&Path>,
     index: &LineIndex,
-    line_in: &dyn Fn(&Path, u32) -> u32,
+    path_of: &dyn Fn(FileId) -> &'a Path,
+    line_in: &dyn Fn(FileId, u32) -> u32,
     sites: &DuplicateFunctionSites,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -56,16 +59,16 @@ pub(crate) fn check_duplicate_function_declarations(
         // Sorted for determinism - which pairs get compared, and the
         // location list's own order, must not depend on `FxHashMap`
         // file-load-order.
-        let mut sorted: Vec<&FnDeclSite> = decl_sites.iter().collect();
-        sorted.sort_by(|a, b| (&a.path, a.span.start).cmp(&(&b.path, b.span.start)));
+        let mut sorted: Vec<&(FileId, FnDeclSite)> = decl_sites.iter().collect();
+        sorted.sort_by(|a, b| (path_of(a.0), a.1.span.start).cmp(&(path_of(b.0), b.1.span.start)));
 
         // Adjacent sites with the identical native signature form one
         // "real duplicate" group; a signature difference starts a fresh
         // group (the phpstorm-stubs version-split idiom, not a bug).
-        let mut groups: Vec<Vec<&FnDeclSite>> = Vec::new();
+        let mut groups: Vec<Vec<&(FileId, FnDeclSite)>> = Vec::new();
         for s in sorted {
             match groups.last_mut() {
-                Some(group) if !sites_differ(group.last().unwrap(), s) => group.push(s),
+                Some(group) if !sites_differ(&group.last().unwrap().1, &s.1) => group.push(s),
                 _ => groups.push(vec![s]),
             }
         }
@@ -76,22 +79,22 @@ pub(crate) fn check_duplicate_function_declarations(
             }
             let location_list = group
                 .iter()
-                .map(|s| {
+                .map(|(site_file, site)| {
                     format!(
                         "- {}:{}",
-                        super::shown_path(root, &s.path).display(),
-                        line_in(&s.path, s.span.start)
+                        super::shown_path(root, path_of(*site_file)).display(),
+                        line_in(*site_file, site.span.start)
                     )
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
             let message = format!("Function {name} declared multiple times:\n{location_list}");
-            for s in &group {
-                if s.path != path {
+            for (site_file, site) in &group {
+                if *site_file != file {
                     continue;
                 }
                 diagnostics.push(
-                    DiagnosticBuilder::new(message.clone(), s.span, 0, "function.duplicate")
+                    DiagnosticBuilder::new(message.clone(), site.span, 0, "function.duplicate")
                         .non_ignorable()
                         .build(index),
                 );

@@ -118,12 +118,12 @@ fn serial(files: &[(FileId, PathBuf, ParsedFile)]) -> Project {
         for (span, target) in parsed.class_fn_refs.clone().unwrap_or_default() {
             project.use_sites.insert(path, target, span);
         }
-        project
-            .duplicate_fn_sites
-            .merge(parsed.duplicate_fn_sites.clone());
-        project
-            .duplicate_class_sites
-            .merge(parsed.duplicate_class_sites.clone());
+        for (name, site) in parsed.duplicate_fn_sites.clone() {
+            project.duplicate_fn_sites.add(name, *id, site);
+        }
+        for (name, site) in parsed.duplicate_class_sites.clone() {
+            project.duplicate_class_sites.add(name, *id, site);
+        }
         register_references(&mut project.dependents, *id, &parsed.references);
         register_references(
             &mut project.signature_dependents,

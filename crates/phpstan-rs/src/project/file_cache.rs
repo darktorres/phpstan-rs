@@ -31,8 +31,8 @@ use syntax::name::Name;
 use syntax::span::{LineIndex, Span};
 
 use super::declared_classes::DeclaredClass;
-use super::duplicate_class_sites::DuplicateClassSites;
-use super::duplicate_fn_sites::DuplicateFunctionSites;
+use super::duplicate_class_sites::ClassDeclSite;
+use super::duplicate_fn_sites::FnDeclSite;
 use super::use_sites::RefTarget;
 use super::{Arc, ParsedFile};
 use crate::deps::RefKey;
@@ -113,9 +113,9 @@ pub(super) struct CachedFile {
     built_decls: Vec<BuiltDecl>,
     pest_facts: Option<PestFacts>,
     declared_classes: Vec<DeclaredClass>,
-    duplicate_fn_sites: DuplicateFunctionSites,
+    duplicate_fn_sites: Vec<(String, FnDeclSite)>,
     anonymous_classes: Vec<Name>,
-    duplicate_class_sites: DuplicateClassSites,
+    duplicate_class_sites: Vec<(String, ClassDeclSite)>,
     bodies: FileBodies,
     global_facts: Arc<GlobalFacts>,
     facts: FileFacts,

@@ -24,8 +24,8 @@ use crate::shard::{SHARDS, join_map, merge_by_shard, shard_of_key, split_map};
 /// The entries a parsed file takes out for the merge (`ParsedFile::take_entries`).
 struct FileEntries {
     class_fn_refs: Vec<(Span, RefTarget)>,
-    duplicate_fn_sites: DuplicateFunctionSites,
-    duplicate_class_sites: DuplicateClassSites,
+    duplicate_fn_sites: Vec<(String, FnDeclSite)>,
+    duplicate_class_sites: Vec<(String, ClassDeclSite)>,
 }
 
 /// A file's entries, and the reference keys of its parse, for one merge.
@@ -53,8 +53,8 @@ struct ChunkWork<'a> {
     target_sites: Vec<(RefTarget, &'a Path, Span)>,
     /// The use sites whose file's path the shard holds, each with its target.
     file_sites: Vec<(&'a Path, RefTarget, Span)>,
-    duplicate_fn_sites: Vec<(String, Vec<FnDeclSite>)>,
-    duplicate_class_sites: Vec<(String, Vec<ClassDeclSite>)>,
+    duplicate_fn_sites: Vec<(String, FileId, FnDeclSite)>,
+    duplicate_class_sites: Vec<(String, FileId, ClassDeclSite)>,
     dependents: Vec<(&'a RefKey, FileId)>,
     signature_dependents: Vec<(&'a RefKey, FileId)>,
 }
@@ -166,11 +166,11 @@ impl ProjectShard {
         for (path, target, span) in work.file_sites {
             self.use_sites.add_file_site(path, target, span);
         }
-        for (name, sites) in work.duplicate_fn_sites {
-            self.duplicate_fn_sites.merge_name(name, sites);
+        for (name, file, site) in work.duplicate_fn_sites {
+            self.duplicate_fn_sites.add(name, file, site);
         }
-        for (name, sites) in work.duplicate_class_sites {
-            self.duplicate_class_sites.merge_name(name, sites);
+        for (name, file, site) in work.duplicate_class_sites {
+            self.duplicate_class_sites.add(name, file, site);
         }
         for (name, file) in work.dependents {
             register_reference(&mut self.dependents, file, name);
@@ -205,15 +205,15 @@ fn bucket<'a>(files: Vec<FileTables<'a>>) -> Vec<ChunkWork<'a>> {
                 .push((target.clone(), path, span));
             work[path_shard].file_sites.push((path, target, span));
         }
-        for (name, sites) in duplicate_fn_sites.into_names() {
+        for (name, site) in duplicate_fn_sites {
             work[shard_of_key(&name)]
                 .duplicate_fn_sites
-                .push((name, sites));
+                .push((name, id, site));
         }
-        for (name, sites) in duplicate_class_sites.into_names() {
+        for (name, site) in duplicate_class_sites {
             work[shard_of_key(&name)]
                 .duplicate_class_sites
-                .push((name, sites));
+                .push((name, id, site));
         }
         for name in references {
             work[shard_of_key(name)].dependents.push((name, id));

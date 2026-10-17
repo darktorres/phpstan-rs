@@ -31,15 +31,20 @@
 use std::path::Path;
 
 use crate::checker::{class_kind_identifier, class_kind_word};
+use crate::file_id::FileId;
 use crate::project::duplicate_class_sites::{ClassDeclSite, DuplicateClassSites};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::span::LineIndex;
 
-pub(crate) fn check_duplicate_class_declarations(
-    path: &Path,
+/// `file` is the file being checked, and `index` holds its lines. `path_of`
+/// names the file of a site, and `line_in` answers for any loaded file the
+/// line of an offset.
+pub(crate) fn check_duplicate_class_declarations<'a>(
+    file: FileId,
     root: Option<&Path>,
     index: &LineIndex,
-    line_in: &dyn Fn(&Path, u32) -> u32,
+    path_of: &dyn Fn(FileId) -> &'a Path,
+    line_in: &dyn Fn(FileId, u32) -> u32,
     sites: &DuplicateClassSites,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -47,23 +52,24 @@ pub(crate) fn check_duplicate_class_declarations(
         // A stub-tagged site is never itself flagged, and never counts
         // toward flagging the real declaration it overrides - see this
         // module's own doc comment.
-        let mut real_sites: Vec<&ClassDeclSite> =
-            decl_sites.iter().filter(|s| !s.is_stub).collect();
+        let mut real_sites: Vec<&(FileId, ClassDeclSite)> =
+            decl_sites.iter().filter(|(_, s)| !s.is_stub).collect();
         if real_sites.len() < 2 {
             continue;
         }
         // Sorted for determinism, mirroring `duplicate_functions`'s own
         // identical reasoning - which location list order a reader sees
         // must not depend on `FxHashMap` file-load-order.
-        real_sites.sort_by(|a, b| (&a.path, a.span.start).cmp(&(&b.path, b.span.start)));
+        real_sites
+            .sort_by(|a, b| (path_of(a.0), a.1.span.start).cmp(&(path_of(b.0), b.1.span.start)));
 
         let location_list = real_sites
             .iter()
-            .map(|s| {
+            .map(|(site_file, site)| {
                 format!(
                     "- {}:{}",
-                    super::shown_path(root, &s.path).display(),
-                    line_in(&s.path, s.span.start)
+                    super::shown_path(root, path_of(*site_file)).display(),
+                    line_in(*site_file, site.span.start)
                 )
             })
             .collect::<Vec<_>>()
@@ -75,7 +81,7 @@ pub(crate) fn check_duplicate_class_declarations(
         // message/identifier, matching this project's general "don't
         // guess past what's already known" bias rather than inventing a
         // dedicated mixed-kind message no real corpus evidence motivates.
-        let kind = real_sites[0].kind;
+        let kind = real_sites[0].1.kind;
         let word = class_kind_word(kind);
         let identifier = format!("{}.duplicate", class_kind_identifier(&kind));
         let message = format!(
@@ -83,12 +89,12 @@ pub(crate) fn check_duplicate_class_declarations(
             word[..1].to_uppercase(),
             &word[1..]
         );
-        for s in &real_sites {
-            if s.path != path {
+        for (site_file, site) in &real_sites {
+            if *site_file != file {
                 continue;
             }
             diagnostics.push(
-                DiagnosticBuilder::new(message.clone(), s.span, 0, identifier.clone())
+                DiagnosticBuilder::new(message.clone(), site.span, 0, identifier.clone())
                     .non_ignorable()
                     .build(index),
             );
