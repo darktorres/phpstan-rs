@@ -888,13 +888,16 @@ impl Server {
                 order: DiagnosticOrder::Sorted,
             },
         };
-        finalize_results(
-            &slot.project,
-            results,
-            &options,
-            slot.project.absolute_root(),
-        )
-        .results
+        let root = slot.project.absolute_root();
+        let results = finalize_results(&slot.project, results, &options, root).results;
+        // A file is published under its path, not relative to the root.
+        match root {
+            Some(root) => results
+                .into_iter()
+                .map(|(path, diagnostics)| (root.join(path), diagnostics))
+                .collect(),
+            None => results,
+        }
     }
 
     /// The post-processed diagnostics of `paths`. Each path is finalized by the

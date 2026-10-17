@@ -401,38 +401,17 @@ impl AnalysisResult {
         let AnalysisResult {
             project, results, ..
         } = self;
-        let root = project.absolute_root().map(Path::to_path_buf);
-        let Report {
-            results,
-            stale_baseline_entries,
-        } = finalize_results(&project, results, options, root.as_deref());
+        let report = finalize_results(&project, results, options, project.absolute_root());
         std::mem::forget(project);
-        // A file is named relative to the root, as the report has always named
-        // it; a file outside the root keeps its path.
-        let results = match &root {
-            Some(root) => results
-                .into_iter()
-                .map(|(path, diagnostics)| {
-                    let relative = path
-                        .strip_prefix(root)
-                        .map_or_else(|_| path.clone(), Path::to_path_buf);
-                    (relative, diagnostics)
-                })
-                .collect(),
-            None => results,
-        };
-        Report {
-            results,
-            stale_baseline_entries,
-        }
+        report
     }
 }
 
 /// The report `options` make of `results`, checked in `project`: the level
 /// filter, inline ignores, `ignore_errors`, the baseline, then the order.
 /// The project's own keys name the files inline ignores apply to. The
-/// ignore entries and the baseline name files relative to `root`, which
-/// the keys may carry as a prefix; the report's keys carry it again.
+/// report names each file relative to `root`, as the ignore entries and the
+/// baseline do; a file outside `root` keeps its path.
 pub(crate) fn finalize_results(
     project: &Project,
     mut results: FxHashMap<PathBuf, Vec<Diagnostic>>,
@@ -465,13 +444,6 @@ pub(crate) fn finalize_results(
             diagnostics::sort_diagnostics(diagnostics);
         }
     }
-    let results = match root {
-        Some(root) => results
-            .into_iter()
-            .map(|(path, diagnostics)| (root.join(path), diagnostics))
-            .collect(),
-        None => results,
-    };
     Report {
         results,
         stale_baseline_entries,
