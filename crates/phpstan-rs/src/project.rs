@@ -1115,21 +1115,21 @@ impl Project {
             source,
             content_hash,
         } = text;
-        debug_assert!(
-            ast.is_some() || (!analyzed && self.built_once),
-            "a file whose tree is needed was read back from the cache"
+        debug_assert_eq!(
+            ast.is_some(),
+            self.keeps_tree(analyzed),
+            "a file arrives with its tree when the project keeps it, and without it when not"
         );
         self.skipped_bodies |= facts.has_skimmed_bodies;
         let owner = owner.unwrap_or_else(|| self.owner_of_file(path));
         self.globals_stale.insert(id);
         let load_order = self.next_load_order;
         self.next_load_order += 1;
-        let keeps_tree = self.keeps_tree(analyzed);
         self.forget_parse_of(path);
         self.files.insert_at(
             id,
             FileState {
-                kept_ast: ast.filter(|_| keeps_tree),
+                kept_ast: ast,
                 source_len: len,
                 content_hash,
                 load_order,
@@ -3061,7 +3061,8 @@ fn parse_with_ignores<'a>(
 #[cfg_attr(test, derive(Clone))]
 pub struct ParsedFile {
     // The tree; none for a file read back from the per-file cache, which
-    // keeps what its tree gave and not the tree.
+    // keeps what its tree gave and not the tree, and for a file whose tree the
+    // project does not keep, once the thread that parsed it has dropped it.
     ast: Option<Vec<Stmt>>,
     // What the lexer skipped over (see `ParsedFile::lex_warnings`).
     lex_warnings: Vec<LexWarning>,

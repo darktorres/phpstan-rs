@@ -1302,6 +1302,11 @@ impl Session {
                     &file_cache::CachedFile::of(&file.parsed, file.text.len),
                 );
             }
+            // A tree the project does not keep is dropped by the thread that
+            // parsed it.
+            if !project.keeps_tree(listed.role == Role::Analysed) {
+                file.parsed.ast = None;
+            }
         }
         read
     }

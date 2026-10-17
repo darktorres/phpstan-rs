@@ -1,7 +1,8 @@
-//! What a load keeps of a file's text: the buffer a worker reads each file
-//! into, how its bytes are read as text, the source a file keeps (only a file
-//! whose tree is kept, and only in a project that retains source), and the
-//! length a file is weighed by.
+//! What a load keeps of a file: the buffer a worker reads each file into, how
+//! its bytes are read as text, the tree a file keeps (in a project built once,
+//! an analysed file's alone), the source a file keeps (only a file whose tree
+//! is kept, and only in a project that retains source), and the length a file
+//! is weighed by.
 
 use super::super::*;
 use crate::project::session::{OverlayFile, Session, load_test_file, load_test_files};
@@ -53,6 +54,29 @@ fn a_context_file_whose_tree_is_dropped_keeps_no_source_and_an_analysed_one_keep
     load_test_file(&mut project, PathBuf::from("app.php"), APP, true);
     assert_eq!(project.source(Path::new("ctx.php")), None);
     assert_eq!(project.source(Path::new("app.php")), Some(APP));
+}
+
+#[test]
+fn a_project_built_once_keeps_the_tree_of_an_analysed_file_and_of_no_context_file() {
+    let mut project = Project::new();
+    project.built_once = true;
+    load_test_files(
+        &mut project,
+        &[
+            (PathBuf::from("app.php"), APP, true),
+            (PathBuf::from("ctx.php"), CONTEXT, false),
+        ],
+    );
+    let kept = |path: &str| {
+        project
+            .files
+            .get(Path::new(path))
+            .expect("loaded")
+            .kept_ast
+            .is_some()
+    };
+    assert!(kept("app.php"));
+    assert!(!kept("ctx.php"));
 }
 
 #[test]
