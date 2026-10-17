@@ -181,7 +181,16 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 2: LOAD-2.2 to 2.7 (LOAD-2.8's first two parts are in; its third waits on LOAD-2.3).
+- Item 2: LOAD-2.2 to 2.7 (LOAD-2.8's first two parts are in; its third waits on
+  LOAD-2.3). LOAD-2.2's walk is in (`85a4ecad`). Its last part, deleting
+  `path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`, waits on a
+  decision: what replaces the name floor for the editor's degrade root (no
+  `paths`), for a file under no configured root, and for a never-seen path.
+  Options: (a) keep `.git` and `node_modules` as names, and skip the Composer
+  vendor directory by its resolved path, as MAGO does (recommended; a `vendor/`
+  outside Composer is then walked); (b) keep all three names until
+  `exclude_paths` exists; (c) delete all three now, so an editor with no
+  `paths` analyses `vendor/`.
 - Item 3: LOAD-3.2 (3.1 waits on REG-16.4, level 2).
 - Item 5: LOAD-4.3, 4.5 and 4.7 (4.4 waits on LOAD-2.5).
 - Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).
