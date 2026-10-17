@@ -248,12 +248,12 @@ impl<'a> Walk<'a> {
 /// its directory stands. A path with no existing ancestor is returned as
 /// given.
 pub(crate) fn resolve(path: &Path) -> PathBuf {
-    for ancestor in path.ancestors() {
+    if let Ok(resolved) = fs::canonicalize(path) {
+        return resolved;
+    }
+    for ancestor in path.ancestors().skip(1) {
         if let Ok(resolved) = fs::canonicalize(ancestor) {
             let rest = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
-            if rest.as_os_str().is_empty() {
-                return resolved;
-            }
             return composer::manifest::lexically_normalized(&resolved.join(rest));
         }
     }
