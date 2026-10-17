@@ -153,7 +153,7 @@ in `.rs` files on this branch:
 | C3 step 6, `String` keys to `Name`; `Borrow<str>` on `ImportKey` (1) | 1 | NAME-1.2 | READY |
 | C3 step 7, the checker's method memo | — | NAME-1.1 | READY |
 | §14: trees dropped in the serial insert loop (267.8 M serial) | — | LOAD-3 | OPEN |
-| the sorted traversal's k-way merge | — | LOAD-2.5 | OPEN, needs LOAD-2.2 |
+| the sorted traversal's k-way merge | — | LOAD-2.5 | OPEN, needs LOAD-2.2's walk |
 | P6(d), the streaming lexer's plumbing | — | SYN-2 | OPEN |
 | P4, column tables for every file | — | SYN-3 | OPEN |
 | F1, the guards on `class_exists`-style tests | — | STUB-8 | OPEN, needs STUB-7 |
@@ -181,8 +181,8 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 2: LOAD-2.2 to 2.7 (LOAD-2.8's first two parts are in; its third waits on
-  LOAD-2.3). LOAD-2.2's walk is in (`85a4ecad`). Its last part, deleting
+- Item 2: LOAD-2.4 to 2.6 (LOAD-2.3, 2.7 and 2.8 are in: `07595369`, `2cd13c8e`
+  and `47adfd19`). LOAD-2.2's walk is in (`85a4ecad`). Its last part, deleting
   `path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`, waits on a
   decision: what replaces the name floor for the editor's degrade root (no
   `paths`), for a file under no configured root, and for a never-seen path.
@@ -190,7 +190,8 @@ later item waits for that need. The READY rows, item by item:
   vendor directory by its resolved path, as MAGO does (recommended; a `vendor/`
   outside Composer is then walked); (b) keep all three names until
   `exclude_paths` exists; (c) delete all three now, so an editor with no
-  `paths` analyses `vendor/`.
+  `paths` analyses `vendor/`. LOAD-2.4 and 2.5 need only the walk, so the
+  decision does not hold them: until it is made, the walk keeps its name list.
 - Item 3: LOAD-3.2 (3.1 waits on REG-16.4, level 2).
 - Item 5: LOAD-4.3, 4.5 and 4.7 (4.4 waits on LOAD-2.5).
 - Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).
