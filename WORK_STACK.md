@@ -24,8 +24,8 @@ level 8's order; DOC-2.1 stays deferred.
 Level 9 is the one active level: the fixes for the costs that the attribution of
 the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done, its decisions
 were ruled on 2026-10-17, and its rows are being built in the plan's order since
-the user's second "go" that day: R1, R11, R12, R15, R2, R3, R4, R6 and R14 are
-in, and R13 is next.
+the user's second "go" that day: R1, R11, R12, R15, R2, R3, R4, R6, R14 and R13
+are in, and R10 is next.
 
 Level 8 waits under it. It holds the 20 G plan and the off drill, and its order is
 in its section below. When level 9 is done, work the lowest item that has a READY
@@ -264,10 +264,10 @@ the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
   items 1 to 3. R15 (a batch run does not purge) came from the allocator runs.
 - Built (since the user's second "go", 2026-10-17): R1 (`6016499f`), R11
   (`a5a4d85f`), R12 (`6705eedd`), R15 (`d6ca3442`), R2 (`68af1c72`, `276ed5ad`),
-  R3 (`75b628f8`), R4 (`1ba57cc0`), R6 (`59bf55bc`) and R14 (`1f351379`,
-  `6e49d4e7`), measured on their ledger rows (LOAD-8.1, LOAD-3.3, CACHE-12,
-  LOAD-8.15, LOAD-8.2 to 8.4, LOAD-8.6, LOAD-8.14). Next: R13, then R10, R5, R8, R9
-  and R7. R14's measurement found LOAD-9 (the installed packages' resolutions,
+  R3 (`75b628f8`), R4 (`1ba57cc0`), R6 (`59bf55bc`), R14 (`1f351379`,
+  `6e49d4e7`) and R13 (`4a996352`), measured on their ledger rows (LOAD-8.1,
+  LOAD-3.3, CACHE-12, LOAD-8.15, LOAD-8.2 to 8.4, LOAD-8.6, LOAD-8.14, LOAD-8.13).
+  Next: R10, then R5, R8, R9 and R7. R14's measurement found LOAD-9 (the installed packages' resolutions,
   READY), which is not one of the plan's rows.
 - The plan's decisions 1 to 7 were ruled on 2026-10-17, each as the plan
   recommended:

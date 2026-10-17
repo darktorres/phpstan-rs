@@ -39,8 +39,12 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     from 16 to 20 ms to 0 to 4 ms, and its `readlink`s from 7,478 to 3,055. The warm pairs
     give −65.6 ms (p = 0.033), more than that stretch can give. Most of the `readlink`s left
     are the installed packages' (the ledger's LOAD-9, READY).
+  - R13 (`4a996352`): −181.3 M warm, all of it the discovery thread's (the parse's 163.0 M),
+    and −9.6 M off. The warm vendor wait fell from about 85 to 38 ms in two recordings each,
+    with no wall change beyond the noise (p = 0.709). The entries are kept by the file's
+    bytes, not its path (its Built).
 
-  R13 is next.
+  R10 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -50,7 +54,8 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   `main.rs`, R2 `walk.rs`, `session.rs`, `file_table.rs`, `project.rs`, `lsp.rs`,
   `dir_listings.rs` and `vendor.rs`, with `PathHash` and `path_hash` now in the composer
   crate's `hashed_path.rs`, R3 `walk.rs`, R4 `session.rs`, R6 `vendor.rs`, and R14
-  `hashed_path.rs`, `vendor.rs`, `walk.rs` and `session.rs`.
+  `hashed_path.rs`, `vendor.rs`, `walk.rs` and `session.rs`, and R13 `vendor.rs`,
+  `crates/composer/src/lib.rs`, `file_cache.rs` and `session.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -773,6 +778,24 @@ generated `autoload_static.php`.
 **Measure.** Warm callgrind (`parse_generated_file` on the discovery thread), and the warm
 vendor wait in a perf recording.
 
+**Built** as `4a996352`: −181.3 M warm, all of it the discovery thread's, and −9.6 M off (the
+discovery thread −5.7 M, as it builds each path in one buffer). The warm vendor wait fell from
+about 85 to 38 ms in two recordings each, more than the 16 ms of the parse, since the entries'
+resolution fell too (29 and 25 samples to 17 and 17). The warm pairs show no change beyond the
+noise (−29.3 ms, p = 0.709). Where it differs from the Change:
+
+- What is kept is a spelled form of the paths: the literals' text and the directories they name
+  (`__DIR__`, `$vendorDir`, `$baseDir`), read from the tree once. It depends on the file's bytes
+  alone, so it is kept by the bytes and how the file is read (the static class, a files array
+  or a directories array), not by the path and the parsed files' content key.
+- It is stored as `{hash}.autoload.bin` in the per-file cache, beside the files' entries, with
+  their checksum and their write. The composer crate reads and writes it through a
+  `GeneratedCache` the session passes, so it stays free of the cache's format.
+- A file that does not parse, or is not of the shape its reading expects, keeps nothing, so it
+  is read again on the next run.
+
+The ledger's LOAD-8.13 has the numbers.
+
 ### 11. R10: the walk does not wait for vendor discovery
 
 *LOAD-8.10. A wall row, warm. Needs R3.*
@@ -1137,6 +1160,7 @@ ours is noted, and a run it distorts is taken again.
   LOAD-8.14 is READY.
 - Done with R14: LOAD-8.14's row, with the one list of `VendorPath`s and the pairs against the
   stretch; its row in §1's table; LOAD-9 (the installed packages' resolutions, READY).
+- Done with R13: LOAD-8.13's row, with the key by the file's bytes; its row in §1's table.
 - Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
   row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
