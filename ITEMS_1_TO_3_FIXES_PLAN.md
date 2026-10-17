@@ -94,8 +94,13 @@ change since; so no rebuild was needed). Piwigo, `check-project --config phpstan
 --format json`, output sha256 `8ff144c3…` in every run whose output was kept (the two off
 recordings, the warm recording, the strace run, and the plain off run with the `/proc/vmstat`
 counters); the six plain timing runs below wrote to `/dev/null`, and the gate binary's
-scaling runs were not hashed (Appendix D). The machine has 8 cores, one thread
-each. The 1-minute load was 2.26 before the off recording read here and 2.20 before the
+scaling runs were not hashed (Appendix D). The machine is a virtual machine: 8 vCPUs, one
+thread each, on an Intel i7-8700 host, which has 6 cores and 12 hardware threads, so when
+all eight vCPUs are busy at least two cores run two of them each. It exposes no hardware
+performance counter (`perf stat` reports `cycles` and `instructions` as not supported, and
+`perf record` samples with `task-clock`) and no cpufreq interface, so clock speed and cache
+or memory contention cannot be told apart here. A "core" below is a vCPU. The 1-minute
+load was 2.26 before the off recording read here and 2.20 before the
 warm one (1.5 to 2.5 at the other steps), with other sessions' processes present. `perf
 record -F 499 -g` (frame pointers), so one sample is 2 ms of one thread's CPU. One run each
 does not resolve what `-g` costs at 499 Hz: off runs under `perf record -F 499 -g` and
@@ -119,9 +124,10 @@ vendor thread's stack is in `io_schedule`, `migrate_pages` and `try_to_compact_p
 `wall-2026-10-17/probe-vendor`, 7 runs; Appendix D) takes 103.5 to 133.5 ms (median 109.5). The `/proc/vmstat` counters
 are system-wide, so other processes count in them too (`compact_fail` rose by 983 and
 `compact_success` by 93 in the same run); the vendor thread's own stack is what ties the
-slow run to compaction. What asked for the high-order pages is not identified: mimalloc
-asks for no huge pages here (Kernel time, below), and a large page-cache folio for a file
-read is one candidate. The ordinary off run compacts too: `isolate_migratepages_block` and
+slow run to compaction. What asked for the high-order pages is the run itself: mimalloc
+gives its 1 GiB arenas `MADV_HUGEPAGE`, an off run takes about 550 transparent huge pages,
+and with THP `defrag` at `madvise` a huge-page fault in a madvised region compacts memory
+directly when no free 2 MiB page is at hand (Kernel time, below). The ordinary off run compacts too: `isolate_migratepages_block` and
 `migrate_folio_*` frames sit in the shard merge's samples. Every row's wall claim must
 therefore be a median of repeated runs, with the compaction counters logged, not one
 recording.
@@ -221,8 +227,8 @@ or more. So the time each row's code takes in these runs (inclusive samples):
 | R11 | freeing the context trees in `insert_numbered_file` | 36 (72 ms, main thread) | |
 | R12 | `bind_file` | 5 | 55 (110 ms, main thread) |
 
-So R1 to R8 are Ir rows: they serve the 20 G plan's Ir total and save a few ms of wall
-each. The wall rows are R10 to R14.
+So R1 to R9 and R13 are Ir rows: they serve the 20 G plan's Ir total and save a few ms of
+wall each (R9 none in a batch run). The wall rows are R10, R11, R12, R14 and R15.
 
 **Kernel time.** 23% of the off run's samples and 22% of the warm run's have a kernel leaf.
 The largest is `__clear_pages_unrolled`, the kernel zeroing a page on its first touch:
@@ -233,18 +239,62 @@ mimalloc v3 (`libmimalloc-sys` 0.1.49, whose `build.rs` picks `c_src/mimalloc/v3
 `v2` feature is on; the workspace sets `default-features = false` and no feature;
 `MI_NO_THP` is unset; our code sets no option) with v3's defaults: `purge_delay` 1000 ms and
 `purge_decommits` on (`src/options.c:127`, `:140`), so a purge is `MADV_DONTNEED`
-(`src/prim/unix/prim.c:498-501`) and a purged page is zeroed again when it is reused;
-`allow_thp` on (`options.c:176`), but `MADV_HUGEPAGE` is given only to a mapping whose size
-and alignment are multiples of 2 MiB (`prim.c:413`, `_mi_os_canuse_large_page` at
-`src/os.c:80`), and arenas are reserved 1 GiB at a time at 64 KiB alignment
-(`MI_ARENA_SLICE_ALIGN`), so the process gets no transparent huge pages. This machine has
-THP `enabled` and `defrag` at `madvise`, and every mTHP size `never` except 2 MiB
-(`inherit`). Kernel time grows with the thread count (`sys` 0.43 s at one thread, 1.82 s at
-eight, off; Scaling, below). Not measured: how much of the zeroing is first touch (the
-footprint) and how much is zeroing again after purges. mimalloc reads its options from the
-environment, so two off runs, one with `MIMALLOC_SHOW_STATS=1` (purge and commit counts at
-exit) and one with `MIMALLOC_PURGE_DELAY=-1` (no purging), settle it without a build; they
-are measurement runs and wait for the user's go-ahead. No row covers this cost.
+(`src/prim/unix/prim.c:498-501`) and a purged page is zeroed again when it is reused; and
+`allow_thp` on (`options.c:176-177`). An OS allocation of at least 8 large pages (16 MiB)
+is aligned to 2 MiB (`src/os.c:303-305`), so the 1 GiB arenas pass
+`_mi_os_canuse_large_page` (`os.c:80`) and get `MADV_HUGEPAGE` (`prim.c:412-418`): the
+process does get transparent huge pages. (An earlier reading of this section, from the
+arenas' 64 KiB `MI_ARENA_SLICE_ALIGN`, said it did not; the probe below measured them.) This
+machine has THP `enabled` and `defrag` at `madvise`, so a huge-page fault in a madvised
+region compacts memory directly when no free 2 MiB page is at hand, and every mTHP size is
+`never` except 2 MiB (`inherit`). Kernel time grows with the thread count (`sys` 0.43 s at
+one thread, 1.82 s at eight, off; Scaling, below).
+
+**The allocator runs** (decision 2; 2026-10-17, 13:36 to 13:41; off mode; every output the
+oracle's; `mimalloc-runs.sh` and `thp-probe.py`, Appendix D). mimalloc reads its options
+from the environment, so none of these needed a build:
+
+- **mimalloc's statistics at exit** (`MIMALLOC_SHOW_STATS=1`, gate binary, one run each,
+  load 0.39). With the defaults: 987 purges, 154.8 MiB in all (160 KiB each on average),
+  user 9.514 s, system 2.863 s. With `MIMALLOC_PURGE_DELAY=-1`: no purge, user 9.306 s,
+  system 2.507 s. Both commit 1.1 GiB and peak at 1.0 GiB of RSS. So purging lowers no
+  peak: it hands back memory freed after the peak, which a batch run holds only until it
+  exits.
+- **hyperfine** (gate binary; `-N --warmup 2 --runs 10`; two rounds in alternating order,
+  default then no purge, and no purge then default; load 1.00 at the start of the first
+  round and 5.93 at the start of the second, raised by the runs themselves). Default 2.258
+  ± 0.230 and 2.276 ± 0.249 s; no purge 2.159 ± 0.149 and 2.076 ± 0.182 s. Pooled, 20 runs
+  each: medians 2.228 and 2.108 s, means 2.267 (σ 0.234) and 2.117 (σ 0.167). No purge is
+  0.121 s (5.4%) faster on the medians, Mann-Whitney U = 276, p = 0.040 (two-sided, normal
+  approximation).
+- **perf** (`head-cg`, one recording each, right after the hyperfine set; load 8.4 from the
+  set's own runs, with nothing of ours running beside the recordings). Default: 6,335
+  samples, the last at 2.525 s, 21% of them kernel leaves, 104 with a TLB-shootdown or IPI
+  frame (`smp_call_function_many_cond` is the leaf of 53). No purge: 5,493 samples, the last
+  at 2.169 s, none with such a frame. `__clear_pages_unrolled` is 456 and 462 samples, the
+  same: the zeroing is not purged pages faulted again.
+- **Huge pages.** `thp_fault_alloc` rose by 551 and 544 in the two recordings (a
+  system-wide counter) and `compact_stall` by 5 and 4. `thp-probe.py` samples
+  `/proc/<pid>/smaps_rollup` every 20 ms over a run (two runs each, alternating, all under
+  the probe's sampling). With the defaults, Rss peaks at 1,114 and 1,103 MiB, 1,066 and
+  1,054 MiB of it `AnonHugePages`, with about 550 huge-page faults, and the run takes 2.734
+  and 2.936 s. With `MIMALLOC_ALLOW_THP=0` (mimalloc then sets `PR_SET_THP_DISABLE` for the
+  process, `prim.c:222-226`), Rss peaks at 928 and 931 MiB with no huge page, and the run
+  takes 4.125 and 3.552 s.
+
+What they show:
+
+- **The zeroing is first touch.** It is the first touch of the run's footprint, 1.1 GiB and
+  nearly all of it huge pages, so only a smaller footprint lowers it. R11 lowers it: the
+  context trees are freed during the parse.
+- **The huge pages stay.** Without them the run takes 3.6 to 4.1 s against 2.7 to 2.9 s.
+- **The huge pages are where the compaction comes from.** With `defrag` at `madvise`, a
+  huge-page fault in mimalloc's madvised arenas compacts memory directly when no free
+  2 MiB page is at hand. That is what the 6.35 s recording's vendor thread was doing. The
+  machine's `defrag` setting decides it, not our code: `defer` takes a huge page only when
+  one is free, with no stall.
+- **Purging gains a batch run nothing.** It costs about 5% of the wall time and all of the
+  TLB-shootdown IPIs: R15.
 
 **The largest unused stretch is not in this plan.** The project's finishing passes run
 from 1.16 to 1.52 s off and from 0.75 to 1.19 s warm at 2 to 3 cores: the thread in
@@ -303,10 +353,54 @@ parallel 5,407 ms, warm 1,055 and 3,262; on the medians, off 1,327 and 5,246 (re
 -1.3, +4.8, +1.6, -6.6%), warm 1,033 and 3,295 (-1.5, +5.9, +0.5, -6.1%). The fit is within
 9% at every point (the worst is off at 8 threads on the means: 1,984 against 2,176). It does
 not measure serial work here: the form assumes the CPU time stays the same as threads are
-added, and it grows by 70% off and 61% warm from one thread to eight (user time from rayon's
-spinning and contention, `sys` from page faults and task switches, which quadruples off), so
-the serial term absorbs that growth. The measure that holds is the timeline's unused
-capacity: 0.75 s off and 0.85 s warm at 8 threads ("Where the 8 cores go unused" above).
+added, and it grows by 70% off and 61% warm from one thread to eight, so the serial term
+absorbs that growth. The measure that holds is the timeline's unused capacity: 0.75 s off
+and 0.85 s warm at 8 threads ("Where the 8 cores go unused" above).
+
+**Where the CPU growth goes** (off). Two `head-cg` recordings were taken one right after
+the other at 13:52, at one thread and at eight: 3,114 and 5,136 samples, the oracle's
+output both times. Load was 1.9 and 2.1, with another session's test suite on one vCPU.
+They were read with `cpugrowth.py` (Appendix D), which puts each sample in one class by its
+leaf. A first one-thread recording, at 13:44, is not used. It ran 20.0 s with 5,766 samples
+(11.5 s of CPU, against 6.2 s in the pair) at 55 to 77% of one vCPU through the parse and
+the check. Load was 2.64 at its start, and another session's test binary was running at
+normal priority when checked right after it. CPU seconds:
+
+| class of the leaf | 1 thread | 8 threads | growth |
+|---|---:|---:|---:|
+| our code | 4.858 | 7.018 | +2.160 |
+| kernel: page zeroing (`__clear_pages*`) | 0.084 | 0.824 | +0.739 |
+| kernel: task switch (`finish_task_switch`, `schedule`) | 0.072 | 0.505 | +0.433 |
+| mimalloc | 0.571 | 0.934 | +0.363 |
+| kernel: other | 0.240 | 0.403 | +0.162 |
+| kernel: TLB shootdown, IPI | 0 | 0.086 | +0.086 |
+| rayon idle, spinning (`sched_yield`, `rayon_core` sleep) | 0.012 | 0.052 | +0.040 |
+| kernel: softirq, IRQ exit | 0.092 | 0.126 | +0.034 |
+| libc `mem*` | 0.265 | 0.297 | +0.032 |
+| kernel: futex, `sched_yield`, file system | 0.046 | 0.048 | +0.002 |
+| **total** | **6.240** | **10.293** | **+4.052** |
+
+By role: parse 2.222 to 4.052 s, check 2.108 to 3.565, stub build 0.894 to 1.236. The
+finishing passes' own thread goes from 0.581 to 0.317 s, while their stolen jobs, which
+the role marks as `other`, go from 0.054 to 0.447.
+
+`perf stat -r 3` on the gate binary gives the same picture (13:51, load 1.15). At one
+thread and at eight: task-clock 6,580 and 10,418 ms (± 2.8%), wall 6.379 and 1.947 s,
+context switches 127 and 5,110, CPU migrations 90 and 2,637, page faults 4,606 and 3,878.
+
+So rayon's spinning is not the growth (0.04 s), and neither are locks. The rest:
+
+- **The same code takes 44% more CPU at eight threads**: our code 4.86 to 7.02 s, mimalloc
+  0.57 to 0.93 s.
+- **The zeroing takes ten times as much**: 0.08 to 0.82 s.
+- **Eight busy vCPUs share the host's six cores**, its 12 MiB L3 and its memory bandwidth.
+  This VM has no counter that separates clock speed from cache and memory contention.
+- **Task switches add 0.43 s**, 0.18 s of it in the idle pool: rayon's workers sleep and
+  wake, and at times more threads are runnable than there are vCPUs (the main, vendor and
+  stub threads beside eight workers).
+- **The TLB shootdowns (0.09 s) are purging's.**
+
+No row owns the growth beyond R11, which lowers the footprint the zeroing writes, and R15.
 
 **Warm-cache integrity:** the warm runs wrote 0 cache files. The fill copy
 (`wall-2026-10-17/cache-warm`) is a copy of `regress-item5/cache-head` and serves all warm
@@ -341,33 +435,76 @@ before the output.
 - **R13's verdict**: thread 11 is on the critical path in warm mode and not in off mode, and
   its parse is 16 ms of discovery's 112 ms warm (8 of 56 samples), not the 41% its Ir share
   suggests. R13 is an Ir row first (163 M in both modes).
-- **Page zeroing** is the largest single leaf in both runs (7 to 9% of all samples), and no
-  row covers it (Kernel time; decision 2).
+- **Page zeroing** is the largest single leaf in both runs (7 to 9% of all samples). It is
+  the first touch of the run's 1.1 GiB, nearly all of it huge pages, not purged pages
+  touched again. R11 lowers the footprint; R15 removes the purges' TLB shootdowns and
+  about 5% of the off run's wall time (Kernel time; decision 2).
 
-**Decisions for the user** (from these measurements):
+**Decisions for the user** (from these measurements). Each names the option recommended as
+the most proper, with its reason; none is decided until the user rules on it.
 
-1. The finishing passes (the largest unused stretch, about 0.27 s): a row here, or their
+1. **The finishing passes** (the largest unused stretch, about 0.27 s): a row here, or their
    utilization recorded in REG-7's record and left there.
-2. The page zeroing: approve the two mimalloc environment runs (Kernel time), which decide
-   whether a purge setting becomes a row.
-3. R14 as its own row (proposed below) or folded into R6; and before R10, where its 14 to
-   16 ms show until R10 hides them, or after R10 with the Ir rows.
-4. The row order: the proposed order (Rows) puts R1 and the wall rows before the other Ir
-   rows.
-5. The stub-base wait (89 ms, cold stub cache only): a row here, or the STUB rows' (ledger).
+   - *Recommended: REG-7's record.* REG-7's per-class resolution replaces these passes
+     (`flatten_phpdoc_inheritance`, `precompute_ancestor_names`,
+     `precompute_member_owners`, `drop_doc_members_excluded_by_native`,
+     `resolve_deferred_value_of`, `flatten_traits`; ledger line 1178).
+   - A row here would parallelize code that REG-7 deletes. The cost stays until REG-7,
+     which waits on REG-16.3.
+2. **The page zeroing and the purging** (measured; Kernel time).
+   - *Recommended: R15, and no change to the huge pages.* The zeroing is the first touch
+     of the footprint, which only a smaller footprint lowers (R11).
+   - The huge pages stay: without them the run takes 3.6 to 4.1 s, against 2.7 to 2.9 s.
+   - Purging costs a batch run about 5% and every TLB-shootdown IPI, and gains it nothing.
+3. **R14**: its own row or folded into R6; before R10 or after it.
+   - *Recommended: its own row, after R2 and R6 and before R10.* R14 changes the walk's
+     entry point (a `Resolved` path that is not resolved again), not discovery. It builds
+     on R2's hashed path and on the listing kinds R6 reads.
+   - Its 14 to 16 ms can be measured only before R10 hides them.
+4. **The row order.**
+   - *Recommended:* R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7.
+   - The contained rows come first, with R11 before R15, since R11 changes what is freed
+     and when.
+   - R2 comes before the rows that use its type (R3, R4, R6, R7, R14).
+   - R6, R13 and R14 come before R10, which hides their wall time. R10 comes after R3,
+     since its hand-over rule changes R3's carried reach state.
+   - The `FileId` rows (R5, R8) go together.
+   - R7 is last, read from a fresh profile, since R2 to R6 remove part of what it lists.
+5. **The stub-base wait** (89 ms, cold stub cache only): a row here, or the STUB rows'.
+   - *Recommended: the STUB rows'.* STUB-11 (no run builds the builtin knowledge, and the
+     stub disk cache goes) removes what a cold run waits for. STUB-13.2 (`Project::loading`
+     goes, and with it `expect_files`' choice of base) removes the wait.
+   - Record the 89 ms and the cold stub build (0 to 0.21 s off, at 4.7 cores) in
+     STUB-10.1's "what a cold run still pays".
+6. **The rows whose costs predate items 1 to 3** (R8, R11 to R15): keep them in this batch
+   or drop them.
+   - *Recommended: keep all.* R11 is item 3's own open row (LOAD-3.3), and R14 completes
+     item 1's LOAD-1.1 ("each link is resolved once"), so both are items 1 to 3's
+     unfinished work.
+   - R8, R12, R13 and R15 sit on the measured critical path or in the Ir total. R12's
+     decode was already `insert_built_decl`'s 413.0 M at the base.
+   - R10 is not among these: it is item 1's own regression, since LOAD-1.2 (`7bef998a`)
+     made every walk wait for `vendor.get()`.
+7. **LOAD-2.2's name floor** (item 2): the walk skips Composer's vendor directory by its
+   resolved path now, and the `.git` and `node_modules` names until `exclude_paths` exists.
+   - On 2026-10-17 this combination of item 2's options a and b was offered as the most
+     proper.
+   - It waits on the user's confirmation before the ledger and WORK_STACK record it.
 
 ## Rows
 
-One commit each, with a pathspec (the checkout is shared). Proposed order after the
-second "go" (decision 4): R1 (the largest Ir cost, a small change); then the wall rows:
-R12 and R11, each a contained change (up to about 0.10 s warm and about 60 ms off), then
-R14 and R10, which both change `walk_listing` (R14 first, so R10 moves roots that are
-already taken as resolved; R10 gains the most, up to about 0.13 s warm, and is the largest
-change; R14's wall gain lasts only until R10 lands, while its system calls and main-thread
-CPU stay saved); then the Ir rows: R2, R3 to R8 (they use R2's type), R9, and R13. R11 to R14 are
-pre-existing costs, not from items 1 to 3, added because the profile puts them on the
-critical path; drop them from the batch if you want the plan limited to what items 1 to 3
-added.
+One commit each, with a pathspec (the checkout is shared). Proposed order after the second
+"go" (decision 4): R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7. R3,
+R4, R6, R7 and R14 use R2's type; R5 and R8 use `FileId`.
+
+Where the rows come from (decision 6):
+
+- R1 to R4, R6, R7 and R9 are costs that items 1 to 3 added; R2 to R4, R6 and R7 also
+  take in older path code.
+- R5 is item 5's.
+- R10 is item 1's regression (LOAD-1.2).
+- R8 and R11 to R15 are older costs. R11 is item 3's open LOAD-3.3, R14 completes item
+  1's LOAD-1.1, and R8, R12, R13 and R15 come from no item.
 
 **R1. Validate UTF-8 once, with the fast check** (394 M off, pool workers; 133.6 M warm, where
 the analysed files are parsed again because they are never cached).
@@ -487,9 +624,27 @@ precedent for avoiding `Path::hash`), `lexically_normalized` (11.5 M), `append_c
 and `entry_canonical` (8.4 M). Design on the same principle: a path that `canonical` returned
 is canonical and normalized, so its containment in `vendor_dir` is a byte-prefix test at a
 separator boundary (sound only for normalized paths, which `resolved` is and `raw` is not);
-the directory's listing is already found once per distinct directory text; `append_concat`,
-`lexically_normalized` and `entry_canonical` are read callee by callee when the row is
-written (the fallback `lexically_normalized` runs only for a path outside `vendor_dir`).
+the directory's listing is already found once per distinct directory text. The callees,
+read one by one (2026-10-17, `vendor.rs:254-343`):
+
+- **Containment is decided once per listed directory**, not per entry. `Listed` carries
+  where its canonical directory lies, in one of three states:
+  - in `vendor_dir`: every entry lies in it;
+  - `vendor_dir`'s parent: only the entry that is `vendor_dir` itself does;
+  - elsewhere: no entry does.
+
+  Only a link is tested itself, since `entry_canonical` resolves it with
+  `fs::canonicalize` and it may lead anywhere.
+- **The as-written fallback works the same way.** `vendor_as_written`
+  (`lexically_normalized(&self.generated_dir.join(".."))`, made again for every fallback
+  entry at `:265`) is made once, in `Resolver::new`. A directory's normalized text and its
+  verdict are kept beside its listing, so a fallback entry is that text joined with its
+  name.
+- **`entry_canonical`'s join stays** (`listed.canonical.join(name)`, `:340`). It is the one
+  place a resolved child is made, and it makes R2's `HashedPath` with `child`.
+- **`append_concat` stays per entry in off mode** (`:394-426`). R13 caches what it
+  evaluates, so a warm run does not run it.
+
 The row measures this part separately: thread 11 is 393 M, of which `parse_generated_file`
 163 M is the autoload files' parse (R13).
 Time (Step 0): discovery is 73 samples off and 56 warm on its own thread (0.041 to 0.208 s
@@ -676,6 +831,16 @@ keeps no context tree (`kept_ast` is `None` for context files) and an analysed f
 its; the Piwigo oracle. Measured with the off run: the drop moves to the pool, so the Ir
 total stays and the main thread falls by about 265 M.
 
+Ledger: this is LOAD-3.3 (item 3's own row, OPEN), not a new row. The ledger makes it
+wait on LOAD-3.1: a tree is kept by one function of (role, open), in the load and in
+`update_file` alike. For the load that holds already:
+
+- in a built-once project `keeps_tree` is a function of the role alone (`project.rs:953`);
+- LOAD-2.2's walk makes each file's role final before its parse.
+
+So R11 is LOAD-3.3 for the load. It leaves `update_file`, which keeps every tree, to
+LOAD-3.1, and LOAD-3.3's record says so.
+
 Measured (Step 0): `insert_numbered_file` is 41 main-thread samples off (82 ms, 1.080 to
 1.162 s), of which freeing the trees is 36 (72 ms: `drop_glue::<[Stmt]>`, with `mi_free`
 and `mi_free_try_collect_mt`, mimalloc's path for a block another thread allocated, under
@@ -705,20 +870,48 @@ the encoded form does not hold. The warm run decodes 655.9 M in all (`Once::call
 later passes decode 177.8 M (`resolve_deferred_value_of`) and 87.9 M (`Members::eq`) more.
 After R12 a pass that reads an entry `bind_file` used to decode decodes it itself, so the Ir
 saving is only the entries no later pass reads, and the wall saving is the move from the
-main thread to the pool; both are measured, not assumed. Give `Lazy` the number
-as its own field, set while the value is still encoded and applied when it is decoded, or
-decode with the number as an argument; the encoded bytes then stay untouched until a class is
-read. The saving is up to 393 M on the main thread, less the decodes that later reads would
-have done anyway (those run on the pool). Test: a warm load's `is_encoded()` entries stay
-encoded after `bind_file`, and a decoded entry reports the right `Origin::File`; the warm
-Piwigo oracle.
+main thread to the pool; both are measured, not assumed.
+
+The design, read in the code (2026-10-17). The plan's two options, the number as `Lazy`'s
+own field and the number as the decoder's argument, are one design:
+
+- **The number is bound without decoding.** `Lazy` keeps the file's number beside the
+  encoded bytes, and `bind_file` sets it without decoding. `get` passes it to the
+  decoder, so a decoded value is born `Origin::File(id)`.
+- **Why it must be passed to the decoder.** `Provenance` encodes `Origin::File(_)` and
+  `Origin::PendingFile` alike as `OriginData::File`, which decodes to `PendingFile`
+  (`provenance.rs:110`, `:135`). A decoded entry is therefore pending until bound, and
+  that is why `bind_file` decodes today.
+- **The ledger.** This is CACHE-12's decode context, for a `FileId` instead of an
+  `Arc<Path>`. CACHE-12 takes it over; CACHE-11, whose decode context CACHE-12 waits on,
+  is BLOCKED.
+- **The number alone does not save the decode.** `resolve_deferred_value_of` asks
+  `class_has_deferred_type` about every class in scope, project and stub alike
+  (`resolve.rs:539`, `:592`, `:1486`). That call decodes every method to learn whether
+  any type in it is deferred; for the stubs this is 177.8 M warm, the 20 G plan's item 6
+  R5 (ledger line 1903). With the number alone, the 393 M moves to that scan, as
+  CACHE-7's 420 M moved to the workers (SKIP: no wall change).
+- **So the encoded entry also carries that fact.** It is computed when the entry is built
+  or encoded, and the scan reads it. Both caches' formats change; they are per build, so
+  the change is a cold start, as any rebuild is.
+- **The fact covers the stub entries too.** It is on every encoded function entry, so it
+  also removes item 6's R5, whose ledger row then cites R12. REG-7.2 (deferred types on
+  demand) later deletes the scan, `function_has_deferred_type` and the fact together.
+- **The third decoder is not yet traced.** `Members::eq` (87.9 M warm) is inlined into
+  `run_finishing_passes`, and callgrind shows no other caller. Which pass compares is
+  found when the row is written.
+
+The saving is up to 393 M on the main thread, less the decodes that later reads would have
+done anyway (those run on the pool). Test: a warm load's `is_encoded()` entries stay
+encoded after `bind_file` and after the scan; a decoded entry reports the right
+`Origin::File`; the warm Piwigo oracle.
 Measured (Step 0): `bind_file` is 55 main-thread samples warm (110 ms, 0.592 to 0.702 s)
 with the pool idle, so the gain is up to about 0.10 s warm, less what the decodes that later
 passes need add where they land (in the finishing passes, whose own thread is busy
 throughout, a decode lengthens that stretch), and 5 samples off. Considered: running `bind_numbers`
 (`session.rs:634`, a serial loop over the files) on the pool. It is a small change and
 spreads the decode over the pool, but it still decodes every method of every cached class
-to write one field; the number as `Lazy`'s own field is the proper fix.
+to write one field; binding the number without decoding is the proper fix.
 
 **R13. The autoload files' parse (thread 11) is not repeated** (`parse_generated_file`
 163.0 M: `parse_program` 137.1 M, `Lexer::build` 25.0 M, in the off and the warm run alike;
@@ -735,12 +928,14 @@ has no cache, still parses; it gains only from the cheaper `LineIndex` (SYN-3.1,
 that). Step 0's verdict: thread 11 is on the critical path in warm mode (the pool idles
 until it ends) and not in off mode (the stub build runs beside it). R13 gains about 16 ms of
 wall warm while R10 is not in and nothing once it is, and saves 163 M of Ir in both modes,
-so it is an Ir row first and comes last in the order.
+so it is an Ir row first. It comes before R10 (decision 4), so its wall share is measured
+while it still has one.
 
 **R14. The walk takes discovery's resolved paths** (14 to 16 ms serial on the main thread
 in both modes, before the walk can start: 7 samples off, 8 warm; by the code, most of the
 7,493 failing `readlink`s and about 2,000 of the 29,161 `statx` calls in the strace count,
-which is not split by thread; pre-existing, not from items 1 to 3).
+which is not split by thread; pre-existing, and it completes item 1's LOAD-1.1, "each link
+is resolved once").
 `walk_listing` (`session.rs:1083-1091`) joins each directory and file that discovery
 returns to the root (a no-op: they are absolute), tests it with `is_promoted`, and hands
 it to `Walk::add` or `Walk::add_file`, which resolve it again: `add` (`walk.rs:513`)
@@ -769,6 +964,63 @@ hand-overs through the new entry point as through today's; the Piwigo oracle. Me
 the main thread's stretch from `vendor.get()`'s return to the walk's start in a perf
 recording (0.210 to 0.222 s off, 0.147 to 0.161 s warm today), and the main thread's
 `readlink` and `statx` counts from `strace -ff` (Appendix D), before and after.
+
+**R15. A batch run does not purge** (wall time; pre-existing, not from items 1 to 3).
+
+*The measurement.* With the environment setting `MIMALLOC_PURGE_DELAY=-1`, the off run's
+medians were 2.228 against 2.108 s (−5.4%, p = 0.040), and its TLB-shootdown IPIs went
+away (Kernel time).
+
+*Why a batch run should not purge:*
+
+- mimalloc v3 purges memory that has been free for `purge_delay` (1000 ms) with
+  `MADV_DONTNEED`: 987 purges, 154.8 MiB in all, in an off run on Piwigo.
+- Each purge flushes the TLBs of the other threads that map the range
+  (`smp_call_function_many_cond`).
+- With `allow_thp` at 1, a purge can be as small as 64 KiB (`options.c:178`), and they
+  average 160 KiB here. A purge smaller than 2 MiB inside a huge page splits that page.
+- A batch run gains nothing from purging. The peak is the same with and without it
+  (1.0 GiB of RSS), and the memory it hands back is free only until the process exits.
+
+*Who keeps the default.* The language server lives long and should give memory back after
+a large analysis, so it keeps the default. So the batch commands (`check`,
+`check-project`, `demo`, `convert-baseline`) set `purge_delay` to −1 at the start of
+`main`'s dispatch, before the worker pool exists. `lsp` and `incremental-bench`, which
+measures the editor's path, keep the default.
+
+*The mechanism:*
+
+- **Not the environment.** mimalloc reads every option from the environment once, when
+  the process loads (`_mi_options_init`, `options.c:191-196`), so `main` cannot set it
+  that way.
+- **`mi_option_set`.** It writes the option (`libmimalloc-sys` `extended.rs:617`;
+  `options.c:298-304`). Purging reads the option each time it schedules a purge
+  (`os.c:642`, `arena.c:2022`), so a set after load takes effect.
+- **The option's index.** The binding defines no constant for v3's
+  `mi_option_purge_delay`. It is index 15 of the enum in `include/mimalloc.h`: the
+  binding's 14 (`mi_option_eager_commit_delay`) and 16 (`mi_option_use_numa_nodes`)
+  bracket it. So the row declares it beside the call. A test checks that the option
+  reads 1000 by default and −1 after the call; the version is pinned (`=0.1.49`), so a
+  bump runs that test again.
+- **Where the `unsafe` lives.** The call is `unsafe`, since it is an `extern "C"`
+  function. It sits in `allocator.rs`, the module that already reaches mimalloc's C API
+  under `#[allow(unsafe_code)]` (`lib.rs:24-26`), as one safe public function with a
+  SAFETY comment.
+- **Other allocators.** With the `dhat-heap`, `hotpath-alloc` or `system-allocator`
+  features that module is not compiled, and the function does nothing.
+
+*Not this row:*
+
+- `allow_thp`: the huge pages stay (Kernel time).
+- The editor's purge settings: whether its purges should be whole huge pages (`allow_thp`
+  2 makes the smallest purge 2 MiB) is a question for its own workload.
+
+*Measured* after R11, which changes what is freed and when:
+
+- the hyperfine set of Kernel time again, alternating A B A B, with the compaction
+  counters;
+- one perf recording, for the IPI count;
+- the Piwigo oracle.
 
 ## Not in this plan (checked)
 
@@ -809,20 +1061,22 @@ once right after R10, whose rule decides which walk hands each file to the parse
 right after R8, whose key change touches every diagnostic producer, so a break in either is
 found before the next rows build on it.
 
-Measurement (needs the user's go-ahead; heavy jobs one at a time, `nice -n 19`):
+Measurement (builds and runs need no approval since 2026-10-17; heavy jobs one at a time,
+`nice -n 19`, loadavg logged; another session's heavy job beside ours is noted, and a run it
+distorts is taken again):
 
 - Ir: off-mode callgrind on Piwigo with the commands of Appendix B (the harness `run-all.sh`
   is cleared with the cache), against `aa896697`'s 21,331,572,685, and the warm run for
   the rows with a warm cost (R1, R9, R12, R13); judge by the inclusive Ir of the functions
   changed (callers via Appendix C's `callers.py`, differences via `cgfn.py`), total beside it.
-- Wall time: a perf recording in the mode the row targets (off for R11; warm for R10, R12
-  and R14), read for the stretch the row shortens against Step 0's tables (Appendix D's
+- Wall time: a perf recording in the mode the row targets (off for R11 and R15; warm for
+  R10, R12 and R14), read for the stretch the row shortens against Step 0's tables (Appendix D's
   commands); and `hyperfine -N` on `gate` binaries, alternating A B A B, at least 5 runs
   each, medians with σ, loadavg noted and the `/proc/vmstat` compaction counters logged
   before and after each set (the 6.35 s recording was compaction, so one run decides
   nothing).
 - An Ir row (R1 to R9, R13) is called an Ir saving, with its wall time shown not to regress
-  beyond the noise; a wall row (R10 to R12, R14) is called a saving on the stretch it
+  beyond the noise; a wall row (R10 to R12, R14, R15) is called a saving on the stretch it
   shortens and on the medians, never on Ir alone.
 
 ## Bookkeeping
@@ -830,15 +1084,20 @@ Measurement (needs the user's go-ahead; heavy jobs one at a time, `nice -n 19`):
 - `WORK_STACK.md`: level 9 tracks this plan (added 2026-10-17, above level 8, which waits
   before its item 8). Name the ledger rows there as they are made, and delete the level
   when the plan is finished (the project rule: the level's own documents keep the record).
-- Ledger: new rows for R1 to R14 under LOAD, with the §1 range rows updated as each lands;
-  correct LOAD-3.4's note and LOAD-6's record; fix the stale comment at `session.rs:1081`.
-- Ledger: record Step 0, the first wall-time measurement of this code (the timelines, the
-  unused capacity, the scaling set, the Ir-per-second table), beside §1's Ir ranges; by
-  decisions 1 and 5, the finishing passes' utilization in REG-7's record and the stub-base
-  wait in the STUB rows'; and the mimalloc runs' outcome if decision 2 approves them.
-- Record the user's decision on item 2's LOAD-2.2 name floor (vendor by resolved path now,
-  plus the `.git` and `node_modules` names until `exclude_paths` exists) in the ledger and
-  WORK_STACK; it was offered and not written.
+- Ledger: new rows under LOAD for the rows that have none, with the §1 range rows updated
+  as each lands. Two rows already have ledger rows and get none: R11 is LOAD-3.3, and R12
+  is CACHE-12's decode context for a `FileId`. R10's new row says that it undoes LOAD-1.2's
+  wait. Correct LOAD-3.4's note and LOAD-6's record, and fix the stale comment at
+  `session.rs:1081`.
+- Ledger: record Step 0, the first wall-time measurement of this code, beside §1's Ir
+  ranges: the timelines, the unused capacity, the scaling set and its CPU-growth reading,
+  the Ir-per-second table, and the allocator runs (Kernel time). By decisions 1 and 5,
+  the finishing passes' utilization goes in REG-7's record and the stub-base wait in
+  STUB-10.1's. Item 6's R5 (line 1903) cites R12's carried fact. REG-7.2's record says
+  it deletes that fact with the scan.
+- Record item 2's LOAD-2.2 name floor in the ledger and in WORK_STACK once the user
+  confirms it (decision 7): vendor by resolved path now, plus the `.git` and
+  `node_modules` names until `exclude_paths` exists.
 - Another session shares the checkout: `git status` and `git log` before starting; commit
   with a pathspec; remove scratch worktrees once recorded.
 
@@ -947,7 +1206,8 @@ Ir, all threads, off mode.** The edges overlap (std calls std), so the std-inter
 
 **Table 5: thread 11, `discover_vendor_context` (393.1 M inclusive, 317 K self).**
 `parse_generated_file` 163.0 M (the generated autoload files; the thread also holds
-`Utf8Chunks` 12.7 M and `LineIndex::new` 25.0 M, caller not traced); `dedup` 118.0 M (all of it the
+`Utf8Chunks` 12.7 M and `LineIndex::new` 25.0 M, both under `parse_generated_file`'s
+`Lexer::build`, Table 10); `dedup` 118.0 M (all of it the
 `drop_files_under_dirs` retain closure, 112.7 M, plus `keep_first` 4.6 M); `Resolver::path`
 98.3 M (101.4 M inclusive in the thread's total; `listed` 30.7 M, `starts_with` 25.2 M,
 `append_concat` 14.2 M, `lexically_normalized` 11.5 M, `entry_canonical` 8.4 M, `parent`
@@ -1274,8 +1534,30 @@ have the oracle's sha256.
       }
   }
   ```
-- mimalloc (decision 2): the off run with `MIMALLOC_SHOW_STATS=1` (statistics at exit), and
-  with `MIMALLOC_PURGE_DELAY=-1` (no purging).
+- mimalloc (decision 2):
+  - `mimalloc-runs.sh` below runs mimalloc's statistics at exit with and without purging,
+    then two hyperfine rounds in alternating order, then one perf recording of each with
+    the `/proc/vmstat` counters around it. It takes about 2 minutes.
+  - The rounds are pooled from both `--export-json` files' `times`, with Python's
+    `statistics` and a two-sided Mann-Whitney U in the normal approximation.
+  - `thp-probe.py` below is run as `nice -n 19 python3 -I thp-probe.py <gate binary>
+    <out.json> [MIMALLOC_ALLOW_THP=0]`, twice each, alternating.
+  - mimalloc's options are documented in `c_src/mimalloc/v3/include/mimalloc.h` (the
+    `mi_option_e` enum, in index order) and `src/options.c` (the defaults).
+- CPU growth with the thread count:
+  - Record the off run with `PHPSTAN_RS_THREADS=1` and then with `=8`, one right after the
+    other (`perf record -F 499 -g` as above), and dump both.
+  - Then `python3 -I cpugrowth.py <1-thread dump> <8-thread dump>` (below). It imports
+    `perfdump.py` from its own directory.
+  - Counts: `nice -n 19 perf stat -r 3 -e task-clock,context-switches,cpu-migrations,page-faults
+    -o <file> -- env <off mode> PHPSTAN_RS_THREADS=<n> <gate binary> $CHECK > <out>`, for
+    n = 1 and 8. With `-r 3` the output is written three times into `<out>`: check each
+    171,439-byte third.
+  - `cycles` and `instructions` print `<not supported>` on this VM, and
+    `/sys/devices/system/cpu/cpu*/cpufreq` does not exist.
+  - Run `ps -eo ni,pcpu,comm --sort=-pcpu | head` before each recording. A heavy job at
+    normal priority beside the `nice -n 19` run distorts it: the 20 s one-thread recording
+    was taken that way.
 - Step 0's tables from the dumps, with `P="python3 -I perfdump.py"`. Checked on 2026-10-17:
   `perfdump.py`'s commands give the same output as the ten scripts Step 0 used, byte for
   byte on both dumps, and `threads` and `kernel` give the numbers the earlier ad hoc
@@ -1711,4 +1993,228 @@ for mode in off warm; do
   [ "$sum" = "$ORACLE" ] && echo "$mode output is the oracle's" || echo "$mode output DIFFERS: $sum"
 done
 echo "cache files written during the warm runs: $(find "$W/cache-warm" -type f -newer "$W/warm-marker" | wc -l)"
+```
+
+`mimalloc-runs.sh` (decision 2; `GATE` is the gate binary, `CG` the `dhat` frame-pointer
+binary):
+
+```bash
+#!/bin/bash
+# Decision 2: does mimalloc's purging cost the off run its page zeroing?
+# Off mode on Piwigo, default options against MIMALLOC_PURGE_DELAY=-1 (no
+# purging): mimalloc's exit statistics for each, two hyperfine rounds in
+# alternating order on the gate binary, then one perf recording of each on
+# the frame-pointer binary of Step 0. Every output is checked against the
+# oracle's sha256.
+W=/home/torres/.cache/prs-profile/mimalloc-2026-10-17
+GATE=/home/torres/.cache/prs-profile/wall-2026-10-17/target-gate/gate/phpstan-rs
+CG=/home/torres/.cache/prs-profile/regress-item5/bin/head-cg
+PIW=/home/torres/piwigo17-frozen
+CHECK="check-project --config phpstan-rs.toml --format json"
+OFF="PHPSTAN_RS_NO_FILE_CACHE=1 PHPSTAN_RS_NO_STUB_CACHE=1"
+ORACLE=8ff144c3fee775166369b993a58814e0f247845fbf850f94d0c41b57924488b1
+mkdir -p "$W"
+cd "$PIW" || exit 1
+log() { echo "$(date -Is) $* loadavg=$(cut -d' ' -f1-3 /proc/loadavg)" | tee -a "$W/steps.log"; }
+vm() { grep -E '^(compact_stall|compact_fail|compact_success|pgmigrate_success|thp_fault_alloc|pgfault|pgmajfault) ' /proc/vmstat > "$W/vmstat-$1.txt"; }
+check() {
+  local sum
+  sum=$(sha256sum < "$1" | cut -d' ' -f1)
+  [ "$sum" = "$ORACLE" ] && echo "$2: output is the oracle's" || echo "$2: output DIFFERS ($sum)"
+}
+for mode in default nopurge; do
+  E=""
+  [ $mode = nopurge ] && E="MIMALLOC_PURGE_DELAY=-1"
+  log "stats $mode"
+  env $OFF $E MIMALLOC_SHOW_STATS=1 nice -n 19 "$GATE" $CHECK > "$W/stats-$mode-out.json" 2> "$W/stats-$mode.txt"
+  check "$W/stats-$mode-out.json" "stats $mode"
+done
+vm hf-before
+log "hyperfine round 1 (default, nopurge)"
+nice -n 19 hyperfine -N --warmup 2 --runs 10 --export-json "$W/hf1.json" \
+  "env $OFF $GATE $CHECK" "env $OFF MIMALLOC_PURGE_DELAY=-1 $GATE $CHECK" > "$W/hf1.txt" 2>&1
+log "hyperfine round 2 (nopurge, default)"
+nice -n 19 hyperfine -N --warmup 2 --runs 10 --export-json "$W/hf2.json" \
+  "env $OFF MIMALLOC_PURGE_DELAY=-1 $GATE $CHECK" "env $OFF $GATE $CHECK" > "$W/hf2.txt" 2>&1
+vm hf-after
+for mode in default nopurge; do
+  E=""
+  [ $mode = nopurge ] && E="MIMALLOC_PURGE_DELAY=-1"
+  env $OFF $E nice -n 19 "$CG" $CHECK > /dev/null 2>&1
+  vm "perf-$mode-before"
+  log "perf $mode"
+  nice -n 19 perf record -o "$W/perf-$mode.data" -F 499 -g -- env $OFF $E "$CG" $CHECK \
+    > "$W/perf-$mode-out.json" 2> "$W/perf-$mode-stderr.txt"
+  vm "perf-$mode-after"
+  check "$W/perf-$mode-out.json" "perf $mode"
+  perf script -i "$W/perf-$mode.data" --no-inline -F tid,time,ip,sym > "$W/$mode.script" 2> "$W/$mode.script.err"
+done
+log "done"
+```
+
+`thp-probe.py`:
+
+```python
+"""Runs one off-mode Piwigo check and samples the process's memory every
+20 ms: the largest Rss and AnonHugePages of /proc/<pid>/smaps_rollup, and the
+system's thp_fault_alloc before and after. Extra NAME=VALUE arguments go into
+the environment.
+
+usage: thp-probe.py <binary> <out.json> [NAME=VALUE]...
+"""
+import hashlib
+import os
+import subprocess
+import sys
+import time
+
+ORACLE = '8ff144c3fee775166369b993a58814e0f247845fbf850f94d0c41b57924488b1'
+
+
+def vmstat(name):
+    with open('/proc/vmstat') as fh:
+        for line in fh:
+            key, value = line.split()
+            if key == name:
+                return int(value)
+    return 0
+
+
+def rollup(pid):
+    out = {}
+    try:
+        with open(f'/proc/{pid}/smaps_rollup') as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 3 and parts[2] == 'kB':
+                    out[parts[0].rstrip(':')] = int(parts[1])
+    except OSError:
+        pass
+    return out
+
+
+binary, out_path = sys.argv[1], sys.argv[2]
+env = dict(os.environ, PHPSTAN_RS_NO_FILE_CACHE='1', PHPSTAN_RS_NO_STUB_CACHE='1')
+for arg in sys.argv[3:]:
+    key, _, value = arg.partition('=')
+    env[key] = value
+args = [binary, 'check-project', '--config', 'phpstan-rs.toml', '--format', 'json']
+faults_before = vmstat('thp_fault_alloc')
+start = time.monotonic()
+with open(out_path, 'wb') as out:
+    proc = subprocess.Popen(args, cwd='/home/torres/piwigo17-frozen', env=env, stdout=out,
+                            stderr=subprocess.DEVNULL)
+    peak_rss = peak_huge = 0
+    while proc.poll() is None:
+        r = rollup(proc.pid)
+        peak_rss = max(peak_rss, r.get('Rss', 0))
+        peak_huge = max(peak_huge, r.get('AnonHugePages', 0))
+        time.sleep(0.02)
+wall = time.monotonic() - start
+faults = vmstat('thp_fault_alloc') - faults_before
+with open(out_path, 'rb') as fh:
+    digest = hashlib.sha256(fh.read()).hexdigest()
+print(f'{" ".join(sys.argv[3:]) or "default"}: wall {wall:.3f} s, peak Rss {peak_rss / 1024:.0f} MiB, '
+      f'peak AnonHugePages {peak_huge / 1024:.0f} MiB, thp_fault_alloc +{faults}, '
+      f'output {"is the oracle" if digest == ORACLE else "DIFFERS " + digest}')
+```
+
+`cpugrowth.py` (beside `perfdump.py`, which it imports):
+
+```python
+"""Where the CPU time of a run grows with the thread count: two dumps of the
+same command (`perf script --no-inline -F tid,time,ip,sym`, task-clock at the
+same rate), the first at fewer threads. Each sample is put in one class by its
+leaf, then the classes and the roles (perfdump.ROLES) are compared.
+
+usage: cpugrowth.py <dump at few threads> <dump at more threads> [hz]
+"""
+import os
+import re
+import sys
+from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from perfdump import IDLE, role_of, samples, short  # noqa: E402
+
+KERNEL = [
+    ('kernel: page zeroing', ('__clear_pages', 'clear_page')),
+    ('kernel: TLB shootdown, IPI', ('smp_call_function', 'flush_tlb', 'send_IPI',
+                                    'native_flush_tlb', 'llist_add_batch')),
+    ('kernel: task switch', ('finish_task_switch', '__schedule', 'schedule',
+                             'preempt_schedule', 'pick_next')),
+    ('kernel: futex, yield', ('futex', 'sched_yield', 'do_sched_yield')),
+    ('kernel: softirq, irq exit', ('handle_softirqs', 'irqentry_exit', '__do_softirq')),
+    ('kernel: compaction, migration', ('compact', 'migrate', 'isolate_')),
+    ('kernel: file system', ('d_lookup', 'link_path_walk', 'statx', 'getdents',
+                             'filemap', 'copy_page_to_iter', 'rep_movs')),
+]
+SPIN = ('rayon_core', 'crossbeam', 'std::thread::yield_now', 'sched_yield',
+        'core::hint::spin_loop', '__sched_yield')
+
+
+def classify(frames, ip):
+    leaf = frames[0] if frames else '?'
+    if ip and ip.startswith('ffff'):
+        for name, keys in KERNEL:
+            if any(k in leaf for k in keys):
+                return name
+        return 'kernel: other'
+    if any(k in leaf for k in SPIN) or (
+            any(any(m in f for m in IDLE) for f in frames[:12])
+            and not any('phpstan_rs' in f or 'syntax::' in f or 'types::' in f
+                        for f in frames[:6])):
+        return 'user: pool idle, spinning'
+    if re.search(r'(^|[^a-z])_?mi_', leaf):
+        return 'user: mimalloc'
+    if 'memmove' in leaf or 'memcpy' in leaf or 'memset' in leaf or 'memcmp' in leaf:
+        return 'user: libc mem*'
+    return 'user: our code'
+
+
+def tally(path):
+    cls = Counter()
+    role = Counter()
+    both = Counter()
+    leaf_by_cls = {}
+    for _, _, frames, ip in samples(path):
+        c = classify(frames, ip)
+        r = role_of(frames)
+        cls[c] += 1
+        role[r] += 1
+        both[(r, c)] += 1
+        leaf_by_cls.setdefault(c, Counter())[short(frames[0], 70) if frames else '?'] += 1
+    return cls, role, both, leaf_by_cls
+
+
+def table(title, a, b, hz):
+    keys = sorted(set(a) | set(b), key=lambda k: -(b.get(k, 0) - a.get(k, 0)))
+    print(f'\n-- {title} (CPU seconds; {hz:.0f} samples per second)')
+    print(f'{"":36} {"few":>7} {"more":>7} {"more-few":>9}')
+    for k in keys:
+        x, y = a.get(k, 0) / hz, b.get(k, 0) / hz
+        name = k if isinstance(k, str) else ' / '.join(k)
+        print(f'{name[:36]:36} {x:7.3f} {y:7.3f} {y - x:+9.3f}')
+    x, y = sum(a.values()) / hz, sum(b.values()) / hz
+    print(f'{"total":36} {x:7.3f} {y:7.3f} {y - x:+9.3f}')
+
+
+def main():
+    few, more = sys.argv[1], sys.argv[2]
+    hz = float(sys.argv[3]) if len(sys.argv) > 3 else 499.0
+    ca, ra, ba, la = tally(few)
+    cb, rb, bb, lb = tally(more)
+    table('by class of leaf', ca, cb, hz)
+    table('by role', ra, rb, hz)
+    table('by role and class (largest growth first)', ba, bb, hz)
+    for c in ('user: pool idle, spinning', 'kernel: other', 'user: our code', 'user: mimalloc'):
+        print(f'\n-- {c}: top leaves, few / more')
+        keys = sorted(set(la.get(c, {})) | set(lb.get(c, {})),
+                      key=lambda k: -(lb.get(c, Counter())[k] - la.get(c, Counter())[k]))
+        for k in keys[:15]:
+            print(f'{la.get(c, Counter())[k]:6} {lb.get(c, Counter())[k]:6}  {k}')
+
+
+if __name__ == '__main__':
+    main()
 ```

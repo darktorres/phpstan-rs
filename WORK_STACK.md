@@ -23,7 +23,7 @@ level 8's order; DOC-2.1 stays deferred.
 
 Level 9 is the one active level: the fixes for the costs that the attribution of
 the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done; its rows wait
-on the user's second "go" and on the plan's decisions 1 to 5.
+on the user's second "go" and on the plan's decisions 1 to 7.
 
 Level 8 waits under it, before item 8. It holds the 20 G plan and the off drill,
 and its order is in its section below. When level 9 is done, work the lowest item
@@ -255,19 +255,29 @@ what that found, and the serial stretches of the load that its Step 0 measured. 
 holds every number, command and script it uses, because the profiles it was read
 from (under `~/.cache/prs-profile/`) are not kept.
 
-- Step 0, the wall-time measurement, is done (the plan's "Step 0 results").
-- Rows R1 to R14, one commit each. R1 to R9 and R13 save Ir; R10 to R12 and R14
-  shorten serial stretches. R8 and R11 to R14 predate items 1 to 3.
-- No row starts before the user's second "go". The plan's decisions 1 to 5 are
-  open: where the finishing passes' unused cores go (a row here, or REG-7's
-  record); the two mimalloc runs; R14 as its own row or in R6, and before or after
-  R10; the row order (proposed: R1; R12, R11; R14, R10; then R2, R3 to R8, R9,
-  R13); where the stub-base wait goes (a row here, or the STUB rows).
-- Each measurement run (callgrind, perf, hyperfine, strace) needs the user's
-  approval.
-- Bookkeeping still open: the ledger rows for R1 to R14 under LOAD; LOAD-3.4's
-  note and LOAD-6's record; Step 0 recorded beside §1; the LOAD-2.2 decision the
-  plan records, written into the ledger and into level 8's item 2.
+- Step 0, the wall-time measurement, is done (the plan's "Step 0 results"). So are
+  the allocator runs (purging, huge pages) and the reading of where the CPU time
+  grows with the thread count.
+- Rows R1 to R15, one commit each. R1 to R9 and R13 save Ir; R10 to R12, R14 and
+  R15 shorten serial stretches or the run. R8 and R11 to R15 are older costs than
+  items 1 to 3. R15 (a batch run does not purge) came from the allocator runs.
+- No row starts before the user's second "go". The plan's decisions 1 to 7 are open,
+  each with a recommendation:
+  1. the finishing passes' unused cores: REG-7's record;
+  2. the zeroing and purging: R15, and the huge pages stay;
+  3. R14: its own row, before R10;
+  4. the order: R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7;
+  5. the stub-base wait: the STUB rows;
+  6. the older rows: kept;
+  7. LOAD-2.2's name floor: waits on the user's confirmation.
+- Builds and measurement runs need no approval (since 2026-10-17).
+- Bookkeeping still open:
+  - the ledger rows for the rows that have none (R11 is LOAD-3.3, R12 is CACHE-12's
+    decode context);
+  - LOAD-3.4's note and LOAD-6's record;
+  - Step 0 and the allocator runs recorded beside §1;
+  - the LOAD-2.2 decision, once confirmed, written into the ledger and into level
+    8's item 2.
 
 ## Documents with no place in the stack
 
