@@ -205,6 +205,10 @@ impl AstCache {
         }
         self.0.push_back((path, ast));
     }
+
+    fn forget(&mut self, path: &Path) {
+        self.0.retain(|(cached, _)| cached != path);
+    }
 }
 
 impl FileState {
@@ -905,17 +909,29 @@ impl Project {
     pub fn set_document(&mut self, path: &Path, bytes: &[u8]) {
         let full = self.full_path(path);
         self.source.set(&full, bytes);
+        self.forget_parse_of(path);
     }
 
     /// Replaces every document the loads and edits read, with `source`.
     pub(crate) fn set_source(&mut self, source: source::FileSource) {
         self.source = source;
+        self.ast_cache = Mutex::default();
     }
 
     /// Gives the file at `path` back to the disk for the reads after this.
     pub fn unset_document(&mut self, path: &Path) {
         let full = self.full_path(path);
         self.source.unset(&full);
+        self.forget_parse_of(path);
+    }
+
+    /// Forgets the tree `ast_of` parsed for `path`, once the file's bytes or
+    /// state change, so the next parse reads them again.
+    fn forget_parse_of(&mut self, path: &Path) {
+        self.ast_cache
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .forget(path);
     }
 
     /// The bytes of the file at `path`: the document's, else the disk's.
@@ -1069,6 +1085,7 @@ impl Project {
         let load_order = self.next_load_order;
         self.next_load_order += 1;
         let keeps_tree = self.keeps_tree(analyzed);
+        self.forget_parse_of(path);
         self.files.insert_at(
             id,
             FileState {
@@ -1558,6 +1575,7 @@ impl Project {
         self.begin_declaration_changes();
         self.complete_skipped_references();
         let id = self.files.id_of(path)?;
+        self.forget_parse_of(path);
         let old = self.files.remove(path)?;
         let classes: Vec<Name> = old
             .classes
@@ -1966,6 +1984,7 @@ impl Project {
         register_references(&mut self.dependents, id, &references);
         register_references(&mut self.signature_dependents, id, &declaration_references);
         self.globals_stale.insert(id);
+        self.forget_parse_of(path);
         self.files.insert(
             path.to_path_buf(),
             FileState {

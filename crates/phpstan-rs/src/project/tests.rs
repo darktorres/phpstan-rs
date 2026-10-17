@@ -2,6 +2,7 @@ mod helpers;
 
 mod anonymous_class_naming;
 mod architecture;
+mod ast_of_overlay;
 mod banned;
 mod declarations;
 mod duplicate_classes;
