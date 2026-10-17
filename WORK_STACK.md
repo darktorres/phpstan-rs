@@ -254,7 +254,7 @@ what that found, and the serial stretches of the load that its Step 0 measured. 
 holds every number and command it uses, and its scripts are in `scripts/`, because
 the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
 
-- Step 0, the wall-time measurement, is done (the plan's "Step 0 results"). So are
+- Step 0, the wall-time measurement, is done (the plan's "Measurements: Step 0"). So are
   the allocator runs (purging, huge pages) and the reading of where the CPU time
   grows with the thread count.
 - Rows R1 to R15, one commit each. R1 to R9 and R13 save Ir; R10 to R12, R14 and
