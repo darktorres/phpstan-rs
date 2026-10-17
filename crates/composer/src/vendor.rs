@@ -485,11 +485,12 @@ impl<'p> Resolver<'p> {
 
     /// The canonical form of `dir`: its parent's, joined with its name,
     /// unless the parent lists it as a link, which is the one case that
-    /// needs the system to follow it. The vendor directory and its parent are
-    /// canonical already, so the directories above them are not read.
+    /// needs the system to follow it. The vendor directory and its parent,
+    /// spelled as discovery spells them, are canonical already, so the
+    /// directories above them are not read.
     fn canonical_dir(&mut self, dir: &Path) -> Option<HashedPath> {
         for known in [self.vendor_dir, self.base_dir] {
-            if dir == known {
+            if dir.as_os_str() == known.as_os_str() {
                 return Some(HashedPath::new(known.to_path_buf()));
             }
         }
