@@ -3,7 +3,7 @@
 //! and a target no root holds is listed once, with the strongest role of the
 //! links that reach it.
 
-use super::super::walk::{Listed, Role, Walk};
+use super::super::walk::{FileIndex, Listed, Role, Walk, path_hash};
 use super::helpers::*;
 use composer::dir_listings::DirListings;
 use std::fs;
@@ -23,7 +23,7 @@ fn listing(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
 fn sorted(listed: Vec<Listed>) -> Vec<(PathBuf, Role, bool)> {
     let mut listed: Vec<(PathBuf, Role, bool)> = listed
         .into_iter()
-        .map(|Listed { path, role, stub }| (path, role, stub))
+        .map(|listed| (listed.path, listed.role, listed.stub))
         .collect();
     listed.sort();
     listed
@@ -607,4 +607,29 @@ fn thread_pool(threads: usize) -> rayon::ThreadPool {
         .num_threads(threads)
         .build()
         .unwrap()
+}
+
+#[test]
+fn a_path_hashes_by_its_components() {
+    assert_eq!(path_hash(Path::new("/a/b/")), path_hash(Path::new("/a//b")));
+    assert_ne!(path_hash(Path::new("/a/b")), path_hash(Path::new("/a/c")));
+}
+
+/// The hash a walk gives each listed file is the hash of its path, and the
+/// index finds each file at its position.
+#[cfg(unix)]
+#[test]
+fn a_listed_file_is_hashed_as_its_path_and_indexed_there() {
+    let dir = TempDir::new("walk_hash");
+    let tree = oracle_tree(&dir);
+    set_locked(&tree, 0o000);
+    let files = oracle_walk(&tree, &crate::project::worker_pool());
+    set_locked(&tree, 0o755);
+
+    assert!(!files.is_empty());
+    let index = FileIndex::of(&files);
+    for (at, file) in files.iter().enumerate() {
+        assert_eq!(file.hash, path_hash(&file.path), "{}", file.path.display());
+        assert_eq!(index.position(&files, &file.path), Some(at));
+    }
 }

@@ -16,11 +16,13 @@
 use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs;
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use composer::dir_listings::DirListings;
 use hashbrown::hash_map::EntryRef;
+use hashbrown::hash_table::Entry;
 use rayon::prelude::*;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use same_file::Handle;
@@ -40,15 +42,32 @@ impl Role {
     }
 }
 
+/// The hash of a path, as `path_hash` gives it.
+pub(crate) type PathHash = u64;
+
 /// A PHP file the walk listed, once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Listed {
     /// The file's resolved path.
     pub(crate) path: PathBuf,
+    /// The path's hash, `path_hash(&path)`.
+    pub(crate) hash: PathHash,
     /// The strongest role of the roots and links that list the file.
     pub(crate) role: Role,
     /// Whether a stub root lists it.
     pub(crate) stub: bool,
+}
+
+impl Listed {
+    /// A file listed at `path`, with the hash of its path.
+    pub(crate) fn new(path: PathBuf, role: Role, stub: bool) -> Self {
+        Listed {
+            hash: path_hash(&path),
+            path,
+            role,
+            stub,
+        }
+    }
 }
 
 /// A root the walk was given, by its resolved path.
@@ -62,8 +81,39 @@ pub(crate) struct Root<'a> {
     pub(crate) excluded: &'a [&'a str],
 }
 
-/// Where each listed file is in a walk's listing, by its resolved path.
-pub(crate) type FileIndex = hashbrown::HashMap<PathBuf, usize, FxBuildHasher>;
+/// Where each listed file is in a walk's listing, by its path. The index
+/// holds positions, so a path is stored once, in the listing.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FileIndex(hashbrown::HashTable<usize>);
+
+impl FileIndex {
+    /// The index of `files`, where each file is at its position. A path
+    /// listed twice has the position of its last listing.
+    pub(crate) fn of(files: &[Listed]) -> Self {
+        let mut index: hashbrown::HashTable<usize> =
+            hashbrown::HashTable::with_capacity(files.len());
+        for (at, file) in files.iter().enumerate() {
+            match index.entry(
+                file.hash,
+                |&i| files[i].path == file.path,
+                |&i| files[i].hash,
+            ) {
+                Entry::Occupied(mut entry) => *entry.get_mut() = at,
+                Entry::Vacant(entry) => {
+                    entry.insert(at);
+                }
+            }
+        }
+        FileIndex(index)
+    }
+
+    /// The position of `path` in `files`, the listing this index was made for.
+    pub(crate) fn position(&self, files: &[Listed], path: &Path) -> Option<usize> {
+        self.0
+            .find(path_hash(path), |&at| files[at].path == path)
+            .copied()
+    }
+}
 
 /// What a walk listed, where each file is, and the roots it was given.
 pub(crate) struct Walked<'a> {
@@ -116,8 +166,8 @@ struct Scope<'a> {
 
 /// What a walk lists, in listing order.
 enum Found {
-    /// A PHP file, under its path.
-    File(PathBuf),
+    /// A PHP file, under its path, with the hash of the path.
+    File(PathBuf, PathHash),
     /// The resolved target of a link, which the walk that met the link queues.
     Link(PathBuf),
 }
@@ -259,7 +309,7 @@ impl<'a> Walk<'a> {
     fn run(&self, job: &Job<'a>) -> Vec<Found> {
         match job {
             Job::Dir { path, scope } => self.walk_root(path, *scope),
-            Job::File { path, .. } => vec![Found::File(path.clone())],
+            Job::File { path, .. } => vec![Found::File(path.clone(), path_hash(path))],
         }
     }
 
@@ -269,7 +319,7 @@ impl<'a> Walk<'a> {
         if target.is_dir() {
             self.walk_root(target, scope)
         } else if is_php(target) {
-            vec![Found::File(target.to_path_buf())]
+            vec![Found::File(target.to_path_buf(), path_hash(target))]
         } else {
             Vec::new()
         }
@@ -285,6 +335,7 @@ impl<'a> Walk<'a> {
         };
         self.walk_dir(
             path,
+            path_hash(path),
             scope,
             &Ancestors {
                 handle: &handle,
@@ -293,11 +344,17 @@ impl<'a> Walk<'a> {
         )
     }
 
-    /// Lists what `dir`, a resolved directory, holds under `scope`, in listing
-    /// order. A subdirectory is walked by a task of its own, and its results
-    /// are placed back among the entries in order. `ancestors` holds `dir` and
-    /// the directories above it in this walk.
-    fn walk_dir(&self, dir: &Path, scope: Scope<'a>, ancestors: &Ancestors<'_>) -> Vec<Found> {
+    /// Lists what `dir`, a resolved directory whose hash is `hash`, holds under
+    /// `scope`, in listing order. A subdirectory is walked by a task of its
+    /// own, and its results are placed back among the entries in order.
+    /// `ancestors` holds `dir` and the directories above it in this walk.
+    fn walk_dir(
+        &self,
+        dir: &Path,
+        hash: PathHash,
+        scope: Scope<'a>,
+        ancestors: &Ancestors<'_>,
+    ) -> Vec<Found> {
         let Some(listing) = self.listings.listing(dir) else {
             return Vec::new();
         };
@@ -308,35 +365,42 @@ impl<'a> Walk<'a> {
             let Some(file_type) = entry.kind else {
                 continue;
             };
-            let name = &entry.name;
-            let child = dir.join(name);
-            let under_root = scope.outside && self.under_root(&child);
+            let name = entry.name.as_os_str();
+            // A child's path is built only when the walk needs it.
             if file_type.is_symlink() {
                 if excludes(scope.excluded, name) {
                     continue;
                 }
+                let child = dir.join(name);
                 match fs::canonicalize(&child) {
                     Ok(target) => steps.push(Step::Found(Found::Link(target))),
                     // A dangling `.php` link is listed under its own path, so
                     // that reading it reports that path.
-                    Err(_) if is_php(&child) && !under_root => {
-                        steps.push(Step::Found(Found::File(child)));
+                    Err(_) if is_php(&child) && !(scope.outside && self.under_root(&child)) => {
+                        steps.push(Step::Found(Found::File(child, child_hash(hash, name))));
                     }
                     Err(_) => {}
                 }
             } else if file_type.is_dir() {
-                if excludes(scope.excluded, name) || under_root || self.prunes(scope, &child) {
+                if excludes(scope.excluded, name) {
+                    continue;
+                }
+                let child = dir.join(name);
+                if (scope.outside && self.under_root(&child)) || self.prunes(scope, &child) {
                     continue;
                 }
                 steps.push(Step::Dir);
-                dirs.push(child);
-            } else if is_php(&child) && !under_root {
-                steps.push(Step::Found(Found::File(child)));
+                dirs.push((child, child_hash(hash, name)));
+            } else if is_php(Path::new(name)) {
+                let child = dir.join(name);
+                if !(scope.outside && self.under_root(&child)) {
+                    steps.push(Step::Found(Found::File(child, child_hash(hash, name))));
+                }
             }
         }
         let subtrees: Vec<Vec<Found>> = dirs
             .par_iter()
-            .map(|child| self.walk_subdirectory(child, scope, ancestors))
+            .map(|(child, child_hash)| self.walk_subdirectory(child, *child_hash, scope, ancestors))
             .collect();
         let mut subtrees = subtrees.into_iter();
         let mut found = Vec::new();
@@ -349,12 +413,13 @@ impl<'a> Walk<'a> {
         found
     }
 
-    /// Walks the subdirectory `child`, unless it is one of `ancestors`, which
-    /// ends the loop. The subdirectory's handle is opened here, so only the
-    /// directories being walked hold one.
+    /// Walks the subdirectory `child`, whose hash is `hash`, unless it is one of
+    /// `ancestors`, which ends the loop. The subdirectory's handle is opened
+    /// here, so only the directories being walked hold one.
     fn walk_subdirectory(
         &self,
         child: &Path,
+        hash: PathHash,
         scope: Scope<'a>,
         ancestors: &Ancestors<'_>,
     ) -> Vec<Found> {
@@ -368,6 +433,7 @@ impl<'a> Walk<'a> {
         }
         self.walk_dir(
             child,
+            hash,
             scope,
             &Ancestors {
                 handle: &handle,
@@ -394,25 +460,34 @@ impl<'a> Walk<'a> {
     fn merge(&mut self, found: Vec<Found>, role: Role, excluded: &'a [&'a str]) {
         for item in found {
             match item {
-                Found::File(path) => self.list(path, role),
+                Found::File(path, hash) => self.list(path, hash, role),
                 Found::Link(target) => self.targets[role.index()].push_back((target, excluded)),
             }
         }
     }
 
-    /// Records a listed file at its resolved path. A file listed again keeps
-    /// the strongest role of its listings.
-    fn list(&mut self, path: PathBuf, role: Role) {
+    /// Records a listed file at its resolved path, whose hash is `hash`. A file
+    /// listed again keeps the strongest role of its listings.
+    fn list(&mut self, path: PathBuf, hash: PathHash, role: Role) {
         let stub = role == Role::Stub;
-        match self.index.entry_ref(&path) {
-            EntryRef::Occupied(entry) => {
+        match self.index.0.entry(
+            hash,
+            |&at| self.listed[at].path == path,
+            |&at| self.listed[at].hash,
+        ) {
+            Entry::Occupied(entry) => {
                 let listed = &mut self.listed[*entry.get()];
                 listed.stub |= stub;
                 listed.role = listed.role.max(role);
             }
-            EntryRef::Vacant(entry) => {
+            Entry::Vacant(entry) => {
                 entry.insert(self.listed.len());
-                self.listed.push(Listed { path, role, stub });
+                self.listed.push(Listed {
+                    path,
+                    hash,
+                    role,
+                    stub,
+                });
             }
         }
     }
@@ -485,4 +560,18 @@ fn excludes(excluded: &[&str], name: &OsStr) -> bool {
 
 fn is_php(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "php")
+}
+
+/// The hash of `path`, computed from its components, so that paths equal as
+/// `Path`s hash alike. It is `child_hash` folded over the components, which
+/// lets a walk extend a directory's hash by each entry's name.
+pub(crate) fn path_hash(path: &Path) -> PathHash {
+    path.components()
+        .fold(0, |hash, component| child_hash(hash, component.as_os_str()))
+}
+
+/// The hash of the path that `name` makes under a directory of hash `parent`.
+fn child_hash(parent: PathHash, name: &OsStr) -> PathHash {
+    const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+    (parent.rotate_left(5) ^ FxBuildHasher.hash_one(name)).wrapping_mul(SEED)
 }

@@ -952,14 +952,9 @@ impl Session {
 
     fn walk_listing(&self) -> Listing {
         if let Some(listed) = &self.overlay_listing {
-            let index = listed
-                .iter()
-                .enumerate()
-                .map(|(at, file)| (file.path.clone(), at))
-                .collect();
             return Listing {
                 files: listed.clone(),
-                index,
+                index: FileIndex::of(listed),
                 roots: Vec::new(),
             };
         }
@@ -1019,7 +1014,7 @@ impl Session {
     pub(crate) fn classify(&self, path: &Path) -> Classified {
         let path = self.identify(path);
         let listing = self.listing_of();
-        if let Some(&at) = listing.index.get(&path) {
+        if let Some(at) = listing.index.position(&listing.files, &path) {
             let listed = &listing.files[at];
             return Classified {
                 path,
@@ -1046,7 +1041,8 @@ impl Session {
     /// created since the walk is.
     pub(crate) fn reaches(&self, path: &Path) -> bool {
         let listing = self.listing_of();
-        listing.index.contains_key(path) || listing.roots.iter().any(|root| root.contains(path))
+        listing.index.position(&listing.files, path).is_some()
+            || listing.roots.iter().any(|root| root.contains(path))
     }
 
     fn configure(&self, project: &mut Project) {
@@ -1314,15 +1310,12 @@ impl Session {
         let mut listed = Vec::with_capacity(files.len());
         for file in files {
             session.source.set(&file.path, &file.bytes);
-            listed.push(Listed {
-                role: if file.analysed {
-                    Role::Analysed
-                } else {
-                    Role::Context
-                },
-                stub: file.stub,
-                path: file.path,
-            });
+            let role = if file.analysed {
+                Role::Analysed
+            } else {
+                Role::Context
+            };
+            listed.push(Listed::new(file.path, role, file.stub));
         }
         session.overlay_listing = Some(listed);
         session
@@ -1657,15 +1650,12 @@ pub(crate) fn load_test_files(
     let mut listed = Vec::with_capacity(files.len());
     for (path, source, analysed) in files {
         project.set_document(path, source.as_bytes());
-        listed.push(Listed {
-            role: if *analysed {
-                Role::Analysed
-            } else {
-                Role::Context
-            },
-            stub: false,
-            path: path.clone(),
-        });
+        let role = if *analysed {
+            Role::Analysed
+        } else {
+            Role::Context
+        };
+        listed.push(Listed::new(path.clone(), role, false));
     }
     Session::for_overlay(Vec::new(), Stubs::shared().clone()).load_listed(project, &listed)
 }
