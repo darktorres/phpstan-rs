@@ -1039,6 +1039,17 @@ measures the editor's path, keep the default.
   against the base's serial merge, so whether it pays for its +42.4 M off (−35.6 M warm) is
   not settled here; its one defect, the `Path::hash` per file (+13.7 M), is R5's.
 - **The eight fixes** (-205.5 M) are a gain.
+- **The check's unused capacity** (0.172 s warm, 0.089 s off). Inside the stretch the
+  check runs at 5.3 to 7.7 cores warm (1.20 to 1.55 s) and at 7.3 to 7.6 off (1.60 to
+  1.80 s), under load 2 to 2.5.
+  - What it leaves is its ramp and its tail. The ramp starts as the finishing passes end,
+    which is REG-7's (decision 1).
+  - In the tail the largest files finish last, though `check_files` already starts the
+    costliest first (`map_on_pool_largest_first`, `project.rs:2299`, by source length).
+  - So no row here owns it.
+- **The CPU time's growth with the thread count** (Scaling, "Where the CPU growth goes").
+  It is the VM's shared cores and memory, the zeroing (R11) and purging (R15). Rayon's
+  spinning is 0.04 s of it.
 
 ## Verification
 
@@ -1262,8 +1273,11 @@ blocks); base 2,913,109,581 in 19,175,695 (peak 807,381,174; exit 647,439,034 in
 (`check_files`'s `run_checker`) 6,442 M, `parse_file` 8,023 M.
 
 **Table 10: further readings (second review).** Warm `crc32fast::hash` 33.5 M (26.1 M in
-`read_indexed`: each cached file's entry is checksummed on load; 7.8 M in the stub cache),
-not examined for a row. Warm `twox_hash` XXH3-128: `Hasher::write` 17.9 M, `finish_128` 2.4 M,
+`read_indexed`: each cached file's entry is checksummed on load; 7.8 M in the stub cache).
+The ledger owns it, so it gets no row here. CACHE-10 gives each record its own CRC,
+checked when the record is read. CACHE-13's `stat` index replaces these reads: ledger
+line 1664 counts `crc32` 30.4 M among them. The checksum itself stays: a cache read must
+be checked. Warm `twox_hash` XXH3-128: `Hasher::write` 17.9 M, `finish_128` 2.4 M,
 24.1 M in `read_indexed` in all (the cache key; R9). Off-run `Utf8Chunks` callers on thread 11:
 only `LineIndex::new` (12.7 M), from `Lexer::build` (25.0 M) in `parse_file`. Piwigo's
 `vendor/composer`: `autoload_static.php` 1,808,580 bytes, `autoload_classmap.php` 1,620,829
