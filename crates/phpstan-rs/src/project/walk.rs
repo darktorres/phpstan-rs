@@ -411,19 +411,23 @@ impl Tree {
         if let Some(node) = self.find(dir, hash) {
             return Some(node);
         }
-        // The hashes of one fold of the path find the nearest directory above
-        // that has a node, and the nodes below it are made from the top down.
-        let ancestors = hashed_ancestors(dir);
-        debug_assert_eq!(ancestors.last(), Some(&(dir, hash)));
-        let above = ancestors.len() - 1;
-        let (mut up, first_new) = ancestors[..above]
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(at, &(path, hash))| Some((Some(self.find(path, hash)?), at + 1)))
-            .unwrap_or((None, 0));
-        for &(path, _) in &ancestors[first_new..] {
-            up = Some(self.make(path, up)?);
+        // The directories above it are looked up from its parent up, by the
+        // hashes of one fold of its path, to the nearest one with a node; the
+        // nodes below that one are made from the top down.
+        let mut ancestors = hashed_ancestors(dir);
+        let first = ancestors.next();
+        debug_assert_eq!(first, Some((dir, hash)));
+        let mut new = vec![dir];
+        let mut up = None;
+        for (ancestor, hash) in ancestors {
+            if let Some(node) = self.find(ancestor, hash) {
+                up = Some(node);
+                break;
+            }
+            new.push(ancestor);
+        }
+        for dir in new.into_iter().rev() {
+            up = Some(self.make(dir, up)?);
         }
         up
     }

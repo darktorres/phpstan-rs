@@ -73,14 +73,14 @@ fn an_entry_made_from_its_directory_is_the_path_made_whole() {
 }
 
 #[test]
-fn each_ancestor_has_its_own_hash_from_the_top_down() {
+fn each_ancestor_has_its_own_hash_from_the_path_up() {
     for path in paths() {
-        let mut expected: Vec<(&Path, u64)> = path
+        let expected: Vec<(&Path, u64)> = path
             .ancestors()
             .map(|ancestor| (ancestor, path_hash(ancestor)))
             .collect();
-        expected.reverse();
-        assert_eq!(hashed_ancestors(&path), expected, "{}", path.display());
+        let found: Vec<(&Path, u64)> = hashed_ancestors(&path).collect();
+        assert_eq!(found, expected, "{}", path.display());
     }
 }
 

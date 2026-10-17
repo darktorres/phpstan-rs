@@ -105,21 +105,20 @@ pub fn path_hash(path: &Path) -> PathHash {
         .fold(0, |hash, component| child_hash(hash, component.as_os_str()))
 }
 
-/// Each ancestor of `path`, from the top down to `path` itself, with its
-/// hash: the hashes of one fold over the path's components.
-pub fn hashed_ancestors(path: &Path) -> Vec<(&Path, PathHash)> {
-    let mut ancestors: Vec<(&Path, PathHash)> =
-        path.ancestors().map(|ancestor| (ancestor, 0)).collect();
-    ancestors.reverse();
+/// Each ancestor of `path`, from `path` itself up to the top, with its hash.
+/// The hashes come from one fold over the components, made first; each
+/// ancestor is made as the iterator reaches it, so a caller that stops near
+/// `path` pays little more than the fold.
+pub fn hashed_ancestors(path: &Path) -> impl Iterator<Item = (&Path, PathHash)> {
+    // A relative path's last ancestor is the empty path, of hash 0.
+    let mut hashes = Vec::with_capacity(16);
+    hashes.push(0);
     let mut hash = 0;
-    for (ancestor, ancestor_hash) in &mut ancestors {
-        // Each ancestor is the one above it with one more component.
-        if let Some(last) = ancestor.components().next_back() {
-            hash = child_hash(hash, last.as_os_str());
-        }
-        *ancestor_hash = hash;
+    for component in path.components() {
+        hash = child_hash(hash, component.as_os_str());
+        hashes.push(hash);
     }
-    ancestors
+    path.ancestors().zip(hashes.into_iter().rev())
 }
 
 /// The hash of the path that `name` makes under a directory of hash `parent`.
