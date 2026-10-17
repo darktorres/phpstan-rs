@@ -14,7 +14,8 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashMap;
+use hashbrown::hash_map::EntryRef;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use same_file::Handle;
 
 /// The role a listed file plays, weakest first.
@@ -54,11 +55,13 @@ pub(crate) struct Root<'a> {
     pub(crate) excluded: &'a [&'a str],
 }
 
+/// Where each listed file is in a walk's listing, by its resolved path.
+pub(crate) type FileIndex = hashbrown::HashMap<PathBuf, usize, FxBuildHasher>;
+
 /// What a walk listed, where each file is, and the roots it was given.
 pub(crate) struct Walked<'a> {
     pub(crate) files: Vec<Listed>,
-    /// Where each listed file is in `files`, by its resolved path.
-    pub(crate) index: FxHashMap<PathBuf, usize>,
+    pub(crate) index: FileIndex,
     pub(crate) roots: Vec<Root<'a>>,
 }
 
@@ -71,8 +74,7 @@ pub(crate) struct Walk<'a> {
     /// each link, with the names that walk excludes.
     targets: [VecDeque<(PathBuf, &'a [&'a str])>; 3],
     listed: Vec<Listed>,
-    /// Where each listed file is, by its resolved path.
-    index: FxHashMap<PathBuf, usize>,
+    index: FileIndex,
 }
 
 impl<'a> Walk<'a> {
@@ -81,7 +83,7 @@ impl<'a> Walk<'a> {
             roots: Vec::new(),
             targets: Default::default(),
             listed: Vec::new(),
-            index: FxHashMap::default(),
+            index: FileIndex::default(),
         }
     }
 
@@ -212,13 +214,16 @@ impl<'a> Walk<'a> {
     /// the strongest role of its listings.
     fn list(&mut self, path: PathBuf, role: Role) {
         let stub = role == Role::Stub;
-        if let Some(&at) = self.index.get(&path) {
-            let listed = &mut self.listed[at];
-            listed.stub |= stub;
-            listed.role = listed.role.max(role);
-        } else {
-            self.index.insert(path.clone(), self.listed.len());
-            self.listed.push(Listed { path, role, stub });
+        match self.index.entry_ref(&path) {
+            EntryRef::Occupied(entry) => {
+                let listed = &mut self.listed[*entry.get()];
+                listed.stub |= stub;
+                listed.role = listed.role.max(role);
+            }
+            EntryRef::Vacant(entry) => {
+                entry.insert(self.listed.len());
+                self.listed.push(Listed { path, role, stub });
+            }
         }
     }
 

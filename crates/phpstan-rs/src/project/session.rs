@@ -32,7 +32,7 @@ use crate::{ext, ignore_errors};
 
 use super::file_cache;
 use super::source::FileSource;
-use super::walk::{self, Listed, Role, Root, Walk, Walked};
+use super::walk::{self, FileIndex, Listed, Role, Root, Walk, Walked};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
@@ -215,7 +215,7 @@ pub struct OverlayFile {
 pub(crate) struct Listing {
     files: Vec<Listed>,
     /// Where each file is in `files`, by its path.
-    index: FxHashMap<PathBuf, usize>,
+    index: FileIndex,
     roots: Vec<Root<'static>>,
 }
 
