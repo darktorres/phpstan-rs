@@ -1063,9 +1063,9 @@ impl Session {
         let content_hash = project
             .retain_source
             .then(|| super::source::content_hash(&bytes));
-        let shown = super::shown_path(Some(self.absolute_root.as_path()), path);
+        let root = Some(self.absolute_root.as_path());
         let cache_key = if cacheable {
-            file_cache::key(&bytes, path, shown, is_stub, index_use_sites)
+            file_cache::key(&bytes, path, root, is_stub, index_use_sites)
         } else {
             None
         };
@@ -1108,10 +1108,10 @@ impl Session {
         };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
             Ok(text) => {
-                super::parse_file_with_names(path, shown, text, is_stub, body_text, Some(names))
+                super::parse_file_with_names(path, root, text, is_stub, body_text, Some(names))
             }
             Err(bytes) => {
-                super::parse_file_with_names(path, shown, bytes, is_stub, body_text, Some(names))
+                super::parse_file_with_names(path, root, bytes, is_stub, body_text, Some(names))
             }
         })) else {
             return Read::Unread;

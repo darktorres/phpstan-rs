@@ -927,8 +927,8 @@ impl Project {
         }
         let bytes = self.read_bytes(path).ok()?;
         let parsed = match std::str::from_utf8(&bytes) {
-            Ok(text) => parse_with_ignores(path, text, None, false),
-            Err(_) => parse_with_ignores(path, &bytes[..], None, false),
+            Ok(text) => parse_with_ignores(None, path, text, None, false),
+            Err(_) => parse_with_ignores(None, path, &bytes[..], None, false),
         }
         .ok()?;
         let ast = Arc::new(parsed.ast);
@@ -1867,10 +1867,10 @@ impl Project {
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
         let bytes = source.as_ref();
-        let shown = shown_path(self.absolute_root(), path);
+        let root = self.absolute_root();
         let parsed = match std::str::from_utf8(bytes) {
-            Ok(text) => parse_file_with_names(path, shown, text, stub, BodyText::Parsed, None),
-            Err(_) => parse_file_with_names(path, shown, bytes, stub, BodyText::Parsed, None),
+            Ok(text) => parse_file_with_names(path, root, text, stub, BodyText::Parsed, None),
+            Err(_) => parse_file_with_names(path, root, bytes, stub, BodyText::Parsed, None),
         }?;
         let previous = self.unindex_file(path);
         let ParsedFile {
@@ -2901,7 +2901,8 @@ struct Parsed {
 }
 
 fn parse_with_ignores<'a>(
-    shown: &Path,
+    root: Option<&Path>,
+    path: &Path,
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
     skim_bodies: bool,
@@ -2920,7 +2921,7 @@ fn parse_with_ignores<'a>(
     if parsed.facts.has_anonymous_class {
         crate::registry::name_anonymous_classes(
             &mut ast,
-            &shown.display().to_string(),
+            &shown_path(root, path).display().to_string(),
             &parsed.line_index,
         );
     }
@@ -3016,7 +3017,7 @@ pub fn parse_file<'a>(
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
 ) -> Result<ParsedFile, ParseError> {
-    parse_file_with_names(path, path, source, is_stub, BodyText::Parsed, None)
+    parse_file_with_names(path, None, source, is_stub, BodyText::Parsed, None)
 }
 
 /// What a parse keeps of the function and method bodies of a file.
@@ -3034,13 +3035,14 @@ pub enum BodyText {
 }
 
 /// `parse_file`, with the names the files of a load share: the cache is
-/// asked for a name before the interner is. `shown` is the file as the
-/// reports spell it (see `shown_path`), which its anonymous classes are
-/// named by. `body_text` is what is kept of the file's function bodies,
-/// which a context file's may be text read when a pass asks.
+/// asked for a name before the interner is. `root` is the project's root, if
+/// it has one: the file is spelled as the reports spell it (see
+/// `shown_path`), and its anonymous classes are named by that spelling.
+/// `body_text` is what is kept of the file's function bodies, which a context
+/// file's may be text read when a pass asks.
 pub fn parse_file_with_names<'a>(
     path: &Path,
-    shown: &Path,
+    root: Option<&Path>,
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
     body_text: BodyText,
@@ -3054,7 +3056,7 @@ pub fn parse_file_with_names<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_with_ignores(shown, source, names, body_text == BodyText::Skipped)?;
+    } = parse_with_ignores(root, path, source, names, body_text == BodyText::Skipped)?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
@@ -3118,8 +3120,7 @@ pub fn parse_file_with_names<'a>(
     // found by the skip.
     #[cfg(debug_assertions)]
     if parsed.facts.has_skimmed_bodies
-        && let Ok(full) =
-            parse_file_with_names(path, shown, source, is_stub, BodyText::AsText, None)
+        && let Ok(full) = parse_file_with_names(path, root, source, is_stub, BodyText::AsText, None)
     {
         file_cache::assert_same_but_bodies(&parsed, &full);
     }

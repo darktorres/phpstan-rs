@@ -12,15 +12,7 @@ class Holder { public function run(): int { return \\helper(2); } }
 const APP: &str = "<?php function helper(int $x): int { return $x; }";
 
 fn parsed(skip: BodyText) -> ParsedFile {
-    parse_file_with_names(
-        Path::new("ctx.php"),
-        Path::new("ctx.php"),
-        CONTEXT,
-        false,
-        skip,
-        None,
-    )
-    .expect("parses")
+    parse_file_with_names(Path::new("ctx.php"), None, CONTEXT, false, skip, None).expect("parses")
 }
 
 /// Inserts `ctx.php` as a context file parsed with `skip`, as a load inserts a
@@ -96,15 +88,8 @@ fn a_project_asked_what_depends_on_a_name_has_what_the_skipped_bodies_refer_to()
 fn a_constant_defined_in_a_body_is_declared_whether_or_not_the_parse_skips_bodies() {
     let source = "<?php function boot() { define('FROM_BODY', 1); } function quiet() { return 1; }";
     let load = |skip: BodyText| {
-        parse_file_with_names(
-            Path::new("boot.php"),
-            Path::new("boot.php"),
-            source,
-            false,
-            skip,
-            None,
-        )
-        .expect("parses")
+        parse_file_with_names(Path::new("boot.php"), None, source, false, skip, None)
+            .expect("parses")
     };
     let (skipped, whole) = (load(BodyText::Skipped), load(BodyText::Parsed));
     assert_eq!(skipped.constants, whole.constants);

@@ -230,18 +230,19 @@ pub(super) struct Key {
     file: PathBuf,
 }
 
-/// The entry of a file with these `bytes`, named `path` and spelled `shown`
-/// (its anonymous classes carry that spelling), parsed as `is_stub` says and
-/// with use sites indexed as `index_use_sites` says; `None` when the cache
-/// is off.
+/// The entry of a file with these `bytes`, named `path` and spelled as
+/// `shown_path(root, path)` says (its anonymous classes carry that spelling),
+/// parsed as `is_stub` says and with use sites indexed as `index_use_sites`
+/// says; `None` when the cache is off.
 pub(super) fn key(
     bytes: &[u8],
     path: &Path,
-    shown: &Path,
+    root: Option<&Path>,
     is_stub: bool,
     index_use_sites: bool,
 ) -> Option<Key> {
     let directory = directory()?;
+    let shown = super::shown_path(root, path);
     let mut hasher = twox_hash::XxHash3_128::new();
     hasher.write(bytes);
     // What follows is length-prefixed, so the bytes and the path can't
