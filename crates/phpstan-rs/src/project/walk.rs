@@ -75,6 +75,9 @@ pub(crate) struct Walk<'a> {
     targets: [VecDeque<(PathBuf, &'a [&'a str])>; 3],
     listed: Vec<Listed>,
     index: FileIndex,
+    /// The resolved path of each directory an explicit file was listed in, by
+    /// the directory as it was given.
+    directories: hashbrown::HashMap<PathBuf, PathBuf, FxBuildHasher>,
 }
 
 impl<'a> Walk<'a> {
@@ -84,6 +87,7 @@ impl<'a> Walk<'a> {
             targets: Default::default(),
             listed: Vec::new(),
             index: FileIndex::default(),
+            directories: Default::default(),
         }
     }
 
@@ -111,7 +115,7 @@ impl<'a> Walk<'a> {
     /// Adds `path` as a root and lists it whatever its extension, as an
     /// explicitly configured file is listed.
     pub(crate) fn add_file(&mut self, path: &Path, role: Role) {
-        let identity = resolve(path);
+        let identity = self.resolve_file(path);
         self.roots.push(Root {
             path: identity.clone(),
             role,
@@ -223,6 +227,34 @@ impl<'a> Walk<'a> {
             EntryRef::Vacant(entry) => {
                 entry.insert(self.listed.len());
                 self.listed.push(Listed { path, role, stub });
+            }
+        }
+    }
+
+    /// The resolved path of the explicitly configured file `path`, as `resolve`
+    /// gives it. A regular file's path is its directory's resolved path, which
+    /// is resolved once per walk, with the file's name joined to it. A link, a
+    /// path ending in `.` or `..`, and a path that does not exist are left to
+    /// `resolve`.
+    fn resolve_file(&mut self, path: &Path) -> PathBuf {
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return resolve(path);
+        };
+        if !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+            return resolve(path);
+        }
+        let parent = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        match self.directories.entry_ref(parent) {
+            EntryRef::Occupied(entry) => entry.get().join(name),
+            EntryRef::Vacant(entry) => {
+                let directory = resolve(parent);
+                let identity = directory.join(name);
+                entry.insert(directory);
+                identity
             }
         }
     }
