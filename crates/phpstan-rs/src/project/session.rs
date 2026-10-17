@@ -219,21 +219,6 @@ pub(crate) struct Listing {
     roots: Vec<Root<'static>>,
 }
 
-impl Listing {
-    fn new(files: Vec<Listed>, roots: Vec<Root<'static>>) -> Listing {
-        let index = files
-            .iter()
-            .enumerate()
-            .map(|(at, listed)| (listed.path.clone(), at))
-            .collect();
-        Listing {
-            files,
-            index,
-            roots,
-        }
-    }
-}
-
 /// The resolved path of `path`, which is the key its file has in a project.
 /// A spelling that resolves on disk is resolved by the disk, and is remembered
 /// in `aliases` when it differs from its resolved path. A spelling that does
@@ -972,7 +957,16 @@ impl Session {
 
     fn walk_listing(&self) -> Listing {
         if let Some(listed) = &self.overlay_listing {
-            return Listing::new(listed.clone(), Vec::new());
+            let index = listed
+                .iter()
+                .enumerate()
+                .map(|(at, file)| (file.path.clone(), at))
+                .collect();
+            return Listing {
+                files: listed.clone(),
+                index,
+                roots: Vec::new(),
+            };
         }
         let mut walk = Walk::new();
         for dir in &self.dirs {
@@ -1003,8 +997,16 @@ impl Session {
         for dir in &self.stub_dirs {
             walk.add(&self.root.join(dir), Role::Stub, &[]);
         }
-        let Walked { files, roots } = walk.finish();
-        Listing::new(files, roots)
+        let Walked {
+            files,
+            index,
+            roots,
+        } = walk.finish();
+        Listing {
+            files,
+            index,
+            roots,
+        }
     }
 
     /// The resolved path of `path`, which is the key its file has in the

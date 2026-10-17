@@ -54,9 +54,11 @@ pub(crate) struct Root<'a> {
     pub(crate) excluded: &'a [&'a str],
 }
 
-/// What a walk listed, and the roots it was given.
+/// What a walk listed, where each file is, and the roots it was given.
 pub(crate) struct Walked<'a> {
     pub(crate) files: Vec<Listed>,
+    /// Where each listed file is in `files`, by its resolved path.
+    pub(crate) index: FxHashMap<PathBuf, usize>,
     pub(crate) roots: Vec<Root<'a>>,
 }
 
@@ -141,6 +143,7 @@ impl<'a> Walk<'a> {
         }
         Walked {
             files: self.listed,
+            index: self.index,
             roots: self.roots,
         }
     }
