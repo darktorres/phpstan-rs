@@ -1141,15 +1141,19 @@ impl Session {
     /// `cacheable` is whether the file may be read from and stored in the
     /// per-file cache, which a context file may be in a project built once;
     /// `index_use_sites` is whether its use sites are indexed with its parse.
+    /// The file's role says whether it is analysed, which keeps its ignore
+    /// comments.
     fn read_and_parse_file(
         &self,
         project: &Project,
-        path: &Path,
-        is_stub: bool,
+        listed: &Listed,
         names: &mut syntax::name::NameCache,
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
+        let path = listed.path.as_path();
+        let is_stub = listed.stub;
+        let analysed = listed.role == Role::Analysed;
         let Ok(bytes) = project.read_bytes(path) else {
             return Read::Unread;
         };
@@ -1201,12 +1205,24 @@ impl Session {
             (true, false) => super::BodyText::Skipped,
         };
         let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
-            Ok(text) => {
-                super::parse_file_with_names(path, root, text, is_stub, body_text, Some(names))
-            }
-            Err(bytes) => {
-                super::parse_file_with_names(path, root, bytes, is_stub, body_text, Some(names))
-            }
+            Ok(text) => super::parse_file_with_names(
+                path,
+                root,
+                text,
+                is_stub,
+                body_text,
+                Some(names),
+                analysed,
+            ),
+            Err(bytes) => super::parse_file_with_names(
+                path,
+                root,
+                bytes,
+                is_stub,
+                body_text,
+                Some(names),
+                analysed,
+            ),
         })) else {
             return Read::Unread;
         };
@@ -1250,14 +1266,7 @@ impl Session {
         cacheable: bool,
         index_use_sites: bool,
     ) -> Read {
-        let mut read = self.read_and_parse_file(
-            project,
-            &listed.path,
-            listed.stub,
-            names,
-            cacheable,
-            index_use_sites,
-        );
+        let mut read = self.read_and_parse_file(project, listed, names, cacheable, index_use_sites);
         if let Read::Loaded(file) = &mut read {
             project.index_use_sites(&mut file.parsed, &file.source);
             file.parsed.owner = listed.owner;

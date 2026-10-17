@@ -934,8 +934,8 @@ impl Project {
         }
         let bytes = self.read_bytes(path).ok()?;
         let parsed = match std::str::from_utf8(&bytes) {
-            Ok(text) => parse_with_ignores(None, path, text, None, false),
-            Err(_) => parse_with_ignores(None, path, &bytes[..], None, false),
+            Ok(text) => parse_with_ignores(None, path, text, None, false, false),
+            Err(_) => parse_with_ignores(None, path, &bytes[..], None, false, false),
         }
         .ok()?;
         let ast = Arc::new(parsed.ast);
@@ -1542,7 +1542,6 @@ impl Project {
             &old.declaration_references,
         );
         Some(UnindexedFile {
-            analyzed: old.analyzed,
             load_order: old.load_order,
             functions: old.functions,
             classes: old.classes,
@@ -1868,9 +1867,17 @@ impl Project {
         // request that happened to race a genuinely-invalid save.
         let bytes = source.as_ref();
         let root = self.absolute_root();
+        // A file the project has seen keeps its analysed flag: an edit does
+        // not change what kind of file it is. The flag is read before the
+        // parse, which keeps ignore comments for an analysed file only.
+        let analyzed = self.files.get(path).map_or(analysed, |file| file.analyzed);
         let parsed = match std::str::from_utf8(bytes) {
-            Ok(text) => parse_file_with_names(path, root, text, stub, BodyText::Parsed, None),
-            Err(_) => parse_file_with_names(path, root, bytes, stub, BodyText::Parsed, None),
+            Ok(text) => {
+                parse_file_with_names(path, root, text, stub, BodyText::Parsed, None, analyzed)
+            }
+            Err(_) => {
+                parse_file_with_names(path, root, bytes, stub, BodyText::Parsed, None, analyzed)
+            }
         }?;
         let previous = self.unindex_file(path);
         let ParsedFile {
@@ -1898,11 +1905,6 @@ impl Project {
         } = parsed;
         let ast = ast.expect("a parse keeps its tree");
 
-        // A file the project has seen keeps its analysed flag: an edit does
-        // not change what kind of file it is.
-        let analyzed = previous
-            .as_ref()
-            .map_or(analysed, |previous| previous.analyzed);
         let load_order = previous.as_ref().map_or_else(
             || {
                 let order = self.next_load_order;
@@ -2906,13 +2908,20 @@ fn parse_with_ignores<'a>(
     source: impl Into<syntax::Source<'a>>,
     names: Option<&mut syntax::name::NameCache>,
     skim_bodies: bool,
+    analysed: bool,
 ) -> Result<Parsed, ParseError> {
     let parsed = if skim_bodies {
         syntax::parse_skimming(source, names, Some(&WATCHED))?
     } else {
         syntax::parse_watching(source, names, Some(&WATCHED))?
     };
-    let ignores = ignore_comments::scan_parsed(&parsed);
+    // Only an analysed file's ignore comments are read (`apply_inline_ignores`,
+    // `check_banned`), so a context file keeps none, as its cached state does.
+    let ignores = if analysed {
+        ignore_comments::scan_parsed(&parsed)
+    } else {
+        ignore_comments::IgnoreComments::default()
+    };
     let mut ast = parsed.stmts;
     // What the file does not name, or hold, there is nothing to find of by
     // walking it.
@@ -2954,6 +2963,7 @@ pub struct ParsedFile {
     constants: Vec<Name>,
     references: FxHashSet<deps::RefKey>,
     declaration_references: FxHashSet<deps::RefKey>,
+    // Empty unless the file is analysed (see `parse_with_ignores`).
     ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
     // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
@@ -3009,14 +3019,15 @@ pub struct ParsedFile {
 /// (see `ParsedFile`'s doc comment on that field) and names the file's
 /// anonymous classes; neither is read to make a decision, so it's fine that
 /// a caller building many `ParsedFile`s concurrently passes a different
-/// `path` to each call with no coordination needed between them.
+/// `path` to each call with no coordination needed between them. The file is
+/// parsed as an analysed one, so its ignore comments are kept.
 #[hotpath::measure]
 pub fn parse_file<'a>(
     path: &Path,
     source: impl Into<syntax::Source<'a>>,
     is_stub: bool,
 ) -> Result<ParsedFile, ParseError> {
-    parse_file_with_names(path, None, source, is_stub, BodyText::Parsed, None)
+    parse_file_with_names(path, None, source, is_stub, BodyText::Parsed, None, true)
 }
 
 /// What a parse keeps of the function and method bodies of a file.
@@ -3038,7 +3049,8 @@ pub enum BodyText {
 /// it has one: the file is spelled as the reports spell it (see
 /// `shown_path`), and its anonymous classes are named by that spelling.
 /// `body_text` is what is kept of the file's function bodies, which a context
-/// file's may be text read when a pass asks.
+/// file's may be text read when a pass asks. `analysed` is whether the file is
+/// analysed, which is what keeps its ignore comments.
 pub fn parse_file_with_names<'a>(
     path: &Path,
     root: Option<&Path>,
@@ -3046,6 +3058,7 @@ pub fn parse_file_with_names<'a>(
     is_stub: bool,
     body_text: BodyText,
     names: Option<&mut syntax::name::NameCache>,
+    analysed: bool,
 ) -> Result<ParsedFile, ParseError> {
     let source: syntax::Source<'a> = source.into();
     let Parsed {
@@ -3055,7 +3068,14 @@ pub fn parse_file_with_names<'a>(
         warnings: lex_warnings,
         facts,
         line_index,
-    } = parse_with_ignores(root, path, source, names, body_text == BodyText::Skipped)?;
+    } = parse_with_ignores(
+        root,
+        path,
+        source,
+        names,
+        body_text == BodyText::Skipped,
+        analysed,
+    )?;
     let origin_path: Arc<Path> = Arc::from(path);
     let origin = Origin::File(Arc::clone(&origin_path));
     let file_declarations::FileDeclarations {
@@ -3119,7 +3139,15 @@ pub fn parse_file_with_names<'a>(
     // found by the skip.
     #[cfg(debug_assertions)]
     if parsed.facts.has_skimmed_bodies
-        && let Ok(full) = parse_file_with_names(path, root, source, is_stub, BodyText::AsText, None)
+        && let Ok(full) = parse_file_with_names(
+            path,
+            root,
+            source,
+            is_stub,
+            BodyText::AsText,
+            None,
+            analysed,
+        )
     {
         file_cache::assert_same_but_bodies(&parsed, &full);
     }
@@ -3185,7 +3213,6 @@ pub fn shown_path<'p>(root: Option<&Path>, path: &'p Path) -> &'p Path {
 
 /// What `Project::unindex_file` removed.
 struct UnindexedFile {
-    analyzed: bool,
     load_order: u64,
     functions: Vec<Name>,
     classes: Vec<Name>,

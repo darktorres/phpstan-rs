@@ -177,7 +177,7 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
             ast: gated,
             facts: gated_facts,
             ..
-        } = parse_with_ignores(None, path, *source, None, false).expect("parses");
+        } = parse_with_ignores(None, path, *source, None, false, false).expect("parses");
         assert_eq!(gated_facts, facts, "facts of source {i}");
         assert_eq!(format!("{gated:?}"), format!("{every:?}"), "source {i}");
         // The anonymous classes' registry entries.
