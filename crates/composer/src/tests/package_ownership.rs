@@ -4,12 +4,13 @@
 use super::super::manifest::{lexically_normalized, resolve};
 use super::super::*;
 use super::helpers::*;
+use crate::canonical::canonicalize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// The package index of the project at `dir`, read as a session reads it.
 fn index(dir: &TempDir) -> PackageIndex {
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = canonicalize(dir.path()).unwrap();
     PackageIndex::new(
         PackageContext::load(&root, &root, &Arc::default(), None)
             .manifest
@@ -23,7 +24,7 @@ fn a_file_under_the_root_belongs_to_the_root_package() {
     let dir = TempDir::new("owner_root");
     dir.write("composer.json", r#"{"name": "acme/widgets"}"#);
     let index = index(&dir);
-    let file = std::fs::canonicalize(dir.path())
+    let file = canonicalize(dir.path())
         .unwrap()
         .join("src/Deep/Widget.php");
     let owner = index.owner_of_dir(file.parent().unwrap());
@@ -44,7 +45,7 @@ fn a_file_of_an_installed_package_belongs_to_it() {
     );
     dir.write("vendor/phpstan/phpstan/src/Rules/Rule.php", "<?php");
     let index = index(&dir);
-    let file = std::fs::canonicalize(dir.path())
+    let file = canonicalize(dir.path())
         .unwrap()
         .join("vendor/phpstan/phpstan/src/Rules/Rule.php");
     let owner = index.owner_of_dir(file.parent().unwrap()).unwrap();
@@ -60,7 +61,7 @@ fn a_root_package_with_no_name_owns_its_files_but_has_no_name() {
     let dir = TempDir::new("owner_no_name");
     dir.write("composer.json", r#"{"require": {}}"#);
     let index = index(&dir);
-    let file = std::fs::canonicalize(dir.path()).unwrap().join("src/A.php");
+    let file = canonicalize(dir.path()).unwrap().join("src/A.php");
     let owner = index.owner_of_dir(file.parent().unwrap());
     assert_eq!(owner, Some(PackageOwner::Root(0)));
     assert_eq!(index.name(owner.unwrap()), None);
@@ -76,7 +77,7 @@ fn a_package_linked_into_the_vendor_directory_belongs_to_its_target() {
         "vendor/composer/installed.json",
         r#"{"packages": [{"name": "acme/b", "type": "library", "install-path": "../acme/b"}]}"#,
     );
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = canonicalize(dir.path()).unwrap();
     std::fs::create_dir_all(root.join("vendor/acme")).unwrap();
     std::os::unix::fs::symlink(root.join("packages/b"), root.join("vendor/acme/b")).unwrap();
     let index = index(&dir);
@@ -154,7 +155,7 @@ fn the_owner_is_what_its_definition_gives_for_any_path() {
     let dir = nested_packages("owner_definition");
     let index = index(&dir);
     let dirs = owned_dirs(&index);
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = canonicalize(dir.path()).unwrap();
     let parts = [
         "vendor", "phpstan", "acme", "lib", "extra", "src", "..", ".", "x.php", "composer",
         "other", "",
@@ -194,7 +195,7 @@ fn the_owner_is_what_its_definition_gives_for_any_path() {
 fn a_subdirectory_stands_where_its_directory_does_with_its_name() {
     let dir = nested_packages("owner_at");
     let index = index(&dir);
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = canonicalize(dir.path()).unwrap();
     let names = [
         "vendor", "phpstan", "acme", "lib", "extra", "src", "composer", "other",
     ];

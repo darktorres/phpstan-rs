@@ -15,6 +15,8 @@ use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
+use crate::canonical;
+
 /// One `composer.json` entry and the 1-based line it's written on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Located<T> {
@@ -263,7 +265,7 @@ impl ComposerManifest {
             .map(|r| {
                 let fixed = r.url.split('*').next().unwrap_or(&r.url);
                 let joined = self.absolute_root.join(fixed.trim_end_matches('/'));
-                std::fs::canonicalize(&joined).unwrap_or(joined)
+                canonical::canonicalize(&joined).unwrap_or(joined)
             })
             .collect();
         self.installed
@@ -341,13 +343,13 @@ pub fn lexically_normalized(path: &Path) -> PathBuf {
 /// its directory stands. A path with no existing ancestor is returned as
 /// given.
 pub fn resolve(path: &Path) -> PathBuf {
-    if let Ok(resolved) = std::fs::canonicalize(path) {
+    if let Ok(resolved) = canonical::canonicalize(path) {
         return resolved;
     }
     for ancestor in path.ancestors().skip(1) {
-        if let Ok(resolved) = std::fs::canonicalize(ancestor) {
+        if let Ok(resolved) = canonical::canonicalize(ancestor) {
             let rest = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
-            return lexically_normalized(&resolved.join(rest));
+            return canonical::form(lexically_normalized(&resolved.join(rest)));
         }
     }
     path.to_path_buf()
@@ -664,7 +666,7 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("packages/b/src/B.php"), "<?php").unwrap();
 
-        let root = std::fs::canonicalize(&root).unwrap();
+        let root = canonical::canonicalize(&root).unwrap();
         let manifest = ComposerManifest::load(&root, &root).unwrap();
         let names: Vec<&str> = manifest
             .path_repository_packages()

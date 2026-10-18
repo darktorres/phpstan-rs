@@ -323,7 +323,7 @@ pub(crate) fn identify_through(
     aliases: &Mutex<FxHashMap<PathBuf, PathBuf>>,
     path: &Path,
 ) -> PathBuf {
-    match std::fs::canonicalize(path) {
+    match composer::canonical::canonicalize(path) {
         Ok(resolved) => {
             if resolved != path {
                 aliases
@@ -575,7 +575,8 @@ pub(crate) fn declared_php_versions(
 fn composer_roots(dirs: &[PathBuf], root: &Path) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for dir in dirs {
-        let start = std::fs::canonicalize(root.join(dir)).unwrap_or_else(|_| root.join(dir));
+        let start =
+            composer::canonical::canonicalize(&root.join(dir)).unwrap_or_else(|_| root.join(dir));
         let start = if start.is_file() {
             start.parent().map(Path::to_path_buf).unwrap_or(start)
         } else {

@@ -42,8 +42,14 @@ impl HashedPath {
     }
 
     /// The entry `name` of this directory. `name` is one name, as a listing
-    /// gives it.
+    /// gives it. The entry of a canonical directory is spelled as a canonical
+    /// path is (`canonical::form`): on Windows, a name that a path without the
+    /// verbatim prefix cannot spell takes the prefix.
     pub fn child(&self, name: &OsStr) -> Self {
+        #[cfg(windows)]
+        if !crate::canonical::spelled_plainly(name) {
+            return HashedPath::new(crate::canonical::form(self.path.join(name)));
+        }
         // Made in one allocation, where `join` copies the directory and then
         // grows the copy.
         let mut path = PathBuf::with_capacity(self.path.as_os_str().len() + 1 + name.len());

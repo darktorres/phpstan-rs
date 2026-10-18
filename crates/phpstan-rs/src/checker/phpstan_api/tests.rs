@@ -298,7 +298,7 @@ mod namespace_in_3rd_party_package {
         let tokens = Lexer::new(src).tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
         let registry = Registry::build(&program);
-        let absolute_root = std::fs::canonicalize(&root.0).unwrap();
+        let absolute_root = composer::canonical::canonicalize(&root.0).unwrap();
         let packages = composer::PackageIndex::new(
             composer::PackageContext::load(&absolute_root, &absolute_root, &Arc::default(), None)
                 .manifest

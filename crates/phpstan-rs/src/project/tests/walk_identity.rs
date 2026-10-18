@@ -49,7 +49,7 @@ fn sorted(listed: Vec<Listed>) -> Vec<(PathBuf, Role, bool)> {
 
 /// `dir`, resolved, so that the expected paths are the ones the walk reaches.
 fn resolved(dir: &TempDir) -> PathBuf {
-    fs::canonicalize(&dir.0).unwrap()
+    composer::canonical::canonicalize(&dir.0).unwrap()
 }
 
 #[test]

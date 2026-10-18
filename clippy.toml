@@ -6,3 +6,9 @@ disallowed-types = [
     { path = "std::collections::HashSet", reason = "randomly seeded; use rustc_hash::FxHashSet or an ordered set" },
     { path = "std::hash::RandomState", reason = "randomly seeded; use rustc_hash::FxBuildHasher" },
 ]
+# Windows' canonical paths carry the verbatim prefix, under which `/`, `.`
+# and `..` are names: a path written onto one names no file.
+disallowed-methods = [
+    { path = "std::fs::canonicalize", reason = "Windows' verbatim form; use composer::canonical::canonicalize" },
+    { path = "std::path::Path::canonicalize", reason = "Windows' verbatim form; use composer::canonical::canonicalize" },
+]

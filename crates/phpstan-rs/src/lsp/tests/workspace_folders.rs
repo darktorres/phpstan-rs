@@ -9,7 +9,6 @@ use super::configuration::DEPRECATED_FIXTURE;
 use super::helpers::run_multi;
 use super::helpers::*;
 use serde_json::{Value, json};
-use std::fs;
 
 #[test]
 fn initialize_with_multiple_workspace_folders_loads_every_folder() {
@@ -279,11 +278,11 @@ fn a_document_opened_through_a_link_into_another_folder_is_checked_by_that_folde
 #[test]
 fn a_reload_that_changes_one_folders_file_set_leaves_the_other_folder_alone() {
     let a = TempDir::new("reload_set_a");
-    let a_base = fs::canonicalize(&a.0).unwrap();
+    let a_base = composer::canonical::canonicalize(&a.0).unwrap();
     a.write("src/Kept.php", "<?php class Kept {}");
     a.write("lib/Dropped.php", "<?php class Dropped {}");
     let b = TempDir::new("reload_set_b");
-    let b_base = fs::canonicalize(&b.0).unwrap();
+    let b_base = composer::canonical::canonicalize(&b.0).unwrap();
     b.write("Other.php", "<?php class Other {}");
 
     let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());

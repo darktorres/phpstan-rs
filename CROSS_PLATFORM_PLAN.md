@@ -4,10 +4,16 @@
 
 - **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
   tracks it.
-- **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`) and R2 (`.gitattributes`, the `platforms` job and
-  the release and extension workflows' changes). The rows are built in the order of the table
-  below, one commit each, with a pathspec, since another session shares the checkout.
-- **Next:** round 1, the push that runs the legs, asked first. Then R3.
+- **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`) and R3. The rows are built in
+  the order of the table below, one commit each, with a pathspec, since another session shares
+  the checkout.
+- **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
+  - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
+    `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
+    client to run, before the 30 s wait for diagnostics began. Two things changed between the
+    runs: the LF checkout and 223 commits.
+  - Rust CI's result is recorded below when it ends.
+- **Next:** R4.
 
 ## Context
 
@@ -300,6 +306,33 @@ code, these are expected:
 - On round 2:
   - a vendor discovery test finds vendor context on Windows;
   - the smoke test's round trip.
+
+**Built.**
+
+- `composer::canonical` holds `canonicalize` and one rule, `form`, for the spelling a
+  canonical path takes. On Windows the rule works both ways: a verbatim drive or share path
+  whose names are all spelled plainly loses the prefix, and a plain one with a name that is not
+  takes it. The device names also cover `CONIN$`, `CONOUT$` and the superscript ports
+  (`COM¹`), and a stem's trailing spaces (`CON .txt`). The rule is applied in three places:
+  - the system's answer;
+  - `resolve`'s tail through the nearest existing ancestor;
+  - `HashedPath::child`, whose entry of a canonical directory is spelled as `form` spells it.
+- The bans are in both `clippy.toml`s: `crates/phpstan-rs` has its own, and clippy reads only
+  the nearest. They fire: a probe call of each failed `clippy -D warnings`. The wrapper
+  `#[allow]`s the lint, as the workspace writes its exceptions.
+- The arch gate failed at HEAD: `walk.rs:1231` has called `fs::canonicalize` since `aab67287`,
+  in the engine its path rule covers. The rule exempts composer, which owns the path I/O (the
+  walk reads its listings through it too), so the walk now asks `composer::canonical`, and the
+  gate passes.
+- The test code's 34 calls compute their expected paths with `canonical::canonicalize`, so they
+  match the code's form on Windows. Two LSP test files lost their now unused `use std::fs`.
+- The Windows code is type-checked here. composer cannot be checked for Windows, since
+  stacker's build compiles `windows.c` with the MinGW headers, so
+  `~/.cache/prs-profile/fixes/wincheck/check.sh` symlinks the pure-Rust path modules and their
+  tests into a scratch crate. It runs `clippy -D warnings` for `x86_64-pc-windows-gnu` and for
+  Linux. Nothing links, so nothing runs: the Windows leg runs the tests.
+- Linux: the composer tests (68) and the `project::`, `lsp::tests::symlink_identity`,
+  `lsp::tests::workspace_folders` and `checker::phpstan_api` tests (215) pass.
 
 ### R4. Equal paths hash alike on Windows
 

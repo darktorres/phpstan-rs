@@ -4,6 +4,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::canonical::canonicalize;
 use crate::manifest::{Autoload, Located};
 
 /// Loads a project whose `composer.json` is `composer` and whose
@@ -14,7 +15,7 @@ fn load(label: &str, composer: &str, installed: Option<&str>) -> Option<Composer
     if let Some(installed) = installed {
         dir.write("vendor/composer/installed.json", installed);
     }
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = canonicalize(dir.path()).unwrap();
     ComposerManifest::load(&root, &root)
 }
 

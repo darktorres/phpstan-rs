@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 
+use crate::canonical;
 use crate::dir_listings::{DirListings, Listing};
 use crate::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors};
 use crate::path_bytes;
@@ -117,7 +118,7 @@ pub fn discover_vendor_context(
     if !composer_dir.is_dir() {
         return VendorContext::default();
     }
-    let Ok(vendor_dir) = std::fs::canonicalize(composer_dir.join("..")) else {
+    let Ok(vendor_dir) = canonical::canonicalize(&composer_dir.join("..")) else {
         return VendorContext::default();
     };
     let Some(base_dir) = vendor_dir.parent().map(Path::to_path_buf) else {
@@ -623,7 +624,7 @@ impl<'p> Resolver<'p> {
             // A link may lead anywhere, and an entry of no known type may be
             // one, so the system resolves it and it is placed itself.
             _ => {
-                let resolved = std::fs::canonicalize(raw).ok()?;
+                let resolved = canonical::canonicalize(raw).ok()?;
                 if path_bytes::starts_with(&resolved, vendor_dir) {
                     return Some(unknown(HashedPath::new(resolved)));
                 }
@@ -636,7 +637,7 @@ impl<'p> Resolver<'p> {
     /// listed, resolved by the system; or, when that lies outside the vendor
     /// directory, as written.
     fn path_alone(&self, raw: &Path) -> Option<HashedPath> {
-        let resolved = std::fs::canonicalize(raw).ok()?;
+        let resolved = canonical::canonicalize(raw).ok()?;
         if path_bytes::starts_with(&resolved, self.vendor_dir) {
             return Some(HashedPath::new(resolved));
         }
@@ -721,7 +722,7 @@ impl<'p> Resolver<'p> {
 
 /// `path` resolved by the system.
 fn canonicalized(path: &Path) -> Option<HashedPath> {
-    std::fs::canonicalize(path).ok().map(HashedPath::new)
+    canonical::canonicalize(path).ok().map(HashedPath::new)
 }
 
 /// The canonical form of the entry `name` of a listed directory, or `None`

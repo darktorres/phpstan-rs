@@ -1228,7 +1228,7 @@ impl<'a, 'p> Walk<'a, 'p> {
                     continue;
                 }
                 let child = dir.child(name);
-                match fs::canonicalize(&child) {
+                match composer::canonical::canonicalize(child.as_path()) {
                     Ok(target) => steps.push(Step::Found(Found::Link(target))),
                     // A dangling `.php` link is listed under its own path, so
                     // that reading it reports that path.

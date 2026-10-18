@@ -7,8 +7,12 @@ disallowed-types = [
     { path = "std::hash::RandomState", reason = "randomly seeded; use rustc_hash::FxBuildHasher" },
 ]
 # A join without the class hierarchy can't fold objects past the union cap
-# to the classes they share.
+# to the classes they share. Windows' canonical paths carry the verbatim
+# prefix, under which `/`, `.` and `..` are names: a path written onto one
+# names no file.
 disallowed-methods = [
     { path = "types::Type::union", reason = "joins without the class hierarchy; use Relation::union" },
     { path = "types::Type::union_of", reason = "joins without the class hierarchy; use Relation::union_of" },
+    { path = "std::fs::canonicalize", reason = "Windows' verbatim form; use composer::canonical::canonicalize" },
+    { path = "std::path::Path::canonicalize", reason = "Windows' verbatim form; use composer::canonical::canonicalize" },
 ]

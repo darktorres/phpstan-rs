@@ -3,6 +3,7 @@
 //! autoloader.
 
 use super::helpers::*;
+use crate::canonical::canonicalize;
 use crate::dir_listings::DirListings;
 use crate::hashed_path::Resolved;
 use crate::vendor::*;
@@ -66,8 +67,8 @@ return array(
     );
 
     let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
-    let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
-    let src_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src")).unwrap();
+    let foo = canonicalize(&dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
+    let src_dir = canonicalize(&dir.path().join("vendor/acme/lib/src")).unwrap();
     // Both are entries of listed directories that are not links, so the walk
     // takes them as they are.
     assert_eq!(
@@ -102,8 +103,7 @@ return array();
     );
 
     let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
-    let class_loader =
-        std::fs::canonicalize(dir.path().join("vendor/composer/ClassLoader.php")).unwrap();
+    let class_loader = canonicalize(&dir.path().join("vendor/composer/ClassLoader.php")).unwrap();
     assert!(
         ctx.files
             .contains(&VendorPath::Resolved(Resolved::resolve(&class_loader))),
@@ -164,9 +164,9 @@ class ComposerStaticInitTest
     );
 
     let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
-    let foo = std::fs::canonicalize(dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
-    let other = std::fs::canonicalize(dir.path().join("vendor/acme/other/Other.php")).unwrap();
-    let acme_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
+    let foo = canonicalize(&dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
+    let other = canonicalize(&dir.path().join("vendor/acme/other/Other.php")).unwrap();
+    let acme_dir = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
 
     // The vendor-rooted entries resolve: the PSR-4 directory, and a classmap
     // file beside it. The classmap file under the directory is left to the
@@ -177,8 +177,8 @@ class ComposerStaticInitTest
 
     // The `__DIR__ . '/../..'`-rooted (first-party, `app/`) entries
     // must be dropped by the vendor-only filter.
-    let first_party_file = std::fs::canonicalize(dir.path().join("app/FirstParty.php")).unwrap();
-    let first_party_dir = std::fs::canonicalize(dir.path().join("app")).unwrap();
+    let first_party_file = canonicalize(&dir.path().join("app/FirstParty.php")).unwrap();
+    let first_party_dir = canonicalize(&dir.path().join("app")).unwrap();
     assert!(
         !paths(&ctx.files).contains(&first_party_file),
         "got: {:?}",
@@ -280,7 +280,7 @@ return array(
     );
 
     let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
-    let lib = std::fs::canonicalize(dir.path().join("vendor/acme/lib")).unwrap();
+    let lib = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
     // The directory loads `Bar.php`. `Foo.php` lies beside the directory, and
     // `helpers.inc` is not PHP, so the walk does not take it: both stay.
     assert_eq!(paths(&ctx.dirs), vec![lib.join("src")]);
@@ -334,7 +334,7 @@ return array(
     // restored before any assertion can fail, so the directory is removed.
     let listable = std::fs::read_dir(&hidden).is_ok();
     std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let baz = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src"))
+    let baz = canonicalize(&dir.path().join("vendor/acme/lib/src"))
         .unwrap()
         .join("hidden/Baz.php");
     assert_eq!(

@@ -1,3 +1,4 @@
+mod canonical;
 mod dir_listings;
 mod hashed_path;
 mod helpers;

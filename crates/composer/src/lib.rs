@@ -5,6 +5,7 @@
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
+pub mod canonical;
 pub mod constraint;
 pub mod dir_listings;
 pub mod hashed_path;

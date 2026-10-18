@@ -7,13 +7,12 @@ use super::super::*;
 use super::helpers::run;
 use super::helpers::*;
 use serde_json::json;
-use std::fs;
 
 #[cfg(unix)]
 #[test]
 fn a_document_opened_through_a_link_publishes_on_its_uri_and_resolves_in_the_target() {
     let dir = TempDir::new("link_document");
-    let base = fs::canonicalize(&dir.0).unwrap();
+    let base = composer::canonical::canonicalize(&dir.0).unwrap();
     dir.write(
         "real/a.php",
         "<?php class Greeter { public function greet(): string { return 'hi'; } }",

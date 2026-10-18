@@ -2,6 +2,7 @@
 //! gets the same listing, and the entries are sorted and typed.
 
 use super::helpers::*;
+use crate::canonical::canonicalize;
 use crate::dir_listings::{DirListings, Listing};
 use crate::hashed_path::HashedPath;
 use std::ffi::OsStr;
@@ -20,7 +21,7 @@ fn names(listing: &Listing) -> Vec<&str> {
 fn a_directory_is_listed_once_and_shared() {
     let dir = TempDir::new("listed_once");
     dir.write("a.php", "<?php");
-    let root = HashedPath::new(std::fs::canonicalize(dir.path()).unwrap());
+    let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listings = DirListings::default();
     let first = listings.listing(&root).unwrap();
     let second = listings.listing(&root).unwrap();
@@ -31,7 +32,7 @@ fn a_directory_is_listed_once_and_shared() {
 fn concurrent_asks_share_one_listing() {
     let dir = TempDir::new("concurrent");
     dir.write("a.php", "<?php");
-    let root = HashedPath::new(std::fs::canonicalize(dir.path()).unwrap());
+    let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listings = Arc::new(DirListings::default());
     let handles: Vec<_> = (0..8)
         .map(|_| {
@@ -55,7 +56,7 @@ fn concurrent_asks_share_one_listing() {
 fn a_file_added_after_the_listing_is_seen_once_the_table_is_cleared() {
     let dir = TempDir::new("cleared");
     dir.write("a.php", "<?php");
-    let root = HashedPath::new(std::fs::canonicalize(dir.path()).unwrap());
+    let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listings = DirListings::default();
     let before = listings.listing(&root).unwrap();
     dir.write("b.php", "<?php");
@@ -72,7 +73,7 @@ fn the_entries_are_sorted_by_name_bytes() {
     for name in ["b.php", "A.php", "a.php", "_x.php"] {
         dir.write(name, "");
     }
-    let root = HashedPath::new(std::fs::canonicalize(dir.path()).unwrap());
+    let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listing = DirListings::default().listing(&root).unwrap();
     assert_eq!(names(&listing), ["A.php", "_x.php", "a.php", "b.php"]);
     assert!(listing.complete);
@@ -83,7 +84,7 @@ fn an_entry_is_found_by_name_with_its_type() {
     let dir = TempDir::new("entry_lookup");
     dir.write("a.php", "");
     dir.write("sub/b.php", "");
-    let root = HashedPath::new(std::fs::canonicalize(dir.path()).unwrap());
+    let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listing = DirListings::default().listing(&root).unwrap();
     let kind = |name: &str| listing.entry(OsStr::new(name)).and_then(|entry| entry.kind);
     assert!(kind("a.php").is_some_and(|kind| kind.is_file()));
@@ -97,7 +98,7 @@ fn a_link_is_listed_as_a_link_and_not_followed() {
     let dir = TempDir::new("link_kind");
     dir.write("a.php", "");
     std::os::unix::fs::symlink(dir.path().join("a.php"), dir.path().join("link.php")).unwrap();
-    let root = HashedPath::new(std::fs::canonicalize(dir.path()).unwrap());
+    let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listing = DirListings::default().listing(&root).unwrap();
     let kind = listing
         .entry(OsStr::new("link.php"))
@@ -110,7 +111,7 @@ fn a_link_is_listed_as_a_link_and_not_followed() {
 fn a_path_that_is_not_a_directory_has_no_listing() {
     let dir = TempDir::new("not_listable");
     dir.write("a.php", "");
-    let root = HashedPath::new(std::fs::canonicalize(dir.path()).unwrap());
+    let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listings = DirListings::default();
     assert!(
         listings
@@ -127,7 +128,7 @@ fn a_directory_that_cannot_be_read_has_no_listing() {
 
     let dir = TempDir::new("unreadable");
     dir.write("hidden/a.php", "");
-    let hidden = HashedPath::new(std::fs::canonicalize(dir.path().join("hidden")).unwrap());
+    let hidden = HashedPath::new(canonicalize(&dir.path().join("hidden")).unwrap());
     // Passable but not readable. A root reads any directory, so then the
     // test only checks that the listing and the system agree. The mode is
     // restored before any assertion can fail, so the directory is removed.
@@ -155,8 +156,7 @@ return array(
 
     let listings = DirListings::default();
     crate::vendor::discover_vendor_context(dir.path(), &listings, None);
-    let src =
-        HashedPath::new(std::fs::canonicalize(dir.path().join("vendor/acme/lib/src")).unwrap());
+    let src = HashedPath::new(canonicalize(&dir.path().join("vendor/acme/lib/src")).unwrap());
     // The discovery has read `src`, so its listing is kept after the file goes.
     std::fs::remove_file(src.as_path().join("Bar.php")).unwrap();
     let listing = listings.listing(&src).unwrap();

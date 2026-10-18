@@ -67,7 +67,7 @@ impl Drop for TempDir {
 /// `dir`, resolved, so that the expected paths are the ones the session keys
 /// its files by.
 pub(super) fn resolved(dir: &TempDir) -> PathBuf {
-    fs::canonicalize(&dir.0).unwrap()
+    composer::canonical::canonicalize(&dir.0).unwrap()
 }
 
 /// A session over `root` with the default configuration, which analyses the
