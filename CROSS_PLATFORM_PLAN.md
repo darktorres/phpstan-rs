@@ -8,10 +8,11 @@
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
   round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
   R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`), R8 (`7d5bddd4`, `06486da9`)
-  R9 (`da9e86df`) and R10 (`007d827b`). The rows are built in the order of the table below,
-  one commit each, with a pathspec, since another session shares the checkout. R18 has one
-  commit for each step, R6 has a second for the rule its build found, R7 has a second for the
-  case rule, and R8 has a second for the files an environment change re-checks.
+  R9 (`da9e86df`), R10 (`007d827b`) and R11 (`a94e27ec`). The rows are built in the order of
+  the table below, one commit each, with a pathspec, since another session shares the
+  checkout. R18 has one commit for each step, R6 has a second for the rule its build found,
+  R7 has a second for the case rule, and R8 has a second for the files an environment change
+  re-checks.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -36,7 +37,7 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** R11, the caches where each platform keeps them, refreshed on Windows.
+- **Next:** R12, colours on Windows consoles.
 
 ## Context
 
@@ -1610,6 +1611,41 @@ On Linux nothing in the output changes; the cost is one thread spawn.
 
 On Linux nothing changes where `HOME` is set, and the oracle runs set the directory
 explicitly. Where `HOME` is unset, the cache now comes on.
+
+**Built** (`a94e27ec`).
+
+- `cache_dir` is `PHPSTAN_RS_CACHE_DIR`, else `phpstan-rs` in `dirs::cache_dir()`, and none
+  when `PHPSTAN_RS_NO_STUB_CACHE` is set. The choice is a function of its inputs
+  (`cache_dir_of`), so its tests need no environment, and the platform is asked only when no
+  directory is chosen.
+- Two differences from the old reading, both on Linux and both what the XDG specification
+  says. A relative `XDG_CACHE_HOME` is ignored, where the old code used it as given. And where
+  `HOME` is unset, the passwd entry's home gives the directory, so the cache comes on.
+- `refresh_last_use` opens an entry that is older than `REFRESH_AFTER` for writing, and sets its
+  time through that handle. An entry that cannot be opened keeps its age.
+- The dependency is `dirs` 7.0.0, the latest release, which brings `dirs-sys`, `option-ext`
+  (MPL-2.0, which `deny.toml` allows) and `redox_users` (for Redox only). `libc` and
+  `windows-sys` 0.61.2 are already in the tree. Both lockfiles hold the four packages and pass
+  `--locked`; `cargo deny check` and `cargo machete` pass.
+- Tests:
+  - three on the precedence: the off switch beats a chosen directory, a chosen directory is
+    used as it is and the platform is not asked, and the default is `phpstan-rs` in the
+    platform's directory, or none when it has none;
+  - the platform's directory follows its convention, with an arm for each system:
+    `~/Library/Caches` on macOS, `XDG_CACHE_HOME` or `~/.cache` on Linux, and on Windows the
+    folder `%LOCALAPPDATA%` names (compared as a file, since the environment may spell it
+    with a short name);
+  - three on the refresh: an entry older than the age moves to now, a recent one keeps its
+    time, and an absent one is left absent.
+- Checked here:
+  - Four mutations (no refresh, a refresh of every read, the platform asked before the choice,
+    the off switch ignored) each fail a test.
+  - Clippy, `-D warnings`; `arch`.
+  - The Windows arm of the convention test type-checks, with its `cfg` flipped for one
+    `cargo check`.
+- Left to the legs: the refresh test passes on Linux through either kind of handle, so the
+  Windows leg is what tells the fix from the read-only handle's refusal; and the Windows and
+  macOS conventions.
 
 ### R12. Colours on Windows consoles
 

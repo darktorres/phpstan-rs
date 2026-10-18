@@ -292,12 +292,15 @@ Done:
   disk folds case.
 - R10: the command runs on a thread with `WORKER_STACK_SIZE`, so the stack the system
   gives the main thread (1 MiB on Windows) no longer decides how often a walk grows.
+- R11: the caches are in each platform's cache directory (`dirs`), so they are on
+  where `HOME` is unset, and an entry's last use is refreshed through a handle that
+  can set it on Windows.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
 path and the include rule. All four are built.
 
-Open: R11 to R17, the rounds after them, and the batch's checks.
+Open: R12 to R17, the rounds after them, and the batch's checks.
 
 ## Documents with no place in the stack
 
