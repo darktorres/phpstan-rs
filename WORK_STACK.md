@@ -11,7 +11,7 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-17, `a5a4d85f` on branch `callgrind-20g`. Counts below were
+State as of 2026-10-17, `8a1ca1e0` on branch `callgrind-20g`. Counts below were
 read from the files on that date. This file covers this branch only.
 
 ## Where to resume
@@ -21,15 +21,14 @@ together later. Their sections below keep the content they had that day. The one
 exception is level 7's designs, which are rows of the 20 G plan and are worked in
 level 8's order; DOC-2.1 stays deferred.
 
-Level 9 is the one active level: the fixes for the costs that the attribution of
-the 20 G plan's items 1 to 3 found (section 9). Its Step 0 is done, its decisions
-were ruled on 2026-10-17, and its rows are being built in the plan's order since
-the user's second "go" that day: R1, R11, R12, R15, R2, R3, R4, R6, R14, R13, R10,
-R5, R8, R9 and R7 are in, which is every row. The end-of-batch checks are next.
+Level 8 is the one active level. It holds the 20 G plan and the off drill, and its
+order is in its section below: work the lowest item that has a READY row, item 2
+as of 2026-10-17 (LOAD-2.2's last part, decided that day), then item 8.
 
-Level 8 waits under it. It holds the 20 G plan and the off drill, and its order is
-in its section below. When level 9 is done, work the lowest item that has a READY
-row: item 2 as of 2026-10-17 (LOAD-2.2's last part, decided that day), then item 8.
+Level 9, which sat above it, finished on 2026-10-17: the fixes for the costs that
+the attribution of the 20 G plan's items 1 to 3 found
+(`ITEMS_1_TO_3_FIXES_PLAN.md`). Every row is in and the batch's checks passed; the
+plan and the ledger's LOAD-8 keep the record.
 
 ## The stack
 
@@ -198,8 +197,8 @@ later item waits for that need. The READY rows, item by item:
   the constant go. The Piwigo gate and the measurements of item 2's rows (wall
   time, instructions) have not run.
 - Item 3: LOAD-3.2 is in (`001bd4f2`), LOAD-3.4 (`845efaab`) and LOAD-3.6
-  (`11f03ec9`). 3.1 waits on REG-16.4, level 2. 3.3's load part is level 9's R11,
-  and its `update_file` part waits on 3.1. 3.5 waits on SYN-1.2, which is item 9's.
+  (`11f03ec9`). 3.1 waits on REG-16.4, level 2. 3.3's load part is in, as the items 1
+  to 3 fixes' R11 (`a5a4d85f`), and its `update_file` part waits on 3.1. 3.5 waits on SYN-1.2, which is item 9's.
   No other row of item 3 is READY.
 - Item 5: none ready. LOAD-4.3 (`6bda466c` to `cf37f8d9`), LOAD-4.4 (`412fafbc`) and
   LOAD-4.5 (`e9b253b4`, `4e443227`) are in; their need, LOAD-2.5, is in (`8590ff55`).
@@ -221,8 +220,9 @@ Items 4, 6, 7, 10 and 17 have no READY row in level 8. Item 4's two are C4 rows
 (level 2). Items 6 and 7 wait on level 2 and the C5 rows. Item 10 (SYN-2) waits
 on SYN-1 (item 9). Item 17 (CACHE-13) waits on LOAD-1.4 and on REG-16.4 (level 2).
 
-Outside the items, with no item number, CACHE-8 and CHECK-4.2 (off drill) and
-TYPE-5 and CHECK-9 (decisions 8 and 9) are READY now.
+Outside the items, with no item number, CACHE-8 and CHECK-4.2 (off drill), TYPE-5
+and CHECK-9 (decisions 8 and 9), and LOAD-9 (the installed packages' resolutions,
+which the items 1 to 3 fixes' R14 found) are READY now.
 
 The off-run rows still open:
 
@@ -235,7 +235,8 @@ The off-run rows still open:
     and a second `file` buffer.
   - CACHE-9 and CACHE-10 are BLOCKED: they need STUB-7.6 and the persistence
     format of CACHE-13.2.
-  - CACHE-11 (E8) follows them. CACHE-12 (E11) is in, as level 9's R12 (`6705eedd`).
+  - CACHE-11 (E8) follows them. CACHE-12 (E11) is in, as the items 1 to 3 fixes' R12
+    (`6705eedd`).
   - CACHE-13 (warm runs) is OPEN; its persistence part needs REG-16.4.
 - **Text made when read** (proposal 11): CHECK-4.1, messages formatted when
   displayed, is OPEN and needs CHECK-6.10 (READY). `report_missing_offset`
@@ -248,57 +249,12 @@ The off-run rows still open:
   E9 (CHECK-5, folded into CHECK-6.16) and E12 (CACHE-7) are SKIP; D3, D6, C7 and
   C8 are decided.
 
-### 9. The costs items 1 to 3 added — `ITEMS_1_TO_3_FIXES_PLAN.md`
-
-Started on 2026-10-17, before level 8's item 8. The ledger's §1 attributes the Ir
-that items 1 to 3 of the 20 G plan added (`4c425d14`, `9aed606b`). The plan fixes
-what that found, and the serial stretches of the load that its Step 0 measured. It
-holds every number and command it uses, and its scripts are in `scripts/`, because
-the profiles it was read from (under `~/.cache/prs-profile/`) are not kept.
-
-- Step 0, the wall-time measurement, is done (the plan's "Measurements: Step 0"). So are
-  the allocator runs (purging, huge pages) and the reading of where the CPU time
-  grows with the thread count.
-- Rows R1 to R15, one commit each. R1 to R9 and R13 save Ir; R10 to R12, R14 and
-  R15 shorten serial stretches or the run. R8 and R11 to R15 are older costs than
-  items 1 to 3. R15 (a batch run does not purge) came from the allocator runs.
-- Built (since the user's second "go", 2026-10-17): R1 (`6016499f`), R11
-  (`a5a4d85f`), R12 (`6705eedd`), R15 (`d6ca3442`), R2 (`68af1c72`, `276ed5ad`),
-  R3 (`75b628f8`), R4 (`1ba57cc0`), R6 (`59bf55bc`), R14 (`1f351379`,
-  `6e49d4e7`), R13 (`4a996352`), R10 (`9513479b`), R5 (`0fb1a4de`), R8
-  (`f676049c`), R9 (`098af486`) and R7 (`30aa2002`, `8a1ca1e0`), measured on their
-  ledger rows (LOAD-8.1, LOAD-3.3, CACHE-12, LOAD-8.15, LOAD-8.2 to 8.6, LOAD-8.14,
-  LOAD-8.13, LOAD-8.10, LOAD-8.8, LOAD-8.9, LOAD-8.7). The Piwigo oracle held after
-  R10, after R8 and after R7, off and warm. R9's premise did not hold (no load takes
-  both the cache key and the digest), so it fixed the editor's edit path instead (its
-  Built). R7 reads a path's name, directory and prefixes from its bytes, where the
-  row carried them (its Built). Next: the end-of-batch checks. R14's measurement
-  found LOAD-9 (the installed packages' resolutions, READY), which is not one of the
-  plan's rows.
-- The plan's decisions 1 to 7 were ruled on 2026-10-17, each as the plan
-  recommended:
-  1. the finishing passes' unused cores: REG-7's record;
-  2. the zeroing and purging: R15, and the huge pages stay;
-  3. R14: its own row, after R2 and R6 and before R10;
-  4. the order: R1; R11, R12, R15; R2, R3, R4, R6, R14, R13; R10; R5, R8; R9; R7;
-  5. the stub-base wait: the STUB rows;
-  6. the older rows: kept;
-  7. LOAD-2.2's name floor: Composer's vendor directory by its resolved path, and
-     the `.git` and `node_modules` names until `exclude_paths` exists (level 8's
-     item 2).
-- Builds and measurement runs need no approval (since 2026-10-17).
-- The ledger's rows: LOAD-8.n is Rn, R11 is LOAD-3.3's load part and R12 is CACHE-12
-  (LOAD-8.11 and 8.12 point to them). Step 0 is the ledger's MEAS-4, with a paragraph
-  in §1; REG-7's and STUB's notes hold the finishing passes' and the stub-base wait's
-  numbers (decisions 1 and 5).
-- Bookkeeping left, with the rows: the comment at `session.rs:1081` (R10); §1's
-  range rows as each row lands.
-
 ## Documents with no place in the stack
 
 Standalone research and plans; none blocks anything. Still at the repository root:
 
 - `CRASH_REPORTING_PLAN.md`
+- `ITEMS_1_TO_3_FIXES_PLAN.md` (level 9, finished on 2026-10-17; the ledger's LOAD-8)
 - `MAGO_ARCHITECTURE_COMPARISON.md`
 - `MASTER_REIMPLEMENTATION_LEDGER.md` (level 6, dropped)
 - `PIWIGO_CORPUS_TRIAGE_ab4c2b5.md`

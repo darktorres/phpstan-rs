@@ -12,10 +12,10 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   up.
 - **The decisions are ruled.** All seven were taken as recommended, and decision 7 was
   confirmed ("Decisions", below).
-- **The rows are being built,** since the user's second "go" (2026-10-17), in the order
-  below, one commit each, with a pathspec, since another session shares the checkout. These
-  are in, and their measurements are on their ledger rows (LOAD-8.n for Rn; LOAD-3.3 for R11,
-  CACHE-12 for R12):
+- **The rows were built** after the user's second "go" (2026-10-17), in the order below, one
+  commit each, with a pathspec, since another session shares the checkout. All are in, and
+  their measurements are on their ledger rows (LOAD-8.n for Rn; LOAD-3.3 for R11, CACHE-12 for
+  R12):
   - R1 (`6016499f`): −381.2 M off, with no wall change beyond the noise.
   - R11 (`a5a4d85f`): −0.22 s of the off run's 1.98 s and −214 MiB of peak RSS, most of it
     the kernel's page zeroing, since the parse reuses the freed trees' memory.
@@ -63,7 +63,14 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     from its bytes, where the row carried them (its Built). The Piwigo output was the oracle's
     in every run, off and warm.
 
-  Every row is in. The end-of-batch checks are next ("Verification").
+  Every row is in, and the end-of-batch checks ("Verification") passed on 2026-10-17, on
+  `8a1ca1e0`: the lib suite (1202), the fixtures (3832) and the integration tests (cli 44,
+  file_cache 5, lsp_exit_code 2, scaling 1, stub_base_reentry 1, stub_index 1, version 2);
+  `check-project vendor/monolog` wrote the same stdout and stderr at `aa896697` and at
+  `8a1ca1e0`, byte for byte, with the file cache off, cold and warm; and the Piwigo output
+  was the oracle's in every run of R7's code, off and warm. Off, the rows took the run from
+  `aa896697`'s 21,329,725,495 Ir to 20,373,086,199 (−956.6 M). The plan is finished, and the
+  measuring worktree is removed.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -1281,9 +1288,9 @@ ours is noted, and a run it distorts is taken again.
 
 ## Bookkeeping
 
-- `WORK_STACK.md`: level 9 tracks this plan (added 2026-10-17, above level 8) and names the
-  ledger rows. Delete the level when the plan is finished (the project rule: the level's own
-  documents keep the record).
+- `WORK_STACK.md`: level 9 tracked this plan (added 2026-10-17, above level 8) and named the
+  ledger rows. It was deleted when the plan finished (the project rule: the level's own
+  documents keep the record), and LOAD-9 moved to level 8's rows outside the items.
 - Done on 2026-10-17, after the rulings:
   - the ledger's rows: LOAD-8.n is Rn (LOAD-8.10 says that it undoes LOAD-1.2's wait); R11 is
     LOAD-3.3's load part, and R12 is CACHE-12, whose decode context is now the file's number,
