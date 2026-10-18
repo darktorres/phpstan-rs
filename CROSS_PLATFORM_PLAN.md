@@ -8,9 +8,9 @@
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
   round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
   R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`), R8 (`7d5bddd4`, `06486da9`)
-  R9 (`da9e86df`), R10 (`007d827b`) and R11 (`a94e27ec`). The rows are built in the order of
-  the table below, one commit each, with a pathspec, since another session shares the
-  checkout. R18 has one commit for each step, R6 has a second for the rule its build found,
+  R9 (`da9e86df`), R10 (`007d827b`), R11 (`a94e27ec`) and R12 (`acc33609`). The rows are built
+  in the order of the table below, one commit each, with a pathspec, since another session
+  shares the checkout. R18 has one commit for each step, R6 has a second for the rule its build found,
   R7 has a second for the case rule, and R8 has a second for the files an environment change
   re-checks.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
@@ -37,7 +37,7 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** R12, colours on Windows consoles.
+- **Next:** R13, the tests on every platform.
 
 ## Context
 
@@ -1658,6 +1658,34 @@ returns `Some(true)`. `anstyle-query` 1.1.5 is already in the tree through clap.
 are unchanged.
 
 **Test.** The decision as a function of (terminal, `NO_COLOR`, enabled).
+
+**Built** (`acc33609`).
+
+- The plan tested `anstyle_query::windows::enable_ansi_colors()`. It is built on
+  `anstream::AutoStream::always` instead, which uses that function and does more:
+  - The function enables the mode on stdout and then on stderr, and reports failure when
+    either fails. A terminal whose stderr is redirected (`2> log`) has the mode on for
+    stdout and is still reported as having none, so a rule of "colour only on `Some(true)`"
+    would drop its colour.
+  - A console that has no such mode has no fallback in the plan's rule. `always` translates the
+    escapes with the console API (`anstyle-wincon`) when stdout is a terminal, the mode could
+    not be enabled and `TERM` does not claim ANSI. Otherwise it passes them on.
+  - Elsewhere `always` passes the bytes on as they are.
+- `anstream` 1.0.0 is a direct dependency. Clap already brings it, with `anstyle-query` and
+  `anstyle-wincon`, so each lockfile gains one edge and no package. `cargo deny check` and
+  `cargo machete` pass.
+- `wants_colour(stdout_is_terminal, no_color)` is the decision: a terminal, unless `NO_COLOR`
+  holds something (an empty value counts as unset). `print_friendly` writes the report, through
+  `anstream` when it has colour and with `print!` when it has none.
+- Tests: the decision's two tables, for a terminal and for what is not one, with `NO_COLOR` unset,
+  empty and set. Two mutations (the terminal ignored, an empty value counted as set) each fail
+  one.
+- Checked here: clippy; the binary's 8 tests and the 44 CLI tests. Under a pseudo-terminal
+  (`script`), the friendly report of the new binary and of the previous row's is
+  byte-identical, with colour (766 bytes, 14 lines with escapes), with `NO_COLOR=1`, and piped.
+- Left to the legs, and to a person: neither the enabling nor the translation runs on a CI
+  leg, because the runners' stdout is a pipe. A Windows console is where the report has to be
+  looked at.
 
 ### R13. The tests on every platform
 

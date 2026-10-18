@@ -295,12 +295,15 @@ Done:
 - R11: the caches are in each platform's cache directory (`dirs`), so they are on
   where `HOME` is unset, and an entry's last use is refreshed through a handle that
   can set it on Windows.
+- R12: the coloured friendly report is written through `anstream`, which turns on a
+  Windows console's virtual-terminal processing or translates the escapes. It has
+  not been seen on a console: the CI legs' stdout is a pipe.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
 path and the include rule. All four are built.
 
-Open: R12 to R17, the rounds after them, and the batch's checks.
+Open: R13 to R17, the rounds after them, and the batch's checks.
 
 ## Documents with no place in the stack
 
