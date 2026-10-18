@@ -18,9 +18,10 @@
 //! path, and an `allow` line names two such entries. An `extern` line
 //! names a workspace crate already extracted from the package: paths into
 //! that library count as references to the module `@<library>`, assigned
-//! to its crate. Every module must be
-//! assigned, and every `allow` line must still match an edge and name a
-//! phase not yet `finished`, so the list only shrinks.
+//! to its crate. Every module must be assigned by an entry other than
+//! `module crate`, which is the library root's alone, and every `allow`
+//! line must still match an edge and name a phase not yet `finished`, so
+//! the list only shrinks.
 //!
 //! The extracted crates are checked too: each crate under `crates/` has
 //! its normal and build dependencies on other workspace crates in its
@@ -89,7 +90,11 @@ pub(crate) fn modgraph(root: &Path, args: &[String]) -> Result<(), String> {
 
     let mut problems = Vec::new();
     for module in &known {
-        if spec.row(module).is_none() {
+        // A module inside one with no assignment is reported with it.
+        let parent_unassigned = module
+            .split_last()
+            .is_some_and(|(_, parent)| !parent.is_empty() && spec.assignment(parent).is_none());
+        if spec.assignment(module).is_none() && !parent_unassigned {
             problems.push(format!("module {} has no assignment", join(module)));
         }
     }
@@ -231,10 +236,24 @@ impl Spec {
             .filter(|(m, _)| path.starts_with(m))
             .max_by_key(|(m, _)| m.len())
     }
+
+    /// The row that assigns the module `module` its crate: its `row`, unless
+    /// that is the `crate` row and the module is not the root. That row is
+    /// the library root's own, which only declares modules and re-exports;
+    /// an item of the root is still the root's.
+    fn assignment(&self, module: &[String]) -> Option<(&ModPath, &String)> {
+        self.row(module)
+            .filter(|(row, _)| !row.is_empty() || module.is_empty())
+    }
 }
 
 fn read_spec(path: &Path) -> Result<Spec, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    parse_spec(&text, path)
+}
+
+/// The spec `text`, read from `path`, which its messages name.
+fn parse_spec(text: &str, path: &Path) -> Result<Spec, String> {
     let mut spec = Spec {
         deps: BTreeMap::new(),
         modules: BTreeMap::new(),
@@ -916,5 +935,41 @@ fn join(p: &[String]) -> String {
         "crate".to_string()
     } else {
         p.join("::")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec() -> Spec {
+        let text = "\
+crate root a
+crate a
+module crate root
+module a a
+";
+        parse_spec(text, Path::new("module-graph.txt")).expect("the spec reads")
+    }
+
+    fn crate_of<'s>(found: Option<(&'s ModPath, &'s String)>) -> Option<&'s str> {
+        found.map(|(_, krate)| krate.as_str())
+    }
+
+    #[test]
+    fn a_module_is_assigned_by_the_longest_row_it_is_in() {
+        let spec = spec();
+        assert_eq!(crate_of(spec.assignment(&split("a"))), Some("a"));
+        assert_eq!(crate_of(spec.assignment(&split("a::b::c"))), Some("a"));
+    }
+
+    #[test]
+    fn the_crate_row_assigns_the_root_and_no_module_below_it() {
+        let spec = spec();
+        assert_eq!(crate_of(spec.assignment(&split("crate"))), Some("root"));
+        assert_eq!(crate_of(spec.assignment(&split("b"))), None);
+        assert_eq!(crate_of(spec.assignment(&split("b::c"))), None);
+        // A path to an item of the root is the root's.
+        assert_eq!(crate_of(spec.row(&split("b"))), Some("root"));
     }
 }
