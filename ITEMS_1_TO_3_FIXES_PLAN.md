@@ -52,8 +52,11 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     run, off and warm.
   - R5 (`0fb1a4de`): −46.9 M off, with no wall change beyond the noise (p = 0.601). The use
     sites' target map holds the file's number too (its Built).
+  - R8 (`f676049c`): −35.6 M off, with no wall change beyond the noise, off (p = 0.940) or
+    warm (p = 0.247). The project's public result maps are keyed by the file's number too
+    (its Built). The Piwigo output was the oracle's in every run, off and warm.
 
-  R8 is next.
+  R9 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -65,8 +68,10 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   crate's `hashed_path.rs`, R3 `walk.rs`, R4 `session.rs`, R6 `vendor.rs`, and R14
   `hashed_path.rs`, `vendor.rs`, `walk.rs` and `session.rs`, R13 `vendor.rs`,
   `crates/composer/src/lib.rs`, `file_cache.rs` and `session.rs`, R10 `walk.rs` and
-  `session.rs`, and R5 `use_sites.rs`, `file_tables.rs`, `file_table.rs`, `project.rs`,
-  `session.rs`, `lsp.rs` and `file_id.rs`.
+  `session.rs`, R5 `use_sites.rs`, `file_tables.rs`, `file_table.rs`, `project.rs`,
+  `session.rs`, `lsp.rs` and `file_id.rs`, and R8 `project.rs`, `session.rs`, `lsp.rs`,
+  `class_shape.rs`, `composer_hygiene.rs`, `banned.rs`, `mock_hygiene.rs`, `architecture.rs`,
+  `whole_program/renamed_named_arguments.rs` and `main/incremental_bench.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -1011,6 +1016,29 @@ diagnostic producer ("Verification").
 
 **Measure.** Off callgrind: the sites above.
 
+**Built** as `f676049c`: −35.6 M off, with no wall change beyond the noise, off (p = 0.940) or
+warm (p = 0.247). `Path::hash` fell from 21.0 M to 1.3 M, which is the report's own map, keyed by
+the root-relative path, and `path_hash` from 5.4 M to 0. The Piwigo output was the oracle's in
+every run, off and warm. Where it differs from the Change:
+
+- **The public result maps are keyed by number too.** `check_paths`, `check_all`,
+  `update_file` and its variants, `remove_file` and `remove_files` return maps keyed by
+  `FileId`, with `path_of` to name a key, so no caller converts a key to a path and back; the
+  editor's unchecked files are numbers too. `remove_files` numbers a path it has not seen, so
+  every path it is given is a key of its result.
+- **`check_files` takes numbers.** `Loaded` carries the load's numbers of the analysed files,
+  the largest first, and `check_paths` finds each path's number once. `line_in` and `ast_of`
+  take a number, and the named-argument facts carry it.
+- **The manifests' places.** Both loads number the manifests (`number_manifests`) and place
+  them among the listed files by path (`ids_in_path_order`); `composer_hygiene` asserts that a
+  manifest has its number.
+- **The language server** gives a document's diagnostics outside an edit from one function
+  (`checked_and_finalized`), forgets a path's results in both of its maps by the path's number,
+  and checks the analysed files in path order (`analyzed_files`).
+- `path_rank` is for tests only.
+
+The ledger's LOAD-8.8 has the numbers.
+
 ### 14. R9: the bytes hashed once in the editor
 
 *LOAD-8.9. The editor's. Needs nothing.*
@@ -1223,6 +1251,8 @@ ours is noted, and a run it distorts is taken again.
   `session.rs:1081`, replaced.
 - Done with R5: LOAD-8.5's row, with the target map's numbers; its row in §1's table;
   LOAD-8.8 is READY.
+- Done with R8: LOAD-8.8's row, with the public maps keyed by number; its row in §1's table;
+  LOAD-8.7 is READY.
 - Left, with the rows: §1's range rows, as each row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
   a pathspec; remove scratch worktrees once they are recorded.
