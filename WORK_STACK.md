@@ -277,14 +277,17 @@ Done:
   sent on.
 - R6: reports name a file with `/` in the machine formats, and a `\` in
   configured path text names a separator and a name's own `\` on every platform.
+- R6's corrections, R5's second follow-up (a disabled server does nothing the
+  editor can see) and R7: configured paths are relative to the config file and
+  read a `\` both ways, the SQLite file is read-only and must exist, and
+  configured path text follows the case rule of the root's directory.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
-path and the include rule. They are built in this order: R6's corrections, R5's
-second follow-up (the disabled server), R7 with the configured paths, and R8
-redesigned.
+path and the include rule. All but the include rule are built; R8 redesigned is
+next.
 
-Open: R7 to R17, the rounds after them, and the batch's checks.
+Open: R8 to R17, the rounds after them, and the batch's checks.
 
 ## Documents with no place in the stack
 

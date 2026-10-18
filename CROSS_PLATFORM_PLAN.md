@@ -6,11 +6,11 @@
   tracks it.
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
-  round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`)
-  and R5's second follow-up (`7a757a8e`). The rows are built in the
+  round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
+  R5's second follow-up (`7a757a8e`) and R7 (`1146b4f6`, `1fe8c8e4`). The rows are built in the
   order of the table below, one commit each, with a pathspec, since another session shares
-  the checkout. R18 has one commit for each step, and R6 has a second for the rule its build
-  found.
+  the checkout. R18 has one commit for each step, R6 has a second for the rule its build
+  found, and R7 has a second for the case rule.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -35,10 +35,7 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next**, in this order:
-  1. R7, with the configured paths: the case rule, the `\` in a configured root and the SQLite
-     path.
-  2. R8, redesigned: what a run can find.
+- **Next:** R8, redesigned: what a run can find.
 
 ## Context
 
@@ -1165,6 +1162,109 @@ configured root.
   file is an error naming the resolved path. Today it creates an empty database there.
 - **Prior art for the case rule:** disallowed-calls matches its zones case-sensitively on every
   platform, and PHPStan's `FileExcluder` folds case on Windows only.
+
+**Built, the configured paths** (`1146b4f6`).
+
+- `project::configured_path` reads a configured path's text.
+  - Outside Windows, text with a `\` has two readings, the separator reading first and the
+    name reading after. Text without one has one reading, and the disk is not asked about it.
+  - `roots` gives a list entry's roots: each reading that exists, else the separator reading.
+  - `single` gives a single file: the reading that exists, else the separator reading; when
+    both exist it is an error naming both, and saying to spell the separator `/`.
+- `Session::resolve` resolves `paths`, `scan_paths`, `stub_paths`, `schema_file`, `baseline`
+  and the SQLite `path` through it and `resolve_against_config`. An editor (the degrade
+  policy) drops an ambiguous baseline or schema, or an SQLite path that names no file, with a
+  warning, and goes on without it.
+- The SQLite reflection:
+  - `Session::resolve` requires the resolved path to be a file. Otherwise the configuration is
+    in error: `sql_reflection.path <resolved path> names no file`. A schema-only reflection
+    has no `path` and is as it was.
+  - `SqliteReflector::connect` opens read-only, with the default's `NO_MUTEX` and neither the
+    create nor the URI flag, and its pool error names the path. The reflector's tests make
+    their database through a connection of their own, and its session-init test writes a
+    temporary table, which a read-only connection can.
+- Tests:
+  - the readings and both functions with the disk injected, and the text-with-one-reading
+    case, which fails if `exists` is called;
+  - `Session::resolve` for each setting: a path relative to the config file and not to the
+    root (the config file in `proj/conf`, a decoy at `proj/db`), a path that names no file,
+    the editor's warning, a baseline read as a separator, as a name and as both, and the same
+    for `paths`.
+- Checked here: three mutations (the SQLite path not resolved against the config file, the
+  second reading ignored, the read-only flags replaced by the default) each fail tests;
+  clippy; the project, app and sql tests; the CLI's baseline tests; the module graph; the
+  Windows type check, which now covers `configured_path` and its tests.
+- The test-name manifest runs only on a clean tree, so round 3 compares it. No test was
+  removed or renamed: the SQLite reflector tests that were reworked kept their names.
+
+**Built, the case rule** (`1fe8c8e4`).
+
+- `diagnostics::CaseRule`, `Exact` or `Folded`.
+  - `key` gives the text a rule compares: as it is, or with each letter in its simple lower
+    case, taken through its simple upper case so that `ς` and `σ` share a key. A letter whose
+    mapping is more than one letter (`ß`) and `İ` are left as they are.
+  - A key of text that needs no folding is borrowed, so `Exact` costs nothing.
+- The probe is `Listing::folds_case` (`DirListings::folds_case` for a directory): the first
+  entry of a complete listing that has an ASCII letter and whose case-flipped spelling the
+  listing does not hold, found or not by one `symlink_metadata`. An incomplete listing, or no
+  such entry, is exact.
+- `Session::resolve` probes the project root once. The listing it reads is the one the walk
+  reads when the root is walked.
+- **One rule serves everything, where the plan had one per configured root.** `exclude` is not
+  a configurable key. The names a walk leaves out are the hardcoded floor, and the floor
+  applies to the root itself (the editor's fallback when no `paths` are given) and to a file
+  no root lists. Both lie under the project root. Every other pattern, an `ignoreErrors`
+  path or a zone, is matched against the path relative to that root. The project root's rule
+  is therefore the one that applies, and probing each root of `paths` would only repeat it.
+- It serves:
+  - `ignoreErrors` paths: `ignore_errors::filter` takes the rule through `Finalize`, and keys
+    each file's path once;
+  - the restricted symbols' `allow_in` and `allow_except_in`, through
+    `CheckSettings::path_case` (`ProjectSettings::path_case`);
+  - the include rule's guarded paths, keyed by the rule on insert and on lookup;
+  - the names a walk leaves out: `walk::Excluded { names, case }` replaces the name slice
+    throughout the walk. `Walk::with_path_case` gives it to the roots a caller adds, and
+    callers' plain slices are unchanged. `Root::contains`, `path_under_excluded_dir`,
+    `unlisted_role` and `Project::update_file_cancellable` use it too.
+- The baseline stays exact.
+- `project::path_spelling::as_listed` spells a configured root as the listings of its
+  directories spell it, on a root that folds case. This is the plan's walk-side respelling,
+  built in the session, where the rule and the listings are: `dirs`, `scan_dirs` and
+  `stub_dirs` go through it.
+  - Each plain name of a path below the root becomes the one entry the rule folds to it.
+  - A name the listing does not hold or holds twice, a link, a file, and a component that is
+    not a name end the respelling, and the rest of the path is as given.
+  - Why: glibc's `realpath` keeps the spelling it is given on a Unix casefold directory, where
+    macOS and Windows give the disk's. Without it a root written in another case is a second
+    key for the files of the first.
+  - `schema_file`, `baseline` and the SQLite `path` are opened, not keyed, so they are not
+    respelled.
+- Tests:
+  - `key`: equal keys for the spellings of a name (ASCII, `É`/`é`, `ΟΔΟΣ`/`οδος`, the Kelvin
+    sign), distinct keys for what simple mappings keep apart (`straße`/`strasse`, `İ`/`i`),
+    and a borrowed key for folded text;
+  - the probe, with hand-made listings over real directories so that a case sensitive disk
+    shows what a folding one gives: a flipped spelling found, not found, an entry whose twin
+    is listed skipped, names without a letter, an incomplete listing, an unreadable
+    directory. One test reads the real disk and expects what its platform gives: exact here,
+    folded on the macOS and Windows legs;
+  - the glob under both rules, `filter`, the zones through the checker, and the include
+    guards through the checker, each under both rules;
+  - the walk's excluded names under both rules, `path_under_excluded_dir`,
+    `update_file` for a path under `Vendor/`, and `as_listed` in eight cases (both rules, an
+    absolute path below and outside the base, a name the listing lacks, a name held in two
+    cases, `..`, a link);
+  - the session: its root's rule is what its platform gives, which is folded on the macOS and
+    Windows legs.
+- Checked here: seven mutations (the excluded-names comparison, the walk's rule, `update_file`'s
+  rule, the zones' rule, the guards' keys, `ignoreErrors`' rule and `as_listed`) each fail
+  tests; clippy; the project,
+  app, lsp, ignore, restricted-symbol and checker tests; the CLI tests; the module graph and
+  arch; the Windows type check, which covers `CaseRule` and its tests.
+- Linux's output is unchanged: the probe gives exact here. Its cost is the root's listing, which
+  the walk reads when the root is walked, and one `symlink_metadata`.
+- Left to the legs: the folded rule on a real folding disk. The platform-conditional tests run
+  there.
 
 ### R8. The include rule: what a run can find
 
