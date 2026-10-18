@@ -611,6 +611,9 @@ pub struct Checker<'a> {
     // `current_file` as an absolute path (`Project::absolute_path`), what
     // PHP's `__FILE__` holds.
     pub(crate) current_file_absolute: Option<std::path::PathBuf>,
+    // `current_file` as the reports spell it (`project::shown_path`): what
+    // a rule that reads the file's name by its directories reads.
+    pub(crate) current_file_shown: Option<std::path::PathBuf>,
     // Paths the file tests with `file_exists()` and friends.
     pub(crate) include_guarded_paths: FxHashSet<String>,
     // `include_path` directories for the file being checked.
@@ -1167,6 +1170,7 @@ impl<'a> Checker<'a> {
             current_file: None,
             current_file_id: None,
             current_file_absolute: None,
+            current_file_shown: None,
             include_guarded_paths: FxHashSet::default(),
             include_path_dirs: Vec::new(),
             root: None,
@@ -1228,9 +1232,16 @@ impl<'a> Checker<'a> {
         self.pest_hook_properties = props.into_iter().map(|p| Name::from(&p)).collect();
     }
 
-    /// See `current_file`, and `current_file_id` for its number.
-    pub fn set_current_file(&mut self, path: &std::path::Path, file: FileId) {
+    /// See `current_file`, `current_file_shown` for `shown`, and
+    /// `current_file_id` for its number.
+    pub fn set_current_file(
+        &mut self,
+        path: &std::path::Path,
+        shown: &std::path::Path,
+        file: FileId,
+    ) {
         self.current_file = Some(path.to_path_buf());
+        self.current_file_shown = Some(shown.to_path_buf());
         self.current_file_id = Some(file);
     }
 

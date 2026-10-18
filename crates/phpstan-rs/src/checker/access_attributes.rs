@@ -35,8 +35,7 @@ impl<'a> Checker<'a> {
         {
             return true;
         }
-        self.current_file.as_ref().is_some_and(|path| {
-            let path = crate::project::shown_path(self.root.as_deref(), path);
+        self.current_file_shown.as_deref().is_some_and(|path| {
             path.components().any(|c| {
                 let part = c.as_os_str().to_string_lossy().to_ascii_lowercase();
                 part == "test" || part == "tests"

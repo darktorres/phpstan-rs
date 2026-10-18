@@ -2517,7 +2517,7 @@ impl Project {
             .with_line_index(&file.line_index);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
-        checker.set_current_file(path, id);
+        checker.set_current_file(path, shown_path(self.absolute_root.as_deref(), path), id);
         // A path that is absolute and normal is its own absolute path, which
         // the checker takes when it is given none.
         if !path_bytes::is_normal_absolute(path) {
