@@ -244,6 +244,9 @@ The message keeps the status and the stderr.
 
 **Change.**
 
+The `platforms` job below is now three jobs, `platform-check`, `platform-test` and
+`platform-fixtures`, on the same runners (`rust-ci.yml`, commit a9f1c05d).
+
 - A `platforms` job in `rust-ci.yml`:
   - Matrix: `macos-26` (arm64), `windows-2025-vs2026` (x64) and `ubuntu-24.04-arm` (aarch64
     Linux, free for public repositories). This repository is public.

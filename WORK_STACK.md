@@ -38,6 +38,16 @@ keep the record.
 
 Levels 1 to 7 are deferred; see Where to resume.
 
+### 0. The CI split — `/home/torres/.claude/plans/the-ci-files-could-curried-nautilus.md`
+
+Started on 2026-10-18, during level 9. One CI run took 35 minutes, because the `gates` and `platforms` jobs ran their steps one after another, and level 9's rounds are checked on CI, so each one waits that long. Its commits are on `callgrind-20g`: `cbb51738`, `076b9d2a`, `5421d398`, `c222556c`, `a9f1c05d`, `7c10e994`, `87e137ed`, `ee272e48`, `dbe6c371`, `5e0af885`, and the docs commit after them. Nothing is pushed. It waits on the user for:
+
+- the push, once the user says go; then the first run is checked against the plan's verification, item 7;
+- a `workflow_dispatch` run of `release.yml` on all five targets, which the user approves first;
+- whether to split the test compile across two jobs per OS, which adds a job per OS (the plan's section "Splitting the test compile");
+- two vetoes: the ledger's rows 968 and 969 (SKIP to HAVE), and the xtask alias that runs in the test profile (`076b9d2a`);
+- row 972 (`CARGO_PROFILE_TEST_DEBUG`): kept until the first run's `phpstan-rs` compile times show whether it pays.
+
 ### 1. The roadmap, in two lanes — `ROADMAP.md`
 
 Paused on 2026-09-23 to split the codebase into crates. `ROADMAP.md` lines
