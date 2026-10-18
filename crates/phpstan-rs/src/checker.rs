@@ -10,6 +10,7 @@ use diagnostics::{Diagnostic, DiagnosticBuilder};
 use keys::{KeyData, LocalKey};
 use std::sync::Arc;
 use syntax::ast::*;
+use syntax::completion::Completion;
 use syntax::name_resolution::NameContext;
 use syntax::span::{LineIndex, Span};
 use types::Type;
@@ -899,9 +900,7 @@ pub(crate) struct StatementMethodCall {
 
 mod completion;
 mod labels;
-pub(crate) use completion::{
-    BREAK_HERE, BlockCompletion, CONTINUE_HERE, Completion, ExitKind, ExitPoint, GotoState, Reach,
-};
+pub(crate) use completion::{ExitKind, ExitPoint, GotoState};
 pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;
 mod infer_cache;
@@ -985,8 +984,7 @@ pub(crate) use assignment::{literal_shape_key, literal_string_key, unassigned_va
 pub(crate) use calls::{CheckArgsCall, resolve_call_args};
 pub(crate) use control_flow::{
     LoopZeroIterations, generator_missing_return_type, generator_template_param,
-    is_constant_condition_family_identifier, is_truthy_literal, merge_scopes,
-    type_allows_generator_return,
+    is_constant_condition_family_identifier, merge_scopes, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{PregCall, preg_call, preg_result_outcome, preg_result_type};

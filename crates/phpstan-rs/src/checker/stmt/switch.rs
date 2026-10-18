@@ -1,5 +1,6 @@
-use crate::checker::{BREAK_HERE, CONTINUE_HERE, Checker, Completion, Locals, merge_scopes};
+use crate::checker::{Checker, Locals, merge_scopes};
 use syntax::ast::*;
+use syntax::completion::{BREAK_HERE, CONTINUE_HERE, Completion};
 use types::Type;
 
 impl<'a> Checker<'a> {

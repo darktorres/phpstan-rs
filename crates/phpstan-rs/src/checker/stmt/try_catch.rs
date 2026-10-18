@@ -1,7 +1,6 @@
-use crate::checker::{
-    Checker, Completion, ExitPoint, Locals, merge_scopes, purge_stale_narrowing_for_var,
-};
+use crate::checker::{Checker, ExitPoint, Locals, merge_scopes, purge_stale_narrowing_for_var};
 use syntax::ast::*;
+use syntax::completion::Completion;
 use syntax::span::Span;
 use syntax::visit::{Visitor, any_expr_in_scope, walk_expr_in_scope, walk_stmt, walk_stmts};
 use types::Type;

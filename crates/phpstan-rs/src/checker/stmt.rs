@@ -1,10 +1,11 @@
 use crate::checker::keys::LocalKey;
 use crate::checker::{
-    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY,
-    BlockCompletion, Checker, Completion, ExitKind, Locals, Reach, generator_missing_return_type,
-    generator_template_param, is_truthy_literal, merge_scopes, purge_stale_narrowing_for_var,
+    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
+    ExitKind, Locals, generator_missing_return_type, generator_template_param, merge_scopes,
+    purge_stale_narrowing_for_var,
 };
 use syntax::ast::*;
+use syntax::completion::{BlockCompletion, Completion, Reach};
 use types::Name;
 use types::Type;
 

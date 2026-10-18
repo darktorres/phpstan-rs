@@ -1629,6 +1629,17 @@ pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
     })
 }
 
+/// Whether `e` is a literal PHP takes as true: `true`, or an integer other
+/// than zero (`while (1)`). Only the bare literal: an expression that
+/// evaluates to a true constant is known by its type, not by its syntax.
+pub fn is_truthy_literal(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Literal(Literal::Bool(true)) => true,
+        ExprKind::Literal(Literal::Int(n)) => *n != 0,
+        _ => false,
+    }
+}
+
 /// Whether `name` (without its `$`) is one of PHP's superglobals.
 pub fn is_superglobal(name: &str) -> bool {
     matches!(

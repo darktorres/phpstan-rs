@@ -5,7 +5,7 @@ use std::rc::Rc;
 use types::UnionAll as _;
 
 use crate::checker::{
-    Checker, Locals, LoopZeroIterations, count_call_operand, is_truthy_literal, merge_scopes,
+    Checker, Locals, LoopZeroIterations, count_call_operand, merge_scopes,
     propagate_container_field_facts,
 };
 use syntax::ast::*;

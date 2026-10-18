@@ -1,9 +1,11 @@
 //! PHP syntax: the lexer, the parser and the tree it builds, traversal,
-//! name resolution and interned names.
+//! name resolution, interned names, and the rules of how a statement
+//! completes.
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod ast;
+pub mod completion;
 pub mod declarations;
 pub mod lexer;
 pub mod memo;

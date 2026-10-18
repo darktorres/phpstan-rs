@@ -173,20 +173,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Real PHP's own two spellings for "this condition is always true":
-/// the literal `true`, and any non-zero integer literal (`while (1)`,
-/// a real, common pre-`true`-keyword-idiom carryover). Deliberately not
-/// attempting anything symbolic beyond a bare literal - a variable or
-/// expression that merely *evaluates* to a truthy constant isn't
-/// something this checker tracks precisely enough to trust here.
-pub(crate) fn is_truthy_literal(e: &Expr) -> bool {
-    match &e.kind {
-        ExprKind::Literal(Literal::Bool(true)) => true,
-        ExprKind::Literal(Literal::Int(n)) => *n != 0,
-        _ => false,
-    }
-}
-
 /// Real PHPStan's own `ConstantConditionRuleHelper::shouldSkip` - every
 /// one of these shapes has its own separate, dedicated rule (an
 /// equality/identity/ordering comparison, `instanceof`, `!`, `&&`/`||`,

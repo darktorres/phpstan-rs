@@ -47,11 +47,12 @@
 
 use rustc_hash::FxHashSet;
 
+use crate::checker::Checker;
 use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
-use crate::checker::{BREAK_HERE, CONTINUE_HERE, Checker};
 use crate::registry::FunctionReflection;
 use crate::registry::init_flow::{Call, CallReceiver, Case, Event, Flow, IfBranch, InitFlow};
 use syntax::ast::*;
+use syntax::completion::{BREAK_HERE, CONTINUE_HERE};
 use syntax::span::Span;
 use syntax::visit::Visitor;
 
