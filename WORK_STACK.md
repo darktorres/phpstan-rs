@@ -275,13 +275,16 @@ Done:
   job's later steps first ran in round 2, and their four failures are fixed too.
 - R5's round-2 follow-up: a file's diagnostics are cleared on the URI they were
   sent on.
-- R6: reports name a file with `/` where PHPStan's do, and a `\` in configured
-  path text is a separator on every platform, as PHPStan reads one.
+- R6: reports name a file with `/` in the machine formats, and a `\` in
+  configured path text names a separator and a name's own `\` on every platform.
 
-Open: R7 to R17, the rounds after them, and the batch's checks. Three things
-wait on the user, all listed in the plan's State: R8's question, two findings
-about the disabled server, and the SQLite reflection's relative path. All three
-are older than the plan.
+Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
+a run can know: the JSON report's spelling, the disabled server, the SQLite
+path and the include rule. They are built in this order: R6's corrections, R5's
+second follow-up (the disabled server), R7 with the configured paths, and R8
+redesigned.
+
+Open: R7 to R17, the rounds after them, and the batch's checks.
 
 ## Documents with no place in the stack
 

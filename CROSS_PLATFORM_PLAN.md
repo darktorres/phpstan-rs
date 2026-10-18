@@ -2,7 +2,7 @@
 
 ## State (2026-10-18)
 
-- **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
+- **The plan is approved** (2026-10-18), with the decisions below. `WORK_STACK.md`'s level 9
   tracks it.
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
@@ -30,13 +30,17 @@
   built before R6. The 20 forbidden edges are refactored away, not listed as exceptions, and
   the graph passes. Round 2 reached the gates job's later steps, and R18 fixes their four
   failures too.
-- **Next:** R7, with what R6 found for it: a `\` in a configured root.
-- **For the user:**
-  - R8's question;
-  - the two findings under R5's round-2 follow-up: the disabled server still publishes on an
-    edit, and disabling clears only the open files;
-  - R6's finding: the SQLite reflection's `path` is relative to the process's working
-    directory, not to the config file.
+- **The questions the build left were answered** (2026-10-18, decisions 5 to 8): the `\` rule
+  and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
+  The user's instruction was to take the most proper design of each from what a run can know,
+  with no weight on the size of the change or on what PHPStan does.
+- **Next**, in this order:
+  1. R6's corrections: the JSON report names a file with `/`, and the comments and records
+     that give PHPStan as the reason for a spelling give the run-time reason.
+  2. R5's second follow-up: a disabled server does nothing visible.
+  3. R7, with the configured paths: the case rule, the `\` in a configured root and the SQLite
+     path.
+  4. R8, redesigned: what a run can find.
 
 ## Context
 
@@ -112,6 +116,32 @@ directory where `HOME` is unset. The Piwigo oracle and the monolog output must s
    asking each time. The first push publishes the branch's 219 unpushed commits.
 4. **The case rule is probed per root.** Matching against configured text folds case only where
    the root's directory does.
+5. **A `\` in configured path text names a separator and a name's own `\`, and every machine
+   format spells a file with `/`.**
+   - Config files and baselines travel between platforms with the repository. Outside Windows
+     a `\` in a path is ambiguous: a separator written on Windows, or a character a Unix name
+     can hold. It names both. A `/` is a character of no platform's names, so it names only a
+     separator.
+   - JSON, checkstyle, JUnit and baselines are read by tools, so one project gives the same
+     report on every platform: they spell a file with `/`. Text, friendly and the warnings on
+     stderr are read by people, who paste the paths into a shell, so they keep the platform's
+     spelling.
+6. **A disabled server does nothing visible.** It clears every file it has published, runs no
+   analysis on any trigger and answers every request with its empty result. It keeps its
+   documents current, so enabling it again analyses what the editor holds. In the extension,
+   `enable` starts and stops the client at once, `configPath` is applied live by the server
+   and needs no restart, and `serverPath` alone restarts the client, since it names the
+   process.
+7. **A path the config file names is relative to the config file, and the analyser never
+   creates or changes a database.** The SQLite reflection's `path` resolves through the one
+   function that resolves every configured path, and opens read-only, with no create flag and
+   no URI parsing. A wrong path then fails naming where it looked.
+8. **An include is reported only when no run could find its file.** The analyser knows the
+   project's files. The include path, the working directory and the platform are the
+   deployment's, and the analysing machine's `/usr/share/php` says nothing of them. So the
+   rule keeps every value a run can have, reads an include in a Unix world and in a Windows
+   world, looks where PHP looks, in PHP's order, and reports a value only when no combination
+   finds a file. R8 has the rest.
 
 ## How the rows are designed and judged
 
@@ -133,6 +163,9 @@ directory where `HOME` is unset. The Piwigo oracle and the monolog output must s
     debug profile, with `TMPDIR` under `~/.cache`.
   - A push only after asking.
   - Comments carry no task references and no narrative.
+  - A design question is answered from what a run can and cannot know, settled with php 8.5
+    where it can be, and never from what PHPStan does or what the change costs. PHPStan is
+    cited as prior art for a mechanism and not as the reason a design is right.
 
 ## The rows, in the order they are built
 
@@ -145,9 +178,9 @@ directory where `HOME` is unset. The Piwigo oracle and the monolog output must s
 | 4 | R4 | equal paths hash alike | Windows | — |
 | 5 | R5 | URIs ↔ paths on every platform | all | R3 |
 | 6 | R18 | the gates job: every module has its crate, no edge breaks the layering, and the later steps pass | CI | R2 |
-| 7 | R6 | report paths spelled with `/` where PHPStan does; a `\` in configured path text is a separator | all | R3 |
-| 8 | R7 | the case rule, probed per root; a `\` in a configured root | all | R6 |
-| 9 | R8 | the include rule's platform values | Windows | R3 |
+| 7 | R6 | machine reports spell a file with `/`; a `\` in configured path text names a separator and a name's own `\` | all | R3 |
+| 8 | R7 | the case rule, probed per root; a `\` in a configured root; the SQLite path | all | R6 |
+| 9 | R8 | the include rule: what a run can find | all | R3 |
 | 10 | R9 | discovery: unreadable spellings, listing misses | Windows, macOS | R3 |
 | 11 | R10 | the program runs on a thread whose stack it chooses | Windows, small `ulimit -s` | R1 |
 | 12 | R11 | the caches where each platform keeps them, refreshed on Windows | Windows, macOS | — |
@@ -665,8 +698,7 @@ on.**
 - Linux's output changes only where a file's URI changes: a workspace opened through a link, or
   a file opened, or reported by the file watcher, under another spelling.
 
-**Found while building it, older than this plan and on every platform.** Not changed here; the
-user is asked.
+**Found while building it, older than this plan and on every platform.**
 
 - While `phpstan-rs.enable` is false, an edit still publishes the file's diagnostics:
   `handle_open_or_change`, the debounced change and the watched files never read `enabled`.
@@ -674,6 +706,42 @@ user is asked.
   never opened keeps its diagnostics, though the extension's setting says that disabling
   "clears its diagnostics". `published` now records every file the editor holds diagnostics
   for, so the clear could cover them all.
+
+**Round 2's second follow-up: a disabled server does nothing visible** (decision 6), built
+after R6's corrections.
+
+- **Now.**
+  - The setting says "Disabling stops the server and clears its diagnostics", and the
+    extension stops its client when `enable` is false at start. The server's own comment says
+    the opposite of the setting: navigation keeps working and only the diagnostics go empty.
+  - `enabled` is read in two places, `analyse_on_save` and `republish_known_files`. A
+    didOpen, a didChange (also through the debounce worker), a watched-file event, a folder
+    added or removed and a configuration change that moves a file's role all analyse and
+    publish while it is false.
+  - Disabling clears the open documents only.
+  - The requests answer from the project, and `inlayHint` runs the checker.
+  - The extension asks for a restart after `enable`, `serverPath` and `configPath` change.
+    The server applies `enable` and `configPath` live (`reload_configuration`).
+- **Change.**
+  - `publish` is the one place a diagnostic leaves the server, so while disabled it sends
+    only the clear of what the editor holds. That makes publishing impossible by
+    construction, whatever triggered it.
+  - The entry points that analyse do no work while disabled: an edit records the document
+    (`open_uris`, `latest_text`, `file_versions`) and returns, and so do the debounced
+    change, the watched-file events, a folder added or removed, and a configuration change
+    that is not `enable` itself.
+  - Disabling clears every file in `published`. Enabling brings the open documents to the
+    projects (`sync_open_documents`), reloads what the disk changed meanwhile, runs the full
+    analysis and publishes.
+  - Every request answers its empty result while disabled, and the doc comment on `enabled`
+    says so.
+  - The extension stops the client when `enable` turns false and starts it when it turns
+    true, with no prompt. `configPath` prompts nothing, since the server applies it.
+    `serverPath` restarts the client, since it names the process.
+- **Test.** The server tests: an edit, a save, a watched-file change, a folder change and a
+  configuration reload while disabled publish nothing; disabling clears a file nothing
+  opened; each request answers empty; enabling publishes what the editor holds, including an
+  edit made while disabled. The extension's unit test of the setting handlers.
 
 ### R18. The gates job: every module has its crate, no edge breaks the layering, and the later steps pass
 
@@ -840,17 +908,16 @@ been renamed. Round 3 runs the comparison.
   among the defaults. That would change what `--no-default-features` builds.
 - It is a warning and not a failure, so it is not changed here.
 
-### R6. Report paths spelled with `/` where PHPStan spells them so
+### R6. Machine reports spell a file with `/`, and a `\` in configured path text names a separator
 
 **Now.** `shown_path` (`project.rs:3430`) gives `src\Foo.php` on Windows. So:
 
 - `ignore_errors::filter` (`:134`) matches `to_string_lossy()` against `src/*`, which never
   matches;
 - the baseline writes and matches `normalize_path(..).display()` (`baseline.rs:201`, `:393`).
-  A baseline made on Linux does not match on Windows, and the other way round. PHPStan's
-  baselines are `/`-joined everywhere (`ParentDirectoryRelativePathHelper`);
-- checkstyle and junit (`output.rs:212`, `:244`) write `\`. PHPStan's
-  `SimpleRelativePathHelper` writes `/`.
+  A baseline made on Linux does not match on Windows, and the other way round;
+- checkstyle and junit (`output.rs:212`, `:244`) write `\`, so one project's report differs by
+  platform.
 
 **Change.**
 
@@ -858,10 +925,10 @@ been renamed. Round 3 runs the comparison.
   `/`. On Unix it gives the path's own text, since `\` is a name character there.
 - The baseline writes it. On Windows it reads an entry's `\` as `/`, which covers baselines this
   tool wrote there before, and matches it.
-- `ignoreErrors`: on Windows a pattern's `\` is a separator, as PHPStan's FNM_NOESCAPE has it
-  there. The path and the pattern are compared in `/` form.
-- Checkstyle and junit use `report_path`. Text, friendly and json keep the platform's spelling, as
-  PHPStan's table and json do.
+- `ignoreErrors`: a pattern's `\` is a separator on Windows, where it is one in a path. The path
+  and the pattern are compared in `/` form.
+- Checkstyle and junit use `report_path`. Text, friendly and json kept the platform's spelling
+  here; decision 5 moves json to `/` (Corrections below).
 
 **Test.**
 
@@ -886,25 +953,21 @@ Linux output is unchanged.
   becomes `/`. Elsewhere it is the path's own text, since a name can hold a `\` there. It is in
   the diagnostics crate because the app, the project, the rules and the disallowed-calls
   extension all call it.
-  - It replaces text, as PHPStan's helpers do (`str_replace('\\', '/', …)`), instead of joining
-    components as the plan said. The two agree on every path a report holds, which has no `.`
-    and no doubled separator. A share keeps its `//server/share` form, so a prefix needs no rule
-    of its own.
+  - It replaces text instead of joining components as the plan said. The two agree on every path
+    a report holds, which has no `.` and no doubled separator. A share keeps its
+    `//server/share` form, so a prefix needs no rule of its own.
 - Where it is used:
   - checkstyle's and JUnit's file names;
   - the baseline's files, written and matched;
-  - anonymous class names (`class@anonymous/src/a.php:2`), which PHPStan's
-    `AnonymousClassNameHelper` spells through its simple helper;
+  - anonymous class names (`class@anonymous/src/a.php:2`), which appear in messages and so in
+    baselines;
   - the restricted symbols' path for their zones;
   - the messages that name a file: the duplicate class and function declarations' location
     lists, and composer hygiene's two PSR-4 messages. A baseline matches by message, so a path
-    in a message is spelled as a baseline's file is. PHPStan's duplicate rules use its fuzzy
-    helper, which gives the platform's spelling. Here they use `/` on every platform, so a
-    baseline made on one platform matches on another.
-- Text, friendly and JSON keep the platform's spelling, as PHPStan's table and JSON do, and so
-  do the warnings on stderr. PHPStan's table uses its simple helper in two places only: an
-  editor URL's `%relFile%` and the JetBrains terminal's `at file:line` line. This tool writes
-  neither.
+    in a message is spelled as a baseline's file is, and a baseline made on one platform
+    matches on another.
+- Text, friendly and JSON kept the platform's spelling, and so do the warnings on stderr.
+  JSON follows the correction below.
 - One rule matches configured path text against a report path (`3350adbd`).
   `diagnostics::path_byte_names` reads it byte by byte:
   - a `\` names a `/` on every platform;
@@ -936,7 +999,7 @@ Linux output is unchanged.
   - on Windows:
     - `ignoreErrors` in either separator;
     - a Windows file written to a baseline with `/` and matched again;
-    - checkstyle and JUnit name the file with `/`, while JSON keeps `\`;
+    - checkstyle and JUnit name the file with `/`, while JSON kept `\` (corrected below);
     - an anonymous class's name;
   - outside Windows: a `\` in a pattern or a baseline entry also names a `\` in a name, and a
     `/` does not.
@@ -976,10 +1039,25 @@ Linux output is unchanged.
     from both on macOS.
 - **Older than this plan, on every platform:** the SQLite reflection's `path` is opened as
   written. A relative one is therefore relative to the process's working directory, while
-  every other path in the config file is relative to the file. Not changed here; the user is
-  asked.
+  every other path in the config file is relative to the file. Decision 7 settles it, and R7
+  builds it.
 
-### R7. Case is matched as the root's directory matches it
+**Corrections** (decision 5), built before R7.
+
+- **JSON names a file with `/`.** `write_json` keys `files` by `report_path`, in the order of
+  that spelling, where it used the platform's. One project then gives the same JSON on every
+  platform, as it gives the same checkstyle, JUnit and baseline. Text, friendly and the
+  warnings on stderr keep the platform's spelling.
+- **The reasons are the run-time ones.** The module doc of `report_path`, the docs of the
+  `ignoreErrors` `path` and of `allow_in`, the baseline's module doc, the anonymous class
+  names' doc and the checkstyle doc gave how PHPStan spells or reads a path as the reason.
+  The reason is that a report, a baseline and a configuration are shared between platforms:
+  a file needs one spelling in them, and configured text has to name the same files wherever
+  it is read.
+- **Test.** The Windows output test expects JSON in `/`, and a test on every platform holds
+  JSON, checkstyle and JUnit to one spelling of a path.
+
+### R7. Case is matched as the root's directory matches it; configured paths
 
 **Now.** Matching against configured text is exact on every platform. On NTFS, default APFS
 or a Linux casefold directory, `Src/*` and `src/*` name the same files.
@@ -1019,43 +1097,119 @@ configured root.
   file whose name on disk is right. On a root that folds case, the walk spells a configured
   path as its directories' listings do.
 
-**From R6.**
+**Configured paths** (from R6; decisions 5 and 7).
 
-- **A `\` in a configured root.** This covers `paths`, `scan_paths`, `stub_paths`,
-  `schema_file` and `baseline`. A `\` there is a separator, as PHPStan reads it on every
-  platform, and outside Windows it can also be a character of a name. The probe reads each
-  root against its directory's listing both ways:
-  - a list's root gives each reading the listings hold, the separator reading first;
-  - a single file (`schema_file`, `baseline`) takes the first reading the listings hold;
-  - when the listings hold neither, it is the separator reading, and a missing root is then
-    named in that reading.
+- **One function resolves a configured path.** `Session::resolve` resolves `paths`,
+  `scan_paths`, `stub_paths`, `schema_file` and `baseline` against the config file's
+  directory through `resolve_against_config`. The SQLite reflection's `path` is the one
+  configured path left out, and it takes the function too.
+- **A `\` in a configured root.** A `\` there is a separator on every platform (decision 5),
+  and outside Windows it can also be a character of a name. The probe reads each root against
+  its directory's listing both ways:
+  - a list's root (`paths`, `scan_paths`, `stub_paths`) gives each reading the listings hold,
+    the separator reading first;
+  - a single file (`schema_file`, `baseline`, the SQLite `path`) takes the reading the
+    listings hold. When both readings name an existing file the configuration is ambiguous:
+    it is an error naming both files, and the user spells the one meant;
+  - when the listings hold neither, it is the separator reading, and a missing file is named
+    in that reading.
 
   Windows already reads `\` as a separator.
+- **The SQLite reflection opens read-only.** `SqliteReflector::connect` opens the file with
+  `SQLITE_OPEN_READ_ONLY` and without the create and URI flags that `r2d2_sqlite`'s `file()`
+  sets by default. The reflector only prepares statements and reads their columns, which a
+  read-only connection does (checked: it prepares even an `INSERT`). A path that names no
+  file is an error naming the resolved path. Today it creates an empty database there.
 - **Prior art for the case rule:** disallowed-calls matches its zones case-sensitively on every
   platform, and PHPStan's `FileExcluder` folds case on Windows only.
 
-### R8. The include rule's platform values
+### R8. The include rule: what a run can find
 
-**Now** (`checker/includes.rs`).
+**Now** (`checker/includes.rs`). The rule looks an include up as if the analysing machine were
+the deployment.
 
-- `PATH_SEPARATOR` is `":"` (`:210`), and `set_include_path` values split on `':'` (`:362`,
-  `:377`). On Windows `C:\lib` splits at the drive letter.
-- The default include path is Debian's `.:/usr/share/php` (`:47`). Windows PHP's is
-  `.;C:\php\pear`.
-- `DIRECTORY_SEPARATOR` already takes the platform's (`:214`).
+- It looks in the project root as the working directory, in the including file's directory,
+  and in an include path of Debian's `.:/usr/share/php` plus the values the checked file itself
+  sets. A relative include path entry is taken as relative to the including file's directory.
+- The platform is this machine's: `PATH_SEPARATOR` is `:`, a set value splits on `:` (on
+  Windows `C:\lib` splits at the drive letter), `DIRECTORY_SEPARATOR` is the machine's and
+  `get_include_path()` is `.:/usr/share/php`.
+- **What PHP does** (php 8.5, the system calls read with `strace`):
+  - A plain name is tried in each include path entry in order, then in the including file's
+    directory, then in the working directory, whether or not the include path names it. A
+    relative entry is relative to the working directory, and an empty entry is the filesystem
+    root (`/name`).
+  - `./name` and `../name` are tried in the working directory only: `./x.php` is not found
+    in the including file's directory.
+  - An absolute name is that file.
+- So the rule answers from the analysing machine's disk where it cannot know the deployment's:
+  - `require 'PEAR.php'` is reported or not by whether this machine has PEAR in
+    `/usr/share/php`, which it does here;
+  - `./x.php` is accepted when `x.php` is beside the includer;
+  - an absolute path, or a `../` above the root, is judged by this machine's files.
 
-**Change.** The value and the split use the platform's separator: `;` on Windows, `:` elsewhere.
-The default is chosen per platform: Unix keeps `.:/usr/share/php` (the directory simply does
-not exist on macOS), and Windows gets `.;C:\php\pear`. The constant types in
-`predefined_constants.rs`, `'/'|'\\'` and `':'|';'`, stay as they are: those are the types of
-code that runs anywhere.
+**What a run can know.** Of an include, the project's files and the text of the code. The
+include path is the deployment's php.ini value, with Composer's autoloader prepending its
+packages' `include-path` entries, and then whatever `set_include_path()` calls ran, one of which
+runs first. The working directory is the shell's for the CLI and the script's directory for a
+web SAPI (from php-src: only the CLI is installed here). The platform is unknown, and so is
+every file outside the project.
 
-**Test.** `cfg(windows)`: `set_include_path(get_include_path() . PATH_SEPARATOR . __DIR__ .
-'/lib')` adds `<dir>/lib`. The Unix tests are unchanged.
+**Change** (decision 8).
 
-**Not here.** Should an include that only the system include path could resolve be reported at
-all? That is a rule question on every platform: PHPStan uses its own process's include path. It
-goes to the user, and nothing changes here.
+1. **A value is reported when no run can find it.** Each value an expression can take is judged
+   on its own, as now: `'a.php'|'b.php'` reports the missing one. A value is missing when no
+   combination of the unknowns below finds a file in the project. A combination that leaves the
+   project, or has a part unknown, counts as finding it.
+2. **Two worlds.** An expression is read in a Unix world (`PATH_SEPARATOR` `:`,
+   `DIRECTORY_SEPARATOR` `/`, `\` a character of a name) and in a Windows world (`;`, `\`, `\`
+   a separator, a drive prefix, `.\` and `..\` relative). Found in either is found. A message
+   names the Unix world's value, which is the Windows world's too unless the expression holds
+   `DIRECTORY_SEPARATOR`. `__DIR__` and `__FILE__` are the project's paths, read under the root
+   in each world. Classifying a name is a pure function of the world and the name.
+3. **Where a value is looked for,** in PHP's order:
+   - an absolute name is that file;
+   - a `./` or `../` name is looked up in the working directory only;
+   - a plain name is looked up in each include path entry, in the including file's directory
+     and in the working directory.
+4. **The include path** takes these values, and a plain name is looked up in their union:
+   - the declared `include_path`, a new key in the deployment's syntax, split by each world's
+     separator (`.:/usr/share/php`, `.;C:\php\pear`);
+   - with the entries Composer's autoloader prepends: the `include-path` of the root package
+     and of every installed package, under the package's directory;
+   - or any value some analysed file sets with `set_include_path()` or `ini_set('include_path',
+     …)`, where `get_include_path()` is the first kind of value.
+
+   The include path is **open** when its start is undeclared (the deployment's php.ini is
+   unknown), when a set value cannot be computed, and when an entry, or an empty entry, leaves
+   the project. A plain name is not reported while it is open. Declaring `include_path = "."`
+   closes the start.
+5. **The working directory** is one of the declared `working_dirs` (a new key, relative to the
+   config file) or, undeclared, the root and the directory of every analysed file: a CLI run
+   from the root, or a web script's directory.
+6. **Outside the project.** A target outside the trees the project reads (the root, `paths`,
+   `scan_paths`, `stub_paths` and the vendor directories) is not judged: an absolute path
+   elsewhere, a `../` above the root, a drive that is another machine's.
+7. **`get_include_path()`** is the declared value. `PATH_SEPARATOR` and `DIRECTORY_SEPARATOR`
+   are the world's.
+
+**Where it lives.** The project builds the environment from the config, Composer's manifests
+and every analysed file's set values, and hands it to the checker. An edit to a file's
+`set_include_path` re-checks the files whose includes depend on it. The pure parts (the world,
+the classification of a name, the candidate locations) take no filesystem and are tested as
+functions.
+
+**Test.**
+
+- Classification and candidates per world, on every platform.
+- The checker: `set_include_path` in another file; Composer's `include-path`; a declared
+  `include_path`; `working_dirs`; the include path open and closed; `./` against a declared
+  working directory; a target outside the project; both worlds' `DIRECTORY_SEPARATOR`; a
+  Windows-written `\` in a literal.
+- Linux's output changes where the old rule was wrong, and each fixture it changes is listed
+  with the rule that changes it: a plain name only the system include path could resolve, an
+  absolute path elsewhere, and `./` beside the includer under a declared working directory.
+  The Piwigo and monolog `fileNotFound` lines are compared before and after.
 
 ### R9. Discovery: unreadable spellings and listing misses
 
