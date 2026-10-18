@@ -1351,8 +1351,6 @@ fn demo_with_a_file_argument_parses_and_checks_that_file() {
 fn check_does_not_crash_on_deep_nesting_or_long_chains() {
     // Nesting and flat chains alike build deep trees; every walk over them
     // grows its stack on demand, so none may abort the process.
-    use std::os::unix::process::ExitStatusExt;
-
     let dir = TempDir::new("deep_nesting");
     let depth = 3_000;
     dir.write(
@@ -1376,11 +1374,13 @@ fn check_does_not_crash_on_deep_nesting_or_long_chains() {
         ),
     );
 
+    // A finished check exits 0. A crash ends in a signal on Unix, which has
+    // no exit code, and in an NTSTATUS code on Windows; a panic ends in 101.
     let output = bin().arg("check").arg(dir.path()).output().unwrap();
     assert_eq!(
-        output.status.signal(),
-        None,
-        "process was killed by a signal (crash) - status: {:?}, stderr: {}",
+        output.status.code(),
+        Some(0),
+        "the check did not finish - status: {:?}, stderr: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
     );
