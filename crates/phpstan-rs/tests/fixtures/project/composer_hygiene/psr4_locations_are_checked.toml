@@ -1,5 +1,5 @@
 no_composer = false
-paths = ["src/Http/Controller.php", "src/http/Router.php", "src/Misplaced.php", "src/Outside.php"]
+paths = ["src/Controller.php", "src/http/Router.php", "src/Misplaced.php", "src/Outside.php"]
 scan_paths = ["vendor/acme/used/src/Used.php", "vendor/acme/unused/src/Unused.php", "vendor/acme/dev-tool/src/Tool.php", "vendor/acme/transitive/src/Helper.php"]
 
 [rules]

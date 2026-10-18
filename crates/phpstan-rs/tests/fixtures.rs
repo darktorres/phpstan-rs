@@ -23,7 +23,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use diagnostics::Diagnostic;
+use diagnostics::{Diagnostic, report_path};
 use libtest_mimic::{Arguments, Failed, Trial};
 use phpstan_rs::gate::{self, FixtureConfig};
 use phpstan_rs::project::worker_pool;
@@ -233,11 +233,9 @@ fn render(
     paths.sort();
     let mut out = String::new();
     for path in paths {
-        let relative = path
-            .strip_prefix(base)
-            .unwrap_or(path)
-            .display()
-            .to_string();
+        // Spelled as reports spell a file, so a fixture's expectation reads
+        // alike on every platform.
+        let relative = report_path(path.strip_prefix(base).unwrap_or(path));
         for d in &results[path] {
             if !single_file {
                 write!(out, "{relative}:").unwrap();
@@ -285,8 +283,22 @@ fn one_line(text: &str) -> String {
 /// Messages that print absolute paths (e.g. an include's resolved path)
 /// name the fixture's directory as `<fixture>` and its ancestors as
 /// `<fixture>/..`, `<fixture>/../..`, so expectations don't depend on
-/// where the repository is checked out.
+/// where the repository is checked out. A message spells a path as the
+/// project's canonical form does, and the harness may have spelled the
+/// fixture's directory otherwise (`tests/fixtures` joined with `\` on
+/// Windows, a link in the checkout's path), so both spellings are named.
 fn portable(text: &str, base: &Path) -> String {
+    let canonical = composer::canonical::canonicalize(base).ok();
+    let mut out = text.to_string();
+    for spelling in canonical.iter().map(PathBuf::as_path).chain([base]) {
+        out = name_fixture_directories(&out, spelling);
+    }
+    out
+}
+
+/// `text` with `base` named `<fixture>` and its ancestors `<fixture>/..`,
+/// `<fixture>/../..`.
+fn name_fixture_directories(text: &str, base: &Path) -> String {
     let mut out = text.to_string();
     let mut placeholder = String::from("<fixture>");
     let mut dir = Some(base);

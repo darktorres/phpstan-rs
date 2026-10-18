@@ -1,1 +1,0 @@
-<?php namespace App\Http; final class Controller {}
