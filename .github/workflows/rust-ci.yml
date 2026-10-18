@@ -15,6 +15,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # The test profile keeps line tables rather than full debug info. A
+  # backtrace still names each frame's file and line; a debugger loses its
+  # view of local variables.
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
   lint:
