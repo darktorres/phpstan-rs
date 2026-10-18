@@ -132,10 +132,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test --profile gate --no-default-features --test fixtures
 
-  # The platforms the release ships besides x86_64 Linux. The tests, the
-  # fixtures and the dhat build run whatever clippy gave, so one failure
-  # hides no other.
-  platforms:
+  # The platforms the release ships besides x86_64 Linux, each in three jobs
+  # that run side by side: the check (clippy, then the heap profiler's build),
+  # the tests and the fixtures. A job runs whatever its earlier steps gave,
+  # so one failure hides no other.
+  platform-check:
     strategy:
       fail-fast: false
       matrix:
@@ -149,25 +150,10 @@ jobs:
       - name: Check text out as committed
         run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Fetch the phpstan-src submodule
-        run: git submodule update --init --depth 1 vendor/phpstan-src
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.rustup/toolchains
-          key: rustup-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
-      - name: Install the pinned toolchain
-        run: rustup install --no-self-update
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-rust
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --keep-going -- -D warnings
-      - name: Tests
-        if: ${{ !cancelled() }}
-        run: cargo test --workspace --all-targets --no-fail-fast
-      - name: Fixture suite
-        if: ${{ !cancelled() }}
-        run: cargo test --profile gate --test fixtures
       # The heap profiler's build, which walks frame pointers where the
       # platform has them.
       - name: The dhat build
@@ -175,3 +161,39 @@ jobs:
         run: cargo check -p phpstan-rs --profile dhat --features dhat-heap
         env:
           RUSTFLAGS: -C force-frame-pointers=yes
+
+  platform-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, windows-2025-vs2026, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      # Windows images check text out with CRLF. .gitattributes keeps this
+      # repository's files LF, but not the phpstan-src submodule's stubs,
+      # which the build embeds.
+      - name: Check text out as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+      - name: Tests
+        run: cargo test --workspace --all-targets --no-fail-fast
+
+  platform-fixtures:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, windows-2025-vs2026, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      # Windows images check text out with CRLF. .gitattributes keeps this
+      # repository's files LF, but not the phpstan-src submodule's stubs,
+      # which the build embeds.
+      - name: Check text out as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+      - name: Fixture suite
+        run: cargo test --profile gate --test fixtures
