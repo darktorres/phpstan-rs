@@ -1280,6 +1280,7 @@ dependencies = [
 name = "phpstan-rs"
 version = "0.1.0"
 dependencies = [
+ "anstream",
  "arrayvec",
  "clap",
  "crc32fast",

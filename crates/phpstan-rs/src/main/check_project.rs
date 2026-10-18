@@ -3,6 +3,8 @@
 //! `--set` assignments, the run resolved and analysed by the library,
 //! then baselined, fixed and printed.
 
+use std::ffi::OsStr;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use output::OutputFormat;
@@ -164,6 +166,26 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     std::mem::forget(run);
 }
 
+/// Whether the friendly report is written with colour: to a terminal, unless
+/// `NO_COLOR` is set to something (<https://no-color.org>).
+pub(crate) fn wants_colour(stdout_is_terminal: bool, no_color: Option<&OsStr>) -> bool {
+    stdout_is_terminal && no_color.is_none_or(OsStr::is_empty)
+}
+
+/// Prints the friendly report. The escapes of a coloured one reach a Windows
+/// console only through `anstream`, which turns on the console's
+/// virtual-terminal processing, or translates the escapes for a console that
+/// has none. Elsewhere it passes them on as they are.
+fn print_friendly(report: &str, colour: bool) {
+    if colour {
+        anstream::AutoStream::always(std::io::stdout())
+            .write_all(report.as_bytes())
+            .expect("failed printing to stdout");
+    } else {
+        print!("{report}");
+    }
+}
+
 fn report(
     run: &CheckRun,
     analysis: AnalysisResult,
@@ -262,9 +284,11 @@ fn report(
             let mut total = 0usize;
             if format == OutputFormat::Friendly {
                 use std::io::IsTerminal;
-                let colour = std::io::stdout().is_terminal()
-                    && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
-                print!("{}", output::render_friendly(&results, colour));
+                let colour = wants_colour(
+                    std::io::stdout().is_terminal(),
+                    std::env::var_os("NO_COLOR").as_deref(),
+                );
+                print_friendly(&output::render_friendly(&results, colour), colour);
                 total = results.values().map(Vec::len).sum();
             } else {
                 for path in paths {

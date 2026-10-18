@@ -18,6 +18,7 @@ postcard.workspace = true
 twox-hash.workspace = true
 arrayvec.workspace = true
 crc32fast.workspace = true
+anstream = "=1.0.0"
 clap = { version = "=4.6.7", features = ["derive"] }
 crossbeam-channel = "=0.5.17"
 dhat = { path = "../../patches/dhat", optional = true }
