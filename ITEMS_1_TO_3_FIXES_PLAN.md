@@ -58,8 +58,12 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   - R9 (`098af486`): the editor hashes a document once per edit. Its Cost and Change did not
     hold: no load takes both the cache key and the digest, so the key is unchanged, and what
     was fixed is the edit path's digest (its Built). No time is claimed.
+  - R7 (`30aa2002`, `8a1ca1e0`): −126.7 M off, with no wall change beyond the noise, off
+    (p = 0.313) or warm (p = 0.627). A path's name, its directory and its prefixes are read
+    from its bytes, where the row carried them (its Built). The Piwigo output was the oracle's
+    in every run, off and warm.
 
-  R7 is next.
+  Every row is in. The end-of-batch checks are next ("Verification").
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -74,8 +78,10 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   `session.rs`, R5 `use_sites.rs`, `file_tables.rs`, `file_table.rs`, `project.rs`,
   `session.rs`, `lsp.rs` and `file_id.rs`, R8 `project.rs`, `session.rs`, `lsp.rs`,
   `class_shape.rs`, `composer_hygiene.rs`, `banned.rs`, `mock_hygiene.rs`, `architecture.rs`,
-  `whole_program/renamed_named_arguments.rs` and `main/incremental_bench.rs`, and R9
-  `source.rs`, `project.rs` and `lsp.rs`.
+  `whole_program/renamed_named_arguments.rs` and `main/incremental_bench.rs`, R9
+  `source.rs`, `project.rs` and `lsp.rs`, and R7 `hashed_path.rs`,
+  `crates/composer/src/lib.rs`, `vendor.rs`, `walk.rs`, `project.rs`, `session.rs`,
+  `declaration_merge.rs` and `pest_config.rs`, with the composer crate's new `path_bytes.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -1160,6 +1166,35 @@ check.
 
 **Measure.** The fresh off profile, by caller.
 
+**Built** as `30aa2002` and `8a1ca1e0`: −126.7 M off, with no wall change beyond the noise, off
+(p = 0.313) or warm (p = 0.627). It was read from the fresh off profile of R8's `f676049c`,
+where std's path code was 117.4 M of self cost and its entries 140.9 M over 62 callers. Where
+it differs from the Change:
+
+- **Read from the bytes, not carried.** A new module, `composer::path_bytes`, reads a path's
+  name, its directory, both at once, a prefix, what is left after it, and its components with
+  the ancestors they end from its bytes where its spelling gives what its components give, and
+  asks `Path` otherwise, so every answer is `Path`'s own; differential tests check it against
+  `Path`. A carried field would save the scan of the last component (7.1 M, for 44,643 paths),
+  for a field in every `HashedPath` whose meaning depends on how its directory is spelled:
+  state to keep consistent, which R4 rejected a dense index for.
+- **What the walk holds is carried** where it holds it. A listed file is read by its own path,
+  and a checked file whose path is absolute and normal is its own absolute path. A directory's
+  entry is made in one allocation. The file roots of one directory and role share one job, so
+  what reaches the directory and its owner are found once. Each directory's place among the
+  packages' directories is carried down (`OwnerAt`). A path's ancestors come with their hashes
+  and names from one pass, and the reach and the tree take the name their caller holds. The
+  declarations' merge makes a root-relative path only for a PHPStan class.
+- **What stays**, std's 11.5 M of self cost and 16.2 M of entries over 57 callers: each entry's
+  path, made once (3.4 M); the probes' path equality (about 5.7 M); the report's map, keyed by
+  the root-relative path (1.4 M); the table's copy of each path, made beside the parse
+  (1.5 M); and the package index's walks (0.7 M). `path_bytes`' own reads are 14.2 M.
+- **The second commit** took −2.9 M, inside MEAS-3's spread: its path code −12 M by function,
+  the allocator +5 M. Its byte pass for the ancestors costs what the components' fold and the
+  scans back cost; one that checks the spelling as it splits would take about 2 M more.
+
+The ledger's LOAD-8.7 has the numbers.
+
 ## Not in this plan (checked)
 
 - **`LineIndex::new`'s 115 M of `Utf8Chunks::next`** (`crates/syntax/src/span.rs:126`). It is a
@@ -1287,6 +1322,8 @@ ours is noted, and a run it distorts is taken again.
 - Done with R9: LOAD-8.9's row, whose task is now the edit path's digest, with the reading
   that no load takes both hashes; LOAD-8's cost line. It has no row in §1's table, which holds
   the rows that moved the off run's Ir.
+- Done with R7: LOAD-8.7's row, with the reads from the path's bytes; its row in §1's table;
+  LOAD-8 is PART until the end-of-batch checks.
 - Left, with the rows: §1's range rows, as each row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
   a pathspec; remove scratch worktrees once they are recorded.
