@@ -259,15 +259,17 @@ Started on 2026-10-18, above level 8. The user corrected the claim that the proj
 targets Linux only: `release.yml` ships Linux, macOS and Windows binaries, but the
 tests run on Linux alone, and the code read at `791a57c6` is scoped to Linux in
 paths, PHP-visible values, runtime behaviour, tests and build scripts. The plan's
-rows R0 to R17 are built in its order. Windows, macOS and aarch64 Linux are
+rows are built in the order of its table. Windows, macOS and aarch64 Linux are
 verified on CI legs, and each push is asked first.
 
-Done: R0 to R4 (the lockfile, the CLI test, the CI legs, the canonical form
-without Windows' verbatim prefix, and prefixes hashed, ordered and owned by their
-kind) and round 1, whose failures are classed in the plan's R2 with the rows they
-extend. Open: R5 to R17, the rounds after them, and the batch's checks. The gates
-job's module graph fails with 27 problems that predate the plan and belong to
-level 2. Whether this batch fixes them is asked with round 2's push.
+Done: R0 to R5 (the lockfile, the CLI test, the CI legs, the canonical form
+without Windows' verbatim prefix, prefixes hashed, ordered and owned by their
+kind, and URIs read and written by each platform's grammar), round 1, whose
+failures are classed in the plan's R2 with the rows they extend, and round 2's
+push. Open: R18, then R6 to R17, the rounds after them, and the batch's checks.
+R18 is level 2's work pulled forward: the gates job's module graph fails with
+27 problems that predate the plan, and the user chose to fix them in this
+batch, the forbidden edges refactored away.
 
 ## Documents with no place in the stack
 

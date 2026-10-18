@@ -5,8 +5,8 @@
 - **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
   tracks it.
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
-  (`c6902324`) and R5. The rows are built in the order of the table below, one commit each,
-  with a pathspec, since another session shares the checkout.
+  (`c6902324`) and R5 (`52844b07`). The rows are built in the order of the table below, one
+  commit each, with a pathspec, since another session shares the checkout.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -14,10 +14,15 @@
     runs: the LF checkout and 223 commits.
   - Rust CI passed on aarch64 Linux and failed on macOS, Windows and the gates job. Each failure
     is classed in R2's "Round 1's result", with the rows it extends: R5, R6, R7, R13 and R15.
-  - The gates job failed at the module graph, which predates this plan. Whether this batch
-    fixes it is asked with round 2's push. Until then, `54e7e02d` runs each gates check
-    whatever the one before it gave.
-- **Next:** round 2, the push asked first, together with the module-graph question; then R6.
+  - The gates job failed at the module graph, which predates this plan. Since `54e7e02d`,
+    each gates check runs whatever the one before it gave.
+- **Round 2** runs `52844b07`, pushed on 2026-10-18 with the user's go-ahead.
+  - Extension CI passed on all three systems. The round trip took 1233 ms on Windows and
+    2628 ms on macOS.
+  - Rust CI: run 39138433432, still running when this was written.
+- **The module graph is fixed in this batch** (the user's decision with round 2's push): R18,
+  built before R6. The 20 forbidden edges are refactored away, not listed as exceptions.
+- **Next:** R18, then R6.
 
 ## Context
 
@@ -125,18 +130,19 @@ directory where `HOME` is unset. The Piwigo oracle and the monolog output must s
 | 3 | R3 | one canonical form of a path, without `\\?\` | Windows | R2 |
 | 4 | R4 | equal paths hash alike | Windows | — |
 | 5 | R5 | URIs ↔ paths on every platform | all | R3 |
-| 6 | R6 | report paths spelled with `/` where PHPStan does, matched by components | Windows | R3 |
-| 7 | R7 | the case rule, probed per root | Windows, macOS, Linux casefold | R6 |
-| 8 | R8 | the include rule's platform values | Windows | R3 |
-| 9 | R9 | discovery: unreadable spellings, listing misses | Windows, macOS | R3 |
-| 10 | R10 | the program runs on a thread whose stack it chooses | Windows, small `ulimit -s` | R1 |
-| 11 | R11 | the caches where each platform keeps them, refreshed on Windows | Windows, macOS | — |
-| 12 | R12 | colours on Windows consoles | Windows | — |
-| 13 | R13 | the tests on every platform: links, CRLF, Unix spellings | all | R2, R3 |
-| 14 | R14 | build scripts: the same embedded data everywhere; dhat's walk per platform | all | R2 |
-| 15 | R15 | developer tooling | macOS, Windows | — |
-| 16 | R16 | `path_bytes` reads Windows paths from their bytes | Windows | R3, R4 |
-| 17 | R17 | the records | — | all |
+| 6 | R18 | the module graph: every module has its crate, and no edge breaks the layering | CI | R2 |
+| 7 | R6 | report paths spelled with `/` where PHPStan does, matched by components | Windows | R3 |
+| 8 | R7 | the case rule, probed per root | Windows, macOS, Linux casefold | R6 |
+| 9 | R8 | the include rule's platform values | Windows | R3 |
+| 10 | R9 | discovery: unreadable spellings, listing misses | Windows, macOS | R3 |
+| 11 | R10 | the program runs on a thread whose stack it chooses | Windows, small `ulimit -s` | R1 |
+| 12 | R11 | the caches where each platform keeps them, refreshed on Windows | Windows, macOS | — |
+| 13 | R12 | colours on Windows consoles | Windows | — |
+| 14 | R13 | the tests on every platform: links, CRLF, Unix spellings | all | R2, R3 |
+| 15 | R14 | build scripts: the same embedded data everywhere; dhat's walk per platform | all | R2 |
+| 16 | R15 | developer tooling | macOS, Windows | — |
+| 17 | R16 | `path_bytes` reads Windows paths from their bytes | Windows | R3, R4, R18 |
+| 18 | R17 | the records | — | all |
 
 CI rounds, each push asked:
 
@@ -556,6 +562,102 @@ on failure, and the cause becomes a row.
 
   Round 2 runs the Windows and macOS legs and the smoke round trip.
 
+### R18. The module graph: every module has its crate, and no edge breaks the layering
+
+Built after R5, in the place the table gives it. The user's decision with round 2's push: the
+forbidden edges are refactored away, not listed as exceptions. This is crate-split work
+(`WORK_STACK.md` level 2) pulled forward.
+
+**Now.** Round 1's gates job failed `cargo xtask modgraph` with 27 problems, read at `52844b07`:
+
+- **14 edges into the crate root.** `crate::file_id` (`1cd01bc4`, 2026-10-02) has no row. So the
+  `crate` row holds it, and no crate may depend on the root. 12 modules of six crates name it,
+  and the registry and the project name `crate::shard` too, which has no row either. The 14th
+  is `main`'s call of `phpstan_rs::keep_freed_memory`, a function of the root.
+- **6 edges that break the layering.**
+  - `registry::init_flow` (reflection) uses the checker's completion rules (`Completion`,
+    `Reach`, analyser) and `is_truthy_literal` (`checker::control_flow::boolean_conditions`,
+    rules).
+  - `project.rs` reads two rules' mention bits and spellings: `checker::unused::MENTIONS_REBIND`
+    and `checker::includes::MENTIONS_GUARD` (`:2528`, `:2531`), and their `WATCH` lists in
+    `WATCHED` (`:3064`). A project test reads them too. These are two edges.
+  - `checker::access_attributes` (ext-language-extensions) calls `project::shown_path`
+    (`7bef998a`).
+  - `pest_config` (ext-pest) calls `composer::path_bytes` (`30aa2002`). No extension may depend
+    on composer.
+- **6 allow lines whose edge is gone:** `checker::control_flow project`,
+  `checker::uninitialized_dataflow project`, `lsp banned`, `lsp ext`,
+  `lsp ext::disallowed_calls` and `lsp ext::sql`.
+- **phpdoc's manifest depends on types** (`2b6aeb84`), which phpdoc's row does not list.
+
+The gate let a new module fall through to the `crate` row without a word. A module the root holds
+has its own edges unchecked, since the root may depend on everything. `gate` and `allocator` have
+no row either.
+
+**Change.** One commit for each step.
+
+1. **The gate.** A module that only the `crate` row holds has no assignment. That row is the
+   library root's own, which only declares modules and re-exports.
+2. **Rows for the four modules.**
+   - `file_id` and `shard` go to reflection. The registry is their lowest user, and they need
+     nothing but std, rayon and the hash crates.
+   - `gate` goes to testing, Appendix A's fixture runner. It reads a fixture's config against
+     the schema its caller passes, as the language server does. The fixture harness and the
+     runtime oracle pass `app::config_schema()`.
+   - `allocator` goes to bin, since the binary chooses the allocator.
+     - It becomes the one module for it, always built. It holds the `#[global_allocator]`
+       static and `keep_freed_memory`, which does nothing under another allocator.
+     - The mimalloc binding moves to `allocator::mimalloc`.
+     - `main` calls `phpstan_rs::allocator::keep_freed_memory()`.
+
+     The root then only declares modules and re-exports.
+3. **The completion rules go to syntax.**
+   - `Completion`, its rules, `Reach` and `BlockCompletion` are pure functions over the
+     completions of a statement's parts and what is known of its conditions. The 25 G report's
+     C1 step 6 has them shared by the checker and `InitFlow`.
+   - They move to `syntax::completion`, which both use.
+   - `is_truthy_literal`, the syntactic answer to "always true", moves to `syntax::ast`, beside
+     `literal_string_value`.
+   - The exit points and the goto state hold the checker's scopes, so they stay in the checker.
+4. **The checker's walks own their mention bits in the analyser.**
+   - The bits and spellings that let `check_program` skip the rebind scan and the include-guard
+     walk move to `checker::mentions`. That is the analyser module whose code reads them.
+   - The project hands the checker the file's whole `mentions` (`set_mentions`, which replaces
+     the two flag setters).
+   - The project composes `WATCHED` from three layers' lists: `stub_attributes` (reflection),
+     `checker::mentions` (analyser) and `file_declarations` (project).
+   - A test holds the two walks' spellings and their scans together: every function name the
+     include-guard walk reads, and every rebind call, is watched.
+5. **The project gives the checker the file's shown path.** `set_current_file` takes the path
+   as the reports spell it (`project::shown_path`), as the checker already takes `__FILE__`'s.
+   The access attributes' `in_test_code` and the restricted symbols' path rules read it. The
+   first called into project, and the second kept its own copy of the rule.
+6. **`path_bytes` becomes a crate of its own,** `phpstan-rs-path-bytes` (lib `path_bytes`), at
+   the bottom of the graph, with std as its only dependency.
+   - It reads paths, not Composer's metadata. The analyser's and the extensions' layers may not
+     depend on composer.
+   - composer and the package use it. Its tests move with it, and its normal-form test takes
+     std's components as its oracle: those are what `lexically_normalized` rebuilds.
+   - xtask's arch and build-time lists name it. The Windows type check lints the crate itself.
+   - R16 and its bench work in this crate.
+7. **phpdoc may depend on types.**
+   - The 25 G report decided this for P7 (§10.1, §11.7): types depends on syntax alone, so
+     there is no cycle.
+   - The `Type` a docblock writes lives beside its node, lowered once per distinct docblock
+     (`2b6aeb84`). Resolution against names, templates and aliases stays in reflection.
+   - The phpdoc row and `CRATE_SPLIT_PLAN.md`'s §3.3 now say so. The six stale allow lines go
+     in the same commit, and the gate passes.
+
+**Test.**
+
+- xtask: the gate's spec parsing is unit-tested, including a module that only the `crate` row
+  holds.
+- `cargo xtask modgraph`, `arch` and `tests` (the test-name manifest, with each moved test in a
+  `gates/test-renames` file) pass.
+- Each step's moved code runs its own tests, listed when it is built.
+
+Linux output is unchanged: each step moves code and keeps what it does.
+
 ### R6. Report paths spelled with `/` where PHPStan spells them so
 
 **Now.** `shown_path` (`project.rs:3430`) gives `src\Foo.php` on Windows. So:
@@ -881,7 +983,7 @@ case, `\` and `/`, doubled and trailing separators, `.` and `..`, `a:b`, and non
 sits beside the Unix mix. Each mix runs on its own platform, with its own count showing that the
 bytes read most of it.
 
-**Measure.** A criterion bench, `crates/composer/benches/path_bytes.rs`, times `path_bytes`
+**Measure.** A criterion bench, `crates/path-bytes/benches/path_bytes.rs` (R18 makes the crate), times `path_bytes`
 against std on a load's mix of paths. It runs here and on the Windows leg. The per-call times
 go into LOAD-8.7; no load-level Windows figure exists.
 
