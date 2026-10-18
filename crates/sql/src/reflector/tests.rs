@@ -379,11 +379,20 @@ fn sqlite_fixture_path(label: &str) -> std::path::PathBuf {
     ))
 }
 
-#[test]
-fn a_real_sqlite_query_reflects_real_column_types_and_nullability() {
-    let path = sqlite_fixture_path("basic");
+/// A database file holding `ddl`, made through a connection of its own: the
+/// reflector opens read-only, so a test sets its database up first.
+fn sqlite_fixture(label: &str, ddl: &str) -> std::path::PathBuf {
+    let path = sqlite_fixture_path(label);
     let _ = std::fs::remove_file(&path);
-    let config = SqlReflectionConfig {
+    rusqlite::Connection::open(&path)
+        .expect("create the sqlite fixture")
+        .execute_batch(ddl)
+        .expect("set up the fixture");
+    path
+}
+
+fn sqlite_config(path: &std::path::Path) -> SqlReflectionConfig {
+    SqlReflectionConfig {
         driver: SqlDriver::Sqlite,
         host: None,
         port: None,
@@ -391,22 +400,24 @@ fn a_real_sqlite_query_reflects_real_column_types_and_nullability() {
         password: None,
         password_env: None,
         database: None,
-        path: Some(path.clone()),
+        path: Some(path.to_path_buf()),
         schema_file: None,
         session_init_sql: None,
-    };
-    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
-    {
-        let conn = reflector.pool.get().expect("get a pooled connection");
-        conn.execute_batch(
-            "CREATE TABLE sql_reflection_probe (
-                 id INTEGER NOT NULL,
-                 name TEXT,
-                 price NUMERIC NOT NULL
-             );",
-        )
-        .expect("set up the fixture table");
     }
+}
+
+#[test]
+fn a_real_sqlite_query_reflects_real_column_types_and_nullability() {
+    let path = sqlite_fixture(
+        "basic",
+        "CREATE TABLE sql_reflection_probe (
+             id INTEGER NOT NULL,
+             name TEXT,
+             price NUMERIC NOT NULL
+         );",
+    );
+    let reflector =
+        SqliteReflector::connect(&sqlite_config(&path)).expect("open the sqlite fixture");
     let row_type = reflector
         .reflect("SELECT id, name, price FROM sql_reflection_probe WHERE id = ?1")
         .expect("reflect a real SELECT");
@@ -420,26 +431,9 @@ fn a_real_sqlite_query_reflects_real_column_types_and_nullability() {
 
 #[test]
 fn a_real_sqlite_computed_column_with_no_backing_table_degrades_honestly() {
-    let path = sqlite_fixture_path("computed");
-    let _ = std::fs::remove_file(&path);
-    let config = SqlReflectionConfig {
-        driver: SqlDriver::Sqlite,
-        host: None,
-        port: None,
-        user: None,
-        password: None,
-        password_env: None,
-        database: None,
-        path: Some(path.clone()),
-        schema_file: None,
-        session_init_sql: None,
-    };
-    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
-    {
-        let conn = reflector.pool.get().expect("get a pooled connection");
-        conn.execute_batch("CREATE TABLE t (id INTEGER NOT NULL);")
-            .expect("set up the fixture table");
-    }
+    let path = sqlite_fixture("computed", "CREATE TABLE t (id INTEGER NOT NULL);");
+    let reflector =
+        SqliteReflector::connect(&sqlite_config(&path)).expect("open the sqlite fixture");
     let row_type = reflector
         .reflect("SELECT id, id + 1 AS next_id FROM t")
         .expect("reflect a real SELECT");
@@ -458,21 +452,9 @@ fn a_real_sqlite_computed_column_with_no_backing_table_degrades_honestly() {
 
 #[test]
 fn a_real_sqlite_prepare_of_an_invalid_query_degrades_to_none_not_a_panic() {
-    let path = sqlite_fixture_path("invalid_query");
-    let _ = std::fs::remove_file(&path);
-    let config = SqlReflectionConfig {
-        driver: SqlDriver::Sqlite,
-        host: None,
-        port: None,
-        user: None,
-        password: None,
-        password_env: None,
-        database: None,
-        path: Some(path.clone()),
-        schema_file: None,
-        session_init_sql: None,
-    };
-    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
+    let path = sqlite_fixture("invalid_query", "CREATE TABLE unrelated (id INTEGER);");
+    let reflector =
+        SqliteReflector::connect(&sqlite_config(&path)).expect("open the sqlite fixture");
     assert!(
         reflector
             .reflect("SELECT * FROM this_table_does_not_exist")
@@ -689,21 +671,13 @@ fn session_init_sql_runs_on_every_new_connection_and_can_relax_sql_mode() {
 
 #[test]
 fn sqlite_session_init_sql_runs_on_every_new_connection() {
-    let path = sqlite_fixture_path("session_init");
-    let _ = std::fs::remove_file(&path);
+    let path = sqlite_fixture("session_init", "CREATE TABLE unrelated (id INTEGER);");
+    // A temporary table is what a read-only connection can still create.
     let config = SqlReflectionConfig {
-        driver: SqlDriver::Sqlite,
-        host: None,
-        port: None,
-        user: None,
-        password: None,
-        password_env: None,
-        database: None,
-        path: Some(path.clone()),
-        schema_file: None,
         session_init_sql: Some(
-            "CREATE TABLE IF NOT EXISTS session_init_probe (id INTEGER NOT NULL);".to_string(),
+            "CREATE TEMP TABLE session_init_probe (id INTEGER NOT NULL);".to_string(),
         ),
+        ..sqlite_config(&path)
     };
     let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
     let row_type = reflector.reflect("SELECT id FROM session_init_probe");
@@ -865,29 +839,13 @@ fn a_real_live_derived_table_cte_and_view_prepare_and_reflect_via_postgres() {
 
 #[test]
 fn a_real_live_derived_table_cte_and_view_prepare_and_reflect_via_sqlite() {
-    let path = sqlite_fixture_path("virtual_relations");
-    let _ = std::fs::remove_file(&path);
-    let config = SqlReflectionConfig {
-        driver: SqlDriver::Sqlite,
-        host: None,
-        port: None,
-        user: None,
-        password: None,
-        password_env: None,
-        database: None,
-        path: Some(path.clone()),
-        schema_file: None,
-        session_init_sql: None,
-    };
-    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
-    {
-        let conn = reflector.pool.get().expect("get a pooled connection");
-        conn.execute_batch(
-            "CREATE TABLE vr_probe (id INTEGER NOT NULL, name TEXT);
-             CREATE VIEW vr_probe_view AS SELECT id, name FROM vr_probe;",
-        )
-        .expect("set up the fixture");
-    }
+    let path = sqlite_fixture(
+        "virtual_relations",
+        "CREATE TABLE vr_probe (id INTEGER NOT NULL, name TEXT);
+         CREATE VIEW vr_probe_view AS SELECT id, name FROM vr_probe;",
+    );
+    let reflector =
+        SqliteReflector::connect(&sqlite_config(&path)).expect("open the sqlite fixture");
     for sql in [
         "SELECT t.id FROM (SELECT id FROM vr_probe) AS t",
         "WITH t AS (SELECT id FROM vr_probe) SELECT id FROM t",
@@ -899,5 +857,41 @@ fn a_real_live_derived_table_cte_and_view_prepare_and_reflect_via_sqlite() {
             "expected a resolved row type for: {sql}"
         );
     }
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_sqlite_path_that_names_no_file_is_an_error_naming_it_and_creates_nothing() {
+    let path = sqlite_fixture_path("missing");
+    let _ = std::fs::remove_file(&path);
+    let error = SqliteReflector::connect(&sqlite_config(&path))
+        .err()
+        .expect("a missing file is not an empty database");
+    assert!(error.contains(&path.display().to_string()), "{error}");
+    assert!(!path.exists(), "opening must not create the file");
+}
+
+#[test]
+fn a_sqlite_connection_only_reads_but_still_reflects_what_it_prepares() {
+    let path = sqlite_fixture("read_only", "CREATE TABLE t (id INTEGER NOT NULL);");
+    let reflector =
+        SqliteReflector::connect(&sqlite_config(&path)).expect("open the sqlite fixture");
+    {
+        let conn = reflector.pool.get().expect("get a pooled connection");
+        assert!(
+            conn.execute("INSERT INTO t (id) VALUES (1)", []).is_err(),
+            "the connection is read-only"
+        );
+        assert!(
+            conn.prepare("INSERT INTO t (id) VALUES (?1)").is_ok(),
+            "a read-only connection still prepares a write, which is all reflection does"
+        );
+    }
+    assert!(reflector.reflect("SELECT id FROM t").is_some());
+    let rows: i64 = rusqlite::Connection::open(&path)
+        .expect("reopen the fixture")
+        .query_row("SELECT COUNT(*) FROM t", [], |row| row.get(0))
+        .expect("count the rows");
+    assert_eq!(rows, 0, "reflection changed nothing");
     let _ = std::fs::remove_file(&path);
 }

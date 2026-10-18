@@ -37,6 +37,7 @@ mod architecture;
 mod banned;
 mod class_shape;
 mod composer_hygiene;
+mod configured_path;
 pub(crate) mod declared_classes;
 pub(crate) mod duplicate_class_sites;
 mod duplicate_classes;

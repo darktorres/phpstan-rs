@@ -4,6 +4,7 @@ mod anonymous_class_naming;
 mod architecture;
 mod ast_of_overlay;
 mod banned;
+mod configured_paths;
 mod declarations;
 mod duplicate_classes;
 mod duplicate_functions;

@@ -482,12 +482,18 @@ impl SqliteReflector {
             .path
             .as_ref()
             .ok_or_else(|| "sql_reflection.path is required for the sqlite driver".to_string())?;
-        let mut manager = r2d2_sqlite::SqliteConnectionManager::file(path);
+        // Read-only, with no create flag and no URI parsing: reflection only
+        // prepares statements and reads their columns, which a read-only
+        // connection does, and it must never create or change the database. A
+        // path that names no file is an error, not an empty database.
+        let mut manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_flags(
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        );
         if let Some(sql) = config.session_init_sql.clone() {
             manager = manager.with_init(move |conn| conn.execute_batch(&sql));
         }
-        let pool =
-            r2d2::Pool::new(manager).map_err(|e| format!("failed to open SQLite database: {e}"))?;
+        let pool = r2d2::Pool::new(manager)
+            .map_err(|e| format!("failed to open SQLite database {}: {e}", path.display()))?;
         Ok(Self { pool })
     }
 }

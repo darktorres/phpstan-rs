@@ -36,6 +36,7 @@ use crate::registry::stub_set::Stubs;
 use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
+use super::configured_path;
 use super::file_cache;
 use super::source::FileSource;
 use super::walk::{FileIndex, FinalFiles, Listed, Role, Root, Unstreamed, Walk, Walked};
@@ -678,16 +679,35 @@ impl Session {
             Some(dir) => dir.join(p),
             None => p,
         };
+        // The roots one entry of a list of paths names, resolved against the
+        // config file (`configured_path`).
+        let configured_roots = |text: &PathBuf| -> Vec<PathBuf> {
+            configured_path::roots(text, |reading| {
+                root.join(resolve_against_config(reading.to_path_buf()))
+                    .exists()
+            })
+            .into_iter()
+            .map(resolve_against_config)
+            .collect()
+        };
+        // The one file the setting `what` names, resolved against the config
+        // file.
+        let configured_file = |what: &str, text: &PathBuf| -> Result<PathBuf, String> {
+            configured_path::single(what, text, |reading| {
+                root.join(resolve_against_config(reading.to_path_buf()))
+                    .is_file()
+            })
+            .map(resolve_against_config)
+        };
         let mut excluded_dir_names: &'static [&'static str] = &[];
         let mut dirs: Vec<PathBuf> = if !overrides.paths.is_empty() {
             overrides.paths
         } else {
             session
                 .paths
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .map(resolve_against_config)
+                .iter()
+                .flatten()
+                .flat_map(configured_roots)
                 .collect()
         };
         if dirs.is_empty() {
@@ -755,20 +775,39 @@ impl Session {
                 Err(error) => report(error, policy, &mut warnings)?,
             }
         }
-        let sql_reflection = sql_settings.reflection;
+        let mut sql_reflection = sql_settings.reflection;
+        // The SQLite file is a configured path like the others, and a file
+        // that is only read: a path that names none is a configuration error.
+        if let Some(config) = sql_reflection.as_mut()
+            && config.driver == sql::config::SqlDriver::Sqlite
+            && let Some(text) = config.path.clone()
+        {
+            let resolved = configured_file("sql_reflection.path", &text)
+                .map(|path| root.join(path))
+                .and_then(|path| {
+                    if path.is_file() {
+                        Ok(path)
+                    } else {
+                        Err(format!(
+                            "sql_reflection.path {} names no file",
+                            path.display()
+                        ))
+                    }
+                });
+            config.path = settle(resolved.map(Some), policy, &mut warnings, None)?;
+        }
         let sql_schema = match sql_reflection
             .as_ref()
             .and_then(|c| c.schema_file.as_ref().map(|f| (f.clone(), c.driver)))
         {
-            Some((path, driver)) => {
-                let path = resolve_against_config(path);
-                settle(
-                    sql::schema::parse_ddl_file(&root.join(path), driver).map(Some),
-                    policy,
-                    &mut warnings,
-                    None,
-                )?
-            }
+            Some((path, driver)) => settle(
+                configured_file("sql_reflection.schema_file", &path)
+                    .and_then(|path| sql::schema::parse_ddl_file(&root.join(path), driver))
+                    .map(Some),
+                policy,
+                &mut warnings,
+                None,
+            )?,
             None => None,
         };
         if let Some(schema) = &sql_schema
@@ -790,8 +829,7 @@ impl Session {
             reflection
                 .scan_paths
                 .iter()
-                .cloned()
-                .map(resolve_against_config)
+                .flat_map(configured_roots)
                 .collect()
         };
         let no_composer = overrides.no_composer || reflection.no_composer.unwrap_or(false);
@@ -801,8 +839,7 @@ impl Session {
             reflection
                 .stub_paths
                 .iter()
-                .cloned()
-                .map(resolve_against_config)
+                .flat_map(configured_roots)
                 .collect()
         };
         let mut scan_files: Vec<PathBuf> = Vec::new();
@@ -866,9 +903,16 @@ impl Session {
             &mut warnings,
             ext::ActiveExtensions::default(),
         )?;
-        let baseline = overrides
-            .baseline
-            .or(session.baseline.clone().map(resolve_against_config));
+        let baseline = match (overrides.baseline, &session.baseline) {
+            (Some(path), _) => Some(path),
+            (None, Some(text)) => settle(
+                configured_file("baseline", text).map(Some),
+                policy,
+                &mut warnings,
+                None,
+            )?,
+            (None, None) => None,
+        };
         let baseline_mode =
             if overrides.baseline_match_identifier || session.baseline_match_identifier {
                 crate::baseline::MatchMode::Identifier
