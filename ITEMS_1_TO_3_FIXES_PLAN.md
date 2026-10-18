@@ -55,8 +55,11 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   - R8 (`f676049c`): −35.6 M off, with no wall change beyond the noise, off (p = 0.940) or
     warm (p = 0.247). The project's public result maps are keyed by the file's number too
     (its Built). The Piwigo output was the oracle's in every run, off and warm.
+  - R9 (`098af486`): the editor hashes a document once per edit. Its Cost and Change did not
+    hold: no load takes both the cache key and the digest, so the key is unchanged, and what
+    was fixed is the edit path's digest (its Built). No time is claimed.
 
-  R9 is next.
+  R7 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -69,9 +72,10 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   `hashed_path.rs`, `vendor.rs`, `walk.rs` and `session.rs`, R13 `vendor.rs`,
   `crates/composer/src/lib.rs`, `file_cache.rs` and `session.rs`, R10 `walk.rs` and
   `session.rs`, R5 `use_sites.rs`, `file_tables.rs`, `file_table.rs`, `project.rs`,
-  `session.rs`, `lsp.rs` and `file_id.rs`, and R8 `project.rs`, `session.rs`, `lsp.rs`,
+  `session.rs`, `lsp.rs` and `file_id.rs`, R8 `project.rs`, `session.rs`, `lsp.rs`,
   `class_shape.rs`, `composer_hygiene.rs`, `banned.rs`, `mock_hygiene.rs`, `architecture.rs`,
-  `whole_program/renamed_named_arguments.rs` and `main/incremental_bench.rs`.
+  `whole_program/renamed_named_arguments.rs` and `main/incremental_bench.rs`, and R9
+  `source.rs`, `project.rs` and `lsp.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -134,7 +138,7 @@ Where the rows come from (decision 6):
 | 11 | R10 | LOAD-8.10 | the walk does not wait for vendor discovery | wall, warm | 120 ms with the pool idle | R3 |
 | 12 | R5 | LOAD-8.5 | per-file tables keyed by `FileId` | Ir | about 27 M | — |
 | 13 | R8 | LOAD-8.8 | identity is a `FileId` inside the scope that owns the table | Ir | about 34 M | R5 |
-| 14 | R9 | LOAD-8.9 | the bytes hashed once in the editor | the editor's | 24.1 M per warm load, with `retain_source` on | — |
+| 14 | R9 | LOAD-8.9 | the bytes hashed once in the editor | the editor's | one XXH3 pass more per document edit, and per project that holds it (first read as 24.1 M per warm load; R9's Built) | — |
 | 15 | R7 | LOAD-8.7 | the remaining component walks on the load path | Ir | about 61 M to remove | R2 to R6, R8 |
 
 Why this order (decision 4):
@@ -1063,6 +1067,33 @@ workload, `phpstan-rs incremental-bench <dir>` (the project's profiling table; f
 `vendor/symfony/src/Symfony/Component/Console`), at workspace open and per edit, after checking
 that the bench runs with `retain_source` and the file cache on.
 
+**Built** as `098af486`, on another reading of the code. The Cost, Now and Change above do not
+hold, at `aa896697` as now:
+
+- **No load takes both hashes.** Only a project built once reads the per-file cache: the
+  editor's load (`load_listed`) passes `built_once && role != Analysed`, and the batch load's
+  project is always built once. The editor's projects never are, and the batch run's retains
+  no source. So the 24.1 M is the batch run's only hash of the bytes, the editor's load takes
+  the digest once per file, and keying the cache by the digest would only have added a second
+  `finish_128` per file to the batch run. The key is unchanged.
+- **The bench takes neither.** `incremental-bench`'s project retains no source and is not
+  built once, so the check this row's Measure asked for fails, and the bench cannot measure
+  either form of the row.
+- **What the editor hashed twice** is a document it is given. Opening or changing one took the
+  text's digest once for each project that holds the file, to compare it with the one the file
+  was loaded with, and the update took it again to keep it; the debounced change, the open
+  documents' sync and the watched files' change took it once per project.
+- **The change.** `source::Digested` holds a document's bytes with their digest, made in one
+  place, so the two cannot disagree. The server makes one per edit and hands it to every
+  project that holds the file; `Project::update_digested_as` keeps its digest, where
+  `update_file_as` still takes its own.
+- **Measured** by counting the digests in a language server test (two files loaded, one opened
+  with new text) under callgrind, on the lib test binaries of `f676049c` and `098af486`: 4 → 3.
+  Each is one XXH3 pass over the document, microseconds, so no time is claimed.
+- **Test:** an edit given its digest keeps it, as an edit given the bytes keeps theirs.
+
+The ledger's LOAD-8.9 has the record.
+
 ### 15. R7: the remaining component walks on the load path
 
 *LOAD-8.7. An Ir row, last. Needs R2 to R6 and R8.*
@@ -1253,6 +1284,9 @@ ours is noted, and a run it distorts is taken again.
   LOAD-8.8 is READY.
 - Done with R8: LOAD-8.8's row, with the public maps keyed by number; its row in §1's table;
   LOAD-8.7 is READY.
+- Done with R9: LOAD-8.9's row, whose task is now the edit path's digest, with the reading
+  that no load takes both hashes; LOAD-8's cost line. It has no row in §1's table, which holds
+  the rows that moved the off run's Ir.
 - Left, with the rows: §1's range rows, as each row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
   a pathspec; remove scratch worktrees once they are recorded.
@@ -1759,7 +1793,7 @@ bytes in 19,129,005 blocks (peak 809,609,428; exit 641,589,716 in 3,576,888 bloc
 **Table 10: other readings.** Warm `crc32fast::hash` 33.5 M (26.1 M in `read_indexed`, where
 each cached file's entry is checksummed on load; 7.8 M in the stub cache; "Not in this plan").
 Warm `twox_hash` XXH3-128: `Hasher::write` 17.9 M, `finish_128` 2.4 M, 24.1 M in `read_indexed`
-in all (the cache key; R9). Off-run `Utf8Chunks` callers on thread 11: only `LineIndex::new`
+in all (the cache key, the batch run's only hash of the bytes; R9's Built). Off-run `Utf8Chunks` callers on thread 11: only `LineIndex::new`
 (12.7 M), from `Lexer::build` (25.0 M) in `parse_file`. Piwigo's `vendor/composer`:
 `autoload_static.php` 1,808,580 bytes, `autoload_classmap.php` 1,620,829 (not parsed while a
 static file exists), `installed.php` 94,049. Main-thread drops of `[Stmt]` (off run):
