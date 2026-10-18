@@ -2,7 +2,10 @@
 //! checks read of their declarations; made once when the file is parsed, so
 //! the checks need not keep its tree.
 
-use syntax::ast::{ClassDecl, Stmt, Visibility};
+#[cfg(debug_assertions)]
+use syntax::ast::Stmt;
+use syntax::ast::{ClassDecl, Visibility};
+#[cfg(debug_assertions)]
 use syntax::declarations::{Declared, for_each_declaration};
 use syntax::span::Span;
 use types::Name;
@@ -58,7 +61,9 @@ impl DeclaredClass {
     }
 }
 
-/// The classes `program` declares unconditionally.
+/// The classes `program` declares unconditionally, by a walk of its own, which
+/// the debug build compares with the classes found alongside the declarations.
+#[cfg(debug_assertions)]
 pub(crate) fn declared_classes(program: &[Stmt]) -> Vec<DeclaredClass> {
     let mut classes = Vec::new();
     for_each_declaration(program, |declaration, _, _| {
