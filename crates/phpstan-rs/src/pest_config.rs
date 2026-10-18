@@ -228,7 +228,7 @@ impl PestFacts {
     /// The bindings of the file `path` with the tree `ast`; `None` for a
     /// file not named `Pest.php`.
     pub fn of(path: &Path, ast: &[Stmt]) -> Option<PestFacts> {
-        if path_bytes::file_name(path).and_then(|n| n.to_str()) != Some("Pest.php") {
+        if !path_bytes::has_file_name(path, "Pest.php") {
             return None;
         }
         let dir = path.parent()?;

@@ -371,20 +371,24 @@ impl<'a> Starts<'a> {
     /// What reaches `dir`, a resolved directory: what each directory above it
     /// passes down, from the top.
     fn reaching(&self, dir: &Path) -> Reaching<'a> {
-        let ancestors: Vec<(&Path, PathHash)> = hashed_ancestors(dir).collect();
-        ancestors
-            .into_iter()
+        hashed_ancestors(dir)
             .rev()
-            .fold(Reaching::default(), |above, (ancestor, hash)| {
-                self.below(&above, ancestor, hash)
+            .fold(Reaching::default(), |above, (ancestor, hash, name)| {
+                self.below(&above, ancestor, hash, name)
             })
     }
 
-    /// What reaches `dir`, whose hash is `hash`, a subdirectory of a directory
-    /// that `above` reaches: the walks that reach that directory and do not
-    /// exclude the name of `dir`, and the walks that start at `dir`.
-    fn below(&self, above: &Reaching<'a>, dir: &Path, hash: PathHash) -> Reaching<'a> {
-        let name = path_bytes::file_name(dir);
+    /// What reaches `dir`, whose hash is `hash` and whose name is `name`, a
+    /// subdirectory of a directory that `above` reaches: the walks that reach
+    /// that directory and do not exclude `name`, and the walks that start at
+    /// `dir`.
+    fn below(
+        &self,
+        above: &Reaching<'a>,
+        dir: &Path,
+        hash: PathHash,
+        name: Option<&OsStr>,
+    ) -> Reaching<'a> {
         let mut walks: Vec<DirWalk<'a>> = above
             .walks
             .iter()
@@ -580,9 +584,9 @@ impl Tree {
     /// The node and slot of the entry at `path`, or `None` when its directory
     /// cannot be placed.
     fn slot_of(&mut self, path: &HashedPath) -> Option<(usize, usize)> {
-        let (dir, dir_hash) = path.parent()?;
+        let (dir, dir_hash, name) = path.split()?;
         let node = self.node(dir, dir_hash)?;
-        let at = self.nodes[node].listing.position(path.file_name()?)?;
+        let at = self.nodes[node].listing.position(name)?;
         Some((node, at))
     }
 
@@ -600,19 +604,19 @@ impl Tree {
         // hashes of one fold of its path, to the nearest one with a node; the
         // nodes below that one are made from the top down.
         let mut ancestors = hashed_ancestors(dir);
-        let first = ancestors.next();
-        debug_assert_eq!(first, Some((dir, hash)));
-        let mut new = vec![dir];
+        let (first, first_hash, name) = ancestors.next()?;
+        debug_assert_eq!((first, first_hash), (dir, hash));
+        let mut new = vec![(dir, name)];
         let mut up = None;
-        for (ancestor, hash) in ancestors {
+        for (ancestor, hash, name) in ancestors {
             if let Some(node) = self.find(ancestor, hash) {
                 up = Some(node);
                 break;
             }
-            new.push(ancestor);
+            new.push((ancestor, name));
         }
-        for dir in new.into_iter().rev() {
-            up = Some(self.make(dir, up)?);
+        for (dir, name) in new.into_iter().rev() {
+            up = Some(self.make(dir, name, up)?);
         }
         up
     }
@@ -624,13 +628,13 @@ impl Tree {
             .copied()
     }
 
-    /// Makes the node of `dir`, in its slot of `up`, its parent's node, or as a
-    /// top when it has no parent. `None` when `dir` cannot be listed, or when
-    /// its slot holds something else.
-    fn make(&mut self, dir: &Path, up: Option<usize>) -> Option<usize> {
+    /// Makes the node of `dir`, whose name is `name`, in its slot of `up`, its
+    /// parent's node, or as a top when it has no parent. `None` when `dir`
+    /// cannot be listed, or when its slot holds something else.
+    fn make(&mut self, dir: &Path, name: Option<&OsStr>, up: Option<usize>) -> Option<usize> {
         let (path, link) = match up {
             Some(up) => {
-                let name = path_bytes::file_name(dir)?;
+                let name = name?;
                 let at = self.nodes[up].listing.position(name)?;
                 if !matches!(self.nodes[up].slots[at], Slot::Empty) {
                     return None;
@@ -1244,8 +1248,9 @@ impl<'a, 'p> Walk<'a, 'p> {
                 if scope.outside && self.under_root(child.as_path()) {
                     continue;
                 }
-                let below =
-                    reaching.map(|reaching| starts.below(reaching, child.as_path(), child.hash()));
+                let below = reaching.map(|reaching| {
+                    starts.below(reaching, child.as_path(), child.hash(), Some(name))
+                });
                 if below.as_ref().is_some_and(|below| scope.prunes(below)) {
                     continue;
                 }

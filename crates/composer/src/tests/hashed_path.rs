@@ -46,6 +46,16 @@ fn a_path_and_its_parent_have_the_hashes_of_their_components() {
             "{}",
             path.display()
         );
+        assert_eq!(
+            hashed.split(),
+            path.parent().zip(path.file_name()).map(|(parent, name)| (
+                parent,
+                path_hash(parent),
+                name
+            )),
+            "{}",
+            path.display()
+        );
     }
 }
 
@@ -73,13 +83,13 @@ fn an_entry_made_from_its_directory_is_the_path_made_whole() {
 }
 
 #[test]
-fn each_ancestor_has_its_own_hash_from_the_path_up() {
+fn each_ancestor_has_its_own_hash_and_name_from_the_path_up() {
     for path in paths() {
-        let expected: Vec<(&Path, u64)> = path
+        let expected: Vec<(&Path, u64, Option<&OsStr>)> = path
             .ancestors()
-            .map(|ancestor| (ancestor, path_hash(ancestor)))
+            .map(|ancestor| (ancestor, path_hash(ancestor), ancestor.file_name()))
             .collect();
-        let found: Vec<(&Path, u64)> = hashed_ancestors(&path).collect();
+        let found: Vec<(&Path, u64, Option<&OsStr>)> = hashed_ancestors(&path).collect();
         assert_eq!(found, expected, "{}", path.display());
     }
 }

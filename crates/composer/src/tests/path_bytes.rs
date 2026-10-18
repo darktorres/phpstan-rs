@@ -4,7 +4,7 @@
 use crate::manifest::lexically_normalized;
 use crate::path_bytes;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// A repeatable mix of paths: absolute and relative, with doubled and
 /// trailing separators, `.` and `..` components, and names with and without
@@ -54,7 +54,46 @@ fn a_name_and_a_parent_are_read_as_the_components_give_them() {
             "{}",
             path.display()
         );
+        assert_eq!(
+            path_bytes::split(&path),
+            path.parent().zip(path.file_name()),
+            "{}",
+            path.display()
+        );
+        for name in ["a", "b.php", ".php", "x..php", "php", "é", "a.b"] {
+            assert_eq!(
+                path_bytes::has_file_name(&path, name),
+                path.file_name() == Some(OsStr::new(name)),
+                "{} named {name}",
+                path.display()
+            );
+        }
     }
+}
+
+#[test]
+fn the_components_and_the_ancestors_they_end_are_read_as_the_path_gives_them() {
+    let mut read = 0;
+    for path in paths() {
+        let Some(components) = path_bytes::components(&path) else {
+            continue;
+        };
+        read += 1;
+        // The ancestors from the top, but for a relative path's empty one.
+        let mut ancestors: Vec<&Path> = path.ancestors().collect();
+        ancestors.reverse();
+        if !path.has_root() {
+            ancestors.remove(0);
+        }
+        let expected: Vec<(Component<'_>, &Path)> = path.components().zip(ancestors).collect();
+        assert_eq!(
+            components.collect::<Vec<_>>(),
+            expected,
+            "{}",
+            path.display()
+        );
+    }
+    assert!(read > 100, "the mix holds paths the bytes read: {read}");
 }
 
 #[test]
@@ -81,6 +120,50 @@ fn a_prefix_is_read_as_the_components_give_it() {
                 path.display(),
                 base.display()
             );
+        }
+    }
+}
+
+#[test]
+fn a_prefix_spelled_another_way_is_read_as_the_components_give_it() {
+    let bases = [
+        "/", "/a", "/a/b", "/a/..", "/a/.b", "a", "a/b", "..", "../a",
+    ];
+    // Ways to go on after a base, and to spell the base with components that
+    // `Path` passes over.
+    let tails = [
+        "", "/", "//", "/x", "//x", "/./x", "/.", "x", "/x/", "/x//y", "/.x",
+    ];
+    for base in bases {
+        let mut spellings = vec![base.to_string()];
+        for (at, _) in base.match_indices('/') {
+            for extra in ["/", "/.", "./"] {
+                let mut spelled = base.to_string();
+                spelled.insert_str(at + 1, extra);
+                spellings.push(spelled);
+            }
+        }
+        spellings.push(format!("./{base}"));
+        spellings.push(base[..base.len() - 1].to_string());
+        for spelled in &spellings {
+            for tail in tails {
+                let path = PathBuf::from(format!("{spelled}{tail}"));
+                let base = Path::new(base);
+                assert_eq!(
+                    path_bytes::starts_with(&path, base),
+                    path.starts_with(base),
+                    "{} against {}",
+                    path.display(),
+                    base.display()
+                );
+                assert_eq!(
+                    path_bytes::strip_prefix(&path, base),
+                    path.strip_prefix(base).ok(),
+                    "{} against {}",
+                    path.display(),
+                    base.display()
+                );
+            }
         }
     }
 }

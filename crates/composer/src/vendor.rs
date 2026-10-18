@@ -596,7 +596,7 @@ impl<'p> Resolver<'p> {
     /// outside `vendor/`, and still belongs to vendor context.
     fn locate(&mut self, raw: &Path) -> Option<Located> {
         let unknown = |path| Located { path, kind: None };
-        let (Some(dir), Some(name)) = (path_bytes::parent(raw), path_bytes::file_name(raw)) else {
+        let Some((dir, name)) = path_bytes::split(raw) else {
             return self.path_alone(raw).map(unknown);
         };
         if dir.as_os_str().is_empty() {
@@ -704,18 +704,14 @@ impl<'p> Resolver<'p> {
                 return Some(HashedPath::new(known.to_path_buf()));
             }
         }
-        let Some(parent) = path_bytes::parent(dir) else {
-            // The root.
+        // The root, or a path that ends in `..`, which names the parent of
+        // what precedes it: the system resolves it.
+        let Some((parent, name)) = path_bytes::split(dir) else {
             return canonicalized(dir);
         };
         if parent.as_os_str().is_empty() {
             return canonicalized(dir);
         }
-        let Some(name) = path_bytes::file_name(dir) else {
-            // Ends in `..`: the parent of what precedes it, as the system
-            // reads it.
-            return canonicalized(dir);
-        };
         let Some(parent_listed) = self.listed(parent) else {
             return canonicalized(dir);
         };
@@ -859,7 +855,7 @@ impl<'d> Walks<'d> {
     /// explicitly, so a file the walk could miss (a missing one, or one
     /// behind a directory that cannot be read) is still listed.
     fn list(&mut self, file: &HashedPath) -> bool {
-        let (Some((dir, hash)), Some(name)) = (file.parent(), file.file_name()) else {
+        let Some((dir, hash, name)) = file.split() else {
             return false;
         };
         path_bytes::is_php_name(name)
@@ -891,17 +887,18 @@ impl<'d> Walks<'d> {
     /// directory is a directory and not a link, each directory below it down
     /// to `dir` is one by its parent's listing, and each can be listed.
     fn find(&self, dir: &Path) -> Option<Arc<Listing>> {
+        // The names of the directories below that one, down to `dir`.
         let mut below = Vec::new();
         let mut ancestors = hashed_ancestors(dir);
         let (root, checked) = loop {
-            let (ancestor, hash) = ancestors.next()?;
+            let (ancestor, hash, name) = ancestors.next()?;
             if let Some(root) = self
                 .roots
                 .find(hash, |(root, _)| root.as_path() == ancestor)
             {
                 break root;
             }
-            below.push(ancestor);
+            below.push(name);
         };
         let mut listing = checked
             .get_or_init(|| {
@@ -911,8 +908,8 @@ impl<'d> Walks<'d> {
             })
             .clone()?;
         let mut path = HashedPath::clone(root);
-        for ancestor in below.into_iter().rev() {
-            let name = path_bytes::file_name(ancestor)?;
+        for name in below.into_iter().rev() {
+            let name = name?;
             let is_dir = listing
                 .entry(name)
                 .and_then(|entry| entry.kind)

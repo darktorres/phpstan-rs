@@ -8,7 +8,7 @@
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::hash::BuildHasher;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use rustc_hash::FxBuildHasher;
 
@@ -75,9 +75,10 @@ impl HashedPath {
         path_bytes::parent(&self.path).map(|parent| (parent, self.parent_hash))
     }
 
-    /// The path's last component, as `Path::file_name` gives it.
-    pub fn file_name(&self) -> Option<&OsStr> {
-        path_bytes::file_name(&self.path)
+    /// `parent` and the path's last component, as `Path::file_name` gives it,
+    /// when the path has both, from one reading of that component.
+    pub fn split(&self) -> Option<(&Path, PathHash, &OsStr)> {
+        path_bytes::split(&self.path).map(|(dir, name)| (dir, self.parent_hash, name))
     }
 
     pub fn into_path_buf(self) -> PathBuf {
@@ -150,21 +151,44 @@ pub fn path_hash(path: &Path) -> PathHash {
         .fold(0, |hash, component| child_hash(hash, component.as_os_str()))
 }
 
-/// Each ancestor of `path`, from `path` itself up to the top, with its hash.
-/// The hashes come from one fold over the components, made first; each
-/// ancestor is made as the iterator reaches it, so a caller that stops near
-/// `path` pays little more than the fold.
-pub fn hashed_ancestors(path: &Path) -> impl Iterator<Item = (&Path, PathHash)> {
-    // A relative path's last ancestor is the empty path, of hash 0.
-    let mut hashes = Vec::with_capacity(16);
-    hashes.push(0);
-    let mut hash = 0;
-    for component in path.components() {
-        hash = child_hash(hash, component.as_os_str());
-        hashes.push(hash);
+/// Each ancestor of `path`, from `path` itself up to the top, with its hash
+/// and its name, as `Path::file_name` gives it; from the top, reversed. All
+/// come from one pass over the components.
+pub fn hashed_ancestors(
+    path: &Path,
+) -> impl DoubleEndedIterator<Item = (&Path, PathHash, Option<&OsStr>)> {
+    // From the top. A relative path's top ancestor is the empty path, of
+    // hash 0.
+    let mut ancestors = Vec::with_capacity(16);
+    if let Some(components) = path_bytes::components(path) {
+        if !path.has_root() {
+            ancestors.push((Path::new(""), 0, None));
+        }
+        let mut hash = 0;
+        for (component, ancestor) in components {
+            hash = child_hash(hash, component.as_os_str());
+            let name = match component {
+                Component::Normal(name) => Some(name),
+                _ => None,
+            };
+            ancestors.push((ancestor, hash, name));
+        }
+    } else {
+        let mut hashes = Vec::with_capacity(16);
+        hashes.push(0);
+        let mut hash = 0;
+        for component in path.components() {
+            hash = child_hash(hash, component.as_os_str());
+            hashes.push(hash);
+        }
+        ancestors.extend(
+            path.ancestors()
+                .zip(hashes.into_iter().rev())
+                .map(|(ancestor, hash)| (ancestor, hash, ancestor.file_name())),
+        );
+        ancestors.reverse();
     }
-    std::iter::successors(Some(path), |&ancestor| path_bytes::parent(ancestor))
-        .zip(hashes.into_iter().rev())
+    ancestors.into_iter().rev()
 }
 
 /// The hash of the path that `name` makes under a directory of hash `parent`.
