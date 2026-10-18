@@ -33,6 +33,7 @@ jobs:
           - os: windows-2025-vs2026
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       # Windows images check text out with CRLF. .gitattributes keeps this
       # repository's files LF, but not the phpstan-src submodule's stubs,
@@ -40,21 +41,10 @@ jobs:
       - name: Check text out as committed
         run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # build.rs embeds vendor/phpstan-src/src; the other submodules are
-      # test corpora the build never reads.
-      - name: Fetch the phpstan-src submodule
-        run: git submodule update --init --depth 1 vendor/phpstan-src
-
-      # .cargo/config.toml links x86_64 Linux artifacts with mold.
-      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
-        if: ${{ runner.os == 'Linux' && runner.arch == 'X64' }}
+      # The caches stay out of a release build; see the action.
+      - uses: ./.github/actions/setup-rust
         with:
-          mold-version: 2.42.1
-
-      # rust-toolchain.toml pins the nightly (and its components);
-      # `rustup install` installs it without updating rustup itself.
-      - name: Install the pinned toolchain
-        run: rustup install --no-self-update
+          cache: "false"
       # Every other leg builds for its runner's own architecture.
       - name: Add the x86_64 macOS target
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}
