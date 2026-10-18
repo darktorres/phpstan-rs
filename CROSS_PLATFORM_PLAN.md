@@ -7,12 +7,13 @@
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
   round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
-  R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`), R8 (`7d5bddd4`, `06486da9`)
-  R9 (`da9e86df`), R10 (`007d827b`), R11 (`a94e27ec`) and R12 (`acc33609`). The rows are built
-  in the order of the table below, one commit each, with a pathspec, since another session
-  shares the checkout. R18 has one commit for each step, R6 has a second for the rule its build found,
-  R7 has a second for the case rule, and R8 has a second for the files an environment change
-  re-checks.
+  R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`), R8 (`7d5bddd4`, `06486da9`),
+  R9 (`da9e86df`), R10 (`007d827b`), R11 (`a94e27ec`), R12 (`acc33609`) and R13 (`f5e418d6`,
+  `ee903695`, `2c7bf898`, `df4be250`). The rows are built in the order of the table below, one
+  commit each, with a pathspec, since another session shares the checkout. R18 has one commit
+  for each step, R6 has a second for the rule its build found, R7 has a second for the case
+  rule, R8 has a second for the files an environment change re-checks, and R13 has one for the
+  fixture harness, one for four tests' paths, one for the links and one for the line breaks.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -37,7 +38,7 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** R13, the tests on every platform.
+- **Next:** R14, the build scripts. Round 3 follows R14, and its push is asked first.
 
 ## Context
 
@@ -1736,6 +1737,131 @@ are unchanged.
     Windows. Once their link tests run everywhere, those imports and helpers are used again.
     Whatever stays unix-only, the permission tests, has its imports under the same `cfg`.
 
+**Built** (`f5e418d6`, `ee903695`, `2c7bf898`, `df4be250`).
+
+- **Round 1's and 2's Unix assumptions** (`f5e418d6`, `ee903695`):
+  - the fixture harness spells the path column with `diagnostics::report_path`, and
+    `portable` names a fixture's directory in the project's canonical spelling, and in the
+    spelling the harness was given;
+  - the PSR-4 fixture has one spelling of each directory: the correctly placed class moved to
+    `src/Controller.php`, so `src/http/` is the only spelling of that directory, and
+    `psr4.caseMismatch` is reported on a folding disk too;
+  - four tests name a path as the system spells it: `collect_php_files_…`,
+    `the_entries_are_sorted_by_name_bytes` (names that differ in more than case),
+    `a_superseded_run_…` (keyed by the canonical path) and the parser-crash session test (a URI
+    made by `path_to_uri`).
+- **Links** (`2c7bf898`):
+  - `test_links` is a test-only module in composer and in the package, each with `link_dir`
+    and `link_file`; the package's has `unlink_dir` as well. A directory link is a symbolic
+    link on Unix and a junction on Windows (the `junction` crate, a Windows-only
+    dev-dependency, `=2.1.0`, MIT; its `unsafe` stays a dependency's). A junction holds an
+    absolute target, so a relative one is joined to the link's directory first, and the
+    junction crate resolves its `..`. A file link is a symbolic link on both; its relative
+    target is written with `\`, which is the only separator Windows reads there. A privilege
+    error (1314) is reported with the Developer Mode hint.
+  - 21 link tests lost their `#[cfg(unix)]`, in `walk_identity.rs`, `session_identity.rs`,
+    `symlink_identity.rs`, `workspace_folders.rs`, `path_spelling.rs`, `manifest.rs`,
+    `dir_listings.rs`, `package_ownership.rs` and `vendor_context_discovery.rs`; so did
+    `hard_links_stay_two_files`. The permission tests stay Unix-only.
+  - The oracle tree's unreadable directory is made so by `set_locked` where a mode can do it.
+    Elsewhere, and for a user who can read a mode-000 directory, the directory is listed, and
+    the test expects `secret.php` then. It used to return early for the second case.
+  - The unused imports and helpers the Windows leg found are used again: the tests that used
+    them run there now.
+  - Checked here: clippy and the tests of composer (76) and of the package's converted
+    modules (66); both lockfiles `--locked`; `cargo deny`; `cargo machete`; the module graph
+    and arch gates; the Windows type check of both helpers, with the Windows arm of each
+    function compiled for `x86_64-pc-windows-gnu`. The Windows leg runs the junctions.
+- **Line breaks** (`df4be250`):
+  - **What the tests found.** The plan asked for CRLF tests of the lexer, `phpdoc`, `LineIndex`
+    and the LSP positions. Run over `\n`, `\r\n` and `\r` alike, they found two defects older
+    than the plan, on every platform.
+    - A `//` or `#` comment in a CRLF file kept its `\r`: its span and its text ended after it.
+    - A lone `\r` was not a line break anywhere. PHP counts it (php 8.5: `__LINE__`, the end of
+      a `//` comment, the newline a `?>` takes, the lines of a heredoc, and so the label that
+      closes one), and so do VS Code and the LSP specification ("`\n`, `\r\n` and `\r`"). A
+      file with only `\r` ended lines had its rest after the first `//` comment swallowed, and
+      no diagnostic at all.
+  - **One definition.** `syntax::span` holds `line_break_len` (the bytes of the break at the
+    start of a slice: two for `\r\n`, one for either alone), `lines` (as `str::lines`, a
+    lone `\r` ends a line too) and `count_line_breaks`. `LineIndex` uses the same rule: a line
+    ends at `\n`, `\r\n` or `\r`, and the `\r` of a `\r\n` is part of its break. Its
+    `line_end` is the offset before the whole break, so the position of an LSP client that
+    names a column past the visible end finds the end of the line (the protocol's clamp),
+    where it used to land between `\r` and `\n`. A bit for each line records which lines end in
+    `\r\n` (nothing for a source without one), and `line_break()` is the first break the
+    source writes. A source with no `\r`, which is every checkout on Linux and macOS, is
+    scanned for `\n` as before, after one `memchr` pass for `\r`; the scan for all three runs
+    only for a source that holds one.
+  - **Where it is read.**
+    - The lexer: a line comment ends at any break (and so its text has none), `?>` takes one
+      break of any of the three, and a heredoc or nowdoc reads its opening line, its lines
+      (the label closes only at the start of a line), the break before the label and its
+      indentation stripping by the same rule. A break inside the body stays as the source
+      wrote it.
+    - `phpdoc`'s two parsers split a docblock with `syntax::span::lines`.
+    - `@phpstan-ignore` comments: the lines a comment spans, and the identifier list's
+      lines.
+    - The `friendly` format's frame splits the source with `lines`.
+    - `composer.json`'s line numbers (`LineFinder`) come from a `LineIndex`.
+    - An auto-fix that adds a line ends it with the file's own break:
+      `constructor.missingParentCall`, `parentCall.missing`. A file that mixes breaks gets the
+      first one it writes. Linux files get `\n`, as they did.
+  - **Checked against PHP.** php 8.5 gives the same `__LINE__`, heredoc contents (hex-compared
+    for six heredocs) and close-tag newline for each of the three breaks, and the new tests
+    assert what it gave.
+  - **Tests.**
+    - The lexer, in `lexer/tests/line_breaks.rs`: comments, `?>`, heredoc and nowdoc bodies,
+      the label rules, indentation, empty and blank-line bodies, interpolated parts' positions,
+      and every token's line and column across a source of all kinds, each over the three
+      breaks. The skipping test's byte-by-byte oracle ends comments at `\r` too.
+    - A randomized one: 3,000 sources of up to eight fragments (comments of each kind,
+      strings, heredocs, nowdocs, close tags, blank lines), each written with the three
+      breaks, lex to the same kinds of token between the same lines and columns.
+    - `LineIndex`: lines, starts, ends, positions and clamping over the three breaks, a `\r`
+      before a `\r\n`, the first break of a source, `lines` against `str::lines`, and the scan
+      of a source without a `\r` against the general one.
+    - `phpdoc`: a docblock with every tag kind, a wrapped array shape and its `//` comments
+      parse equal across the three breaks, in both parsers.
+    - The package: ignore comments (lines, identifiers, errors); the friendly frame; the two
+      auto-fixes and the member deletion; `composer.json`'s lines; and the LSP, where a
+      document's diagnostics, definition and hover (and one at the end of a line) are equal.
+    - Mutations: the old line splitting in phpdoc fails five tests, and the old comment end
+      fails three of the lexer's, the randomized one among them.
+  - **Cost.** `LineIndex::new` runs once per file, so its scan is in every run's instruction
+    count. Counted by callgrind over Piwigo's 20,200 files (91 MB, 2.54 M lines), the scan
+    alone with the file reads taken out:
+    - the old `memchr_iter` for `\n`: 147.7 M instructions;
+    - one `memchr2_iter` for both breaks: 198.4 M (+50.7 M), since lines of about 36 bytes make
+      each call dear;
+    - one pass for `\r`, then the old scan: 159.9 M (+12.2 M), which is what the code does.
+
+    The time is the same in each (39 ms for the corpus). The lexer's `memchr3` for a comment's
+    end and the docblock splitting are not counted apart: the batch's callgrind run counts the
+    sum.
+  - **Corpora.** Seven vendored corpora (guzzle, amphp, reactphp-http, phpstan-strict-rules,
+    composer, doctrine-collections and wordpress: 6,142 PHP files, 43,886 diagnostics),
+    checked as they are, with every line break written `\r\n`, and with every line break
+    written `\r` (a file that held `\r\n` first read as one break). Each is `check-project
+    --no-composer --format json` with the file cache off, and the diagnostics are compared
+    one by one, from a gate binary built from the commit.
+    - `\r\n`: identical, but for one message that quotes a string literal with its own breaks
+      (doctrine-collections, `DoubledMethod.php:223`: `"\n\n …"` is `"\r\n\r\n …"`).
+    - `\r`: the same, and 17 lines that differ besides, all from regular expressions with the
+      `x` flag and `#` comments (wordpress `upgrade.php:3067` and `class-snoopy.php:630`, and
+      `UriValidator.php` in composer's vendor tree). PCRE ends such a comment at `\n` alone,
+      so with `\r` the comment runs to the pattern's end, its groups are gone, and the tool
+      reports a pattern that does not compile or an offset that does not exist. php 8.5
+      compiles the wordpress pattern with `\n` and with `\r\n`, and with `\r` fails with
+      "missing closing parenthesis at offset 931", the message and offset the tool reports.
+  - **Checked here.**
+    - Clippy, `-D warnings`, on the workspace; the lib suite (1,351), `syntax` (300), `phpdoc`
+      (157) and `composer` (77); the fixtures (3,847, gate profile).
+    - The corpora above.
+  - **Left to the legs.** The junction and file-link tests on Windows, and `set_locked`'s
+    fallback where a mode cannot lock a directory. The line-break tests build their sources in
+    memory, so they run alike on every leg.
+
 ### R14. Build scripts: the same embedded data everywhere, and dhat's walk per platform
 
 **Now.**
@@ -1870,9 +1996,6 @@ Builds and runs need no approval. One heavy job at a time, under `nice -n 19`, w
 
 - **The extension's TypeScript** already handles the platforms: `.exe` and `.cmd`, chmod, the
   quarantine attribute.
-- **CRLF semantics** beyond R13's tests:
-  - `phpdoc` splits with `str::lines` (CRLF-aware), and its lexer stops at `\r`;
-  - the syntax crate handles `\r` at 7 sites.
 - **fnmatch's `?` and `[…]`** in `ignoreErrors` are a parity gap on every platform, not a
   platform-scoped one. PHPStan's matcher never sees a `\`: `normalizePath` has already turned
   each one into a separator (R6).

@@ -298,12 +298,17 @@ Done:
 - R12: the coloured friendly report is written through `anstream`, which turns on a
   Windows console's virtual-terminal processing or translates the escapes. It has
   not been seen on a console: the CI legs' stdout is a pipe.
+- R13: the tests run on every platform. Directory links are junctions on Windows
+  and symbolic links elsewhere, the fixture harness and four tests spell a path as
+  the system does, and a line ends at `\n`, `\r\n` or `\r` wherever the code reads
+  one. That last part found two older defects: a `//` comment in a CRLF file kept
+  its `\r`, and a file of lone `\r` lost its code after the first comment.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
 path and the include rule. All four are built.
 
-Open: R13 to R17, the rounds after them, and the batch's checks.
+Open: R14 to R17, the rounds after them, and the batch's checks.
 
 ## Documents with no place in the stack
 
