@@ -24,6 +24,8 @@
 //! A walk of a role above context is decided by the roots of such roles
 //! alone, so the context roots can be given while those walks run
 //! (`Walk::finish_with`); the context walks start once every root is known.
+//! What the walks list is placed once they end, while the sink still takes
+//! the files they handed over.
 //!
 //! The listed files are placed in a tree of the directories that hold them.
 //! Each directory has one slot per entry of its listing, in the listing's
@@ -37,7 +39,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Mutex;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, mpsc};
 
 use composer::dir_listings::{DirListings, Listing};
 use composer::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors, path_hash};
@@ -57,7 +59,7 @@ pub(crate) enum Role {
 }
 
 impl Role {
-    /// The role's slot in `Walk::targets`.
+    /// The role's slot in `Placed::targets`.
     fn index(self) -> usize {
         self as usize
     }
@@ -171,8 +173,15 @@ type Take<'t> = dyn Fn(Vec<Listed>) + Sync + 't;
 pub(crate) struct Walk<'a, 'p> {
     /// The roots given before the walk starts.
     given: Roots<'a>,
-    /// Every root the walk was given, once it has started.
-    roots: Vec<Root<'a>>,
+    /// What the walks read as they list.
+    lister: Lister<'a, 'p>,
+    /// What the walks listed.
+    placed: Placed<'a>,
+}
+
+/// What the walks of a run read as they list: the walks the roots start, the
+/// roots, the directories' listings and the packages.
+struct Lister<'a, 'p> {
     /// The walks the roots of the roles above context start, by the path each
     /// starts from, so that a file is known to be listed by one walk of its
     /// strongest role before the walks run. Those walks are decided by these.
@@ -180,9 +189,18 @@ pub(crate) struct Walk<'a, 'p> {
     /// The walks every root starts, for the context walks: known once the
     /// context roots are.
     every_start: OnceLock<Starts<'a>>,
-    /// The context walks: those of the context roots given before the walk
-    /// started, then those of the ones given while the stronger walks ran.
-    context_jobs: OnceLock<Vec<Job<'a>>>,
+    /// Every root the walk was given, known once the context roots are.
+    roots: OnceLock<Vec<Root<'a>>>,
+    /// The listings of the directories the walk reads. A load shares them with
+    /// its vendor discovery, so each directory is read once.
+    listings: Arc<DirListings>,
+    /// The packages whose directories give each listed file its owner.
+    packages: &'p composer::PackageIndex,
+}
+
+/// What the walks listed: the files, placed in the tree of their directories
+/// or kept aside, and the targets of the links met.
+struct Placed<'a> {
     /// The targets of the links met so far, by the role of the walk that met
     /// each link, with the names that walk excludes.
     targets: [VecDeque<(PathBuf, &'a [&'a str])>; 3],
@@ -191,11 +209,6 @@ pub(crate) struct Walk<'a, 'p> {
     /// The listed files the tree cannot place: a file whose directory, or one
     /// of the directories above it, cannot be listed.
     unplaced: Vec<Listed>,
-    /// The listings of the directories the walk reads. A load shares them with
-    /// its vendor discovery, so each directory is read once.
-    listings: Arc<DirListings>,
-    /// The packages whose directories give each listed file its owner.
-    packages: &'p composer::PackageIndex,
 }
 
 /// Roots given to a walk, with the walk of each, in the order they were
@@ -220,12 +233,20 @@ enum Job<'a> {
     File { path: HashedPath, role: Role },
 }
 
-impl Job<'_> {
+impl<'a> Job<'a> {
     /// The role of the files the walk lists.
     fn role(&self) -> Role {
         match self {
             Job::Dir { scope, .. } => scope.role,
             Job::File { role, .. } => *role,
+        }
+    }
+
+    /// The directory names the walk leaves out below its root.
+    fn excluded(&self) -> &'a [&'a str] {
+        match self {
+            Job::Dir { scope, .. } => scope.excluded,
+            Job::File { .. } => &[],
         }
     }
 }
@@ -870,15 +891,18 @@ impl<'a, 'p> Walk<'a, 'p> {
     pub(crate) fn new(listings: Arc<DirListings>, packages: &'p composer::PackageIndex) -> Self {
         Walk {
             given: Roots::default(),
-            roots: Vec::new(),
-            starts: Starts::default(),
-            every_start: OnceLock::new(),
-            context_jobs: OnceLock::new(),
-            targets: Default::default(),
-            tree: Tree::new(Arc::clone(&listings)),
-            unplaced: Vec::new(),
-            listings,
-            packages,
+            lister: Lister {
+                starts: Starts::default(),
+                every_start: OnceLock::new(),
+                roots: OnceLock::new(),
+                listings: Arc::clone(&listings),
+                packages,
+            },
+            placed: Placed {
+                targets: Default::default(),
+                tree: Tree::new(listings),
+                unplaced: Vec::new(),
+            },
         }
     }
 
@@ -922,7 +946,9 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// Walks the roots as `finish` does, with the context roots that `context`
     /// adds. `context` runs on the calling thread while the walks of the roots
     /// above context run, which no context root decides, and the context walks
-    /// start once it returns.
+    /// start once it returns. What the walks list is placed, and the targets
+    /// of their links walked, once they end, while `sink` still takes the
+    /// files they handed over.
     pub(crate) fn finish_with<S: FinalFiles>(
         mut self,
         pool: &rayon::ThreadPool,
@@ -932,90 +958,57 @@ impl<'a, 'p> Walk<'a, 'p> {
         let Roots {
             mut roots, jobs, ..
         } = std::mem::take(&mut self.given);
-        let (stronger, given_context): (Vec<Job<'a>>, Vec<Job<'a>>) =
+        let (stronger, mut context_jobs): (Vec<Job<'a>>, Vec<Job<'a>>) =
             jobs.into_iter().partition(|job| job.role() > Role::Context);
-        self.starts = Starts::of(&stronger, &roots);
+        self.lister.starts = Starts::of(&stronger, &roots);
         let hand = Hand {
             sink,
             #[cfg(test)]
             handed: Mutex::default(),
         };
-        let mut later = ContextRoots(Roots::default());
-        let stronger_found = OnceLock::new();
-        let context_found = OnceLock::new();
-        let walk = &self;
+        let (lister, placed) = (&self.lister, &mut self.placed);
+        let (stronger_sent, stronger_found) = mpsc::sync_channel(1);
         pool.in_place_scope(|tasks| {
-            tasks.spawn(|tasks| {
-                let take = |files: Vec<Listed>| hand.take(tasks, files);
+            let (handing, stronger) = (&hand, &stronger);
+            // A walk that panics drops the sender with its task, which ends
+            // the wait for it below.
+            tasks.spawn(move |tasks| {
+                let take = |files: Vec<Listed>| handing.take(tasks, files);
                 let found: Vec<Vec<Found>> = stronger
                     .par_iter()
-                    .map(|job| walk.run(job, Some(&take)))
+                    .map(|job| lister.run(job, Some(&take)))
                     .collect();
-                let _ = stronger_found.set(found);
+                let _ = stronger_sent.send(found);
             });
+            let mut later = ContextRoots(Roots::default());
             context(&mut later);
-            let jobs = walk.context_jobs.get_or_init(|| {
-                given_context
-                    .into_iter()
-                    .chain(std::mem::take(&mut later.0.jobs))
+            roots.extend(later.0.roots);
+            context_jobs.extend(later.0.jobs);
+            let _ = lister
+                .every_start
+                .set(Starts::of(stronger.iter().chain(&context_jobs), &roots));
+            let _ = lister.roots.set(roots);
+            let take = |files: Vec<Listed>| hand.take(tasks, files);
+            let context_found: Vec<Vec<Found>> = pool.install(|| {
+                context_jobs
+                    .par_iter()
+                    .map(|job| lister.run(job, Some(&take)))
                     .collect()
             });
-            let _ = walk.every_start.set(Starts::of(
-                stronger.iter().chain(jobs),
-                roots.iter().chain(&later.0.roots),
-            ));
-            tasks.spawn(|tasks| {
-                let take = |files: Vec<Listed>| hand.take(tasks, files);
-                let found: Vec<Vec<Found>> = jobs
-                    .par_iter()
-                    .map(|job| walk.run(job, Some(&take)))
-                    .collect();
-                let _ = context_found.set(found);
-            });
-        });
-        roots.extend(later.0.roots);
-        self.roots = roots;
-        let context_jobs = self.context_jobs.take().unwrap_or_default();
-        let found = stronger
-            .iter()
-            .zip(stronger_found.into_inner().unwrap_or_default())
-            .chain(
-                context_jobs
-                    .iter()
-                    .zip(context_found.into_inner().unwrap_or_default()),
-            );
-        for (job, found) in found {
-            match job {
-                Job::Dir { scope, .. } => self.merge(found, scope.role, scope.excluded),
-                Job::File { role, .. } => self.merge(found, *role, &[]),
+            let stronger_found = stronger_found.recv().unwrap_or_default();
+            for (job, found) in stronger
+                .iter()
+                .zip(stronger_found)
+                .chain(context_jobs.iter().zip(context_found))
+            {
+                placed.merge(found, job.role(), job.excluded());
             }
-        }
-        pool.install(|| {
-            let mut walked: FxHashMap<PathBuf, Vec<&'a [&'a str]>> = FxHashMap::default();
-            while let Some((role, target, excluded)) = self.next_target() {
-                if self.under_root(&target) {
-                    continue;
-                }
-                let walks = walked.entry(target.clone()).or_default();
-                if walks.contains(&excluded) {
-                    continue;
-                }
-                walks.push(excluded);
-                let scope = Scope {
-                    role,
-                    excluded,
-                    outside: true,
-                };
-                let found = self.walk_target(&target, scope);
-                self.merge(found, role, excluded);
-            }
+            pool.install(|| placed.walk_targets(lister));
         });
-        let Walk {
-            mut tree,
-            unplaced,
-            roots,
-            ..
-        } = self;
+        let roots = self.lister.roots.take().unwrap_or_default();
+        let Placed {
+            mut tree, unplaced, ..
+        } = self.placed;
         let files = tree.emit();
         let files = if unplaced.is_empty() {
             files
@@ -1041,7 +1034,9 @@ impl<'a, 'p> Walk<'a, 'p> {
             roots,
         }
     }
+}
 
+impl<'a> Lister<'a, '_> {
     /// The walks that a walk of `role` is decided by: for a role above
     /// context, those of the roots of such roles, which no context root
     /// changes; for a context walk, every root's.
@@ -1279,6 +1274,43 @@ impl<'a, 'p> Walk<'a, 'p> {
         )
     }
 
+    /// Whether a root holds `path`. A link target's walk asks it, which starts
+    /// once every root is known.
+    fn under_root(&self, path: &Path) -> bool {
+        self.roots
+            .get()
+            .expect("a link target is walked once every root is known")
+            .iter()
+            .any(|root| path.starts_with(&root.path))
+    }
+}
+
+impl<'a> Placed<'a> {
+    /// Walks the targets of the links met, strongest role first, with what
+    /// `lister` reads, and places what they list. A target under a root is
+    /// left to that root's walk, and a target is walked once for each set of
+    /// excluded names that meets it.
+    fn walk_targets(&mut self, lister: &Lister<'a, '_>) {
+        let mut walked: FxHashMap<PathBuf, Vec<&'a [&'a str]>> = FxHashMap::default();
+        while let Some((role, target, excluded)) = self.next_target() {
+            if lister.under_root(&target) {
+                continue;
+            }
+            let walks = walked.entry(target.clone()).or_default();
+            if walks.contains(&excluded) {
+                continue;
+            }
+            walks.push(excluded);
+            let scope = Scope {
+                role,
+                excluded,
+                outside: true,
+            };
+            let found = lister.walk_target(&target, scope);
+            self.merge(found, role, excluded);
+        }
+    }
+
     /// Records what a walk listed, in the order it listed it: each file under
     /// the walk's role, and each link's target queued with the walk's role and
     /// names.
@@ -1315,10 +1347,6 @@ impl<'a, 'p> Walk<'a, 'p> {
                     .pop_front()
                     .map(|(target, excluded)| (role, target, excluded))
             })
-    }
-
-    fn under_root(&self, path: &Path) -> bool {
-        self.roots.iter().any(|root| path.starts_with(&root.path))
     }
 }
 
