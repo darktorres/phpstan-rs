@@ -290,12 +290,14 @@ Done:
 - R9: discovery names no file for bytes that are not UTF-8 where a path is text, and
   asks the system for a name its directory's listing lacks, which finds it where the
   disk folds case.
+- R10: the command runs on a thread with `WORKER_STACK_SIZE`, so the stack the system
+  gives the main thread (1 MiB on Windows) no longer decides how often a walk grows.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
 path and the include rule. All four are built.
 
-Open: R10 to R17, the rounds after them, and the batch's checks.
+Open: R11 to R17, the rounds after them, and the batch's checks.
 
 ## Documents with no place in the stack
 

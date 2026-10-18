@@ -8,10 +8,10 @@
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
   round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
   R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`), R8 (`7d5bddd4`, `06486da9`)
-  and R9 (`da9e86df`). The rows are built in the order of the table below, one commit each,
-  with a pathspec, since another session shares the checkout. R18 has one commit for each
-  step, R6 has a second for the rule its build found, R7 has a second for the case rule, and
-  R8 has a second for the files an environment change re-checks.
+  R9 (`da9e86df`) and R10 (`007d827b`). The rows are built in the order of the table below,
+  one commit each, with a pathspec, since another session shares the checkout. R18 has one
+  commit for each step, R6 has a second for the rule its build found, R7 has a second for the
+  case rule, and R8 has a second for the files an environment change re-checks.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -36,7 +36,7 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** R10, the program runs on a thread whose stack it chooses.
+- **Next:** R11, the caches where each platform keeps them, refreshed on Windows.
 
 ## Context
 
@@ -1548,6 +1548,37 @@ The dhat profiler and hotpath's guard stay in `main`.
 - A unit test that the command thread's stack is the size asked for (`stacker::remaining_stack`).
 
 On Linux nothing in the output changes; the cost is one thread spawn.
+
+**Built** (`007d827b`).
+
+- `main` parses the command line, keeps freed memory while it is the only thread, and runs the
+  command through `on_worker_stack`: a scoped thread named `phpstan-rs-main`, with
+  `WORKER_STACK_SIZE`, which `main` joins. `run` holds the old `match`. A panic of the command
+  is raised again in `main` by `resume_unwind`, so the hook does not report it twice and the
+  status stays 101. The dhat profiler and hotpath's guard stay in `main`.
+- `RED_ZONE`'s doc names the smallest stack a walk runs on, a spawned thread's 2 MiB, and why
+  the main thread is not one. The profiling notes say where the work is now: `CLAUDE.md`'s
+  callgrind note and `scripts/perfdump.py`'s `<main tid>`.
+- The test needs `stacker` as a dev-dependency (the workspace's pin, which syntax already
+  uses). Both lockfiles pass `--locked`.
+- Tests (three, in `main/tests/worker_stack.rs`): the thread's stack is the size asked for
+  (`stacker::remaining_stack`), the body runs on another thread and returns its value, and a
+  panic reaches the caller with its payload.
+- Checked here:
+  - Three mutations (a 1 MiB stack, no thread, a replaced panic) each fail a test.
+  - Clippy, `-D warnings`, and the 44 CLI tests (R1's deep-nesting test among them), the LSP
+    exit-code, version and file-cache tests.
+  - With the main thread's stack limited to 1 MiB (`prlimit --stack`, Windows' size),
+    `check-project vendor/monolog` makes 36,914 `mmap`, 36,878 `mprotect` and 36,869 `munmap`
+    calls before, one set for each growth of the stack guard, and 65, 29 and 25 after. At the
+    default 8 MiB it makes 63, 27 and 21 before, and 66, 29 and 26 after. On Linux the
+    growth is a mapping, and no time difference shows: the four commands, five runs each in two
+    rounds, give 5.6 to 6.5 s with a spread of 0.2 to 0.5 s, under a load average of 4.5 to 7.
+    A growth on Windows is a fiber, which is not measured.
+  - Monolog's output (off, cold and warm) and Piwigo's JSON are identical to the previous
+    row's.
+- Left to the legs: the Windows leg runs the CLI tests, R1's among them, with the 1 MiB main
+  stack.
 
 ### R11. The caches where each platform keeps them, refreshed on Windows
 

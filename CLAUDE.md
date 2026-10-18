@@ -73,9 +73,10 @@ valgrind --tool=callgrind --callgrind-out-file=<dir>/cg.out \
 callgrind_annotate --inclusive=yes --tree=none <dir>/cg.out-<thread>
 ```
 
-- One output file per thread (`cg.out-01` is `main`); read the largest ones
-  first, and note which run in series (a test thread starts after `main`
-  has listed its tests) and which beside each other.
+- One output file per thread (`cg.out-01` is `main`, which parses the command
+  line and waits; the command runs on the second thread, `phpstan-rs-main`);
+  read the largest ones first, and note which run in series (a test thread
+  starts after `main` has listed its tests) and which beside each other.
 - `--tree=calling` lists a function's callees and `--tree=caller` its
   callers; a callee that is inlined shows only as part of its caller.
 - Instruction counts are not time: memory-bound work weighs more in wall
