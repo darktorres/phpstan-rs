@@ -6,7 +6,9 @@ name: Rust CI
 # commit), so a run changes only with the repository. The corpus,
 # type-snapshot, baseline, performance and build-time gates need the
 # frozen Piwigo checkout and a stable machine, so they run locally
-# through `cargo xtask gates`.
+# through `cargo xtask gates`. The benches are type-checked here rather
+# than built: nothing runs them, and `cargo xtask gates --full` still links
+# them.
 on:
   push:
   pull_request:
@@ -114,9 +116,12 @@ jobs:
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
-      - name: Benches compile
+      # The bench profile inherits the release profile's settings, so this
+      # check sees the cfgs the benches build with. It covers every workspace
+      # member's benches; the step it replaces built only the default member's.
+      - name: Benches type-check
         if: ${{ !cancelled() }}
-        run: cargo bench --no-run
+        run: cargo check --release --workspace --benches
       - name: Fuzz targets compile
         if: ${{ !cancelled() }}
         run: cargo check --manifest-path fuzz/Cargo.toml --all-targets

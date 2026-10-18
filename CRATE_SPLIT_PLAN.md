@@ -893,8 +893,9 @@ progress, feature work touching that stage's modules waits for it.
   - the public API snapshots (gate 14, from G1).
 
 CI (`.github/workflows/rust-ci.yml`) runs the build and test half. The
-corpus, type, baseline, performance and build-time gates run locally
-(frozen Piwigo checkout, stable machine).
+benches are type-checked there (`cargo check --release --workspace
+--benches`), not built. The corpus, type, baseline, performance and
+build-time gates run locally (frozen Piwigo checkout, stable machine).
 
 1. **Build and lint:**
    - fmt;
@@ -909,7 +910,7 @@ corpus, type, baseline, performance and build-time gates run locally
    - `cargo machete`;
    - `cargo deny check`;
    - fuzz compile (`--manifest-path fuzz/Cargo.toml`);
-   - `cargo bench --no-run`.
+   - `cargo bench --no-run` (CI type-checks the benches instead).
 2. **Module graph.** Every module is assigned a target crate (Appendix A).
    No module imports a module assigned to a higher crate or a sibling it may
    not depend on, except edges listed in `gates/module-graph.txt`, each with

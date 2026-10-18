@@ -19,7 +19,8 @@ early; each edit goes in with the step that causes it.
   reviewed for runtime correctness. The structural commit then follows
   with no delta.
 - No gate loses coverage. A check moves out of the quick tier only if it
-  is redundant there. `--full` and CI keep running it.
+  is redundant there. `--full` keeps running it, and CI type-checks the
+  benches instead.
 - One commit per step, checked cheaply before the next starts: fmt,
   clippy, the unit tests of the touched modules, and the fixture
   directories each step names, byte-identical
@@ -425,7 +426,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 
 - `cargo bench --no-run` leaves the quick tier: `test --all-targets`
   already compiles every bench, and it only adds a release-profile
-  build. `--full` and CI keep it.
+  build. `--full` keeps it; CI type-checks the benches instead.
 - The `--no-default-features` step becomes `cargo check`; `--full` keeps
   the `--no-default-features` test run.
 - `cargo doc` (6 s) and the fuzz check (21 s) stay in the quick tier;
