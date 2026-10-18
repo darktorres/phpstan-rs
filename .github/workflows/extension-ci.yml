@@ -30,6 +30,12 @@ on:
       - ".gitattributes"
       - ".github/workflows/extension-ci.yml"
 
+# A pull request's newer run cancels the run it supersedes. A push gets a
+# group of its own, so pushes neither wait for nor cancel one another.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   unit:
     # Node-only - no Rust build needed for the pure/settings/download

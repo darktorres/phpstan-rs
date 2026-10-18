@@ -13,6 +13,12 @@ on:
   push:
   pull_request:
 
+# A pull request's newer run cancels the run it supersedes. A push gets a
+# group of its own, so pushes neither wait for nor cancel one another.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   # The test profile keeps line tables rather than full debug info. A
