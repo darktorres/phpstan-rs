@@ -43,8 +43,15 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     and −9.6 M off. The warm vendor wait fell from about 85 to 38 ms in two recordings each,
     with no wall change beyond the noise (p = 0.709). The entries are kept by the file's
     bytes, not its path (its Built).
+  - R10 (`9513479b`): −65.4 ms of the warm run's 1.30 s (p = 0.017), where the pool now
+    starts 42 to 48 ms earlier, beside vendor discovery; off −61.6 ms, inside the noise
+    (p = 0.232). It adds 69.9 M off, most of it doc comments the check parses again, since the
+    memo they are read from holds the context files' now. The stub mark is carried with the
+    hand-over (its Built). Placing the walks' results inside the walk's scope (`8f93dd07`)
+    gained nothing and was reverted (`c8505326`). The Piwigo output was the oracle's in every
+    run, off and warm.
 
-  R10 is next.
+  R5 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -54,8 +61,9 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   `main.rs`, R2 `walk.rs`, `session.rs`, `file_table.rs`, `project.rs`, `lsp.rs`,
   `dir_listings.rs` and `vendor.rs`, with `PathHash` and `path_hash` now in the composer
   crate's `hashed_path.rs`, R3 `walk.rs`, R4 `session.rs`, R6 `vendor.rs`, and R14
-  `hashed_path.rs`, `vendor.rs`, `walk.rs` and `session.rs`, and R13 `vendor.rs`,
-  `crates/composer/src/lib.rs`, `file_cache.rs` and `session.rs`.
+  `hashed_path.rs`, `vendor.rs`, `walk.rs` and `session.rs`, R13 `vendor.rs`,
+  `crates/composer/src/lib.rs`, `file_cache.rs` and `session.rs`, and R10 `walk.rs` and
+  `session.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -868,6 +876,39 @@ after this row ("Verification").
 **Measure.** The warm vendor wait and the parse that now overlaps it in a perf recording, and
 hyperfine medians, warm.
 
+**Built** as `9513479b`: −65.4 ms of the warm run's 1.30 s (20 pairs, p = 0.017), where the
+pool's first sample moved from 0.064 to 0.073 s to 0.022 to 0.025 s in two recordings each; off
+−61.6 ms, inside the noise (p = 0.232), since the stub build keeps the pool busy through the
+wait. The warm pairs give more than that stretch can, so the stretch is the row's saving. The
+Piwigo output was the oracle's in every run, off and warm. Where it differs from the Change:
+
+- **The stub mark is carried.** A file's stub mark changes its parse and its cache key
+  (`is_stub`), and a stub walk weaker than the walk that hands a file over still marks it. So
+  the hand-over carries the mark from every stub walk that reaches the directory and every stub
+  file root that names the file (`Reach`), and a file root's walk hands its file over by the
+  same rule, counting the directory walks that reach its directory and the file roots that name
+  it.
+- **The merge order.** The results are merged stronger walks first, then the context walks, not
+  in slots of the old order: the listing does not depend on the order, since each file's role
+  is the strongest of its listings, its stub mark their union, and the files are listed in path
+  order. The tests compare the two orders.
+- **The decision tables.** The stronger walks are decided by a `Starts` of their own roots, and
+  the context walks by one of every root, made once the context roots are known.
+  `Walk::add_file`, `add_resolved_dir` and `add_resolved_file` are for tests only: a load gives
+  its context roots through `ContextRoots`, in `finish_with`'s closure.
+- **The Ir.** +69.9 M off. The walk's own code is +0.9 M. The check parses 1,899 more doc
+  comments (+54 M): the memo they are read from is bounded and empties a full shard, so what it
+  holds when the check starts follows the order the files were parsed in, and the context files
+  are parsed after the analysed ones now. Warm runs, which read the context files from the
+  cache, do not fill it with theirs.
+- **The merge after the parse.** The walks' results are merged on the main thread after the
+  walk's scope ends, so after the last handed-over file is parsed (4 to 8 ms); before, they were
+  merged on the pool beside the parse's last 10 ms. `8f93dd07` placed them inside the scope, but
+  the walks themselves end as the last files are parsed, so nothing overlapped, and 20 pairs
+  each gave +12.3 ms warm (p = 0.502) and +31.8 ms off (p = 0.218). `c8505326` reverted it.
+
+The ledger's LOAD-8.10 has the numbers.
+
 ### 12. R5: per-file tables keyed by `FileId`
 
 *LOAD-8.5. An Ir row. Needs nothing.*
@@ -1161,8 +1202,10 @@ ours is noted, and a run it distorts is taken again.
 - Done with R14: LOAD-8.14's row, with the one list of `VendorPath`s and the pairs against the
   stretch; its row in §1's table; LOAD-9 (the installed packages' resolutions, READY).
 - Done with R13: LOAD-8.13's row, with the key by the file's bytes; its row in §1's table.
-- Left, with the rows: the stale comment at `session.rs:1081` (R10); §1's range rows, as each
-  row lands.
+- Done with R10: LOAD-8.10's row, with the stub mark, the merge order, the doc comments the
+  check parses again and the revert; its row in §1's table; the stale comment at
+  `session.rs:1081`, replaced.
+- Left, with the rows: §1's range rows, as each row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
   a pathspec; remove scratch worktrees once they are recorded.
 
