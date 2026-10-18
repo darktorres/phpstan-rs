@@ -19,10 +19,14 @@
 - **Round 2** runs `52844b07`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The round trip took 1233 ms on Windows and
     2628 ms on macOS.
-  - Rust CI: run 39138433432, still running when this was written.
+  - Rust CI passed on aarch64 Linux. It failed on macOS (5 tests, fixtures included), on
+    Windows (31 tests and fixtures, clippy and dhat) and on the gates job. Each failure is
+    classed in R2's "Round 2's result", with the rows it extends: R5 (a follow-up), R13, R14
+    and R18.
 - **The module graph is fixed in this batch** (the user's decision with round 2's push): R18,
   built before R6. The 20 forbidden edges are refactored away, not listed as exceptions.
-- **Next:** R18, then R6.
+  Round 2 reached the gates job's later steps, whose four failures go to R18 too.
+- **Next:** R18 (steps 1 and 2 are underway), then R5's round-2 follow-up, then R6.
 
 ## Context
 
@@ -130,7 +134,7 @@ directory where `HOME` is unset. The Piwigo oracle and the monolog output must s
 | 3 | R3 | one canonical form of a path, without `\\?\` | Windows | R2 |
 | 4 | R4 | equal paths hash alike | Windows | — |
 | 5 | R5 | URIs ↔ paths on every platform | all | R3 |
-| 6 | R18 | the module graph: every module has its crate, and no edge breaks the layering | CI | R2 |
+| 6 | R18 | the gates job: every module has its crate, no edge breaks the layering, and the later steps pass | CI | R2 |
 | 7 | R6 | report paths spelled with `/` where PHPStan does, matched by components | Windows | R3 |
 | 8 | R7 | the case rule, probed per root | Windows, macOS, Linux casefold | R6 |
 | 9 | R8 | the include rule's platform values | Windows | R3 |
@@ -330,6 +334,59 @@ code, these are expected:
       on macOS.
   - **The dhat build.** It calls `pthread_getattr_np` (R14).
 - **Extension CI** passed on all three systems, as the State records.
+
+**Round 2's result.** Rust CI run 39138433432 on `52844b07`. The logs are in
+`~/.cache/prs-profile/fixes/logs/round2-*`.
+
+- **aarch64 Linux:** every step passed.
+- **gates (x86_64 Linux):**
+  - The module graph failed as in round 1 (R18).
+  - Since `54e7e02d`, the steps after it ran for the first time on this branch. Four of them
+    fail for causes older than the plan, and all four go to R18's step 8:
+    - **Fuzz targets compile:** `fuzz/src/lib.rs:68` passes `project::parse_file` four
+      arguments, but it takes three: the interner argument is gone.
+    - **Each feature on its own:** `hotpath-alloc` alone does not build. It turns on
+      `hotpath/hotpath-alloc` but not the package's own `hotpath`, and hotpath's alloc mode
+      refuses to build without its profiler (`compile_error!`).
+    - **Unused dependencies:** the package lists `memchr` and uses it nowhere.
+    - **Licenses, advisories:** RUSTSEC-2026-0346, -0347, -0348 and -0349 are in rustls
+      0.23.45, which mysql brings in. The fix is 0.23.46 or later.
+- **macOS:** lib 3 of 1198 failed, composer 1 of 68, fixtures 1 of 3832. R5's client
+  spelling fixed 44 of round 1's 46 LSP failures.
+  - `did_change_workspace_folders_removed_clears_its_files_and_keeps_the_others`. The removed
+    folder's file was cleared on its canonical URI (`file:///private/var/…`), and it had been
+    published on the client's (`file:///var/…`). This is a product bug of R5's, so the editor
+    keeps the stale diagnostics. It goes to R5's round-2 follow-up.
+  - `a_superseded_run_sends_nothing_and_the_newer_run_sends_its_result` looks up
+    `Server::last_diagnostics` by the temp directory's spelling, which the server keys by the
+    canonical path (R13).
+  - `collect_php_files_…`, `the_entries_are_sorted_by_name_bytes` and `psr4_locations_are_checked`
+    fail as in round 1 (R13).
+- **Windows:** lib 4 of 1173 failed, composer 3 of 75, stub_index 1 of 1, fixtures 23 of 3832.
+  The dhat build failed, and so did clippy.
+  - **Clippy.** Ten imports and two helpers are left unused on Windows by test files whose tests
+    are all `cfg(unix)`. They are in `lsp/tests/symlink_identity.rs`,
+    `project/tests/session_identity.rs`, `project/tests/walk_identity.rs`, `project/walk.rs:924`
+    (`add_resolved_dir`, `add_resolved_file`) and composer's `tests/package_ownership.rs`. They
+    go to R13 with the links.
+  - **The verbatim prefix is gone** (R3): the vendor-context tests and three of the nine
+    include fixtures pass.
+  - **The same two LSP tests as on macOS fail**, for the same causes (R5, R13), and
+    `a_file_that_crashes_the_parser_…` fails as in round 1 (R13).
+  - Round 1's other classes fail again:
+    - `collect_php_files_…` and `the_entries_are_sorted_by_name_bytes` (R13);
+    - `path_bytes`' two mixes (R16);
+    - `stub_index` (R14);
+    - the dhat build, from `pthread_getattr_np` (R14).
+  - **Fixtures:**
+    - six include fixtures. The harness's `<fixture>` replacement misses the canonical
+      spelling the messages use (`<fixture>/../../../..\fixtures\…`), which is R13's
+      `portable`;
+    - `allowIn` (R6);
+    - the path column of pest 6, phpstan_api_gating 5 and composer_hygiene 5, with the
+      composer_hygiene messages' own spelling (R6, R13).
+  - The dhat build also warns of two imports it leaves unused (`registry.rs:78`,
+    `project/declared_classes.rs:62`), on Linux as well (R14).
 
 ### R3. One canonical form of a path, without Windows' verbatim prefix
 
@@ -562,7 +619,22 @@ on failure, and the cause becomes a row.
 
   Round 2 runs the Windows and macOS legs and the smoke round trip.
 
-### R18. The module graph: every module has its crate, and no edge breaks the layering
+**Round 2's follow-up: a removed folder's files are cleared on the URIs they were published
+on.**
+
+- **Now.** When a workspace folder is removed, the server clears its files' diagnostics after
+  the folder has gone. `client_spelling` then finds no folder for them, so the clear goes out
+  on the canonical URI. The client never published there, and it keeps the stale diagnostics
+  (round 2, macOS and Windows). A workspace opened through a link has the same bug on Linux.
+- **Change.** A clear goes out on the URI the file's last publish used. The server keeps, for
+  each file it has published, the URI it published on, and clears that one. It does not
+  recompute a spelling once the folder that gave it has gone.
+- **Test.** The round-2 test on every leg. Here: a workspace opened through a link and then
+  removed clears its files on the link's URIs.
+
+Built after R18, before R6.
+
+### R18. The gates job: every module has its crate, no edge breaks the layering, and the later steps pass
 
 Built after R5, in the place the table gives it. The user's decision with round 2's push: the
 forbidden edges are refactored away, not listed as exceptions. This is crate-split work
@@ -647,6 +719,13 @@ no row either.
      (`2b6aeb84`). Resolution against names, templates and aliases stays in reflection.
    - The phpdoc row and `CRATE_SPLIT_PLAN.md`'s §3.3 now say so. The six stale allow lines go
      in the same commit, and the gate passes.
+8. **The gates job's later steps,** which ran for the first time in round 2 and fail for
+   causes older than this plan:
+   - the fuzz library calls `project::parse_file` with its current arguments;
+   - `hotpath-alloc` turns on the package's own `hotpath`, which its alloc mode needs;
+   - the unused `memchr` dependency goes;
+   - rustls goes to a release past the four advisories, by `cargo update -p rustls`, in both
+     lockfiles where it appears.
 
 **Test.**
 
@@ -903,6 +982,12 @@ are unchanged.
     it wrote (`collect_php_files_…`).
   - R5's extension fixes the LSP tests that compared canonical URIs with the temp directory's
     spelling, without changing them.
+- **Round 2's.**
+  - `a_superseded_run_sends_nothing_and_the_newer_run_sends_its_result` looks up
+    `Server::last_diagnostics` by the canonical path the server keys it by.
+  - The test files whose tests are all `cfg(unix)` leave imports and helpers unused on
+    Windows. Once their link tests run everywhere, those imports and helpers are used again.
+    Whatever stays unix-only, the permission tests, has its imports under the same `cfg`.
 
 ### R14. Build scripts: the same embedded data everywhere, and dhat's walk per platform
 
@@ -934,6 +1019,10 @@ are unchanged.
 - R2's leg step: `cargo check -p phpstan-rs --profile dhat --features dhat-heap` with
   `-C force-frame-pointers=yes`.
 - Once on the macOS leg: a dhat-heap run on a small project whose stacks are whole (recorded).
+
+**Round 2.** The dhat build warns, on Linux too, of two imports it leaves unused:
+`build_declarations` (`registry.rs:78`) and `project/declared_classes.rs:62`. Each takes the
+`cfg` of the code that uses it, so the dhat check builds without warnings.
 
 ### R15. Developer tooling
 
