@@ -45,6 +45,7 @@ jobs:
     # serverDownload.test.ts, extension.test.ts all run under plain
     # node:test with an injected fetch/fs, never a real subprocess).
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: editors/vscode
@@ -67,12 +68,12 @@ jobs:
       - run: bun run test:unit
 
   integration:
-    needs: unit
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-26, windows-2025-vs2026]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       # Windows images check text out with CRLF. .gitattributes keeps this
       # repository's files LF, but not the phpstan-src submodule's stubs,
