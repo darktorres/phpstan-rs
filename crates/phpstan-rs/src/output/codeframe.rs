@@ -120,7 +120,7 @@ fn frame(
     let last = (line + CONTEXT_LINES).min(lines.len() as u32);
     let width = last.to_string().len();
     for n in first..=last {
-        let text = lines[(n - 1) as usize].trim_end_matches('\r');
+        let text = lines[(n - 1) as usize];
         let code = match highlights {
             Some(h) => paint(n, text, h),
             None => text.to_string(),
@@ -162,7 +162,7 @@ pub fn render_friendly(results: &FxHashMap<PathBuf, Vec<Diagnostic>>, colour: bo
         let source = std::fs::read_to_string(Path::new(path)).ok();
         let lines: Vec<&str> = source
             .as_deref()
-            .map(|s| s.strip_suffix('\n').unwrap_or(s).split('\n').collect())
+            .map(|s| syntax::span::lines(s).collect())
             .unwrap_or_default();
         let highlights = if colour && path.extension().is_some_and(|e| e == "php") {
             source.as_deref().map(highlights_for)

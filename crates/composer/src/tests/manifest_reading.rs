@@ -444,3 +444,48 @@ fn an_out_of_range_number_in_an_unread_member_does_not_hide_the_rest() {
     assert_eq!(packages(&manifest.require), vec!["x/y"]);
     assert_eq!(installed_names(&manifest), vec!["b/b"]);
 }
+
+#[test]
+fn the_lines_a_manifest_reports_are_the_same_whatever_the_line_break() {
+    let lf = concat!(
+        "{\n",
+        "  \"name\": \"acme/app\",\n",
+        "  \"require\": {\n",
+        "    \"php\": \">=8.1\",\n",
+        "    \"acme/lib\": \"^1.0\"\n",
+        "  },\n",
+        "  \"provide\": {\n",
+        "    \"acme/x\": \"*\"\n",
+        "  },\n",
+        "  \"scripts\": {\n",
+        "    \"test\": [\n",
+        "      \"phpunit\",\n",
+        "      \"echo done\"\n",
+        "    ]\n",
+        "  },\n",
+        "  \"config\": {\n",
+        "    \"platform\": {\n",
+        "      \"php\": \"8.1.0\"\n",
+        "    }\n",
+        "  }\n",
+        "}\n",
+    );
+    let lines = |composer: &str| {
+        let manifest = load("line_breaks", composer, None).expect("composer.json loads");
+        (
+            manifest.require.iter().map(|r| r.line).collect::<Vec<_>>(),
+            manifest.provide.iter().map(|p| p.line).collect::<Vec<_>>(),
+            manifest.scripts.iter().map(|s| s.line).collect::<Vec<_>>(),
+            manifest.platform_php.as_ref().map(|p| p.line),
+        )
+    };
+    let expected = lines(lf);
+    assert_eq!(expected, (vec![5, 4], vec![8], vec![12, 13], Some(18)));
+    for line_break in ["\r\n", "\r"] {
+        assert_eq!(
+            lines(&lf.replace('\n', line_break)),
+            expected,
+            "{line_break:?}"
+        );
+    }
+}

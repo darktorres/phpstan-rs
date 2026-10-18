@@ -139,7 +139,7 @@ impl IgnoreComments {
 }
 
 fn newlines(text: &str) -> u32 {
-    text.matches('\n').count() as u32
+    syntax::span::count_line_breaks(text) as u32
 }
 
 /// Every occurrence of `marker` in a doc comment starting on `line`
@@ -214,13 +214,14 @@ fn tokenize_ignore(input: &str) -> Vec<(&str, IgnoreToken, i64)> {
     while i < bytes.len() {
         let start = i;
         let rest = &input[i..];
+        let break_len = syntax::span::line_break_len(&bytes[i..]);
         let kind = if matches!(bytes[i], b' ' | b'\t') {
             while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
                 i += 1;
             }
             IgnoreToken::Whitespace
-        } else if rest.starts_with('\n') || rest.starts_with("\r\n") {
-            i += if rest.starts_with('\r') { 2 } else { 1 };
+        } else if break_len > 0 {
+            i += break_len;
             while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
                 i += 1;
             }
@@ -461,6 +462,44 @@ mod tests {
 
     fn errors(source: &str) -> Vec<(u32, String)> {
         scan(source).parse_errors
+    }
+
+    #[test]
+    fn the_lines_ignored_are_the_same_whatever_the_line_break() {
+        let lf = concat!(
+            "<?php\n",
+            "$a = 1 / 0; // @phpstan-ignore-line\n",
+            "// @phpstan-ignore-next-line\n",
+            "$b = 1 / 0;\n",
+            "/**\n",
+            " * Some note.\n",
+            " * @phpstan-ignore-line\n",
+            " */\n",
+            "$c = \"a\" + 1; // @phpstan-ignore binaryOp.invalid, argument.type\n",
+            "// @phpstan-ignore binaryOp.invalid\n",
+            "$d = \"a\" + 1;\n",
+            "/**\n",
+            " * @phpstan-ignore binaryOp.invalid\n",
+            " */\n",
+            "$e = \"a\" + 1;\n",
+            "$f = 1; // @phpstan-ignore ,\n",
+            "/* @phpstan-ignore\n",
+            "   binaryOp.invalid,\n",
+            "   argument.type (reason\n",
+            "   continues) */\n",
+            "$g = 1;\n",
+        );
+        let expected = scan(lf);
+        assert!(!expected.lines.is_empty());
+        assert_eq!(expected.identifiers.len(), 3, "got: {expected:?}");
+        assert_eq!(expected.parse_errors.len(), 2, "got: {expected:?}");
+        for line_break in ["\r\n", "\r"] {
+            assert_eq!(
+                scan(&lf.replace('\n', line_break)),
+                expected,
+                "{line_break:?}"
+            );
+        }
     }
 
     #[test]

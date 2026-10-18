@@ -16,7 +16,7 @@ pub(crate) fn parse(raw: &str) -> PhpDocNode {
     let mut node = PhpDocNode::default();
     let inner = raw.trim().trim_start_matches("/**").trim_end_matches("*/");
     let mut tag_lines: Vec<String> = Vec::new();
-    for raw_line in inner.lines() {
+    for raw_line in syntax::span::lines(inner) {
         let line = raw_line.trim();
         let line = line.strip_prefix('*').map(str::trim).unwrap_or(line);
         let line = line

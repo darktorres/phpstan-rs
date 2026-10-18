@@ -87,3 +87,41 @@ fn a_missing_parent_constructor_call_is_inserted_when_it_needs_no_arguments() {
         .expect("reported");
     assert!(finding.fix.is_none(), "no fix when arguments are required");
 }
+
+#[test]
+fn a_fix_that_adds_a_line_or_removes_lines_works_in_a_file_of_any_line_break() {
+    let enable = |s: &mut crate::checker::settings::CheckSettings| {
+        s.strict_rules.check_parent_constructor_call = true
+    };
+    let constructors = "<?php\nclass P { public function __construct(int $x = 0) {} }\nclass C extends P {\n    public function __construct() {\n        $this->ready();\n    }\n    private function ready(): void {}\n}\nclass E extends P {\n    public function __construct() {}\n}\n";
+    let members = "<?php\nfinal class A {\n    /** Never used. */\n    private const UNUSED = 1;\n    private const A = 1, B = 2;\n\n    #[\\Deprecated]\n    private ?int $gone;\n\n    /**\n     * Helper.\n     */\n    private function helper(): void {}\n\n    public function used(): int { return self::A; }\n}\n";
+    let unused = |src: &str| {
+        let d = all_diagnostics_for(src);
+        let fixes: Vec<&DiagnosticFix> = d
+            .iter()
+            .filter(|x| x.identifier.ends_with(".unused"))
+            .filter_map(|x| x.fix.as_ref())
+            .collect();
+        String::from_utf8(diagnostics::fix::apply_fixes(src.as_bytes(), fixes).0).unwrap()
+    };
+    let inserted = fixed(constructors, "constructor.missingParentCall", enable);
+    let removed = unused(members);
+    assert!(inserted.contains("        parent::__construct();\n"));
+    assert!(!removed.contains("Helper"));
+    for line_break in ["\r\n", "\r"] {
+        assert_eq!(
+            fixed(
+                &constructors.replace('\n', line_break),
+                "constructor.missingParentCall",
+                enable
+            ),
+            inserted.replace('\n', line_break),
+            "{line_break:?}"
+        );
+        assert_eq!(
+            unused(&members.replace('\n', line_break)),
+            removed.replace('\n', line_break),
+            "{line_break:?}"
+        );
+    }
+}

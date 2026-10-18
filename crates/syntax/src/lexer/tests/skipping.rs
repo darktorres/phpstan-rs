@@ -15,14 +15,16 @@ fn byte_by_byte(src: &[u8], mut pos: usize) -> (usize, Vec<(usize, usize)>) {
                     break;
                 }
                 let start = pos;
-                while pos < src.len() && peek(pos) != b'\n' && !starts(pos, b"?>") {
+                while pos < src.len() && !matches!(peek(pos), b'\n' | b'\r') && !starts(pos, b"?>")
+                {
                     pos += 1;
                 }
                 comments.push((start, pos));
             }
             b'/' if peek_at(pos, 1) == b'/' => {
                 let start = pos;
-                while pos < src.len() && peek(pos) != b'\n' && !starts(pos, b"?>") {
+                while pos < src.len() && !matches!(peek(pos), b'\n' | b'\r') && !starts(pos, b"?>")
+                {
                     pos += 1;
                 }
                 comments.push((start, pos));

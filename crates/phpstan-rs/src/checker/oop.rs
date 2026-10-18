@@ -1971,10 +1971,14 @@ pub(crate) fn signatures_compatible(a: &FunctionReflection, b: &FunctionReflecti
 /// onto its own lines.
 fn parent_call_insertion(ctor: &MethodDecl, index: &LineIndex) -> Option<(Span, String)> {
     const CALL: &str = "parent::__construct();";
+    let line_break = index.line_break().as_str();
     if let Some(first) = ctor.function.body_stmts().first() {
         let at = first.span.start;
         let indent = " ".repeat(index.line_col(at).col.saturating_sub(1) as usize);
-        return Some((Span { start: at, end: at }, format!("{CALL}\n{indent}")));
+        return Some((
+            Span { start: at, end: at },
+            format!("{CALL}{line_break}{indent}"),
+        ));
     }
     let open = ctor.function.body.as_ref()?.open;
     let close = ctor.function.span.end;
@@ -1986,7 +1990,7 @@ fn parent_call_insertion(ctor: &MethodDecl, index: &LineIndex) -> Option<(Span, 
             start: open.start,
             end: close,
         },
-        format!("{{\n{inner}{CALL}\n{outer}}}"),
+        format!("{{{line_break}{inner}{CALL}{line_break}{outer}}}"),
     ))
 }
 

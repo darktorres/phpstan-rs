@@ -1,6 +1,7 @@
 mod api_tags;
 mod assert_tags;
 mod callable_invocation_tags;
+mod line_breaks;
 mod method_and_mixin_tags;
 mod param_and_return_tags;
 mod psalm_and_phan_tags;

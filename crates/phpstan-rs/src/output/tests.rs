@@ -245,16 +245,40 @@ fn junit_reports_each_diagnostic_as_a_failing_case_and_clean_files_as_passing() 
 }
 
 fn friendly_fixture(name: &str) -> PathBuf {
+    friendly_fixture_written_with(name, "\n")
+}
+
+/// The source `friendly_fixture` writes, its lines ended by `line_break`.
+fn friendly_fixture_written_with(name: &str, line_break: &str) -> PathBuf {
     let dir =
         std::env::temp_dir().join(format!("phpstan-rs-friendly-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("a.php");
     std::fs::write(
         &path,
-        "<?php\n// note\nfunction f(int $x): string {\n    return $x + 1;\n}\n",
+        "<?php\n// note\nfunction f(int $x): string {\n    return $x + 1;\n}\n"
+            .replace('\n', line_break),
     )
     .unwrap();
     path
+}
+
+#[test]
+fn friendly_frames_the_same_lines_whatever_line_break_the_source_writes() {
+    let render = |name: &str, line_break: &str| {
+        let path = friendly_fixture_written_with(name, line_break);
+        let mut d = diag_with_identifier("Wrong return.", 4, 12, 0, "return.type");
+        d.span.end = LineCol { line: 4, col: 18 };
+        let results = FxHashMap::from_iter([(path.clone(), vec![d])]);
+        let text = render_friendly(&results, false).replace(&path.display().to_string(), "<file>");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        text
+    };
+    let lf = render("lines-lf", "\n");
+    assert!(lf.contains("> 4 |     return $x + 1;\n"), "got: {lf:?}");
+    for (name, line_break) in [("lines-crlf", "\r\n"), ("lines-cr", "\r")] {
+        assert_eq!(render(name, line_break), lf, "{line_break:?}");
+    }
 }
 
 #[test]

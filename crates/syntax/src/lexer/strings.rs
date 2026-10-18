@@ -1,7 +1,7 @@
 use crate::lexer::{Lexer, is_ident_continue, is_ident_start, skip_string_literal_bytes};
 use crate::name::Interner;
 use crate::php_string::PhpString;
-use crate::span::Span;
+use crate::span::{Span, line_break_len};
 use crate::token::{SimpleIndexKey, StringPart, Token};
 
 /// Whether `s` is a full, well-formed PHP identifier (not just that it
@@ -297,12 +297,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        if self.peek() == b'\r' {
-            self.pos += 1;
-        }
-        if self.peek() == b'\n' {
-            self.pos += 1;
-        }
+        self.pos += line_break_len(&self.src[self.pos..]);
 
         let body_start = self.pos;
         let mut closing_indent = 0usize;
@@ -324,26 +319,24 @@ impl<'a> Lexer<'a> {
                     break;
                 }
             }
-            self.pos = line_start;
-            while self.pos < self.src.len() && self.peek() != b'\n' {
-                self.pos += 1;
-            }
-            if self.pos >= self.src.len() {
+            // On to the start of the next line.
+            let Some(found) = memchr::memchr2(b'\n', b'\r', &self.src[line_start..]) else {
                 // Unterminated heredoc/nowdoc: treat rest of file as body
                 // rather than looping forever.
+                self.pos = self.src.len();
                 body_end = self.pos;
                 break;
-            }
-            self.pos += 1; // consume '\n'
+            };
+            self.pos = line_start + found;
+            self.pos += line_break_len(&self.src[self.pos..]);
         }
 
-        let mut raw_body = &self.src[body_start..body_end];
-        if raw_body.last() == Some(&b'\n') {
-            raw_body = &raw_body[..raw_body.len() - 1];
-        }
-        if raw_body.last() == Some(&b'\r') {
-            raw_body = &raw_body[..raw_body.len() - 1];
-        }
+        // The line break before the closing label is not part of the body.
+        let raw_body = &self.src[body_start..body_end];
+        let raw_body = [&b"\r\n"[..], b"\n", b"\r"]
+            .iter()
+            .find_map(|line_break| raw_body.strip_suffix(*line_break))
+            .unwrap_or(raw_body);
         let (content, offsets) = strip_heredoc_indent(raw_body, closing_indent);
 
         if nowdoc {
@@ -787,19 +780,25 @@ fn strip_heredoc_indent(text: &[u8], indent: usize) -> (Vec<u8>, Vec<usize>) {
     // `text`.
     let mut offsets = Vec::with_capacity(text.len() + 1);
     let mut line_start = 0;
-    for line in text.split(|&b| b == b'\n') {
+    loop {
+        let line_end = memchr::memchr2(b'\n', b'\r', &text[line_start..])
+            .map_or(text.len(), |found| line_start + found);
+        let line = &text[line_start..line_end];
         let cut = line
             .iter()
             .take(indent)
             .take_while(|&&b| b == b' ' || b == b'\t')
             .count();
-        if line_start > 0 {
-            content.push(b'\n');
-            offsets.push(line_start - 1);
-        }
         content.extend_from_slice(&line[cut..]);
-        offsets.extend((line_start + cut)..(line_start + line.len()));
-        line_start += line.len() + 1;
+        offsets.extend((line_start + cut)..line_end);
+        if line_end == text.len() {
+            break;
+        }
+        // The line break stays as the source wrote it.
+        let next = line_end + line_break_len(&text[line_end..]);
+        content.extend_from_slice(&text[line_end..next]);
+        offsets.extend(line_end..next);
+        line_start = next;
     }
     offsets.push(text.len());
     (content, offsets)

@@ -453,6 +453,7 @@ fn insertion(
     call: &str,
     last: bool,
 ) -> Option<(Span, String)> {
+    let line_break = index.line_break().as_str();
     if last {
         let tail = f.body_stmts().last()?;
         if matches!(tail.kind, StmtKind::Return(_)) {
@@ -460,12 +461,18 @@ fn insertion(
         }
         let at = tail.span.end;
         let indent = " ".repeat(index.line_col(tail.span.start).col.saturating_sub(1) as usize);
-        return Some((Span { start: at, end: at }, format!("\n{indent}{call}")));
+        return Some((
+            Span { start: at, end: at },
+            format!("{line_break}{indent}{call}"),
+        ));
     }
     if let Some(first) = f.body_stmts().first() {
         let at = first.span.start;
         let indent = " ".repeat(index.line_col(at).col.saturating_sub(1) as usize);
-        return Some((Span { start: at, end: at }, format!("{call}\n{indent}")));
+        return Some((
+            Span { start: at, end: at },
+            format!("{call}{line_break}{indent}"),
+        ));
     }
     let open = f.body.as_ref()?.open;
     let close = f.span.end;
@@ -476,7 +483,7 @@ fn insertion(
             end: close,
         },
         format!(
-            "{{\n{}{call}\n{}}}",
+            "{{{line_break}{}{call}{line_break}{}}}",
             " ".repeat(indent + 4),
             " ".repeat(indent)
         ),

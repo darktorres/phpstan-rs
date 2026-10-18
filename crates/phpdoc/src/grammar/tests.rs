@@ -837,3 +837,30 @@ fn a_tag_with_no_description_allocates_none() {
         Description::default()
     );
 }
+
+/// `raw`, which writes each line break as `\n`, written with each of the
+/// three line breaks.
+fn written_three_ways(raw: &str) -> [(&'static str, String); 3] {
+    ["\n", "\r\n", "\r"].map(|line_break| (line_break, raw.replace('\n', line_break)))
+}
+
+#[test]
+fn a_doc_comment_parses_to_the_same_tags_whatever_its_line_breaks() {
+    let lf = concat!(
+        "/**\n",
+        " * Summary.\n",
+        " * @param array{\n",
+        " *   id: int, // the key\n",
+        " *   name: string,\n",
+        " * } $row the row\n",
+        " * @return list<string>\n",
+        " * @throws \\RuntimeException when it fails\n",
+        " */",
+    );
+    let expected = parse(lf);
+    assert_eq!(expected.tags.len(), 3);
+    assert!(expected.errors.is_empty(), "got: {:?}", expected.errors);
+    for (line_break, raw) in written_three_ways(lf) {
+        assert_eq!(parse(&raw), expected, "{line_break:?}");
+    }
+}

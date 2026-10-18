@@ -323,7 +323,7 @@ pub fn parse(raw: &str) -> DocBlock {
     // the most recent `@tag` line until the next one starts, rather than
     // being parsed as its own (tagless, ignored) line.
     let mut tag_lines: Vec<String> = Vec::new();
-    for raw_line in inner.lines() {
+    for raw_line in syntax::span::lines(inner) {
         let line = raw_line.trim();
         let line = line.strip_prefix('*').map(str::trim).unwrap_or(line);
         // Continuation lines join with a real newline, not a space: a

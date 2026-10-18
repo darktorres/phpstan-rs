@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
+use syntax::span::LineIndex;
 
 use crate::canonical;
 
@@ -622,15 +623,19 @@ impl<'de> Deserialize<'de> for Installed<'de> {
 /// Finds the line a key is written on in the raw JSON text.
 struct LineFinder<'t> {
     text: &'t str,
+    lines: LineIndex,
 }
 
 impl<'t> LineFinder<'t> {
     fn new(text: &'t str) -> Self {
-        LineFinder { text }
+        LineFinder {
+            text,
+            lines: LineIndex::new(text.as_bytes()),
+        }
     }
 
     fn line_at(&self, offset: usize) -> u32 {
-        self.text[..offset].matches('\n').count() as u32 + 1
+        self.lines.line(offset as u32)
     }
 
     fn find_quoted_from(&self, needle: &str, from: usize) -> Option<usize> {
@@ -653,12 +658,10 @@ impl<'t> LineFinder<'t> {
     /// The line of the string `value` at or after line `line`.
     fn line_of_string_after(&self, value: &str, line: u32) -> u32 {
         let start = self
-            .text
-            .match_indices('\n')
-            .nth(line.saturating_sub(2) as usize)
-            .map(|(i, _)| i)
+            .lines
+            .line_start(line)
             .filter(|_| line > 1)
-            .unwrap_or(0);
+            .unwrap_or(0) as usize;
         self.find_quoted_from(value, start)
             .map(|at| self.line_at(at))
             .unwrap_or(line)

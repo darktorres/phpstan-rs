@@ -12,6 +12,7 @@ mod excluded_names_case;
 mod file_discovery_and_misc;
 mod file_removal;
 mod file_tables;
+mod fix_line_breaks;
 mod fused_declarations;
 mod include_environment;
 mod incremental_updates;

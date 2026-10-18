@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::name::{Interner, Name, NameCache};
-use crate::span::{LineIndex, Span};
+use crate::span::{LineIndex, Span, line_break_len};
 use crate::token::{Keyword, Token};
 use std::sync::Arc;
 
@@ -823,12 +823,8 @@ impl<'a> Lexer<'a> {
     #[cold]
     fn lex_close_tag(&mut self) -> Token {
         self.pos += 2;
-        // A single newline right after `?>` belongs to the tag.
-        if self.starts_with(b"\r\n") {
-            self.pos += 2;
-        } else if self.starts_with(b"\n") {
-            self.pos += 1;
-        }
+        // A single line break right after `?>` belongs to the tag.
+        self.pos += line_break_len(&self.src[self.pos..]);
         // ?> implies a statement terminator in real PHP; the parser
         // treats end-of-inline-html the same as a semicolon boundary.
         self.in_php = false;
@@ -956,13 +952,13 @@ impl<'a> Lexer<'a> {
         self.pos = skip_string_literal_bytes(self.src, self.pos);
     }
 
-    /// Where the line comment at the position ends: at the newline, or at
+    /// Where the line comment at the position ends: at its line break, or at
     /// the `?>` that closes PHP mode, or at the end of the source.
     fn line_comment_end(&self) -> usize {
         let mut at = self.pos;
-        while let Some(found) = memchr::memchr2(b'\n', b'?', &self.src[at..]) {
+        while let Some(found) = memchr::memchr3(b'\n', b'\r', b'?', &self.src[at..]) {
             let end = at + found;
-            if self.src[end] == b'\n' || self.src.get(end + 1) == Some(&b'>') {
+            if self.src[end] != b'?' || self.src.get(end + 1) == Some(&b'>') {
                 return end;
             }
             at = end + 1;

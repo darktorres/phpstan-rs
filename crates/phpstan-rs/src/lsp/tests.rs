@@ -8,6 +8,7 @@ mod document_highlight;
 mod helpers;
 mod include_environment;
 mod inlay_hints;
+mod line_breaks;
 mod load_off_loop;
 mod navigation;
 mod protocol_and_session;
