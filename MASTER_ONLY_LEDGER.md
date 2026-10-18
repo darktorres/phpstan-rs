@@ -28,6 +28,7 @@ Progress: 1134 of 1134 judged (WORTH 8, ADAPT 263, SKIP 839, HAVE 24); 0 OPEN. R
 - The Effects decision names `registry/demand.rs` as the port target, but demand.rs answers purity and property writes only. The storage-level fixes (by-reference captures, globals, destructors, superglobals, element facts) need a target in the checker's own effect handling, which the branch has not decided. Their rows are ADAPT on the decision, not on a checked port target; the owner picks the target before any of them is ported.
 - The recorder family (tools/builtin-runs, row 32 and the rows after it) is one port: taking row 32 takes the recorder, and its table is regenerated rather than copied. Whether the branch takes the recorder at all is the owner's call; until it is, these rows are ADAPT.
 - Row 985 (the erp-web gitlink): the owner decides whether the erp-web corpus round in ROADMAP.md stays. That decides whether the gitlink and its .gitmodules entry go.
+- Row 937 (Linux CI and the release legs on ubuntu-26.04): moving the release legs moves the glibc the binaries need, which the commit's own note puts at 2.43 or newer. The owner decides that floor before the row is taken.
 
 | # | master | date | status | applies | overlap | subject | why |
 |---|---|---|---|---|---|---|---|
