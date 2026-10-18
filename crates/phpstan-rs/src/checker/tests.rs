@@ -4,6 +4,7 @@ mod codemods;
 mod dynamic_variable_bodies;
 mod helpers;
 mod locals_keys;
+mod mentions;
 mod method_memo;
 mod narrowing;
 mod template_params;

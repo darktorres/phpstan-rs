@@ -24,7 +24,7 @@ use member_usage::{
     MemberUsage, hook_read_write_shape, seed_self_typed_param_aliases, walk_expr_for_members,
     walk_property_hooks_for_members, walk_stmt_body_for_members,
 };
-pub(crate) use rebind::{MENTIONS_REBIND, WATCH as REBIND_WATCH, scan_program_for_rebind_targets};
+pub(crate) use rebind::scan_program_for_rebind_targets;
 use var_usage::collect_var_usage;
 
 impl<'a> Checker<'a> {

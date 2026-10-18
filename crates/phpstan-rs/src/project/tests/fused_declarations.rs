@@ -192,12 +192,10 @@ fn what_a_file_names_is_found_among_its_identifiers() {
             .unwrap()
             .facts
     };
-    let rebind =
-        |source: &str| facts(source).mentions & crate::checker::unused::MENTIONS_REBIND != 0;
+    let rebind = |source: &str| facts(source).mentions & crate::checker::mentions::REBIND != 0;
     let stub_attribute =
         |source: &str| facts(source).mentions & crate::stub_attributes::MENTIONS != 0;
-    let guard =
-        |source: &str| facts(source).mentions & crate::checker::includes::MENTIONS_GUARD != 0;
+    let guard = |source: &str| facts(source).mentions & crate::checker::mentions::GUARD != 0;
     assert_eq!(facts("<?php class A {}"), syntax::FileFacts::default());
     assert!(facts("<?php $f = new class {};").has_anonymous_class);
     assert!(facts("<?php $f = new #[A] class {};").has_anonymous_class);

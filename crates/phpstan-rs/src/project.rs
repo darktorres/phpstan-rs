@@ -2524,12 +2524,7 @@ impl Project {
             checker.set_current_file_absolute(self.absolute_path(path));
         }
         checker.set_root(self.absolute_root.clone());
-        checker.set_closure_rebind_possible(
-            file.facts.mentions & checker::unused::MENTIONS_REBIND != 0,
-        );
-        checker.set_include_guards_possible(
-            file.facts.mentions & checker::includes::MENTIONS_GUARD != 0,
-        );
+        checker.set_mentions(file.facts.mentions);
         Some((checker, ast))
     }
 
@@ -3059,13 +3054,13 @@ fn trait_line_ranges(ast: &[Stmt], line_index: &LineIndex) -> Vec<(u32, u32)> {
     ranges
 }
 
-/// The spellings a file's facts note, each list with the bits of the walk
-/// it gates.
+/// The spellings a file's facts note, each list with the bits of the walks
+/// it gates: the stub attributes' pass, the declarations' walk and the
+/// checker's file pass.
 static WATCHED: syntax::WatchList = syntax::WatchList(&[
     crate::stub_attributes::WATCH,
     file_declarations::WATCH,
-    checker::unused::REBIND_WATCH,
-    checker::includes::WATCH,
+    checker::mentions::WATCH,
 ]);
 
 /// What the tree `ast` refers to, and what its declarations do: from what
