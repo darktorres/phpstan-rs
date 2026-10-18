@@ -275,10 +275,13 @@ Done:
   job's later steps first ran in round 2, and their four failures are fixed too.
 - R5's round-2 follow-up: a file's diagnostics are cleared on the URI they were
   sent on.
+- R6: reports name a file with `/` where PHPStan's do, and a `\` in configured
+  path text is a separator on every platform, as PHPStan reads one.
 
-Open: R6 to R17, the rounds after them, and the batch's checks. Two things wait
-on the user, both listed in the plan's State: R8's question, and two findings
-about the disabled server, which are older than the plan.
+Open: R7 to R17, the rounds after them, and the batch's checks. Three things
+wait on the user, all listed in the plan's State: R8's question, two findings
+about the disabled server, and the SQLite reflection's relative path. All three
+are older than the plan.
 
 ## Documents with no place in the stack
 

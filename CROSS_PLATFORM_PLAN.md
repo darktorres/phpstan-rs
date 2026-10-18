@@ -5,10 +5,11 @@
 - **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
   tracks it.
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
-  (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`) and R5's
-  round-2 follow-up (`8d81da46`). The rows are built in the order of the table below, one
-  commit each, with a pathspec, since another session shares the checkout. R18 has one commit
-  for each step.
+  (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
+  round-2 follow-up (`8d81da46`) and R6 (`2526323b`, `3350adbd`). The rows are built in the
+  order of the table below, one commit each, with a pathspec, since another session shares
+  the checkout. R18 has one commit for each step, and R6 has a second for the rule its build
+  found.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -29,9 +30,13 @@
   built before R6. The 20 forbidden edges are refactored away, not listed as exceptions, and
   the graph passes. Round 2 reached the gates job's later steps, and R18 fixes their four
   failures too.
-- **Next:** R6.
-- **For the user:** R8's question, and the two findings under R5's round-2 follow-up (the
-  disabled server still publishes on an edit, and disabling clears only the open files).
+- **Next:** R7, with what R6 found for it: a `\` in a configured root.
+- **For the user:**
+  - R8's question;
+  - the two findings under R5's round-2 follow-up: the disabled server still publishes on an
+    edit, and disabling clears only the open files;
+  - R6's finding: the SQLite reflection's `path` is relative to the process's working
+    directory, not to the config file.
 
 ## Context
 
@@ -140,8 +145,8 @@ directory where `HOME` is unset. The Piwigo oracle and the monolog output must s
 | 4 | R4 | equal paths hash alike | Windows | — |
 | 5 | R5 | URIs ↔ paths on every platform | all | R3 |
 | 6 | R18 | the gates job: every module has its crate, no edge breaks the layering, and the later steps pass | CI | R2 |
-| 7 | R6 | report paths spelled with `/` where PHPStan does, matched by components | Windows | R3 |
-| 8 | R7 | the case rule, probed per root | Windows, macOS, Linux casefold | R6 |
+| 7 | R6 | report paths spelled with `/` where PHPStan does; a `\` in configured path text is a separator | all | R3 |
+| 8 | R7 | the case rule, probed per root; a `\` in a configured root | all | R6 |
 | 9 | R8 | the include rule's platform values | Windows | R3 |
 | 10 | R9 | discovery: unreadable spellings, listing misses | Windows, macOS | R3 |
 | 11 | R10 | the program runs on a thread whose stack it chooses | Windows, small `ulimit -s` | R1 |
@@ -875,6 +880,105 @@ Linux output is unchanged.
   messages' spelling with the report's: a path below the root is spelled alike on every
   platform, and Linux's messages stay as they are.
 
+**Built** (`2526323b`, `3350adbd`).
+
+- `diagnostics::report_path` spells a path for reports and messages. On Windows each `\`
+  becomes `/`. Elsewhere it is the path's own text, since a name can hold a `\` there. It is in
+  the diagnostics crate because the app, the project, the rules and the disallowed-calls
+  extension all call it.
+  - It replaces text, as PHPStan's helpers do (`str_replace('\\', '/', …)`), instead of joining
+    components as the plan said. The two agree on every path a report holds, which has no `.`
+    and no doubled separator. A share keeps its `//server/share` form, so a prefix needs no rule
+    of its own.
+- Where it is used:
+  - checkstyle's and JUnit's file names;
+  - the baseline's files, written and matched;
+  - anonymous class names (`class@anonymous/src/a.php:2`), which PHPStan's
+    `AnonymousClassNameHelper` spells through its simple helper;
+  - the restricted symbols' path for their zones;
+  - the messages that name a file: the duplicate class and function declarations' location
+    lists, and composer hygiene's two PSR-4 messages. A baseline matches by message, so a path
+    in a message is spelled as a baseline's file is. PHPStan's duplicate rules use its fuzzy
+    helper, which gives the platform's spelling. Here they use `/` on every platform, so a
+    baseline made on one platform matches on another.
+- Text, friendly and JSON keep the platform's spelling, as PHPStan's table and JSON do, and so
+  do the warnings on stderr. PHPStan's table uses its simple helper in two places only: an
+  editor URL's `%relFile%` and the JetBrains terminal's `at file:line` line. This tool writes
+  neither.
+- One rule matches configured path text against a report path (`3350adbd`).
+  `diagnostics::path_byte_names` reads it byte by byte:
+  - a `\` names a `/` on every platform;
+  - a `\` also names a `\` that a name holds, which a report path has only outside Windows;
+  - a `/` names only itself, and so does every other byte.
+
+  It is applied in two places:
+  - `ignoreErrors` paths and the restricted symbols' `allowIn` and `allowExceptIn` match
+    through `ignore_errors::path_glob_matches`. `glob_matches` became one algorithm over
+    bytes with the rule passed in, so a name pattern keeps `\` as PHP's namespace separator.
+  - The baseline keys its entries by their slash spelling. In that spelling an entry's file
+    equals every file it names, and `diagnostics::path_text_names` then confirms each
+    candidate. An entry written with `\`, by hand or by this tool on Windows before this row,
+    matches. Nothing is rewritten on load.
+- composer hygiene names the PSR-4 target relative to the root, as it names the file. It used
+  to give the canonical absolute path, on Linux too, which put the machine's directory into the
+  message and so into every baseline entry for it.
+- Linux's behaviour changes in two places, and both were defects there too.
+  - The PSR-4 target's path, which changes two fixtures' expectations (3 lines). The rule is
+    opt-in, and Piwigo's configuration does not enable it.
+  - A `\` in configured path text now also names a `/`. Piwigo's configuration has no `\`,
+    and neither do the 25 fixture configurations that set these paths.
+- Tests:
+  - `report_path`, and the rule's two functions;
+  - on every platform:
+    - a `\` in an `ignoreErrors` path, in a zone and in a baseline entry is a separator;
+    - the rule holds at a glob's start, in its middle and at its end, and in a non-ASCII name;
+    - a name pattern keeps its `\`;
+  - on Windows:
+    - `ignoreErrors` in either separator;
+    - a Windows file written to a baseline with `/` and matched again;
+    - checkstyle and JUnit name the file with `/`, while JSON keeps `\`;
+    - an anonymous class's name;
+  - outside Windows: a `\` in a pattern or a baseline entry also names a `\` in a name, and a
+    `/` does not.
+- Checked here, after each commit:
+  - clippy, `-D warnings`, on the package and the diagnostics crate;
+  - the diagnostics tests (13) and the touched modules' tests: 93 for the first commit, then
+    47 in `baseline`, `ignore_errors` and `restricted_symbols`;
+  - the fixtures (3832), with the two composer_hygiene fixtures re-blessed;
+  - the CLI's baseline and ignore tests (2);
+  - the Windows type check, which now covers `report_path` and its tests;
+  - the package's Windows tests, compiled on Linux under a flipped `cfg` in one clippy run.
+
+  `cargo xtask modgraph` (403 modules, 12,717 references) and `arch` pass.
+
+**Found while building it.**
+
+- **PHPStan reads a `\` in configured path text as a separator on every platform**, not only on
+  Windows as this row said.
+  - `FileHelper::normalizePath` turns each `\` into `/` for the pattern and the file alike,
+    before `FileExcluder` compares them. `FNM_NOESCAPE` matters only on Windows, where the
+    joined spelling has `\` again.
+  - disallowed-calls' `FilePath::fnMatch` normalizes both sides the same way.
+
+  So the plan's reading outside Windows, a `\` as a character of a name alone, would have
+  left a configuration or baseline written on Windows unmatched on Linux and macOS. The second
+  commit builds the rule above. "Not in this plan" was wrong about `\` escapes for the same
+  reason: PHPStan's matcher never sees a `\`.
+- **A configured root has the same question.** PHPStan reads `paths` through `normalizePath`
+  too (`CommandHelper.php:251`). This tool reads a `\` in `paths`, `scan_paths`, `stub_paths`,
+  `schema_file` and `baseline` as a character of a name outside Windows. Choosing between the
+  readings needs the disk, and R7 probes each configured root against it, so R7 takes this.
+- **Case:**
+  - disallowed-calls matches its zones case-sensitively on every platform (`FNM_NOESCAPE`
+    alone);
+  - PHPStan's `FileExcluder` folds case on Windows only;
+  - R7 folds where a root's directory does. That differs from disallowed-calls on Windows, and
+    from both on macOS.
+- **Older than this plan, on every platform:** the SQLite reflection's `path` is opened as
+  written. A relative one is therefore relative to the process's working directory, while
+  every other path in the config file is relative to the file. Not changed here; the user is
+  asked.
+
 ### R7. Case is matched as the root's directory matches it
 
 **Now.** Matching against configured text is exact on every platform. On NTFS, default APFS
@@ -914,6 +1018,21 @@ configured root.
   names it is given, on a casefold directory too, so on Linux `psr4.caseMismatch` can report a
   file whose name on disk is right. On a root that folds case, the walk spells a configured
   path as its directories' listings do.
+
+**From R6.**
+
+- **A `\` in a configured root.** This covers `paths`, `scan_paths`, `stub_paths`,
+  `schema_file` and `baseline`. A `\` there is a separator, as PHPStan reads it on every
+  platform, and outside Windows it can also be a character of a name. The probe reads each
+  root against its directory's listing both ways:
+  - a list's root gives each reading the listings hold, the separator reading first;
+  - a single file (`schema_file`, `baseline`) takes the first reading the listings hold;
+  - when the listings hold neither, it is the separator reading, and a missing root is then
+    named in that reading.
+
+  Windows already reads `\` as a separator.
+- **Prior art for the case rule:** disallowed-calls matches its zones case-sensitively on every
+  platform, and PHPStan's `FileExcluder` folds case on Windows only.
 
 ### R8. The include rule's platform values
 
@@ -1224,8 +1343,9 @@ Builds and runs need no approval. One heavy job at a time, under `nice -n 19`, w
 - **CRLF semantics** beyond R13's tests:
   - `phpdoc` splits with `str::lines` (CRLF-aware), and its lexer stops at `\r`;
   - the syntax crate handles `\r` at 7 sites.
-- **fnmatch's `?`, `[…]` and `\` escapes** in `ignoreErrors` on Unix are a parity gap on every
-  platform, not a platform-scoped one.
+- **fnmatch's `?` and `[…]`** in `ignoreErrors` are a parity gap on every platform, not a
+  platform-scoped one. PHPStan's matcher never sees a `\`: `normalizePath` has already turned
+  each one into a separator (R6).
 - **The release target scope** is not changed here: the glibc floor, musl, Windows ARM64.
 - **`.cargo/config.toml`'s mold and clang** stay x86_64 Linux's. They are a link-speed choice;
   R15's README covers them.
