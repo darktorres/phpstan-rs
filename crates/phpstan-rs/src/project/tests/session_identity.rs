@@ -6,7 +6,7 @@ use super::super::Project;
 use super::super::walk::Role;
 use super::helpers::{TempDir, resolved, session};
 use crate::registry::stub_set::Stubs;
-use std::fs;
+use crate::test_links::{link_dir, unlink_dir};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -22,13 +22,12 @@ fn a_listed_file_is_classified_under_its_resolved_path_with_its_role() {
     assert!(!classified.is_stub);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_spelling_through_a_link_is_classified_as_the_file_it_names() {
     let dir = TempDir::new("classify_link");
     dir.write("proj/real/a.php", "<?php");
     let root = resolved(&dir).join("proj");
-    std::os::unix::fs::symlink("real", root.join("link")).unwrap();
+    link_dir("real", root.join("link"));
     let session = session(&root, Vec::new());
 
     let classified = session.classify(&root.join("link/a.php"));
@@ -36,18 +35,17 @@ fn a_spelling_through_a_link_is_classified_as_the_file_it_names() {
     assert_eq!(classified.role, Role::Analysed);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_spelling_whose_link_was_removed_keeps_the_file_it_named() {
     let dir = TempDir::new("classify_removed_link");
     dir.write("proj/real/a.php", "<?php");
     let root = resolved(&dir).join("proj");
-    std::os::unix::fs::symlink("real", root.join("link")).unwrap();
+    link_dir("real", root.join("link"));
     let session = session(&root, Vec::new());
     let spelled = root.join("link/a.php");
     assert_eq!(session.classify(&spelled).path, root.join("real/a.php"));
 
-    fs::remove_file(root.join("link")).unwrap();
+    unlink_dir(root.join("link"));
     let classified = session.classify(&spelled);
     assert_eq!(classified.path, root.join("real/a.php"));
     assert_eq!(classified.role, Role::Analysed);

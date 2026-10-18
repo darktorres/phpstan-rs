@@ -669,7 +669,6 @@ impl<'t> LineFinder<'t> {
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn path_repository_packages_are_recognized_through_their_symlink() {
         let root = std::env::temp_dir().join(format!("phpstan-rs-manifest-{}", std::process::id()));
@@ -678,7 +677,7 @@ mod tests {
         std::fs::create_dir_all(root.join("vendor/acme")).unwrap();
         std::fs::create_dir_all(root.join("vendor/composer")).unwrap();
         std::fs::create_dir_all(root.join("vendor/other/lib")).unwrap();
-        std::os::unix::fs::symlink(root.join("packages/b"), root.join("vendor/acme/b")).unwrap();
+        crate::test_links::link_dir(root.join("packages/b"), root.join("vendor/acme/b"));
         std::fs::write(
             root.join("composer.json"),
             r#"{"name": "acme/app", "repositories": [{"type": "path", "url": "packages/*"}],

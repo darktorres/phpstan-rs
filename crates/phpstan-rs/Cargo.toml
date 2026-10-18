@@ -76,6 +76,10 @@ libtest-mimic = "=0.8.2"
 proptest.workspace = true
 stacker.workspace = true
 
+# Windows makes a link to a directory with a junction, which needs no privilege.
+[target.'cfg(windows)'.dev-dependencies]
+junction.workspace = true
+
 # The fixture suite (tests/fixtures.rs). Each fixture still builds a whole
 # Project, stubs included, so a debug run takes ~26 minutes; it runs in the
 # `gate` profile instead (`cargo test --profile gate --test fixtures`, part

@@ -4,6 +4,7 @@
 
 use super::super::path_spelling::as_listed;
 use super::helpers::{TempDir, resolved};
+use crate::test_links::link_dir;
 use composer::dir_listings::DirListings;
 use diagnostics::CaseRule;
 use std::path::{Path, PathBuf};
@@ -116,12 +117,11 @@ fn a_component_that_is_not_a_name_ends_the_spelling() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_ends_the_spelling() {
     let dir = TempDir::new("spelling_link");
     dir.write("real/Inner/a.php", "<?php\n");
-    std::os::unix::fs::symlink(resolved(&dir).join("real"), resolved(&dir).join("Link")).unwrap();
+    link_dir(resolved(&dir).join("real"), resolved(&dir).join("Link"));
     assert_eq!(
         listed(&dir, "link/inner/a.php", CaseRule::Folded),
         PathBuf::from("Link/inner/a.php")

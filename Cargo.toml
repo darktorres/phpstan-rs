@@ -23,6 +23,7 @@ stub-sources = { package = "phpstan-rs-stub-sources", path = "crates/stub-source
 criterion = "=0.8.2"
 hotpath = "=0.26.1"
 imbl = "=7.0.2"
+junction = "=2.1.0"
 libmimalloc-sys = { version = "=0.1.49", default-features = false }
 proptest = "=1.11.0"
 hashbrown = { version = "=0.17.1", default-features = false }

@@ -6,6 +6,7 @@ use super::helpers::*;
 use crate::canonical::canonicalize;
 use crate::dir_listings::DirListings;
 use crate::hashed_path::{HashedPath, Resolved};
+use crate::test_links::{link_dir, link_file};
 use crate::vendor::*;
 use std::path::PathBuf;
 use syntax::ast::*;
@@ -208,18 +209,16 @@ fn dunder_dir_lexes_and_parses_as_a_bare_name() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn a_path_repository_symlink_out_of_vendor_is_still_vendor_context() {
     let dir = TempDir::new("path_repository");
     dir.write("composer.json", "{}");
     dir.write("packages/b/src/B.php", "<?php class B {}");
     std::fs::create_dir_all(dir.path().join("vendor/acme")).unwrap();
-    std::os::unix::fs::symlink(
+    link_dir(
         dir.path().join("packages/b"),
         dir.path().join("vendor/acme/b"),
-    )
-    .unwrap();
+    );
     dir.write(
         "vendor/composer/autoload_psr4.php",
         r#"<?php
@@ -349,13 +348,13 @@ return array(
 // made per file from the paths, so this fixture holds each case of the drop:
 // the walk of the nearest directory lists a file only through directories
 // that are not links, down to a file that is not one.
-#[cfg(unix)]
 #[test]
 fn a_file_is_left_to_a_directory_only_when_the_directorys_walk_lists_it() {
     let dir = TempDir::new("left_by_listing");
-    let link = |target: &str, link: &str| {
-        std::os::unix::fs::symlink(dir.path().join(target), dir.path().join(link)).unwrap()
-    };
+    let dir_link =
+        |target: &str, link: &str| link_dir(dir.path().join(target), dir.path().join(link));
+    let file_link =
+        |target: &str, link: &str| link_file(dir.path().join(target), dir.path().join(link));
     dir.write("composer.json", "{}");
     dir.write("vendor/acme/a/src/A1.php", "<?php class A1 {}");
     dir.write("vendor/acme/a/src/deep/er/A2.php", "<?php class A2 {}");
@@ -367,13 +366,13 @@ fn a_file_is_left_to_a_directory_only_when_the_directorys_walk_lists_it() {
     // Path-repository packages, linked into `vendor/` and kept as written.
     dir.write("packages/b/src/B.php", "<?php class B {}");
     dir.write("packages/b/Real.php", "<?php class Real {}");
-    link("packages/b/Real.php", "packages/b/src/Link.php");
+    file_link("packages/b/Real.php", "packages/b/src/Link.php");
     dir.write("packages/c/C.php", "<?php class C {}");
     std::fs::create_dir_all(dir.path().join("vendor/acme/d/src")).unwrap();
     dir.write("packages/e/Z.php", "<?php class Z {}");
-    link("packages/b", "vendor/acme/b");
-    link("packages/c", "vendor/acme/c");
-    link("packages/e", "vendor/acme/d/src/lnk");
+    dir_link("packages/b", "vendor/acme/b");
+    dir_link("packages/c", "vendor/acme/c");
+    dir_link("packages/e", "vendor/acme/d/src/lnk");
     dir.write(
         "vendor/composer/autoload_classmap.php",
         r#"<?php

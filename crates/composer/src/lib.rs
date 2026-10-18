@@ -285,4 +285,6 @@ impl PackageIndex {
 }
 
 #[cfg(test)]
+mod test_links;
+#[cfg(test)]
 mod tests;

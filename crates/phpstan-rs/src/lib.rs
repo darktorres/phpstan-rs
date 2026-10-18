@@ -37,6 +37,8 @@ pub mod rule;
 pub mod rules_settings;
 pub(crate) mod shard;
 pub(crate) mod stub_attributes;
+#[cfg(test)]
+pub(crate) mod test_links;
 
 pub use checker::Checker;
 pub use diagnostics::{Diagnostic, DiagnosticBuilder, DiagnosticFix};

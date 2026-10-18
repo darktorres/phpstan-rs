@@ -5,6 +5,7 @@ use super::helpers::*;
 use crate::canonical::canonicalize;
 use crate::dir_listings::{DirListings, Entry, Listing};
 use crate::hashed_path::HashedPath;
+use crate::test_links::link_file;
 use std::ffi::OsStr;
 use std::sync::Arc;
 
@@ -95,12 +96,11 @@ fn an_entry_is_found_by_name_with_its_type() {
     assert!(listing.entry(OsStr::new("missing.php")).is_none());
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_is_listed_as_a_link_and_not_followed() {
     let dir = TempDir::new("link_kind");
     dir.write("a.php", "");
-    std::os::unix::fs::symlink(dir.path().join("a.php"), dir.path().join("link.php")).unwrap();
+    link_file(dir.path().join("a.php"), dir.path().join("link.php"));
     let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listing = DirListings::default().listing(&root).unwrap();
     let kind = listing

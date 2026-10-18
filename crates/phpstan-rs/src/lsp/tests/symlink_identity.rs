@@ -9,9 +9,9 @@
 use super::super::*;
 use super::helpers::run;
 use super::helpers::*;
+use crate::test_links::link_dir;
 use serde_json::json;
 
-#[cfg(unix)]
 #[test]
 fn a_document_opened_through_a_link_publishes_on_its_uri_and_resolves_in_the_target() {
     let dir = TempDir::new("link_document");
@@ -19,7 +19,7 @@ fn a_document_opened_through_a_link_publishes_on_its_uri_and_resolves_in_the_tar
         "real/a.php",
         "<?php class Greeter { public function greet(): string { return 'hi'; } }",
     );
-    std::os::unix::fs::symlink("real", dir.0.join("link")).unwrap();
+    link_dir("real", dir.0.join("link"));
     let src = "<?php function useGreeter(Greeter $g) { return $g->greet(); }";
     dir.write("real/b.php", src);
     let link_uri = path_to_uri(&dir.0.join("link/b.php")).to_string();
@@ -39,7 +39,6 @@ fn a_document_opened_through_a_link_publishes_on_its_uri_and_resolves_in_the_tar
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_workspace_opened_through_a_link_is_answered_in_the_links_spelling() {
     let dir = TempDir::new("link_workspace");
@@ -53,7 +52,7 @@ fn a_workspace_opened_through_a_link_is_answered_in_the_links_spelling() {
     );
     let src = "<?php function useGreeter(Greeter $g) { return $g->greet(); }";
     dir.write("real/use.php", src);
-    std::os::unix::fs::symlink("real", dir.0.join("link")).unwrap();
+    link_dir("real", dir.0.join("link"));
     let link = dir.0.join("link");
     let link_uri = path_to_uri(&link).to_string();
     let use_uri = path_to_uri(&link.join("use.php")).to_string();
@@ -99,7 +98,6 @@ fn a_workspace_opened_through_a_link_is_answered_in_the_links_spelling() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_workspace_opened_through_a_link_and_removed_is_cleared_on_the_links_uris() {
     let dir = TempDir::new("link_workspace_removed");
@@ -107,7 +105,7 @@ fn a_workspace_opened_through_a_link_and_removed_is_cleared_on_the_links_uris() 
         "real/unopened.php",
         "<?php function f() { echo $undefinedInLinked; }",
     );
-    std::os::unix::fs::symlink("real", dir.0.join("link")).unwrap();
+    link_dir("real", dir.0.join("link"));
     let link = dir.0.join("link");
     let link_uri = path_to_uri(&link).to_string();
     let unopened_uri = path_to_uri(&link.join("unopened.php")).to_string();
@@ -142,13 +140,12 @@ fn a_workspace_opened_through_a_link_and_removed_is_cleared_on_the_links_uris() 
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_file_opened_by_another_spelling_has_its_diagnostics_moved_to_that_uri() {
     let dir = TempDir::new("link_workspace_moved");
     let src = "<?php function f() { echo $undefinedInLinked; }";
     dir.write("real/a.php", src);
-    std::os::unix::fs::symlink("real", dir.0.join("link")).unwrap();
+    link_dir("real", dir.0.join("link"));
     let link = dir.0.join("link");
     let link_uri = path_to_uri(&link).to_string();
     let linked_uri = path_to_uri(&link.join("a.php")).to_string();

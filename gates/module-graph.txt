@@ -77,6 +77,7 @@ module pcre_validate builtins
 module stub_attributes reflection
 module file_id reflection
 module shard reflection
+module test_links project
 module registry reflection
 module registry::assertion_table reflection
 module assertion_tables reflection

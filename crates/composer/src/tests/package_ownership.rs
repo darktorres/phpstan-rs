@@ -5,6 +5,7 @@ use super::super::manifest::{lexically_normalized, resolve};
 use super::super::*;
 use super::helpers::*;
 use crate::canonical::canonicalize;
+use crate::test_links::link_dir;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -67,7 +68,6 @@ fn a_root_package_with_no_name_owns_its_files_but_has_no_name() {
     assert_eq!(index.name(owner.unwrap()), None);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_package_linked_into_the_vendor_directory_belongs_to_its_target() {
     let dir = TempDir::new("owner_linked");
@@ -79,7 +79,7 @@ fn a_package_linked_into_the_vendor_directory_belongs_to_its_target() {
     );
     let root = canonicalize(dir.path()).unwrap();
     std::fs::create_dir_all(root.join("vendor/acme")).unwrap();
-    std::os::unix::fs::symlink(root.join("packages/b"), root.join("vendor/acme/b")).unwrap();
+    link_dir(root.join("packages/b"), root.join("vendor/acme/b"));
     let index = index(&dir);
     // A path is looked up resolved, so the link is followed to its target.
     let owner = index.owner_of_dir(&resolve(&root.join("vendor/acme/b/src")));

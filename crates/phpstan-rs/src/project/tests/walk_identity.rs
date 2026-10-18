@@ -5,6 +5,7 @@
 
 use super::super::walk::{FileIndex, FinalFiles, Listed, Role, Unstreamed, Walk};
 use super::helpers::*;
+use crate::test_links::{link_dir, link_file};
 use composer::dir_listings::DirListings;
 use composer::hashed_path::path_hash;
 use std::fs;
@@ -91,13 +92,12 @@ fn a_file_under_two_roots_is_listed_once_under_its_resolved_path() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_root_given_through_a_link_is_listed_under_its_target() {
     let dir = TempDir::new("walk_root_link");
     dir.write("proj/a.php", "<?php");
     let base = resolved(&dir);
-    std::os::unix::fs::symlink("proj", base.join("link")).unwrap();
+    link_dir("proj", base.join("link"));
 
     assert_eq!(
         listing(&[(base.join("link"), Role::Analysed, &[])]),
@@ -185,14 +185,13 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_into_a_listed_root_is_left_to_that_root() {
     let dir = TempDir::new("walk_link_in_root");
     dir.write("proj/src/a.php", "<?php");
     let base = resolved(&dir);
     let root = base.join("proj");
-    std::os::unix::fs::symlink("src", root.join("alias")).unwrap();
+    link_dir("src", root.join("alias"));
 
     assert_eq!(
         listing(&[(root.clone(), Role::Analysed, &[])]),
@@ -200,14 +199,13 @@ fn a_link_into_a_listed_root_is_left_to_that_root() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_file_link_into_a_listed_root_lists_its_target_once() {
     let dir = TempDir::new("walk_file_link_in_root");
     dir.write("proj/src/a.php", "<?php");
     let base = resolved(&dir);
     let root = base.join("proj");
-    std::os::unix::fs::symlink("src/a.php", root.join("copy.php")).unwrap();
+    link_file("src/a.php", root.join("copy.php"));
 
     assert_eq!(
         listing(&[(root.clone(), Role::Analysed, &[])]),
@@ -215,7 +213,6 @@ fn a_file_link_into_a_listed_root_lists_its_target_once() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_target_outside_every_root_is_listed_once_under_its_resolved_path() {
     let dir = TempDir::new("walk_outside_target");
@@ -223,8 +220,8 @@ fn a_target_outside_every_root_is_listed_once_under_its_resolved_path() {
     dir.write("outside/x.php", "<?php");
     let base = resolved(&dir);
     let root = base.join("proj");
-    std::os::unix::fs::symlink("../outside", root.join("one")).unwrap();
-    std::os::unix::fs::symlink("../outside", root.join("two")).unwrap();
+    link_dir("../outside", root.join("one"));
+    link_dir("../outside", root.join("two"));
 
     assert_eq!(
         listing(&[(root.clone(), Role::Analysed, &[])]),
@@ -235,7 +232,6 @@ fn a_target_outside_every_root_is_listed_once_under_its_resolved_path() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_target_is_walked_with_the_exclusions_of_each_walk_that_meets_it() {
     let dir = TempDir::new("walk_link_exclusions");
@@ -247,8 +243,8 @@ fn a_link_target_is_walked_with_the_exclusions_of_each_walk_that_meets_it() {
     let proj = base.join("proj");
     let ctx = base.join("ctx");
     let outside = base.join("outside");
-    std::os::unix::fs::symlink("../outside", proj.join("out")).unwrap();
-    std::os::unix::fs::symlink("../outside", ctx.join("out")).unwrap();
+    link_dir("../outside", proj.join("out"));
+    link_dir("../outside", ctx.join("out"));
 
     // The excluding walk skips `vendor` inside the target; the context walk,
     // which excludes nothing, lists it. Each file is listed once.
@@ -266,7 +262,6 @@ fn a_link_target_is_walked_with_the_exclusions_of_each_walk_that_meets_it() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_file_reached_through_analysed_and_context_links_is_analysed() {
     let dir = TempDir::new("walk_role_by_link");
@@ -276,8 +271,8 @@ fn a_file_reached_through_analysed_and_context_links_is_analysed() {
     let base = resolved(&dir);
     let ctx = base.join("ctx");
     let proj = base.join("proj");
-    std::os::unix::fs::symlink("../outside", ctx.join("go")).unwrap();
-    std::os::unix::fs::symlink("../outside", proj.join("go")).unwrap();
+    link_dir("../outside", ctx.join("go"));
+    link_dir("../outside", proj.join("go"));
     let expected = vec![
         (ctx.join("c.php"), Role::Context, false),
         (base.join("outside/x.php"), Role::Analysed, false),
@@ -301,7 +296,6 @@ fn a_file_reached_through_analysed_and_context_links_is_analysed() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_context_root_reached_through_an_analysed_link_keeps_its_role() {
     let dir = TempDir::new("walk_context_root_via_link");
@@ -309,7 +303,7 @@ fn a_context_root_reached_through_an_analysed_link_keeps_its_role() {
     dir.write("proj/a.php", "<?php");
     let base = resolved(&dir);
     let proj = base.join("proj");
-    std::os::unix::fs::symlink("../ctx", proj.join("c")).unwrap();
+    link_dir("../ctx", proj.join("c"));
 
     assert_eq!(
         listing(&[
@@ -323,7 +317,6 @@ fn a_context_root_reached_through_an_analysed_link_keeps_its_role() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_cycle_ends_and_lists_each_file_once() {
     let dir = TempDir::new("walk_cycle");
@@ -332,10 +325,10 @@ fn a_link_cycle_ends_and_lists_each_file_once() {
     dir.write("other/y.php", "<?php");
     let base = resolved(&dir);
     let root = base.join("proj");
-    std::os::unix::fs::symlink("../outside", root.join("go")).unwrap();
-    std::os::unix::fs::symlink(".", base.join("outside/self")).unwrap();
-    std::os::unix::fs::symlink("../other", base.join("outside/back")).unwrap();
-    std::os::unix::fs::symlink("../outside", base.join("other/loop")).unwrap();
+    link_dir("../outside", root.join("go"));
+    link_dir(".", base.join("outside/self"));
+    link_dir("../other", base.join("outside/back"));
+    link_dir("../outside", base.join("other/loop"));
 
     assert_eq!(
         listing(&[(root.clone(), Role::Analysed, &[])]),
@@ -347,15 +340,14 @@ fn a_link_cycle_ends_and_lists_each_file_once() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_dangling_php_link_is_listed_by_its_path_and_a_link_to_a_non_php_file_is_not() {
     let dir = TempDir::new("walk_dangling");
     dir.write("proj/a.php", "<?php");
     dir.write("proj/readme.txt", "not php");
     let root = resolved(&dir).join("proj");
-    std::os::unix::fs::symlink("nowhere.php", root.join("dangling.php")).unwrap();
-    std::os::unix::fs::symlink("readme.txt", root.join("notes.php")).unwrap();
+    link_file("nowhere.php", root.join("dangling.php"));
+    link_file("readme.txt", root.join("notes.php"));
 
     assert_eq!(
         listing(&[(root.clone(), Role::Analysed, &[])]),
@@ -366,7 +358,6 @@ fn a_dangling_php_link_is_listed_by_its_path_and_a_link_to_a_non_php_file_is_not
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_named_like_an_excluded_directory_is_not_followed() {
     let dir = TempDir::new("walk_excluded_link");
@@ -374,7 +365,7 @@ fn a_link_named_like_an_excluded_directory_is_not_followed() {
     dir.write("outside/x.php", "<?php");
     let base = resolved(&dir);
     let root = base.join("proj");
-    std::os::unix::fs::symlink("../outside", root.join("vendor")).unwrap();
+    link_dir("../outside", root.join("vendor"));
 
     assert_eq!(
         listing(&[(root.clone(), Role::Analysed, &["vendor"])]),
@@ -382,7 +373,6 @@ fn a_link_named_like_an_excluded_directory_is_not_followed() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn hard_links_stay_two_files() {
     let dir = TempDir::new("walk_hard_link");
@@ -423,13 +413,12 @@ fn a_stub_root_marks_its_files_and_an_analysed_listing_stays_analysed() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn an_explicit_link_is_listed_under_its_target() {
     let dir = TempDir::new("walk_explicit_link");
     dir.write("real/lib.php", "<?php");
     let base = resolved(&dir);
-    std::os::unix::fs::symlink("real/lib.php", base.join("link.php")).unwrap();
+    link_file("real/lib.php", base.join("link.php"));
 
     let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("link.php"), Role::Context);
@@ -443,14 +432,13 @@ fn an_explicit_link_is_listed_under_its_target() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn explicit_files_under_a_linked_directory_are_listed_under_its_target() {
     let dir = TempDir::new("walk_explicit_linked_dir");
     dir.write("real/lib.php", "<?php");
     dir.write("real/other.php", "<?php");
     let base = resolved(&dir);
-    std::os::unix::fs::symlink("real", base.join("alias")).unwrap();
+    link_dir("real", base.join("alias"));
 
     let mut explicit = Walk::new(Arc::default(), &NO_PACKAGES);
     explicit.add_file(&base.join("alias/lib.php"), Role::Context);
@@ -530,7 +518,6 @@ fn a_walk_reads_a_directory_once_through_its_listings() {
 }
 
 /// The directories of the link tree `oracle_tree` builds.
-#[cfg(unix)]
 struct OracleTree {
     app: PathBuf,
     ctx: PathBuf,
@@ -541,10 +528,9 @@ struct OracleTree {
 /// A link tree written out by hand, with every case one run meets: two links
 /// into one outside directory from roots of different roles, a link from an
 /// analysed root into a context root and one back, a self link and a mutual
-/// link, a file link, a dangling link, a link to a non-PHP file, an unreadable
-/// directory, an explicit file under a context directory, and a context root
-/// inside an analysed one.
-#[cfg(unix)]
+/// link, a file link, a dangling link, a link to a non-PHP file, a directory
+/// `set_locked` can make unreadable, an explicit file under a context
+/// directory, and a context root inside an analysed one.
 fn oracle_tree(dir: &TempDir) -> OracleTree {
     dir.write("app/a.php", "<?php");
     dir.write("app/readme.txt", "not php");
@@ -562,23 +548,21 @@ fn oracle_tree(dir: &TempDir) -> OracleTree {
         outside: base.join("outside"),
         locked: base.join("app/locked"),
     };
-    let symlink = |target: &str, at: PathBuf| std::os::unix::fs::symlink(target, at).unwrap();
-    symlink("../outside", tree.app.join("to_outside"));
-    symlink("../ctx", tree.app.join("to_ctx"));
-    symlink(".", tree.app.join("self"));
-    symlink("../outside/x.php", tree.app.join("copy.php"));
-    symlink("nowhere.php", tree.app.join("dangling.php"));
-    symlink("readme.txt", tree.app.join("notes.php"));
-    symlink("../outside", tree.ctx.join("go"));
-    symlink("../app", tree.ctx.join("back"));
-    symlink("../mut_b", tree.outside.join("mut_a/back"));
-    symlink("../mut_a", tree.outside.join("mut_b/back"));
-    symlink(".", tree.outside.join("self"));
+    link_dir("../outside", tree.app.join("to_outside"));
+    link_dir("../ctx", tree.app.join("to_ctx"));
+    link_dir(".", tree.app.join("self"));
+    link_file("../outside/x.php", tree.app.join("copy.php"));
+    link_file("nowhere.php", tree.app.join("dangling.php"));
+    link_file("readme.txt", tree.app.join("notes.php"));
+    link_dir("../outside", tree.ctx.join("go"));
+    link_dir("../app", tree.ctx.join("back"));
+    link_dir("../mut_b", tree.outside.join("mut_a/back"));
+    link_dir("../mut_a", tree.outside.join("mut_b/back"));
+    link_dir(".", tree.outside.join("self"));
     tree
 }
 
 /// What `oracle_tree`'s roots list on `pool`, in the order the walk gives it.
-#[cfg(unix)]
 fn oracle_walk(tree: &OracleTree, pool: &rayon::ThreadPool) -> Vec<Listed> {
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
     walk.add(&tree.app, Role::Analysed, &[]);
@@ -588,56 +572,59 @@ fn oracle_walk(tree: &OracleTree, pool: &rayon::ThreadPool) -> Vec<Listed> {
     walk.finish(pool, &Unstreamed).files
 }
 
-/// Sets the mode of the unreadable directory, `0o000` or `0o755`.
+/// Makes the tree's `locked` directory unreadable, or readable again. A Unix
+/// mode does it; elsewhere the directory stays readable.
 #[cfg(unix)]
-fn set_locked(tree: &OracleTree, mode: u32) {
+fn set_locked(tree: &OracleTree, locked: bool) {
     use std::os::unix::fs::PermissionsExt;
+    let mode = if locked { 0o000 } else { 0o755 };
     fs::set_permissions(&tree.locked, fs::Permissions::from_mode(mode)).unwrap();
 }
 
-#[cfg(unix)]
+#[cfg(not(unix))]
+fn set_locked(_tree: &OracleTree, _locked: bool) {}
+
 #[test]
 fn a_link_tree_is_listed_as_written_by_hand() {
     let dir = TempDir::new("walk_oracle");
     let tree = oracle_tree(&dir);
-    set_locked(&tree, 0o000);
-    // A user who can read a directory of mode 000 (root) has nothing to test.
-    let unreadable = fs::read_dir(&tree.locked).is_err();
+    set_locked(&tree, true);
+    // A user who can read a directory of mode 000 (root) lists what is in it,
+    // as does a platform that cannot lock one.
+    let readable = fs::read_dir(&tree.locked).is_ok();
     let found = sorted(oracle_walk(&tree, &crate::project::worker_pool()));
-    set_locked(&tree, 0o755);
-    if !unreadable {
-        return;
-    }
+    set_locked(&tree, false);
 
     let (app, ctx, outside) = (&tree.app, &tree.ctx, &tree.outside);
-    assert_eq!(
-        found,
-        vec![
-            (app.join("a.php"), Role::Analysed, false),
-            (app.join("dangling.php"), Role::Analysed, false),
-            (app.join("pkg/src/p.php"), Role::Analysed, false),
-            (ctx.join("c.php"), Role::Context, false),
-            (outside.join("keep.php"), Role::Analysed, false),
-            (outside.join("mut_a/m.php"), Role::Analysed, false),
-            (outside.join("mut_b/n.php"), Role::Analysed, false),
-            (outside.join("x.php"), Role::Analysed, false),
-        ]
-    );
+    let mut expected = vec![
+        (app.join("a.php"), Role::Analysed, false),
+        (app.join("dangling.php"), Role::Analysed, false),
+        (app.join("pkg/src/p.php"), Role::Analysed, false),
+        (ctx.join("c.php"), Role::Context, false),
+        (outside.join("keep.php"), Role::Analysed, false),
+        (outside.join("mut_a/m.php"), Role::Analysed, false),
+        (outside.join("mut_b/n.php"), Role::Analysed, false),
+        (outside.join("x.php"), Role::Analysed, false),
+    ];
+    if readable {
+        expected.push((tree.locked.join("secret.php"), Role::Analysed, false));
+        expected.sort();
+    }
+    assert_eq!(found, expected);
 }
 
 /// The listing comes out in the same order on one thread, on four, on the
 /// worker pool, and again on the worker pool.
-#[cfg(unix)]
 #[test]
 fn the_listing_order_does_not_depend_on_the_thread_count() {
     let dir = TempDir::new("walk_threads");
     let tree = oracle_tree(&dir);
-    set_locked(&tree, 0o000);
+    set_locked(&tree, true);
     let single = oracle_walk(&tree, &thread_pool(1));
     let four = oracle_walk(&tree, &thread_pool(4));
     let default = oracle_walk(&tree, &crate::project::worker_pool());
     let again = oracle_walk(&tree, &crate::project::worker_pool());
-    set_locked(&tree, 0o755);
+    set_locked(&tree, false);
 
     assert!(!single.is_empty());
     assert_eq!(single, four);
@@ -645,7 +632,6 @@ fn the_listing_order_does_not_depend_on_the_thread_count() {
     assert_eq!(default, again);
 }
 
-#[cfg(unix)]
 fn thread_pool(threads: usize) -> rayon::ThreadPool {
     rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
@@ -655,14 +641,13 @@ fn thread_pool(threads: usize) -> rayon::ThreadPool {
 
 /// The hash a walk gives each listed file is the hash of its path, and the
 /// index finds each file at its position.
-#[cfg(unix)]
 #[test]
 fn a_listed_file_is_hashed_as_its_path_and_indexed_there() {
     let dir = TempDir::new("walk_hash");
     let tree = oracle_tree(&dir);
-    set_locked(&tree, 0o000);
+    set_locked(&tree, true);
     let files = oracle_walk(&tree, &crate::project::worker_pool());
-    set_locked(&tree, 0o755);
+    set_locked(&tree, false);
 
     assert!(!files.is_empty());
     let index = FileIndex::of(&files);
@@ -676,7 +661,6 @@ fn a_listed_file_is_hashed_as_its_path_and_indexed_there() {
 /// Each file a walk lists carries the package that owns its directory. A file
 /// reached through a link is owned by the package of its target, and a dangling
 /// `.php` link by the package of the directory it is in.
-#[cfg(unix)]
 #[test]
 fn a_listed_file_carries_the_package_that_owns_its_directory() {
     let dir = TempDir::new("walk_owners");
@@ -688,9 +672,8 @@ fn a_listed_file_carries_the_package_that_owns_its_directory() {
     dir.write("vendor/acme/lib/src/A.php", "<?php");
     dir.write("src/B.php", "<?php");
     let base = resolved(&dir);
-    std::os::unix::fs::symlink("../vendor/acme/lib/src/A.php", base.join("src/Linked.php"))
-        .unwrap();
-    std::os::unix::fs::symlink("nowhere.php", base.join("src/Dangling.php")).unwrap();
+    link_file("../vendor/acme/lib/src/A.php", base.join("src/Linked.php"));
+    link_file("nowhere.php", base.join("src/Dangling.php"));
     let packages = composer::PackageIndex::new(
         composer::manifest::ComposerManifest::load(&base, &base)
             .into_iter()
@@ -721,7 +704,6 @@ fn a_listed_file_carries_the_package_that_owns_its_directory() {
 /// context root inside an excluding root, a stub root inside an analysed one),
 /// a link whose target holds a root, and a dangling link. A file's role is the
 /// strongest that lists it.
-#[cfg(unix)]
 #[test]
 fn the_listing_is_in_path_order_across_nested_roots_links_and_stubs() {
     let dir = TempDir::new("walk_order");
@@ -735,8 +717,8 @@ fn the_listing_is_in_path_order_across_nested_roots_links_and_stubs() {
     dir.write("shared/n/k.php", "<?php");
     dir.write("shared/z.php", "<?php");
     let base = resolved(&dir);
-    std::os::unix::fs::symlink(base.join("shared"), base.join("app/linked")).unwrap();
-    std::os::unix::fs::symlink(base.join("nowhere.php"), base.join("app/dangling.php")).unwrap();
+    link_dir(base.join("shared"), base.join("app/linked"));
+    link_file(base.join("nowhere.php"), base.join("app/dangling.php"));
     let app = base.join("app");
     let excluded: &[&str] = &["vendor"];
 
@@ -904,7 +886,6 @@ fn a_file_two_walks_of_its_strongest_role_list_is_handed_over_by_neither() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_target_is_listed_but_never_handed_over() {
     let dir = TempDir::new("walk_link_handed");
@@ -912,7 +893,7 @@ fn a_link_target_is_listed_but_never_handed_over() {
     dir.write("outside/o.php", "<?php");
     let base = resolved(&dir);
     let proj = base.join("proj");
-    std::os::unix::fs::symlink("../outside", proj.join("out")).unwrap();
+    link_dir("../outside", proj.join("out"));
 
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
     walk.add(&proj, Role::Analysed, &[]);
@@ -1025,7 +1006,6 @@ fn walked_with_roots(walk: Walk<'_, '_>) -> Outcome {
     (handed, walked.files, roots)
 }
 
-#[cfg(unix)]
 #[test]
 fn a_path_that_discovery_resolved_is_walked_as_when_the_walk_resolves_it() {
     use composer::vendor::VendorPath;
@@ -1038,15 +1018,14 @@ fn a_path_that_discovery_resolved_is_walked_as_when_the_walk_resolves_it() {
     dir.write("vendor/acme/a/src/deep/D.php", "<?php");
     dir.write("vendor/acme/a/Extra.php", "<?php");
     dir.write("vendor/acme/a/Target.php", "<?php");
-    std::os::unix::fs::symlink(
+    link_file(
         base.join("vendor/acme/a/Target.php"),
         base.join("vendor/acme/a/Linked.php"),
-    )
-    .unwrap();
+    );
     // A path-repository package, linked into `vendor/`.
     dir.write("packages/b/src/B.php", "<?php");
     dir.write("packages/b/Other.php", "<?php");
-    std::os::unix::fs::symlink(base.join("packages/b"), base.join("vendor/acme/b")).unwrap();
+    link_dir(base.join("packages/b"), base.join("vendor/acme/b"));
     dir.write(
         "vendor/composer/autoload_classmap.php",
         r#"<?php

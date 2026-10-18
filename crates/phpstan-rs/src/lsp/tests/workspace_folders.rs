@@ -8,6 +8,7 @@ use super::super::*;
 use super::configuration::DEPRECATED_FIXTURE;
 use super::helpers::run_multi;
 use super::helpers::*;
+use crate::test_links::link_dir;
 use serde_json::{Value, json};
 
 #[test]
@@ -246,7 +247,6 @@ fn removing_a_folder_keeps_checking_its_open_document() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_document_opened_through_a_link_into_another_folder_is_checked_by_that_folder() {
     // `a/link` names `b/real`, so the document belongs to `b`, and `b`'s
@@ -258,7 +258,7 @@ fn a_document_opened_through_a_link_into_another_folder_is_checked_by_that_folde
         "[ext.deprecation-rules]\nenabled = true\n",
     );
     b.write("real/Use.php", DEPRECATED_FIXTURE);
-    std::os::unix::fs::symlink(b.0.join("real"), a.0.join("link")).unwrap();
+    link_dir(b.0.join("real"), a.0.join("link"));
     let link_uri = path_to_uri(&a.0.join("link/Use.php")).to_string();
 
     let messages = run_multi(
