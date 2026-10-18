@@ -15,32 +15,6 @@ const UNDEFINED_CALL: &str = "<?php\nfunction f(): void {\n    totallyUndefinedF
 const IGNORED_CALL: &str =
     "<?php\nfunction f(): void {\n    totallyUndefinedFunction(); // @phpstan-ignore-line\n}\n";
 
-fn as_values(messages: Vec<Message>) -> Vec<Value> {
-    messages
-        .iter()
-        .map(|m| serde_json::to_value(m).unwrap())
-        .collect()
-}
-
-fn publishes_for<'a>(messages: &'a [Value], uri: &str) -> Vec<&'a Value> {
-    messages
-        .iter()
-        .filter(|m| m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == uri)
-        .collect()
-}
-
-fn diagnostics_of(publish: &Value) -> &[Value] {
-    publish["params"]["diagnostics"].as_array().unwrap()
-}
-
-/// A server with `dir` loaded, and the messages of its first analysis.
-fn loaded_server(dir: &TempDir) -> (Server, Vec<Value>) {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
-    server.add_workspace_folders(std::slice::from_ref(&dir.0));
-    let initial = as_values(server.publish_workspace_diagnostics());
-    (server, initial)
-}
-
 /// Runs the server on its own thread: `before`, then `save`. Returns once
 /// `uri` has been published, and then ends the session. A save's analysis
 /// runs on the debounce worker after its window, and `exit` does not flush a

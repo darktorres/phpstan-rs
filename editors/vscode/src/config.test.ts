@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { resolveConfigPath, buildInitializationOptions, Settings } from "./config";
+import {
+  resolveConfigPath,
+  buildInitializationOptions,
+  changeNeedsNewProcess,
+  Settings,
+} from "./config";
 
 function settings(overrides: Partial<Settings> = {}): Settings {
   return { enable: true, configPath: null, serverPath: null, ...overrides };
@@ -43,4 +48,24 @@ test("buildInitializationOptions sends the raw configPath and propagates the war
   const result = buildInitializationOptions(settings({ configPath: "rel/path.toml" }), undefined);
   assert.equal(result.options.configPath, "rel/path.toml");
   assert.equal(typeof result.warning, "string");
+});
+
+function changed(...settings: string[]): (setting: string) => boolean {
+  return (setting) => settings.includes(setting);
+}
+
+test("changeNeedsNewProcess: enable starts or stops the server, so it needs one", () => {
+  assert.equal(changeNeedsNewProcess(changed("phpstan-rs.enable")), true);
+});
+
+test("changeNeedsNewProcess: serverPath names the process, so it needs a new one", () => {
+  assert.equal(changeNeedsNewProcess(changed("phpstan-rs.serverPath")), true);
+});
+
+test("changeNeedsNewProcess: configPath is applied by the running server", () => {
+  assert.equal(changeNeedsNewProcess(changed("phpstan-rs.configPath")), false);
+});
+
+test("changeNeedsNewProcess: a setting of another extension needs nothing", () => {
+  assert.equal(changeNeedsNewProcess(changed("editor.fontSize", "phpstan-rs.trace.server")), false);
 });

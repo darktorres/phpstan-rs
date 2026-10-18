@@ -65,3 +65,15 @@ export function buildInitializationOptions(
   }
   return resolved.warning === undefined ? { options } : { options, warning: resolved.warning };
 }
+
+/**
+ * Whether a change of settings needs a new language-server process.
+ * `affects` says whether the change touched a setting by its full name
+ * (`vscode.ConfigurationChangeEvent.affectsConfiguration`). `enable`
+ * starts or stops the server, and `serverPath` names the process. Every
+ * other setting, `configPath` among them, reaches the running server
+ * through `synchronize.configurationSection`, and the server applies it.
+ */
+export function changeNeedsNewProcess(affects: (setting: string) => boolean): boolean {
+  return affects("phpstan-rs.enable") || affects("phpstan-rs.serverPath");
+}

@@ -59,7 +59,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
-    "test:unit": "bun run compile && node --test out/extension.test.js out/serverDownload.test.js out/config.test.js out/serverBinary.test.js",
+    "test:unit": "bun run compile && node --test out/extension.test.js out/serverDownload.test.js out/config.test.js out/serverBinary.test.js out/serialized.test.js",
     "pretest": "bun run compile",
     "test:smoke": "node ./out/test/runTest.js"
   },

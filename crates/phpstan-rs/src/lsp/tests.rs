@@ -3,6 +3,7 @@ mod code_action;
 mod completion;
 mod configuration;
 mod debounce_integration;
+mod disabled_server;
 mod document_highlight;
 mod helpers;
 mod inlay_hints;

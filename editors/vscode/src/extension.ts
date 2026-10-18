@@ -6,10 +6,16 @@ import {
   State,
 } from "vscode-languageclient/node";
 import { getSettings } from "./settings";
-import { buildInitializationOptions } from "./config";
+import { buildInitializationOptions, changeNeedsNewProcess } from "./config";
 import { resolveServerBinary } from "./serverBinary";
+import { serialized } from "./serialized";
 
 let client: LanguageClient | undefined;
+
+/** Every start and stop of the client goes through this, one after the
+ * other: stopping and starting await, and two interleaved restarts would
+ * leave two clients behind. */
+const restart = serialized();
 
 function firstFolderPath(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -17,11 +23,10 @@ function firstFolderPath(): string | undefined {
 
 /**
  * (Re)builds and starts a fresh `LanguageClient` from a current settings
- * snapshot, stopping any previously running client first. Used by both
- * `activate()` and `phpstan-rs.restartServer` - the restart command is
- * the practical way a user applies a changed `configPath`/`serverPath`/
- * `enable` before 3.3 gives the server itself a live-reload path;
- * without it, only VS Code's own "Developer: Reload Window" recovers.
+ * snapshot, stopping any previously running client first, and starts none
+ * while `phpstan-rs.enable` is false. Used by `activate()`, by
+ * `phpstan-rs.restartServer` and by a change of `enable` or `serverPath`.
+ * Stopping the client ends the server and clears its diagnostics.
  */
 async function startClient(context: vscode.ExtensionContext): Promise<void> {
   if (client) {
@@ -77,10 +82,9 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
   // itself automatically off the client id below ("phpstan-rs") -
   // no code needed for that setting at all.
   // `synchronize.configurationSection` makes the client send
-  // `workspace/didChangeConfiguration` on any `phpstan-rs.*` change;
-  // the server's `handle_notification` has a catch-all `_ => {}` arm,
-  // so this is inert (not an error) until 3.3 gives it a real listener -
-  // wiring the client half now costs nothing.
+  // `workspace/didChangeConfiguration` on any `phpstan-rs.*` change, which
+  // the running server applies as it arrives (`configPath` and `enable`
+  // included).
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "php" }],
     outputChannelName: "phpstan-rs Language Server",
@@ -118,37 +122,27 @@ export interface ExtensionExports {
 
 export async function activate(context: vscode.ExtensionContext): Promise<ExtensionExports> {
   context.subscriptions.push(
-    vscode.commands.registerCommand("phpstan-rs.restartServer", () => startClient(context)),
+    vscode.commands.registerCommand("phpstan-rs.restartServer", () =>
+      restart(() => startClient(context)),
+    ),
   );
 
-  // Only these three settings change the spawned process or its args -
-  // a plain `configurationSection` push can't apply them, since the
-  // process is already running with different args than the new
-  // settings call for. `trace.server` self-applies (no prompt needed);
-  // a `configPath` file-content edit (not the *setting*) is 3.3's own
-  // scope once it exists. A settings change landing between
-  // `initialize` and this handler being wired up is not handled
-  // specially - low risk given VS Code's own event-ordering guarantees.
+  // `enable` starts or stops the server and `serverPath` names its
+  // process, so a change of either starts a new client at once. Every other
+  // setting, `configPath` among them, reaches the running server through
+  // `synchronize.configurationSection`, and the server applies it. A
+  // settings change landing between `initialize` and this handler being
+  // wired up is not handled specially - low risk given VS Code's own
+  // event-ordering guarantees.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
-      const affected =
-        event.affectsConfiguration("phpstan-rs.enable") ||
-        event.affectsConfiguration("phpstan-rs.serverPath") ||
-        event.affectsConfiguration("phpstan-rs.configPath");
-      if (!affected) {
-        return;
+      if (changeNeedsNewProcess((setting) => event.affectsConfiguration(setting))) {
+        void restart(() => startClient(context));
       }
-      void vscode.window
-        .showInformationMessage("phpstan-rs settings changed", "Restart Server")
-        .then((choice) => {
-          if (choice === "Restart Server") {
-            void startClient(context);
-          }
-        });
     }),
   );
 
-  await startClient(context);
+  await restart(() => startClient(context));
 
   return { getClientState: () => client?.state };
 }

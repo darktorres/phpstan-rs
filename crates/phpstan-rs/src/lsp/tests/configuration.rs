@@ -1,7 +1,7 @@
 //! `workspace/didChangeConfiguration` hot-reload: the pushed-settings
 //! path, the `workspace/configuration` pull path for a client that
 //! advertises `workspace.configuration` support, the `enable`
-//! squiggles-off/on toggle, and the no-op fast path a real client's
+//! off/on toggle, and the no-op fast path a real client's
 //! constant unrelated-settings-save traffic depends on.
 
 use super::super::*;
@@ -17,13 +17,6 @@ fn did_open(uri: &str, text: &str) -> Value {
         "textDocument/didOpen",
         json!({"textDocument": {"uri": uri, "languageId": "php", "version": 1, "text": text}}),
     )
-}
-
-fn publishes_for<'a>(messages: &'a [Value], uri: &str) -> Vec<&'a Value> {
-    messages
-        .iter()
-        .filter(|m| m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == uri)
-        .collect()
 }
 
 #[test]
@@ -110,8 +103,9 @@ fn disabling_then_re_enabling_clears_then_restores_diagnostics_without_a_new_did
         &[
             did_open(&uri, DEPRECATED_FIXTURE),
             did_change_configuration(json!({"phpstan-rs": {"enable": false}})),
-            hover_request(3, &uri, pos),
+            hover_request(3, &uri, pos.clone()),
             did_change_configuration(json!({"phpstan-rs": {"enable": true}})),
+            hover_request(4, &uri, pos),
         ],
     );
 
@@ -144,11 +138,15 @@ fn disabling_then_re_enabling_clears_then_restores_diagnostics_without_a_new_did
         "enable:true must restore the real diagnostic without a fresh didOpen, got: {publishes:?}"
     );
 
-    let hover = response_result(&messages, 3);
+    let disabled = response_result(&messages, 3);
     assert!(
-        hover["contents"].is_string(),
-        "hover/definition must keep working while disabled - enable:false means \
-         'stop showing squiggles', not 'stop the language server', got: {hover:?}"
+        disabled.is_null(),
+        "a disabled server answers a request with its empty result, got: {disabled:?}"
+    );
+    let enabled = response_result(&messages, 4);
+    assert!(
+        enabled["contents"].is_string(),
+        "hover answers again once the server is enabled, got: {enabled:?}"
     );
 }
 

@@ -43,11 +43,11 @@ Development Host.
 - `phpstan-rs.trace.server` (`off`/`messages`/`verbose`, default `off`) -
   traces the client/server JSON-RPC traffic in its own output channel;
   needs no extension code, `vscode-languageclient` binds it automatically.
-- **`phpstan-rs: Restart Server`** command - re-reads the settings above
-  and restarts the language server, applying a changed `configPath`/
-  `serverPath`/`enable` without a full "Developer: Reload Window". VS
-  Code also offers this automatically (as a notification prompt) after
-  changing any of those three settings.
+- **`phpstan-rs: Restart Server`** command - restarts the language server
+  with the current settings. Changing `enable` or `serverPath` does it for
+  you, with no prompt: `enable` stops or starts the server at once, and
+  `serverPath` restarts it, since it names the process. A changed
+  `configPath` needs no restart: the running server applies it.
 
 ## Tests
 

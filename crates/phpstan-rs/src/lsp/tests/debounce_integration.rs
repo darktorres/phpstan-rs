@@ -24,13 +24,6 @@ fn did_change(uri: &str, version: i64, text: &str) -> Value {
     )
 }
 
-fn publishes_for<'a>(messages: &'a [Value], uri: &str) -> Vec<&'a Value> {
-    messages
-        .iter()
-        .filter(|m| m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == uri)
-        .collect()
-}
-
 #[test]
 fn rapid_didchange_burst_coalesces_and_the_shutdown_flush_publishes_the_final_edit() {
     let dir = TempDir::new("debounce_shutdown_flush");

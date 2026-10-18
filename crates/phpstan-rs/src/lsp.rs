@@ -253,10 +253,16 @@ struct Server {
     // call. A relative override is resolved against each folder's root.
     // `None` until a `workspace/didChangeConfiguration` notification sets one.
     config_path_override: Option<PathBuf>,
-    // `phpstan-rs.enable` - "stop showing squiggles", not "stop the
-    // language server": hover/definition/documentSymbol keep working
-    // while `false`, only `publishDiagnostics` goes empty.
+    // `phpstan-rs.enable`. While `false` the server does nothing the editor
+    // can see: `publish` sends only the clear of what the editor holds,
+    // nothing is checked on an edit, a save or a watched-file event, and
+    // every feature request is answered with its empty result. It keeps the
+    // open documents' text and the file events it was sent, so that enabling
+    // it again catches up (`catch_up`).
     enabled: bool,
+    // The `workspace/didChangeWatchedFiles` events received while disabled,
+    // in arrival order.
+    deferred_file_events: Vec<lsp_types::FileEvent>,
     // Captured once at `"initialize"` from
     // `capabilities.workspace.configuration` - whether this client
     // supports a server-initiated `workspace/configuration` pull. A real
@@ -438,6 +444,7 @@ impl Server {
             aliases: Mutex::default(),
             config_path_override: None,
             enabled: true,
+            deferred_file_events: Vec::new(),
             supports_configuration_pull: false,
             supports_watched_files: false,
             file_versions: FxHashMap::default(),
@@ -787,8 +794,12 @@ impl Server {
     /// Brings every open document to the homes that hold it now, with the
     /// editor's text. A home that holds one no longer drops it, and each home
     /// that holds one is given the document. Returns the paths whose state
-    /// changed, and the warnings of the documents that failed to parse.
+    /// changed, and the warnings of the documents that failed to parse. A
+    /// disabled server leaves the documents to `catch_up`.
     fn sync_open_documents(&mut self) -> (Vec<PathBuf>, Vec<Message>) {
+        if !self.enabled {
+            return (Vec::new(), Vec::new());
+        }
         let mut open: Vec<PathBuf> = self.open_uris.keys().cloned().collect();
         open.sort();
         let mut changed = Vec::new();
@@ -1010,6 +1021,12 @@ impl Server {
 
     /// A save's own work: the full analysis, published where it changed.
     fn analyse_on_save(&mut self) -> Vec<Message> {
+        self.analyse_and_publish()
+    }
+
+    /// The full analysis, published where it changed. A disabled server
+    /// analyses nothing.
+    fn analyse_and_publish(&mut self) -> Vec<Message> {
         if !self.enabled {
             return Vec::new();
         }
@@ -1093,8 +1110,7 @@ impl Server {
     /// initial load nothing has been published for these paths yet, so
     /// there is nothing to clear.
     fn publish_workspace_diagnostics(&mut self) -> Vec<Message> {
-        self.analyse_workspace();
-        self.publish_analysis()
+        self.analyse_and_publish()
     }
 
     /// `reload_configuration`'s own republish step, once it decides
@@ -1102,21 +1118,35 @@ impl Server {
     /// differ from what the editor was last sent, so a file that had
     /// diagnostics under the old config and none under the new one gets an
     /// explicit empty `publishDiagnostics` that clears them client-side.
-    /// While `!self.enabled`, skips rechecking entirely and just clears every
-    /// currently-open file - phpstan-rs.enable means "stop showing squiggles",
-    /// not "stop the language server".
+    /// While `!self.enabled`, skips rechecking entirely and clears every file
+    /// the editor holds diagnostics for.
     fn republish_known_files(&mut self) -> Vec<Message> {
-        if !self.enabled {
-            // The editor now shows nothing for an open file, which the next
-            // publish has to change from.
-            let open: Vec<PathBuf> = self.open_uris.keys().cloned().collect();
-            return open
-                .into_iter()
-                .flat_map(|path| self.publish(&path, Vec::new()))
-                .collect();
+        if self.enabled {
+            return self.analyse_and_publish();
         }
-        self.analyse_workspace();
-        self.publish_analysis()
+        let mut held: Vec<PathBuf> = self
+            .published
+            .iter()
+            .filter(|(_, published)| !published.diagnostics.is_empty())
+            .map(|(path, _)| path.clone())
+            .collect();
+        held.sort();
+        held.into_iter()
+            .flat_map(|path| self.publish(&path, Vec::new()))
+            .collect()
+    }
+
+    /// What a disabled server left undone, once it is enabled: the open
+    /// documents are brought to the projects as the editor holds them, and
+    /// the watched-file events it was sent are handled. The full analysis
+    /// that publishes the result is `republish_known_files`.
+    fn catch_up(&mut self) -> Vec<Message> {
+        let (_, mut messages) = self.sync_open_documents();
+        let events = std::mem::take(&mut self.deferred_file_events);
+        if !events.is_empty() {
+            messages.extend(self.handle_watched_files_changed(events));
+        }
+        messages
     }
 
     /// Records the per-file checks of an edit of `edited` made in `home`. The
@@ -1159,6 +1189,9 @@ impl Server {
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris.insert(path.clone(), (uri.clone(), version));
         self.latest_text.insert(path.clone(), text.to_string());
+        if !self.enabled {
+            return Vec::new();
+        }
         let mut recorded = Vec::new();
         let mut content_changed = false;
         let document = source::Digested::new(text.as_bytes());
@@ -1233,6 +1266,9 @@ impl Server {
         self.open_uris
             .insert(path.clone(), (uri.clone(), Some(version)));
         self.latest_text.insert(path.clone(), text.to_string());
+        if !self.enabled {
+            return Vec::new();
+        }
         let mut recorded = Vec::new();
         let document = source::Digested::new(text.as_bytes());
         for (home, classified) in self.holders(&path) {
@@ -1293,6 +1329,10 @@ impl Server {
     /// matters (this is intra-batch coalescing only, not a cross-
     /// notification debounce - see this item's own doc comment).
     fn handle_watched_files_changed(&mut self, changes: Vec<lsp_types::FileEvent>) -> Vec<Message> {
+        if !self.enabled {
+            self.deferred_file_events.extend(changes);
+            return Vec::new();
+        }
         let mut last_by_path: FxHashMap<PathBuf, (Uri, lsp_types::FileChangeType)> =
             FxHashMap::default();
         for change in changes {
@@ -1390,8 +1430,19 @@ impl Server {
     /// now (`uri_and_version_for`), and when the editor holds the file's
     /// diagnostics under another URI, they are cleared there first. An empty
     /// set is that clear alone: the URI the file is known by now can be one
-    /// the editor never had its diagnostics on.
+    /// the editor never had its diagnostics on. A disabled server sends
+    /// nothing else: the clear of what the editor holds, and no message when
+    /// it holds nothing.
     fn publish(&mut self, path: &Path, diags: Vec<diagnostics::Diagnostic>) -> Vec<Message> {
+        let diags = if self.enabled { diags } else { Vec::new() };
+        if !self.enabled
+            && !self
+                .published
+                .get(path)
+                .is_some_and(|held| !held.diagnostics.is_empty())
+        {
+            return Vec::new();
+        }
         let (uri, version) = self.uri_and_version_for(path);
         let elsewhere = self
             .published
@@ -2598,6 +2649,9 @@ impl Server {
                     .finish_loading_with(&self.stubs);
             }
         }
+        if self.enabled && !was_enabled {
+            messages.extend(self.catch_up());
+        }
         messages.extend(self.republish_known_files());
         messages
     }
@@ -3256,6 +3310,24 @@ fn ok_response(id: &RequestId, result: serde_json::Value) -> Message {
     })
 }
 
+/// The requests that ask the server what it knows of the code. A disabled
+/// server answers each with its empty result, `null`.
+const FEATURE_REQUESTS: [&str; 13] = [
+    "textDocument/hover",
+    "textDocument/definition",
+    "textDocument/typeDefinition",
+    "textDocument/documentSymbol",
+    "textDocument/codeAction",
+    "workspace/symbol",
+    "textDocument/completion",
+    "textDocument/signatureHelp",
+    "textDocument/documentHighlight",
+    "textDocument/semanticTokens/full",
+    "textDocument/inlayHint",
+    "textDocument/references",
+    "textDocument/rename",
+];
+
 /// Registers `req.id` (with a fresh cancellation flag) before dispatch
 /// and writes the resulting response through `respond_unless_canceled`,
 /// so a `"$/cancelRequest"` arriving mid-dispatch (impossible today,
@@ -3270,6 +3342,9 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         .register(id.clone(), Arc::clone(&cancel_flag));
 
     let response = match req.method.as_str() {
+        method if !server.enabled && FEATURE_REQUESTS.contains(&method) => {
+            ok_response(&id, serde_json::Value::Null)
+        }
         "initialize" => {
             let params: Option<InitializeParams> = serde_json::from_value(req.params).ok();
             #[allow(deprecated)] // root_uri: no other way to reach it pre-workspace_folders

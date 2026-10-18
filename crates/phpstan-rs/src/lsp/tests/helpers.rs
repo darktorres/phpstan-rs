@@ -431,6 +431,36 @@ pub(super) fn last_publish_diagnostics_for<'a>(messages: &'a [Value], uri: &str)
         .unwrap_or_else(|| panic!("no publishDiagnostics for {uri} in {messages:?}"))
 }
 
+/// `messages` as the JSON values a test inspects.
+pub(super) fn as_values(messages: Vec<Message>) -> Vec<Value> {
+    messages
+        .iter()
+        .map(|m| serde_json::to_value(m).unwrap())
+        .collect()
+}
+
+/// The `textDocument/publishDiagnostics` notifications for `uri` in
+/// `messages`, in order.
+pub(super) fn publishes_for<'a>(messages: &'a [Value], uri: &str) -> Vec<&'a Value> {
+    messages
+        .iter()
+        .filter(|m| m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == uri)
+        .collect()
+}
+
+/// The diagnostics a `publishDiagnostics` notification carries.
+pub(super) fn diagnostics_of(publish: &Value) -> &[Value] {
+    publish["params"]["diagnostics"].as_array().unwrap()
+}
+
+/// A server with `dir` loaded, and the messages of its first analysis.
+pub(super) fn loaded_server(dir: &TempDir) -> (Server, Vec<Value>) {
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
+    server.add_workspace_folders(std::slice::from_ref(&dir.0));
+    let initial = as_values(server.publish_workspace_diagnostics());
+    (server, initial)
+}
+
 /// A fresh, unique scratch directory per test - real files on disk,
 /// since the server walks the real filesystem (`Session::listing`) and
 /// reads it with `std::fs::read`, not something worth faking.
