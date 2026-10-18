@@ -273,9 +273,12 @@ Done:
   27 problems that predate the plan, and the user chose to fix them in this
   batch. The forbidden edges are refactored away, and the graph passes. The
   job's later steps first ran in round 2, and their four failures are fixed too.
+- R5's round-2 follow-up: a file's diagnostics are cleared on the URI they were
+  sent on.
 
-Open: R5's round-2 follow-up, then R6 to R17, the rounds after them, and the
-batch's checks.
+Open: R6 to R17, the rounds after them, and the batch's checks. Two things wait
+on the user, both listed in the plan's State: R8's question, and two findings
+about the disabled server, which are older than the plan.
 
 ## Documents with no place in the stack
 

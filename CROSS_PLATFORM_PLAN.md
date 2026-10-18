@@ -5,9 +5,10 @@
 - **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
   tracks it.
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
-  (`c6902324`), R5 (`52844b07`) and R18 (eight commits, `0e908059` to `80b3bbd9`). The rows
-  are built in the order of the table below, one commit each, with a pathspec, since another
-  session shares the checkout. R18 has one commit for each step.
+  (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`) and R5's
+  round-2 follow-up (`8d81da46`). The rows are built in the order of the table below, one
+  commit each, with a pathspec, since another session shares the checkout. R18 has one commit
+  for each step.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -28,7 +29,9 @@
   built before R6. The 20 forbidden edges are refactored away, not listed as exceptions, and
   the graph passes. Round 2 reached the gates job's later steps, and R18 fixes their four
   failures too.
-- **Next:** R5's round-2 follow-up, then R6.
+- **Next:** R6.
+- **For the user:** R8's question, and the two findings under R5's round-2 follow-up (the
+  disabled server still publishes on an edit, and disabling clears only the open files).
 
 ## Context
 
@@ -634,7 +637,38 @@ on.**
 - **Test.** The round-2 test on every leg. Here: a workspace opened through a link and then
   removed clears its files on the link's URIs.
 
-Built after R18, before R6.
+**Built** (`8d81da46`), after R18 and before R6.
+
+- `Server::published` replaces `last_diagnostics`. For each file it holds the diagnostics the
+  editor holds and the URI they went to, `None` when none were sent.
+- Every publish goes through one function, `publish`.
+  - A set goes to the URI the editor knows the file by now. When the editor holds the file's
+    diagnostics under another URI, they are cleared there first.
+  - An empty set is that clear alone.
+- `publish_analysis` also sends a file whose diagnostics are unchanged when the editor holds
+  them under a URI it no longer knows the file by, as when a folder spelled otherwise comes to
+  own it.
+- The disabled branch's clears go through `publish` too.
+- Tests:
+  - a workspace opened through a link and then removed: its file is published, then cleared,
+    on the link's URI alone;
+  - a file published under the link and then opened by its real spelling: the link's URI is
+    cleared, and the diagnostics go to the URI it was opened by.
+- Checked here:
+  - both tests fail with the move turned off, and pass with it;
+  - the 289 `lsp::` tests and clippy pass.
+- Linux's output changes only where a file's URI changes: a workspace opened through a link, or
+  a file opened, or reported by the file watcher, under another spelling.
+
+**Found while building it, older than this plan and on every platform.** Not changed here; the
+user is asked.
+
+- While `phpstan-rs.enable` is false, an edit still publishes the file's diagnostics:
+  `handle_open_or_change`, the debounced change and the watched files never read `enabled`.
+- Disabling clears only the open files. A file the workspace scan published and the editor
+  never opened keeps its diagnostics, though the extension's setting says that disabling
+  "clears its diagnostics". `published` now records every file the editor holds diagnostics
+  for, so the clear could cover them all.
 
 ### R18. The gates job: every module has its crate, no edge breaks the layering, and the later steps pass
 
