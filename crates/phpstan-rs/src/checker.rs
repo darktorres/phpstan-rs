@@ -617,13 +617,14 @@ pub struct Checker<'a> {
     // Paths the file tests with `file_exists()` and friends, as keys of
     // `CheckSettings::path_case`.
     pub(crate) include_guarded_paths: FxHashSet<String>,
-    // `include_path` directories for the file being checked.
-    pub(crate) include_path_dirs: Vec<String>,
+    // What the include rule knows of the project's trees and deployment
+    // (`Project::include_env`). Without it no include is judged.
+    pub(crate) include_env: Option<&'a include_lookup::IncludeEnv>,
     // The project's root, which relative include paths resolve against
     // first (see `Project::absolute_root`); `None` is the process's working
     // directory.
     pub(crate) root: Option<std::path::PathBuf>,
-    // `includes::file_constant_initializers` for the file being checked.
+    // `include_values::file_constant_initializers` for the file being checked.
     pub(crate) include_constant_initializers: FxHashMap<String, Expr>,
     // `if` statements already reported as the tail of an enum `if`/`elseif`
     // chain (`strict_idioms`).
@@ -929,6 +930,8 @@ mod generics;
 mod global_constants;
 mod imports;
 mod impossible_instanceof;
+pub mod include_lookup;
+mod include_values;
 mod includes;
 mod ini_directives;
 mod instantiation;
@@ -1022,6 +1025,12 @@ impl<'a> Checker<'a> {
 
     pub fn with_bodies(mut self, bodies: &'a dyn crate::registry::BodySource) -> Self {
         self.bodies = bodies;
+        self
+    }
+
+    /// Judges includes against `env`.
+    pub(crate) fn with_include_env(mut self, env: &'a include_lookup::IncludeEnv) -> Self {
+        self.include_env = Some(env);
         self
     }
 
@@ -1173,7 +1182,7 @@ impl<'a> Checker<'a> {
             current_file_absolute: None,
             current_file_shown: None,
             include_guarded_paths: FxHashSet::default(),
-            include_path_dirs: Vec::new(),
+            include_env: None,
             root: None,
             include_constant_initializers: FxHashMap::default(),
             enum_chain_tails: FxHashSet::default(),
@@ -1616,13 +1625,13 @@ impl<'a> Checker<'a> {
             };
         self.constant_facts = global_constants::constant_facts(program);
         if self.current_file.is_some() {
-            self.include_constant_initializers = includes::file_constant_initializers(program);
-            (self.include_guarded_paths, self.include_path_dirs) =
-                if self.mentions & mentions::GUARD != 0 {
-                    self.collect_include_guards(program)
-                } else {
-                    (FxHashSet::default(), includes::default_include_dirs())
-                };
+            self.include_constant_initializers =
+                include_values::file_constant_initializers(program);
+            self.include_guarded_paths = if self.mentions & mentions::GUARD != 0 {
+                self.collect_include_guards(program)
+            } else {
+                FxHashSet::default()
+            };
         }
         self.check_declare_directives(program);
         self.check_file_whitespace(program);

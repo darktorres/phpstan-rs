@@ -2,10 +2,11 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use syntax::name::{NameMap, NameSet};
 
 use crate::checker::constant_resolver::ConstantResolver;
+use crate::checker::include_lookup::{IncludeEnv, IncludeSettings, LookupChanges};
 use crate::checker::rule_level_helper::RuleLevelHelper;
 use crate::checker::settings::CheckSettings;
 use crate::checker::{self, Checker, PropertyAssignFacts};
@@ -292,6 +293,13 @@ pub struct Project {
     packages: composer::PackageIndex,
     // What the checks are configured with (`apply_settings`).
     settings: CheckSettings,
+    // What the configuration and the manifests say of where includes are
+    // found (`apply_settings`).
+    include_settings: IncludeSettings,
+    // What the include rule knows of the project: the settings, with what
+    // the code adds to them. Built on first use, and built again after the
+    // files that feed it change (`refresh_include_env`).
+    include_env: OnceLock<IncludeEnv>,
     // Whether `Session::load`/`update_file` keep each file's own raw source
     // text around in its `FileState` (see that field's own doc comment) -
     // off by default. Only `lsp.rs`'s `Server` turns this on:
@@ -507,6 +515,9 @@ pub struct ProjectSettings {
     pub path_case: diagnostics::CaseRule,
     /// The composer packages, and which directories each owns.
     pub packages: composer::PackageIndex,
+    /// Where includes are found: the include path, the directories a run
+    /// starts in and the trees the project reads.
+    pub include: IncludeSettings,
     pub php_versions: Option<types::PhpVersions>,
     /// The level types are accepted at; `None` when it's unset.
     pub configured_level: Option<u8>,
@@ -626,6 +637,8 @@ impl Project {
             absolute_root: None,
             packages: composer::PackageIndex::default(),
             settings: CheckSettings::default(),
+            include_settings: IncludeSettings::default(),
+            include_env: OnceLock::new(),
             retain_source: false,
             built_once: false,
             finished: false,
@@ -653,6 +666,7 @@ impl Project {
             absolute_root,
             path_case,
             packages,
+            include,
             php_versions,
             configured_level,
             phpstan_api_check_enabled,
@@ -677,6 +691,8 @@ impl Project {
         } = settings;
         let class_fn_sites_before = self.indexes_class_fn_sites();
         self.absolute_root = absolute_root;
+        self.include_settings = include;
+        self.include_env = OnceLock::new();
         self.retain_source = retain_source;
         self.built_once = built_once;
 
@@ -1510,6 +1526,7 @@ impl Project {
     #[hotpath::measure]
     pub fn finish_loading_with(&mut self, stubs: &Stubs) {
         self.finish_declarations(Some(stubs));
+        self.include_env = OnceLock::new();
     }
 
     /// `finish_loading_with` the process's shared test stubs.
@@ -2046,6 +2063,12 @@ impl Project {
             }
         }?;
         parsed.bind_file(self.files.id_for(path));
+        // Whether the file moved where includes are looked up before; `None`
+        // for a file the project did not hold.
+        let moves_lookup_before = self
+            .files
+            .get(path)
+            .map(|file| file.facts.mentions & checker::mentions::LOOKUP != 0);
         let previous = self.unindex_file(path);
         let ParsedFile {
             ast,
@@ -2101,6 +2124,7 @@ impl Project {
         register_references(&mut self.signature_dependents, id, &declaration_references);
         self.globals_stale.insert(id);
         self.forget_parse_of(path);
+        let moves_lookup = facts.mentions & checker::mentions::LOOKUP != 0;
         self.files.insert(
             path.to_path_buf(),
             FileState {
@@ -2129,6 +2153,12 @@ impl Project {
             },
         );
         let mut affected = self.finish_declarations(None);
+        // The files that set the include path or move the working directory,
+        // and the directories that hold files, feed the include environment.
+        let feeds_include_env = moves_lookup_before.is_none_or(|before| before || moves_lookup);
+        if feeds_include_env && self.refresh_include_env() {
+            affected.extend(self.analyzed_files());
+        }
 
         let mut results = FxHashMap::default();
         affected.insert(id);
@@ -2209,6 +2239,9 @@ impl Project {
         if any_removed {
             self.rebuild_declarations(&removed, None);
             affected.extend(self.finish_declarations(None));
+            if self.refresh_include_env() {
+                affected.extend(self.analyzed_files());
+            }
         }
 
         affected
@@ -2511,8 +2544,79 @@ impl Project {
         self.checker_for_file(self.files.id_of(path)?)
     }
 
+    /// What the include rule knows of the project and its deployment: the
+    /// settings, with the values the analysed files set the include path to,
+    /// and the directories a run can start in.
+    pub(crate) fn include_env(&self) -> &IncludeEnv {
+        self.include_env.get_or_init(|| self.build_include_env())
+    }
+
+    fn build_include_env(&self) -> IncludeEnv {
+        let mut changes = LookupChanges::default();
+        for id in self.analyzed_files() {
+            let moves_lookup = self
+                .files
+                .get_by_id(id)
+                .is_some_and(|file| file.facts.mentions & checker::mentions::LOOKUP != 0);
+            if !moves_lookup {
+                continue;
+            }
+            if let Some((mut checker, ast)) = self.checker_without_includes_for_file(id) {
+                let file_changes = checker.lookup_changes(&ast);
+                changes.include_path.extend(file_changes.include_path);
+                changes.chdir.extend(file_changes.chdir);
+            }
+        }
+        IncludeEnv::build(
+            &self.include_settings,
+            self.absolute_root.as_deref(),
+            || self.script_dirs(),
+            changes,
+        )
+    }
+
+    /// The directories a run can start in when the configuration declares
+    /// none: the root, where a command-line run starts, and the directory of
+    /// each analysed file, where a web server starts the script it runs.
+    fn script_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = self
+            .files
+            .iter()
+            .filter(|(_, file)| file.analyzed)
+            .filter_map(|(path, _)| path.parent())
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .collect::<FxHashSet<PathBuf>>()
+            .into_iter()
+            .collect();
+        dirs.sort();
+        if let Some(root) = &self.absolute_root {
+            dirs.retain(|dir| dir != root);
+            dirs.insert(0, root.clone());
+        }
+        dirs
+    }
+
+    /// Builds the include environment again from the files as they are now.
+    /// Returns whether it is not the one it was: the files that set the
+    /// include path changed, or a directory came or went among the places a
+    /// script runs from, and every include may be judged otherwise.
+    fn refresh_include_env(&mut self) -> bool {
+        let Some(before) = self.include_env.take() else {
+            return false;
+        };
+        before != *self.include_env()
+    }
+
     /// `checker_for` the file numbered `id`.
     fn checker_for_file(&self, id: FileId) -> Option<(Checker<'_>, AstRef<'_>)> {
+        let (checker, ast) = self.checker_without_includes_for_file(id)?;
+        Some((checker.with_include_env(self.include_env()), ast))
+    }
+
+    /// `checker_for_file`, that judges no include: what the include
+    /// environment is built from reads the files through it.
+    fn checker_without_includes_for_file(&self, id: FileId) -> Option<(Checker<'_>, AstRef<'_>)> {
         let file = self.files.get_by_id(id)?;
         let path = self.files.path(id);
         let ast = self.ast_of(id)?;

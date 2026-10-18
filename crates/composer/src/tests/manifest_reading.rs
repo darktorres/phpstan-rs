@@ -302,6 +302,90 @@ fn installed_package_flags_and_lists_are_read_by_shape() {
     assert!(b.replace.is_empty());
 }
 
+/// The directories of `paths`, relative to the manifest's root.
+fn below_root<'m>(
+    manifest: &'m ComposerManifest,
+    paths: impl Iterator<Item = &'m Path>,
+) -> Vec<String> {
+    paths
+        .map(|path| {
+            path.strip_prefix(&manifest.root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect()
+}
+
+#[test]
+fn include_path_entries_are_directories_below_the_package_with_their_slashes_trimmed() {
+    let manifest = load(
+        "include_path_root",
+        r#"{"include-path": ["lib/", "/abs", "a/b", "", "/", 5, null, ["x"]]}"#,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        below_root(
+            &manifest,
+            manifest.include_path.iter().map(PathBuf::as_path)
+        ),
+        vec!["lib", "abs", "a/b", "", ""]
+    );
+}
+
+#[test]
+fn an_include_path_of_the_wrong_shape_lists_nothing() {
+    for text in [
+        r#"{"include-path": 5}"#,
+        r#"{"include-path": null}"#,
+        r#"{"include-path": {"a": "b"}}"#,
+        "{}",
+    ] {
+        let manifest = load("include_path_shape", text, None).unwrap();
+        assert!(manifest.include_path.is_empty(), "{text}");
+    }
+}
+
+#[test]
+fn an_installed_packages_include_path_is_below_its_install_directory() {
+    let manifest = load(
+        "include_path_installed",
+        r#"{"include-path": ["own"]}"#,
+        Some(
+            r#"{"packages": [
+                {"name": "acme/a", "include-path": ["lib/", "/src"]},
+                {"name": "acme/b", "install-path": "../elsewhere/b", "include-path": ["inc"]},
+                {"name": "acme/c"}
+            ]}"#,
+        ),
+    )
+    .unwrap();
+    let a = manifest.installed_package("acme/a").unwrap();
+    assert_eq!(
+        a.include_path,
+        vec![a.install_dir.join("lib"), a.install_dir.join("src")]
+    );
+    let b = manifest.installed_package("acme/b").unwrap();
+    assert_eq!(b.include_path, vec![b.install_dir.join("inc")]);
+    assert!(
+        manifest
+            .installed_package("acme/c")
+            .unwrap()
+            .include_path
+            .is_empty()
+    );
+    assert_eq!(
+        below_root(&manifest, manifest.include_paths()),
+        vec![
+            "own".to_string(),
+            "vendor/acme/a/lib".to_string(),
+            "vendor/acme/a/src".to_string(),
+            "vendor/elsewhere/b/inc".to_string(),
+        ]
+    );
+}
+
 #[test]
 fn composer_json_reads_up_to_511_levels_of_nesting() {
     // The object is one level; the arrays of `extra` are the rest.

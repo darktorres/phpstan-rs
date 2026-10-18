@@ -86,6 +86,8 @@ pub struct InstalledPackage {
     /// (a Pest/PHPStan/Psalm plugin, a Laravel package), so the framework
     /// loads it without code naming it.
     pub auto_discovered: bool,
+    /// Its `include-path` directories, below `install_dir`.
+    pub include_path: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +120,8 @@ pub struct ComposerManifest {
     pub platform_php: Option<Located<String>>,
     pub repositories: Vec<Repository>,
     pub installed: Vec<InstalledPackage>,
+    /// The root package's `include-path` directories, below `absolute_root`.
+    pub include_path: Vec<PathBuf>,
 }
 
 impl ComposerManifest {
@@ -197,8 +201,18 @@ impl ComposerManifest {
                 manifest.repositories.push(Repository { kind, url });
             }
         }
+        manifest.include_path = include_directories(absolute_root, json.raw("include-path"));
         manifest.installed = read_installed(absolute_root);
         Some(manifest)
+    }
+
+    /// The directories that Composer's autoloader puts in front of PHP's
+    /// include path: the root package's, then each installed package's.
+    pub fn include_paths(&self) -> impl Iterator<Item = &Path> {
+        self.include_path
+            .iter()
+            .chain(self.installed.iter().flat_map(|p| &p.include_path))
+            .map(PathBuf::as_path)
     }
 
     pub fn requires(&self, package: &str) -> bool {
@@ -313,10 +327,25 @@ fn read_installed(absolute_root: &Path) -> Vec<InstalledPackage> {
                     .is_some_and(|bin| !bin.is_empty()),
                 provide: keys(package.read("provide")),
                 replace: keys(package.read("replace")),
+                include_path: include_directories(&install_dir, package.raw("include-path")),
                 name,
                 install_dir,
                 vendor_dir,
             })
+        })
+        .collect()
+}
+
+/// The directories an `include-path` lists, below `base`. Composer trims the
+/// `/` around an entry, so an entry never leaves `base` by being absolute.
+fn include_directories(base: &Path, entries: Option<&RawValue>) -> Vec<PathBuf> {
+    entries
+        .map(strings)
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| match entry.trim_matches('/') {
+            "" => base.to_path_buf(),
+            relative => base.join(relative),
         })
         .collect()
 }

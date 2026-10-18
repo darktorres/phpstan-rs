@@ -13,6 +13,7 @@ mod file_discovery_and_misc;
 mod file_removal;
 mod file_tables;
 mod fused_declarations;
+mod include_environment;
 mod incremental_updates;
 mod inline_ignore_comments;
 mod load_cache;

@@ -1,4 +1,4 @@
 main.php:2:1-2:36 require.fileNotFound L0 | Path in require() "<fixture>/lib/absent.php" is not a file or it does not exist.
 main.php:3:1-3:35 requireOnce.fileNotFound L0 | Path in require_once() "<fixture>/nope.php" is not a file or it does not exist.
 main.php:4:1-4:22 include.fileNotFound L0 | Path in include() "missing.php" is not a file or it does not exist.
-main.php:5:1-5:52 includeOnce.fileNotFound L0 | Path in include_once() "<fixture>/../elsewhere.php" is not a file or it does not exist.
+main.php:5:1-5:53 includeOnce.fileNotFound L0 | Path in include_once() "<fixture>/elsewhere.php" is not a file or it does not exist.

@@ -1,103 +1,19 @@
 //! `RequireFileExistsRule`: an `include`/`require` (and `_once`) whose
 //! path resolves to known strings, none of which name an existing file.
-//! Paths are resolved from string literals, constant string types,
-//! `__DIR__`/`__FILE__`, `dirname()`, and concatenations of these, then
-//! looked up relative to the working directory and the including file's
-//! own directory, and each `include_path` entry - PHP's default plus any
-//! `set_include_path()`/`ini_set('include_path', ...)` in the file. A
-//! constant declared in the same file resolves through its initializer,
-//! so `__DIR__` in it means this file's directory. A path the file also tests with `file_exists()`/
-//! `is_file()`/`is_readable()` is left alone.
+//! The strings come from `include_values`, once for each world a path is
+//! read in, and are looked up where a run can find them (`include_lookup`).
+//! A path the file also tests with `file_exists()`/`is_file()`/
+//! `is_readable()` is left alone.
 
-use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::{Path, PathBuf};
+use rustc_hash::FxHashSet;
+use std::path::Path;
 
+use crate::checker::include_lookup::World;
+use crate::checker::include_values::{IncludeCall, IncludeCalls};
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
-
-/// The functions whose call tests a path, which guards an include of it. A
-/// file that names none of them, `set_include_path` or `ini_set` has no
-/// guard to find (`mentions::GUARD`).
-pub(crate) const GUARD_FUNCTIONS: [&str; 6] = [
-    "file_exists",
-    "is_file",
-    "is_readable",
-    "is_writable",
-    "is_writeable",
-    "is_executable",
-];
-
-/// PHP's compiled-in default `include_path`.
-const DEFAULT_INCLUDE_PATH: &str = ".:/usr/share/php";
-
-const MAX_CONSTANT_DEPTH: usize = 8;
-
-fn short_name(name: &str) -> &str {
-    name.rsplit('\\').next().unwrap_or(name)
-}
-
-fn class_constant_key(class: &str, constant: &str) -> String {
-    format!("{}::{constant}", short_name(class).to_ascii_lowercase())
-}
-
-/// Initializers of the constants `program` declares - `const`, `define()`
-/// with a literal name, and class/enum constants - keyed by short name
-/// (`Class::NAME` lowercased on the class). A name declared twice is
-/// dropped.
-pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, Expr> {
-    let mut initializers = Initializers(FxHashMap::default());
-    walk_stmts(&mut initializers, program);
-    initializers
-        .0
-        .into_iter()
-        .filter_map(|(k, v)| Some((k, v?)))
-        .collect()
-}
-
-/// Each constant's initializer, `None` once a name is declared twice.
-/// Function bodies are not entered, and a `define()` counts only as a
-/// statement's own expression.
-struct Initializers(FxHashMap<String, Option<Expr>>);
-
-impl Initializers {
-    fn add(&mut self, key: String, value: &Expr) {
-        self.0
-            .entry(key)
-            .and_modify(|v| *v = None)
-            .or_insert_with(|| Some(value.clone()));
-    }
-}
-
-impl<'ast> Visitor<'ast> for Initializers {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        match &stmt.kind {
-            StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    self.add(short_name(&c.name).to_string(), &c.value);
-                }
-            }
-            StmtKind::ClassDecl(c) => {
-                for k in &c.def.consts {
-                    self.add(class_constant_key(&c.name, &k.name), &k.value);
-                }
-            }
-            StmtKind::FunctionDecl(_) => {}
-            _ => walk_stmt(self, stmt),
-        }
-    }
-
-    fn visit_expr(&mut self, e: &'ast Expr) {
-        if let ExprKind::Call(callee, args) = &e.kind
-            && callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
-            && let [name, value, ..] = args.as_slice()
-            && let ExprKind::Literal(Literal::String(name)) = &name.value.kind
-        {
-            self.add(short_name(&name.to_str_lossy()).to_string(), &value.value);
-        }
-    }
-}
+use syntax::visit::walk_stmts;
 
 /// `(construct as written, identifier prefix)` for an include kind.
 pub(crate) fn include_construct(kind: IncludeKind) -> (&'static str, &'static str) {
@@ -110,188 +26,11 @@ pub(crate) fn include_construct(kind: IncludeKind) -> (&'static str, &'static st
     (kind.as_str(), prefix)
 }
 
-/// The function a call's callee names, as an unqualified name in a
-/// namespace falls back to the global one.
-fn callee_name(e: &Expr) -> Option<&str> {
-    match &e.kind {
-        ExprKind::Name(n) => {
-            let (primary, fallback) = n.candidates();
-            Some(fallback.unwrap_or(primary))
-        }
-        _ => None,
-    }
-}
-
-/// A stream-wrapper URL (`phar://...`, `data://...`) - not a path on
-/// this filesystem.
-fn is_stream_wrapper_path(path: &str) -> bool {
-    path.split_once("://").is_some_and(|(scheme, _)| {
-        !scheme.is_empty()
-            && scheme
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-    })
-}
-
 impl<'a> Checker<'a> {
-    /// The checked file's own absolute path - what PHP's `__FILE__`
-    /// holds, however the file was named on the command line or in the
-    /// config's `paths` (a relative path's `dirname()` chain would
-    /// otherwise walk off its top to `""`). The project supplies it; a
-    /// checker run without one falls back to the path as named.
-    fn current_file_absolute(&self) -> Option<PathBuf> {
-        if let Some(file) = &self.current_file_absolute {
-            return Some(file.clone());
-        }
-        let file = self.current_file.as_ref()?;
-        Some(match &self.root {
-            Some(dir) => dir.join(file),
-            None => file.to_path_buf(),
-        })
-    }
-
-    fn current_dir_of_file(&self) -> Option<PathBuf> {
-        self.current_file_absolute()
-            .and_then(|f| f.parent().map(Path::to_path_buf))
-    }
-
-    /// Every string `e` can evaluate to, when all of them are known.
-    fn resolve_include_paths(&self, e: &Expr, locals: &Locals) -> Option<Vec<String>> {
-        self.resolve_paths_at(e, locals, 0)
-    }
-
-    fn file_constant_initializer(&self, e: &Expr) -> Option<&Expr> {
-        let key = match &e.kind {
-            ExprKind::Name(n) if !(n.starts_with("__") && n.ends_with("__")) => {
-                short_name(n).to_string()
-            }
-            ExprKind::ClassConstFetch(target, constant) => {
-                let class = target.as_name()?;
-                let class = if ["self", "static"]
-                    .iter()
-                    .any(|k| class.eq_ignore_ascii_case(k))
-                {
-                    self.current_class.as_deref()?
-                } else {
-                    class
-                };
-                class_constant_key(class, constant)
-            }
-            _ => return None,
-        };
-        self.include_constant_initializers.get(&key)
-    }
-
-    fn resolve_paths_at(&self, e: &Expr, locals: &Locals, depth: usize) -> Option<Vec<String>> {
-        syntax::stack::guard(|| {
-            if let Some(init) = self.file_constant_initializer(e) {
-                return (depth < MAX_CONSTANT_DEPTH)
-                    .then(|| self.resolve_paths_at(init, &self.new_locals(), depth + 1))
-                    .flatten();
-            }
-            let e = e.peeled();
-            match &e.kind {
-                // The platform's own separators - the paths are checked
-                // against this machine's filesystem.
-                ExprKind::Name(n) if n.trim_start_matches('\\') == "PATH_SEPARATOR" => {
-                    Some(vec![":".to_string()])
-                }
-                ExprKind::Name(n) if n.trim_start_matches('\\') == "DIRECTORY_SEPARATOR" => {
-                    Some(vec![std::path::MAIN_SEPARATOR.to_string()])
-                }
-                ExprKind::Call(callee, args)
-                    if args.is_empty()
-                        && callee_name(callee)
-                            .is_some_and(|n| n.eq_ignore_ascii_case("get_include_path")) =>
-                {
-                    Some(vec![DEFAULT_INCLUDE_PATH.to_string()])
-                }
-                ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => Some(vec![
-                    self.current_dir_of_file()?.to_string_lossy().into_owned(),
-                ]),
-                ExprKind::Name(n) if n.eq_ignore_ascii_case("__FILE__") => Some(vec![
-                    self.current_file_absolute()?.to_string_lossy().into_owned(),
-                ]),
-                ExprKind::Binary(BinOp::Concat, l, r) => {
-                    let lefts = self.resolve_paths_at(l, locals, depth)?;
-                    let rights = self.resolve_paths_at(r, locals, depth)?;
-                    let mut out = Vec::new();
-                    for left in &lefts {
-                        for right in &rights {
-                            out.push(format!("{left}{right}"));
-                        }
-                    }
-                    Some(out)
-                }
-                ExprKind::Call(callee, args)
-                    if callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("dirname")) =>
-                {
-                    let [path_arg, rest @ ..] = args.as_slice() else {
-                        return None;
-                    };
-                    let levels = match rest {
-                        [] => 1,
-                        [level] => match &level.value.kind {
-                            ExprKind::Literal(Literal::Int(n)) if *n >= 1 => *n as usize,
-                            _ => return None,
-                        },
-                        _ => return None,
-                    };
-                    let paths = self.resolve_paths_at(&path_arg.value, locals, depth)?;
-                    Some(
-                        paths
-                            .into_iter()
-                            .map(|p| {
-                                let mut path = PathBuf::from(p);
-                                for _ in 0..levels {
-                                    if !path.pop() {
-                                        break;
-                                    }
-                                }
-                                path.to_string_lossy().into_owned()
-                            })
-                            .collect(),
-                    )
-                }
-                _ => {
-                    let strings: Vec<String> = self
-                        .infer_expr(e, locals)
-                        .constant_strings_text()
-                        .into_iter()
-                        .map(|s| s.into_owned())
-                        .collect();
-                    (!strings.is_empty()).then_some(strings)
-                }
-            }
-        })
-    }
-
-    fn include_target_exists(&self, path: &str) -> bool {
-        let path = Path::new(path);
-        if path.is_absolute() {
-            return path.is_file();
-        }
-        // Without a working directory, the relative path itself: the
-        // filesystem resolves it against the process's.
-        let from_cwd = Some(match &self.root {
-            Some(dir) => dir.join(path),
-            None => path.to_path_buf(),
-        });
-        let from_file = self.current_dir_of_file().map(|d| d.join(path));
-        from_cwd.is_some_and(|p| p.is_file())
-            || from_file.is_some_and(|p| p.is_file())
-            || self.include_path_dirs.iter().any(|dir| {
-                let dir = Path::new(dir);
-                let dir = if dir.is_absolute() {
-                    dir.to_path_buf()
-                } else {
-                    match self.current_dir_of_file() {
-                        Some(base) => base.join(dir),
-                        None => dir.to_path_buf(),
-                    }
-                };
-                dir.join(path).is_file()
-            })
+    /// Whether the file tests `path` with `GUARD_FUNCTIONS`.
+    fn is_guarded(&self, path: &str) -> bool {
+        self.include_guarded_paths
+            .contains(&*self.settings.path_case.key(path))
     }
 
     pub(crate) fn check_include_path(
@@ -304,20 +43,28 @@ impl<'a> Checker<'a> {
         if self.current_file.is_none() {
             return;
         }
-        let Some(paths) = self.resolve_include_paths(path_expr, locals) else {
+        let Some(env) = self.include_env else {
             return;
         };
-        for path in paths {
-            if is_stream_wrapper_path(&path)
-                || self
-                    .include_guarded_paths
-                    .contains(&*self.settings.path_case.key(&path))
-                || self.include_target_exists(&path)
+        let Some([unix, windows]) = self.include_values(path_expr, locals) else {
+            return;
+        };
+        let includer_dir = self.current_dir_of_file();
+        let place = env.place(includer_dir.as_deref());
+        let is_file = |path: &Path| path.is_file();
+        for (unix_text, windows_text) in unix.iter().zip(&windows) {
+            let values = [(World::Unix, unix_text), (World::Windows, windows_text)];
+            if values.iter().any(|&(_, text)| self.is_guarded(text))
+                || values
+                    .iter()
+                    .any(|&(world, text)| place.is_found(world, text, &is_file))
             {
                 continue;
             }
             self.report(
-                format!("Path in {construct}() \"{path}\" is not a file or it does not exist."),
+                format!(
+                    "Path in {construct}() \"{unix_text}\" is not a file or it does not exist."
+                ),
                 span,
                 0,
                 format!("{identifier_prefix}.fileNotFound"),
@@ -325,22 +72,20 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Every path `program` tests with a `GUARD_FUNCTIONS` call, and the
-    /// `include_path` directories: PHP's default plus every value the
-    /// file sets it to.
-    pub(crate) fn collect_include_guards(
-        &self,
-        program: &[Stmt],
-    ) -> (FxHashSet<String>, Vec<String>) {
+    /// Every path `program` tests with a `GUARD_FUNCTIONS` call, in each
+    /// world.
+    pub(crate) fn collect_include_guards(&self, program: &[Stmt]) -> FxHashSet<String> {
         let locals = self.new_locals();
         let mut guarded = FxHashSet::default();
-        let mut include_dirs = default_include_dirs();
-        let mut on_call = |call: IncludeCall| match call {
-            IncludeCall::Guard(arg) => {
-                if let Some(paths) = self.resolve_include_paths(arg, &locals) {
-                    // Keyed as `check_include_path` looks them up: a guard
-                    // names the file whatever the case of its letters where
-                    // the root's directory folds case.
+        let mut on_call = |call: IncludeCall| {
+            let IncludeCall::Guard(arg) = call else {
+                return;
+            };
+            for world in World::ALL {
+                if let Some(paths) = self.resolve_include_paths(arg, &locals, world) {
+                    // Keyed as `is_guarded` looks them up: a guard names the
+                    // file whatever the case of its letters where the root's
+                    // directory folds case.
                     guarded.extend(
                         paths
                             .iter()
@@ -348,67 +93,8 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            IncludeCall::SetIncludePath(arg) => {
-                for value in self
-                    .resolve_include_paths(arg, &locals)
-                    .into_iter()
-                    .flatten()
-                {
-                    for dir in value.split(':').filter(|d| !d.is_empty()) {
-                        if !include_dirs.iter().any(|d| d == dir) {
-                            include_dirs.push(dir.to_string());
-                        }
-                    }
-                }
-            }
         };
-        walk_stmts(&mut GuardArgs(&mut on_call), program);
-        (guarded, include_dirs)
-    }
-}
-
-/// The `include_path` directories before the file sets any.
-pub(crate) fn default_include_dirs() -> Vec<String> {
-    DEFAULT_INCLUDE_PATH
-        .split(':')
-        .map(str::to_string)
-        .collect()
-}
-
-enum IncludeCall<'e> {
-    Guard(&'e Expr),
-    SetIncludePath(&'e Expr),
-}
-
-/// Hands every `GUARD_FUNCTIONS`, `set_include_path()` and
-/// `ini_set('include_path', ...)` argument anywhere in the program to its
-/// callback.
-struct GuardArgs<'o>(&'o mut dyn FnMut(IncludeCall));
-
-impl<'ast> Visitor<'ast> for GuardArgs<'_> {
-    fn visit_expr(&mut self, e: &'ast Expr) {
-        syntax::stack::guard(|| {
-            if let ExprKind::Call(callee, args) = &e.kind
-                && let Some(name) = callee_name(callee)
-            {
-                let is = |wanted: &str| name.eq_ignore_ascii_case(wanted);
-                match args.as_slice() {
-                    [arg, ..] if GUARD_FUNCTIONS.iter().any(|f| is(f)) => {
-                        (self.0)(IncludeCall::Guard(&arg.value))
-                    }
-                    [arg] if is("set_include_path") => {
-                        (self.0)(IncludeCall::SetIncludePath(&arg.value))
-                    }
-                    [key, value]
-                        if is("ini_set")
-                            && matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") =>
-                    {
-                        (self.0)(IncludeCall::SetIncludePath(&value.value))
-                    }
-                    _ => {}
-                }
-            }
-            walk_expr(self, e);
-        })
+        walk_stmts(&mut IncludeCalls(&mut on_call), program);
+        guarded
     }
 }

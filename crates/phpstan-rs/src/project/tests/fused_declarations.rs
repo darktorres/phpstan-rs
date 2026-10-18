@@ -196,6 +196,9 @@ fn what_a_file_names_is_found_among_its_identifiers() {
     let stub_attribute =
         |source: &str| facts(source).mentions & crate::stub_attributes::MENTIONS != 0;
     let guard = |source: &str| facts(source).mentions & crate::checker::mentions::GUARD != 0;
+    let include_path =
+        |source: &str| facts(source).mentions & crate::checker::mentions::INCLUDE_PATH != 0;
+    let chdir = |source: &str| facts(source).mentions & crate::checker::mentions::CHDIR != 0;
     assert_eq!(facts("<?php class A {}"), syntax::FileFacts::default());
     assert!(facts("<?php $f = new class {};").has_anonymous_class);
     assert!(facts("<?php $f = new #[A] class {};").has_anonymous_class);
@@ -222,10 +225,21 @@ fn what_a_file_names_is_found_among_its_identifiers() {
     for source in [
         "<?php if (file_exists($p)) {}",
         "<?php if (IS_READABLE($p)) {}",
-        "<?php set_include_path('/x');",
-        "<?php ini_set('include_path', '/x');",
     ] {
         assert!(guard(source), "{source}");
     }
+    for source in [
+        "<?php set_include_path('/x');",
+        "<?php ini_set('include_path', '/x');",
+        "<?php ini_alter('include_path', '/x');",
+    ] {
+        assert!(include_path(source), "{source}");
+        assert!(!guard(source), "{source}");
+        assert!(!chdir(source), "{source}");
+    }
+    assert!(chdir("<?php chdir(__DIR__);"));
+    assert!(!include_path("<?php chdir(__DIR__);"));
     assert!(!guard("<?php echo 1;"));
+    assert!(!include_path("<?php if (file_exists($p)) {}"));
+    assert!(!chdir("<?php if (file_exists($p)) {}"));
 }

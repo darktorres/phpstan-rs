@@ -6,6 +6,7 @@ mod debounce_integration;
 mod disabled_server;
 mod document_highlight;
 mod helpers;
+mod include_environment;
 mod inlay_hints;
 mod load_off_loop;
 mod navigation;

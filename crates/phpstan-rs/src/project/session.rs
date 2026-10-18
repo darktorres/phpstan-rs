@@ -24,6 +24,7 @@ use serde::Deserialize;
 use crate::architecture::{self, ArchitectureSettings};
 use crate::assertion_tables::OverlaySettings;
 use crate::banned::{self, BannedSettings};
+use crate::checker::include_lookup::IncludeSettings;
 use crate::checker::settings::EngineSettings;
 use crate::ext::disallowed_calls::DisallowedCallsSettings;
 use crate::ext::mockstan::MockstanSettings;
@@ -871,8 +872,22 @@ impl Session {
         let mut composer_manifests = Vec::new();
         let mut composer_php_versions = None;
         let mut root_manifest = None;
+        // The `vendor` directory of each Composer project: a tree the project
+        // reads where `composer install` has built it, and a directory a
+        // deployment builds where it has not.
+        let composer_roots = composer_roots(&dirs, &absolute_root);
+        let mut vendor_trees: Vec<PathBuf> = Vec::new();
+        let mut unbuilt: Vec<PathBuf> = Vec::new();
+        for composer_root in &composer_roots {
+            let vendor = composer_root.join("vendor");
+            if vendor.is_dir() {
+                vendor_trees.push(vendor);
+            } else if composer_root.join("composer.json").is_file() {
+                unbuilt.push(vendor);
+            }
+        }
         if !no_composer {
-            for composer_root in composer_roots(&dirs, &absolute_root) {
+            for composer_root in composer_roots {
                 // The manifest's paths are resolved, as the files they are
                 // compared with are.
                 let package = composer::PackageContext::load(
@@ -942,10 +957,39 @@ impl Session {
         let baseline_per_identifier =
             overrides.baseline_per_identifier || session.baseline_per_identifier;
 
+        // The trees the project reads. An include that leaves them is not
+        // judged, and neither is one into a directory that is built elsewhere.
+        let resolved_in_root = |path: &PathBuf| composer::manifest::resolve(&root.join(path));
+        let include = IncludeSettings {
+            include_path: reflection.include_path.clone(),
+            working_dirs: reflection.working_dirs.as_ref().map(|dirs| {
+                dirs.iter()
+                    .flat_map(&configured_roots)
+                    .map(|dir| resolved_in_root(&as_listed(dir)))
+                    .collect()
+            }),
+            composer: composer_manifests
+                .iter()
+                .flat_map(|manifest| manifest.include_paths())
+                .map(composer::manifest::resolve)
+                .collect(),
+            trees: std::iter::once(absolute_root.clone())
+                .chain(
+                    dirs.iter()
+                        .chain(&scan_dirs)
+                        .chain(&scan_files)
+                        .chain(&stub_dirs)
+                        .map(&resolved_in_root),
+                )
+                .chain(vendor_trees)
+                .collect(),
+            unbuilt,
+        };
         let settings = ProjectSettings {
             absolute_root: Some(absolute_root.clone()),
             path_case,
             packages: composer::PackageIndex::new(composer_manifests),
+            include,
             php_versions,
             configured_level,
             phpstan_api_check_enabled,

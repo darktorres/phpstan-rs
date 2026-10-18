@@ -12,15 +12,32 @@ fn parsed(source: &str) -> syntax::ParsedFile {
 
 #[test]
 fn every_function_the_include_guard_walk_reads_is_watched() {
-    let functions = includes::GUARD_FUNCTIONS
-        .iter()
-        .chain(&["set_include_path", "ini_set"]);
-    for function in functions {
+    for function in include_values::GUARD_FUNCTIONS {
         assert!(
-            mentions::WATCH.contains(&(*function, mentions::GUARD)),
+            mentions::WATCH.contains(&(function, mentions::GUARD)),
             "{function}"
         );
     }
+}
+
+#[test]
+fn every_function_that_sets_the_include_path_is_watched() {
+    for function in ["set_include_path", "ini_set", "ini_alter"] {
+        assert!(
+            mentions::WATCH.contains(&(function, mentions::INCLUDE_PATH)),
+            "{function}"
+        );
+    }
+}
+
+#[test]
+fn chdir_is_watched() {
+    assert!(mentions::WATCH.contains(&("chdir", mentions::CHDIR)));
+    assert_eq!(
+        mentions::LOOKUP,
+        mentions::INCLUDE_PATH | mentions::CHDIR,
+        "the walk that reads both is gated by both"
+    );
 }
 
 #[test]

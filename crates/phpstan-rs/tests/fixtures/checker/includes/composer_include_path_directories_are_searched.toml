@@ -1,0 +1,3 @@
+no_composer = false
+include_path = "."
+working_dirs = ["."]
