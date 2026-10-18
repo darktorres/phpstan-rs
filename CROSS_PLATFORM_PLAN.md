@@ -1,0 +1,677 @@
+# The code scoped to Linux: the cross-platform fixes
+
+## State (2026-10-18)
+
+- **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
+  tracks it.
+- **No row is built yet.** The rows are built in the order of the table below, one commit each,
+  with a pathspec, since another session shares the checkout.
+
+## Context
+
+I claimed that the project builds only for Linux, and used the claim to justify R7's `#[cfg(unix)]`
+byte reads (`composer::path_bytes`). The user corrected it: "its not true that this project only
+targets linux". The facts are these:
+
+- `release.yml` builds five targets: x86_64 and aarch64 Linux, aarch64 and x86_64 macOS, and x86_64
+  Windows (MSVC). Only the native legs are run (`--version`); the aarch64 Linux and x86_64 macOS
+  binaries are cross-built and never run.
+- `extension-ci.yml` builds the release binary and runs the VS Code smoke test on Ubuntu, macOS and
+  Windows.
+- `rust-ci.yml` (clippy, the tests, the fixtures) runs on `ubuntu-24.04` only. So code under
+  `cfg(not(unix))` is never linted, and no test has ever run on Windows or macOS.
+- This branch's last push (`120c990f`, 2026-10-14) failed in two places:
+  - The Windows smoke test: "activates on a .php file and produces diagnostics via a real server
+    round trip" got no diagnostics in 30 s.
+  - The Rust CI stopped at "Lockfiles match the manifests". `fuzz/Cargo.lock` still fails
+    `cargo metadata --locked` at HEAD.
+
+The code, read at `791a57c6` (the same code as `8a1ca1e0`), is scoped to Linux in these ways.
+
+- **Paths on Windows:**
+  - `fs::canonicalize` returns `\\?\C:\…`, and every resolved path carries that prefix. In a
+    verbatim path `/` is not a separator, so discovery's spelled paths
+    (`__DIR__ . '/../pkg/X.php'`) name no file. `__DIR__` holds the prefix where PHP holds
+    `C:\…`, and a path's URI encodes the prefix into its authority.
+  - `path_hash` hashes a drive prefix by its spelling: `c:` and `C:` are equal `Path`s with
+    different hashes.
+  - The URI code drops a UNC URI's host, strips a drive letter on Unix too, and decodes a name's
+    bytes lossily.
+  - The report's paths are spelled with `\`, so an `ignoreErrors` path written with `/` never
+    matches, and a baseline made on one platform does not match on the other.
+- **PHP-visible values:**
+  - The include rule takes `PATH_SEPARATOR` as `:`, splits include paths on `:`, and uses
+    Debian's default include path.
+  - On Windows, vendor `path_of` turns bytes that are not UTF-8 into the empty path.
+- **Runtime:**
+  - Windows gives the main thread 1 MiB of stack, which is no larger than the stack guard's
+    1 MiB red zone.
+  - On Windows the cache directory is off (`HOME` is unset), so every run builds the stubs
+    cold.
+  - The per-file cache's last-use refresh fails on Windows (a read-only handle), so eviction
+    there goes oldest-written first.
+  - Raw ANSI escapes reach a Windows console.
+- **Tests and build:**
+  - The tests:
+    - The `cli` test target does not compile on Windows: its unix-only import has no `cfg`.
+    - The link tests are `#[cfg(unix)]`.
+    - There is no `.gitattributes`, so a Windows checkout embeds CRLF stubs.
+  - The build scripts:
+    - `stub-sources/build.rs` spells the embedded stub paths with `\` on Windows, against the
+      checked-in `index.tsv`'s `/`.
+    - The patched dhat's frame-pointer walk calls glibc's `pthread_getattr_np` on any x86_64
+      target, so it cannot compile for macOS or Windows.
+  - Developer tooling: `-Z threads` applies to x86_64 Linux only; xtask spawns `touch`, `diff`
+    and GNU `time`; the scripts read `/proc`.
+- **The records:** `path_bytes`' doc says nothing of the platforms, and LOAD-8.7's −126.7 M is a
+  Linux measurement presented without the platform.
+
+This plan fixes each case where it applies, in the most proper way, and changes nothing on Linux
+except where Linux was wrong too: `uri_to_path`'s `/c:/` and lossy decoding, and the cache
+directory where `HOME` is unset. The Piwigo oracle and the monolog output must stay byte-identical.
+
+## Decisions (2026-10-18)
+
+1. **The cache directories follow each platform's convention.** Linux keeps `$XDG_CACHE_HOME`
+   or `~/.cache`, macOS uses `~/Library/Caches`, and Windows `%LOCALAPPDATA%`, through the
+   `dirs` crate. `PHPSTAN_RS_CACHE_DIR` still overrides.
+2. **`path_bytes` gets a Windows grammar too**: differential tests on the Windows leg, timed by a
+   bench on the runner.
+3. **The Windows and macOS runs are CI legs.** I push `callgrind-20g` when a round is ready,
+   asking each time. The first push publishes the branch's 219 unpushed commits.
+4. **The case rule is probed per root.** Matching against configured text folds case only where
+   the root's directory does.
+
+## How the rows are designed and judged
+
+- **The most proper fix, not the smallest.**
+  - One function per concern.
+  - A lint enforces it where it can: `disallowed-methods` for `canonicalize`.
+  - Each `cfg` branch is correct on its own platform, not merely compiling.
+- **Linux is the control.** Every row leaves Linux output byte-identical unless the row names a
+  Linux defect it fixes. The end of the batch proves it with the oracle, monolog and one
+  callgrind run.
+- **Windows and macOS are verified only on the CI legs (R2).** No local cross-build is possible
+  here: aws-lc (rustls), the bundled SQLite, mimalloc, PCRE2 and stacker's assembly need the
+  target's C toolchain and SDK.
+- **No saving without a measurement.** R16's Windows reads are timed per call by a criterion
+  bench on the runner. No load-level Windows figure can be made, and none is claimed.
+- **Working rules:**
+  - One commit per row, with a pathspec, since another session shares the checkout.
+  - `cargo fmt` first, then check, `clippy -D warnings` and the row's targeted tests in the
+    debug profile, with `TMPDIR` under `~/.cache`.
+  - A push only after asking.
+  - Comments carry no task references and no narrative.
+
+## The rows, in the order they are built
+
+| | row | what | platforms | needs |
+|---:|---|---|---|---|
+| 0 | R0 | `fuzz/Cargo.lock` matches its manifest | CI | — |
+| 1 | R1 | the deep-nesting CLI test runs everywhere | Windows | — |
+| 2 | R2 | CI legs on macOS, Windows and aarch64 Linux; LF checkouts; the release's cross-built binaries run | all | R0, R1 |
+| 3 | R3 | one canonical form of a path, without `\\?\` | Windows | R2 |
+| 4 | R4 | equal paths hash alike | Windows | — |
+| 5 | R5 | URIs ↔ paths on every platform | all | R3 |
+| 6 | R6 | report paths spelled with `/` where PHPStan does, matched by components | Windows | R3 |
+| 7 | R7 | the case rule, probed per root | Windows, macOS, Linux casefold | R6 |
+| 8 | R8 | the include rule's platform values | Windows | R3 |
+| 9 | R9 | discovery: unreadable spellings, listing misses | Windows, macOS | R3 |
+| 10 | R10 | the program runs on a thread whose stack it chooses | Windows, small `ulimit -s` | R1 |
+| 11 | R11 | the caches where each platform keeps them, refreshed on Windows | Windows, macOS | — |
+| 12 | R12 | colours on Windows consoles | Windows | — |
+| 13 | R13 | the tests on every platform: links, CRLF, Unix spellings | all | R2, R3 |
+| 14 | R14 | build scripts: the same embedded data everywhere; dhat's walk per platform | all | R2 |
+| 15 | R15 | developer tooling | macOS, Windows | — |
+| 16 | R16 | `path_bytes` reads Windows paths from their bytes | Windows | R3, R4 |
+| 17 | R17 | the records | — | all |
+
+CI rounds, each push asked:
+
+- round 1 after R2, the inventory;
+- round 2 after R5, the smoke round trip;
+- round 3 after R13 and R14;
+- round 4 after R16, the bench;
+- round 5 at the end, with the release dry run.
+
+## Rows
+
+Lines are as read at `791a57c6`.
+
+### R0. `fuzz/Cargo.lock` matches its manifest
+
+**Now.** `cargo metadata --locked --offline --manifest-path fuzz/Cargo.toml` fails ("cannot
+update the lock file"). That step stopped this branch's last Rust CI run, so no test step has
+run on CI since.
+
+**Change.** Update the lock offline with the minimal change that `cargo metadata --offline`
+makes, then check both lockfiles with `--locked`.
+
+**Verify.** Both `--locked` commands of `rust-ci.yml`'s first step pass.
+
+### R1. The deep-nesting CLI test runs on every platform
+
+**Now.** `check_does_not_crash_on_deep_nesting_or_long_chains` (`tests/cli.rs:1351`) imports
+`std::os::unix::process::ExitStatusExt` with no `cfg`, so the `cli` test target does not compile
+on Windows. On Windows `cargo test --workspace --all-targets` fails before any test runs.
+
+**Change.** Assert that the status is the one a finished `check` returns: 0, since `run_check`
+(`main/check.rs:13`) returns nothing and never exits otherwise. The test then fails in each case
+that matters:
+
+- a crash, which ends in a signal on Unix (no code), and on Windows in an NTSTATUS code
+  (0xC00000FD for a stack overflow, 0xC0000409 for a fast fail);
+- a panic, which ends in 101.
+
+The message keeps the status and the stderr.
+
+**Test.** The test itself, here now and on the legs in round 1.
+
+### R2. CI legs on every platform, LF checkouts, and every shipped binary run once
+
+**Now.**
+
+- `rust-ci.yml` runs on `ubuntu-24.04` alone.
+- With no `.gitattributes`, a Windows runner, whose `core.autocrlf` is true, checks out CRLF.
+  That covers the fixtures, `index.tsv`, phpstorm-stubs (tracked here) and the phpstan-src
+  submodule's `.stub` files (its `.gitattributes` gives `eol=lf` to `*.php` only). The Windows
+  release binary embeds CRLF stubs.
+- `release.yml` runs only the native binaries. Its comments, and `extension-ci.yml`'s, say that
+  the repository has no GitHub remote, which is no longer true.
+
+**Change.**
+
+- A `platforms` job in `rust-ci.yml`:
+  - Matrix: `macos-26` (arm64), `windows-2025-vs2026` (x64) and `ubuntu-24.04-arm` (aarch64
+    Linux, free for public repositories). This repository is public.
+  - Checkout: LF (`git config --global core.autocrlf false` before checkout), the phpstan-src
+    submodule, the pinned toolchain and the caches, as the `gates` job has them.
+  - Steps, each run whatever the one before it gave (`if: ${{ !cancelled() }}`), so one failure
+    hides no other:
+    - `cargo clippy --workspace --all-targets -- -D warnings`;
+    - `cargo test --workspace --all-targets --no-fail-fast`;
+    - `cargo test --profile gate --test fixtures`;
+    - R14's dhat check.
+  - The `gates` job stays Linux's, with xtask, deny, machete and hack.
+- `.gitattributes`: `* text=auto eol=lf`, with the binary types marked binary. The repository's
+  own files check out LF everywhere.
+- `extension-ci.yml` and `release.yml`: their Windows legs set `core.autocrlf false` before
+  checkout, so the binary they build embeds Linux's bytes. The stale comments go.
+- `release.yml`:
+  - The aarch64 Linux leg builds natively on `ubuntu-24.04-arm` and runs its binary. This
+    replaces the cross toolchain step.
+  - The x86_64 macOS binary runs under Rosetta on the arm64 runner (`arch -x86_64`).
+
+**Round 1, the inventory.** The first push, asked, gives every failure on the legs. The run is
+recorded here by class, and each class goes to the row that owns it, or to a new one. From the
+code, these are expected:
+
+- Windows:
+  - vendor context empty, from the verbatim spelled paths (R3);
+  - include-rule and URI tests (R3, R5, R8);
+  - `/`-spelled report tests (R6);
+  - `stub_index` (R14);
+  - temp paths spelled with the 8.3 short name (`RUNNER~1`) against canonical ones (R13);
+  - the smoke round trip (R3, R5).
+- macOS: temp paths under `/var/folders` against canonical `/private/var/…` ones (R13).
+
+### R3. One canonical form of a path, without Windows' verbatim prefix
+
+**Now.**
+
+- Ten call sites call `std::fs::canonicalize`: `session.rs:326` (`identify_through`) and `:578`,
+  `walk.rs:1231`, `manifest.rs:266` and `:344-348` (`resolve`), and `vendor.rs:120`, `:626`,
+  `:639` and `:724`.
+- On Windows each returns `\\?\C:\…`, so every root, listed file, discovered vendor path and
+  document key carries the prefix. In a verbatim path `/` is not a separator and `.` and `..`
+  are literal. As a result:
+  - discovery's spelled paths (the canonical generated directory joined with
+    `'/../symfony/console/X.php'`, `vendor.rs:381-394`) are one component that no listing holds,
+    so a Windows load has no vendor context;
+  - the include rule's `__DIR__` and `__FILE__` (`includes.rs:223-228`) hold `\\?\C:\…` where
+    PHP holds `C:\…`, so `require __DIR__ . '/x.php'` is reported missing;
+  - `path_to_uri` puts `\\?\` into a non-open file's URI (R5);
+  - the reports show it.
+
+**Change.**
+
+- A module `composer::canonical` with `canonicalize(path) -> io::Result<PathBuf>`: the system's
+  canonical path.
+  - On Windows, `\\?\X:\…` becomes `X:\…` and `\\?\UNC\server\share\…` becomes
+    `\\server\share\…`, when every component can be spelled without the prefix: no reserved
+    device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9`, with or without an
+    extension), no trailing `.` or space, and no character a Win32 name forbids. Otherwise the
+    path stays verbatim.
+  - There is no length limit: std itself adds the prefix to a long path when it calls the
+    system.
+  - Other verbatim forms (`\\?\Volume{…}\`) stay as they are.
+- `manifest::resolve` builds on it, and all ten call sites use one of the two.
+- `clippy.toml`: `disallowed-methods` for `std::fs::canonicalize` and
+  `std::path::Path::canonicalize`. The one wrapper `#[expect]`s it.
+- `HashedPath::child` (`hashed_path.rs:46`) keeps the invariant: a name that cannot be spelled
+  plainly makes a verbatim child, so `Resolved::known`'s assertion (`:131`) holds on Windows.
+
+**Test.**
+
+- `cfg(windows)` unit tests of the rule:
+  - a drive in either case;
+  - UNC;
+  - each reserved name, with and without an extension;
+  - a trailing dot or space;
+  - a long path;
+  - a volume GUID path.
+- A Windows round trip: a temp file's canonical path is plain, and `resolve` maps it to itself.
+
+**Verify.**
+
+- Linux is unchanged: the wrapper is `fs::canonicalize` there.
+- On round 2:
+  - a vendor discovery test finds vendor context on Windows;
+  - the smoke test's round trip.
+
+### R4. Equal paths hash alike on Windows
+
+**Now.** `HashedPath::new` (`:33`), `path_hash` (`:149`) and `hashed_ancestors` (`:157`) fold
+`component.as_os_str()`. A prefix's text is its spelling, while `Path`'s equality compares the
+prefix's parsed kind (std uppercases the drive letter, and reads `//server/share` as
+`\\server\share`). So `c:\a` and `C:\a` are equal `Path`s with different hashes, and a table
+keyed by `PathHash` with path equality misses one of them. The module's doc (`:1-6`) promises
+that they hash alike.
+
+**Change.** One `component_hash(parent, &Component)`:
+
+- a prefix hashes its kind: `Prefix::Disk(b'C')`, `UNC(server, share)` and the others, as
+  `Path` compares them;
+- any other component hashes its text, as now.
+
+Unix has no prefix, so every hash there stays the same.
+
+**Test.** `cfg(windows)`: the spellings `Path` calls equal (drive case, UNC separators) hash
+alike. The existing `hashed_path` tests run on every leg.
+
+### R5. URIs and paths on every platform
+
+**Now** (`lsp/protocol.rs`).
+
+- `uri_to_path` (`:110`):
+  - It ignores the authority. On Windows `file://server/share/a.php` becomes `\share\a.php`; on
+    Unix another host's URI is taken as local.
+  - It strips the `/` before a drive letter on every platform. On Unix `file:///c:/x` is the
+    absolute path `/c:/x`.
+  - It decodes the escapes lossily (`percent_decode`, `:192`), so on Unix a name that is not
+    UTF-8 (`%E9`) loses its bytes.
+- `path_to_uri` (`:122`, `path_to_uri_path_string` `:158`):
+  - It writes a prefix raw: `\\server\share` is percent-encoded into the path, and `\\?\C:`
+    into the authority.
+  - It writes a non-UTF-8 Unix name lossily.
+- The doc comment at `:147-157` calls Linux "this project's only build target".
+
+**Change.**
+
+- Unix:
+  - `file:///p` and `file://localhost/p` give the path made of the decoded bytes
+    (`OsStrExt::from_bytes`), and another host gives `None`;
+  - `path_to_uri` encodes the name's bytes.
+- Windows:
+  - `file:///C:/p` and `file:///c%3A/p` give `C:\p`, decoded as UTF-8 (anything else gives
+    `None`);
+  - `file://server/share/p` gives `\\server\share\p`;
+  - `path_to_uri` writes `Disk` and `VerbatimDisk` as `/C:/…`, and `UNC` and `VerbatimUNC` as
+    `file://server/share/…`. Other verbatim kinds keep their spelling, encoded.
+- The comment states why components are joined with `/` on every platform.
+- An open document keeps publishing on the URI its client sent (`open_uris`, `lsp.rs:1011`).
+
+**Test.** Per-platform unit tests:
+
+- `cfg(unix)`: bytes, `localhost`, another host, `/c:/`;
+- `cfg(windows)`: both drive encodings, UNC both ways, and a verbatim path's URI.
+
+Round 2 runs the smoke round trip. If it still fails, the smoke test prints the server's stderr
+on failure, and the cause becomes a row.
+
+### R6. Report paths spelled with `/` where PHPStan spells them so
+
+**Now.** `shown_path` (`project.rs:3430`) gives `src\Foo.php` on Windows. So:
+
+- `ignore_errors::filter` (`:134`) matches `to_string_lossy()` against `src/*`, which never
+  matches;
+- the baseline writes and matches `normalize_path(..).display()` (`baseline.rs:201`, `:393`).
+  A baseline made on Linux does not match on Windows, and the other way round. PHPStan's
+  baselines are `/`-joined everywhere (`ParentDirectoryRelativePathHelper`);
+- checkstyle and junit (`output.rs:212`, `:244`) write `\`. PHPStan's
+  `SimpleRelativePathHelper` writes `/`.
+
+**Change.**
+
+- One function, `report_path(&Path) -> Cow<str>`. On Windows it gives the components joined with
+  `/`. On Unix it gives the path's own text, since `\` is a name character there.
+- The baseline writes it. On Windows it reads an entry's `\` as `/`, which covers baselines this
+  tool wrote there before, and matches it.
+- `ignoreErrors`: on Windows a pattern's `\` is a separator, as PHPStan's FNM_NOESCAPE has it
+  there. The path and the pattern are compared in `/` form.
+- Checkstyle and junit use `report_path`. Text, friendly and json keep the platform's spelling, as
+  PHPStan's table and json do.
+
+**Test.**
+
+- Unit tests per platform.
+- A baseline made with one spelling matches the other on Windows.
+
+Linux output is unchanged.
+
+### R7. Case is matched as the root's directory matches it
+
+**Now.** Matching against configured text is exact on every platform. On NTFS, default APFS
+or a Linux casefold directory, `Src/*` and `src/*` name the same files.
+
+**Change.**
+
+- **The probe.** Each configured root is probed once at load: the project root, `paths`, and the
+  scan and stub roots. The probe takes an entry of the root's listing (from `DirListings`,
+  which the walk then reuses) whose name has a letter and whose case-flipped spelling the
+  listing does not hold. If `symlink_metadata` finds the flipped spelling, the root's directory
+  folds case; if not, or when no entry qualifies, matching is exact. A vendor root takes the
+  project root's rule.
+- **What the rule applies to.**
+  - The project root's rule serves `ignoreErrors` paths and the include rule's guard paths
+    (`include_guarded_paths`).
+  - Each walk root's rule serves its excluded names: each root's `exclude`, and the name floor
+    of `.git`, `node_modules` and the vendor directory (`path_under_excluded_dir`,
+    `project.rs:3419`).
+- **Not the baseline.** Its entries come from the files' own spelling, so they stay exact.
+- The project carries the rule.
+
+**Test.**
+
+- Matchers with the rule injected.
+- The probe gives exact here, and folds on the Windows and macOS legs.
+
+On Linux the probe gives exact, so the output is unchanged. Its cost is about one `lstat` per
+configured root.
+
+### R8. The include rule's platform values
+
+**Now** (`checker/includes.rs`).
+
+- `PATH_SEPARATOR` is `":"` (`:210`), and `set_include_path` values split on `':'` (`:362`,
+  `:377`). On Windows `C:\lib` splits at the drive letter.
+- The default include path is Debian's `.:/usr/share/php` (`:47`). Windows PHP's is
+  `.;C:\php\pear`.
+- `DIRECTORY_SEPARATOR` already takes the platform's (`:214`).
+
+**Change.** The value and the split use the platform's separator: `;` on Windows, `:` elsewhere.
+The default is chosen per platform: Unix keeps `.:/usr/share/php` (the directory simply does
+not exist on macOS), and Windows gets `.;C:\php\pear`. The constant types in
+`predefined_constants.rs`, `'/'|'\\'` and `':'|';'`, stay as they are: those are the types of
+code that runs anywhere.
+
+**Test.** `cfg(windows)`: `set_include_path(get_include_path() . PATH_SEPARATOR . __DIR__ .
+'/lib')` adds `<dir>/lib`. The Unix tests are unchanged.
+
+**Not here.** Should an include that only the system include path could resolve be reported at
+all? That is a rule question on every platform: PHPStan uses its own process's include path. It
+goes to the user, and nothing changes here.
+
+### R9. Discovery: unreadable spellings and listing misses
+
+**Now** (`composer/src/vendor.rs`).
+
+- On Windows, `path_of` (`:748`) turns bytes that are not UTF-8 into the empty path, though its
+  doc says "read lossily". PHP for Windows opens paths as UTF-8, so such an entry names no
+  file.
+- A name its directory's listing does not hold is dropped (`entry_canonical`, `:729`). Composer
+  copies `composer.json`'s spelling, so on a case-insensitive volume a spelling whose case
+  differs from the disk's names the file.
+
+**Change.**
+
+- Bytes that are not UTF-8 give `None`: the entry names no file.
+- A listing miss asks the system (`canonical::canonicalize`). That finds the file where the
+  volume folds case, and fails at once elsewhere.
+
+**Test.**
+
+- A discovery test with a case-differing spelling: found on the Windows and macOS legs, absent
+  here.
+- On Windows, an entry that is not UTF-8.
+
+On Linux a miss is an absent file. Piwigo's misses are counted before and after: no new
+system call is expected.
+
+### R10. The program runs on a thread whose stack it chooses
+
+**Now.**
+
+- `syntax::stack::guard` grows a 16 MiB segment (`stack.rs:12`) when less than `RED_ZONE` (1 MiB,
+  `:9`) is left.
+- Windows gives the main thread 1 MiB, so every outermost guarded call there grows a segment,
+  which on Windows is a fiber, and the next call does it again.
+- `check`, `check-project`'s main-thread work and the language server's request loop all run on
+  the main thread (`main.rs:96-119`).
+- Linux's main stack is `ulimit -s`.
+- `RED_ZONE`'s doc says it is "well under the smallest thread stack (2 MiB)". That holds for every
+  thread but the main one.
+
+**Change.** `main` does the following, in order:
+
+1. It parses the command line.
+2. It calls `keep_freed_memory` while it is the only thread.
+3. It runs the command on a thread of `WORKER_STACK_SIZE` (`project.rs:373`).
+4. It returns or exits with the command's outcome. A panic is resumed, so the exit status stays
+   101.
+
+The dhat profiler and hotpath's guard stay in `main`.
+
+**Test.**
+
+- R1's test on every leg.
+- A unit test that the command thread's stack is the size asked for (`stacker::remaining_stack`).
+
+On Linux nothing in the output changes; the cost is one thread spawn.
+
+### R11. The caches where each platform keeps them, refreshed on Windows
+
+**Now.**
+
+- `cache_dir` (`registry/stub_cache.rs:34-45`) reads `XDG_CACHE_HOME` or `HOME`. On Windows
+  `HOME` is usually unset, so the stub cache and the per-file cache are off, and every run builds
+  the stub registry cold.
+- `read_entry` (`project/file_cache.rs:313-326`) refreshes an entry's last use through the
+  read-only handle it read the entry with. Windows refuses to set a time without write access,
+  and the error is ignored (`let _`), so eviction there goes oldest-written first. The file's
+  own test opens for writing (`:498`).
+
+**Change.**
+
+- `dirs::cache_dir()` joined with `phpstan-rs`. That is `$XDG_CACHE_HOME` or `~/.cache` on Linux
+  (the passwd entry's home where `HOME` is unset), `~/Library/Caches` on macOS, and
+  `{FOLDERID_LocalAppData}` on Windows. `PHPSTAN_RS_CACHE_DIR` and the `NO_*_CACHE` switches
+  work as now.
+- The refresh opens the entry for writing.
+- The dependency is `dirs = "=7.0.0"`: MIT OR Apache-2.0. Its `dirs-sys` and `option-ext`
+  (MPL-2.0) are allowed by `deny.toml`, and `windows-sys` 0.61.2 is already in the tree.
+
+**Test.**
+
+- The precedence (the override, the off switch, the default).
+- On every leg, a refresh test: an entry older than `REFRESH_AFTER` is read, and its mtime
+  moves.
+
+On Linux nothing changes where `HOME` is set, and the oracle runs set the directory
+explicitly. Where `HOME` is unset, the cache now comes on.
+
+### R12. Colours on Windows consoles
+
+**Now.** The code frame writes ANSI escapes whenever stdout is a terminal and `NO_COLOR` is unset
+(`main/check_project.rs:264-266`, `output/codeframe.rs:16-24`). A Windows console prints them
+raw unless virtual-terminal processing is on, and a program must turn that on itself.
+
+**Change.** On Windows, colour is used only once `anstyle_query::windows::enable_ansi_colors()`
+returns `Some(true)`. `anstyle-query` 1.1.5 is already in the tree through clap. Other platforms
+are unchanged.
+
+**Test.** The decision as a function of (terminal, `NO_COLOR`, enabled).
+
+### R13. The tests on every platform
+
+**Change.**
+
+- **Links.** A test helper `link(original, link)`:
+  - Unix: `symlink`.
+  - Windows, for a directory: a junction, which is what Composer makes for path repositories
+    and needs no privilege. It uses the `junction` crate as a `cfg(windows)` dev-dependency,
+    whose `unsafe` stays a dependency's.
+  - Windows, for a file: `symlink_file`. That needs the symlink privilege, which the runners
+    have; without it the helper fails, saying to enable Developer Mode.
+  - The link tests drop `#[cfg(unix)]`: in `walk_identity.rs`, `session_identity.rs`,
+    `symlink_identity.rs`, `workspace_folders.rs`, `manifest.rs`, `dir_listings.rs`,
+    `package_ownership.rs` and `vendor_context_discovery.rs`. Std counts a junction as a link
+    (`FileType::is_symlink` holds for name-surrogate reparse points), so the walk should need no
+    Windows branch; the tests check that.
+- **`hard_links_stay_two_files`** drops its `cfg`: `fs::hard_link` is portable.
+- **The permission tests**: `a_directory_that_cannot_be_read_has_no_listing`,
+  `a_php_file_its_directory_cannot_list_is_kept`,
+  `a_file_the_tree_cannot_place_keeps_the_listing_in_path_order`, and the oracle tree's
+  `set_locked`.
+  - They lock a directory with a Unix mode, so they stay unix-only. The code reads
+    `read_dir`'s error alike everywhere.
+  - The oracle tests split: their link part runs everywhere.
+- **CRLF.** A Windows checkout of a user's project is CRLF by default. New tests run the lexer,
+  `phpdoc`, `LineIndex` and the LSP positions over CRLF sources: line numbers, columns, heredoc
+  terminators and doc tags.
+- **Round 1's Unix assumptions.** Every test that round 1 shows to assume Unix spellings is
+  fixed. Examples are a temp path in the 8.3 short form or under `/var`, compared with a canonical
+  one, and a path compared as `/`-joined text.
+
+### R14. Build scripts: the same embedded data everywhere, and dhat's walk per platform
+
+**Now.**
+
+- `stub-sources/build.rs` `write_path_array` (`:43-50`) spells each embedded stub's path with
+  `to_string_lossy`, which gives `standard\basic.php` on Windows. The checked-in `index.tsv`
+  spells it `standard/basic.php`, so the `stub_index` test cannot pass there, and the
+  provenance indices differ by platform.
+- `include_str!` embeds a CRLF checkout's bytes as they are (R2).
+- `patches/dhat` builds the frame-pointer walk for any x86_64 target given the flag (`build.rs`),
+  but the walk calls glibc's `pthread_getattr_np` (`lib.rs:1293-1300`). A frame-pointer dhat
+  build for Intel macOS or Windows does not compile, and aarch64 never takes the walk.
+
+**Change.**
+
+- The paths are joined with `/`.
+- A source that holds `\r\n` is embedded from an LF copy in `OUT_DIR`.
+- dhat:
+  - Linux: the walk reads `rbp` on x86_64 and `x29` on aarch64, with `pthread_getattr_np`.
+  - macOS: the walk on both architectures, with `pthread_get_stackaddr_np` and
+    `pthread_get_stacksize_np`.
+  - Elsewhere, Windows included, the unwinder.
+  - `build.rs` and the README say so.
+
+**Test.**
+
+- `stub_index` on every leg.
+- R2's leg step: `cargo check -p phpstan-rs --profile dhat --features dhat-heap` with
+  `-C force-frame-pointers=yes`.
+- Once on the macOS leg: a dhat-heap run on a small project whose stacks are whole (recorded).
+
+### R15. Developer tooling
+
+**Change.**
+
+- `.cargo/config.toml`: `-Z threads=8` moves to `[target.'cfg(all())']`, so every host gets
+  the parallel front end. mold stays x86_64 Linux's.
+- xtask:
+  - `touch` (`main.rs:1263`, `:1291`) becomes `File::set_modified`.
+  - `diff -u` (`:935`) becomes `similar`'s unified diff, a dependency of xtask.
+  - The perf gate's peak RSS (`:1118`) uses GNU `time -f %M` on Linux and BSD `time -l` on
+    macOS, which reports bytes. On Windows the gate says that it has no peak-RSS reading, and
+    hyperfine's timing still runs.
+- `scripts/`: each script that reads `/proc`, `perf`, valgrind, THP or `systemd-run` says in
+  its usage that it runs on Linux.
+- README's "Building from source" adds:
+  - the pinned nightly (`rust-toolchain.toml`);
+  - clang and mold on x86_64 Linux (`.cargo/config.toml`), and how to build without them;
+  - where the caches are on each platform.
+
+### R16. `path_bytes` reads Windows paths from their bytes
+
+**Change** (decision 2).
+
+- **The plain forms on Windows:**
+  - absolute: `X:\` followed by names separated by `\`. Every loaded path has this form after
+    R3;
+  - relative: names separated by `\`, the first of which is not a drive spec.
+  - A name is non-empty, holds neither separator, and is not `.`; `..` reads as `ParentDir`, as
+    on Unix.
+- **How the pieces are cut:**
+  - A sub-path is cut from `path.to_str()`, a scan for surrogates; a path that is not UTF-8 goes
+    to std.
+  - The prefix component comes from std, since `PrefixComponent` has no public constructor.
+  - `hashed_ancestors` gives a prefix no ancestor of its own, as `Path::ancestors` gives none.
+- **Left to std:** a `/`, `\\?\`, UNC, device and drive-relative paths.
+- **`is_php_name`** reads a name's bytes on every platform.
+
+**Test.** A Windows mix is checked against std function by function: each prefix kind in either
+case, `\` and `/`, doubled and trailing separators, `.` and `..`, `a:b`, and non-ASCII names. It
+sits beside the Unix mix. Each mix runs on its own platform, with its own count showing that the
+bytes read most of it.
+
+**Measure.** A criterion bench, `crates/composer/benches/path_bytes.rs`, times `path_bytes`
+against std on a load's mix of paths. It runs here and on the Windows leg. The per-call times
+go into LOAD-8.7; no load-level Windows figure exists.
+
+### R17. The records
+
+- `path_bytes`' module doc: which platforms read bytes, and how Windows' grammar differs.
+- LOAD-8.7:
+  - −126.7 M is Linux's, by callgrind;
+  - macOS takes the same code, unmeasured;
+  - Windows has R16's per-call bench.
+- The memory `project-is-cross-platform`: the legs now test all three platforms.
+- `WORK_STACK.md`: level 9 for this plan when it starts (the plan is copied to
+  `CROSS_PLATFORM_PLAN.md`). It is deleted when the plan finishes, and level 8 resumes.
+
+## Verification
+
+**Per row.** `cargo fmt`, then `cargo check`, `cargo clippy -D warnings`, and the row's tests
+(`-p phpstan-rs-composer`, `-p phpstan-rs --lib <module>`), in the debug profile with
+`TMPDIR=/home/torres/.cache/prs-profile/fixes/tmp`. No full suite per row.
+
+**Per round** (each push asked). The legs:
+
+- `platforms`: macOS, Windows, aarch64 Linux;
+- `gates`: Linux;
+- `extension-ci`: three OSes.
+
+A failure is read from the job's log, saved under `~/.cache/prs-profile/fixes/logs/`.
+
+**At the end of the batch, on Linux:**
+
+- `cargo test -p phpstan-rs --lib`, `--test fixtures` and the integration tests;
+- `check-project vendor/monolog`, stdout and stderr byte-compared between a worktree at
+  `791a57c6` and HEAD, both `LC_ALL=C sort`ed, off, cold and warm;
+- the Piwigo oracle (171,439 bytes, sha256 `8ff144c3…`), off and warm;
+- one off-mode callgrind run: the total within MEAS-3's spread (±20 M) of `8a1ca1e0`'s
+  20,373,086,199, since R3, R4, R7 and R10 touch Linux's load path.
+
+Builds and runs need no approval. One heavy job at a time, under `nice -n 19`, with
+`/proc/loadavg` logged.
+
+**At the end of the batch, elsewhere:**
+
+- every leg green: clippy, the tests and the fixtures on Windows, macOS and aarch64 Linux;
+- the smoke round trip on Windows;
+- `release.yml` by `workflow_dispatch` for all five targets, every binary run once (asked).
+
+## Not in this plan (checked)
+
+- **The extension's TypeScript** already handles the platforms: `.exe` and `.cmd`, chmod, the
+  quarantine attribute.
+- **CRLF semantics** beyond R13's tests:
+  - `phpdoc` splits with `str::lines` (CRLF-aware), and its lexer stops at `\r`;
+  - the syntax crate handles `\r` at 7 sites.
+- **fnmatch's `?`, `[…]` and `\` escapes** in `ignoreErrors` on Unix are a parity gap on every
+  platform, not a platform-scoped one.
+- **The release target scope** is not changed here: the glibc floor, musl, Windows ARM64.
+- **`.cargo/config.toml`'s mold and clang** stay x86_64 Linux's. They are a link-speed choice;
+  R15's README covers them.

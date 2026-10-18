@@ -11,8 +11,8 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-17, `8a1ca1e0` on branch `callgrind-20g`. Counts below were
-read from the files on that date. This file covers this branch only.
+State as of 2026-10-18, `791a57c6` on branch `callgrind-20g`. Counts below were
+read from the files on 2026-10-17. This file covers this branch only.
 
 ## Where to resume
 
@@ -21,14 +21,18 @@ together later. Their sections below keep the content they had that day. The one
 exception is level 7's designs, which are rows of the 20 G plan and are worked in
 level 8's order; DOC-2.1 stays deferred.
 
-Level 8 is the one active level. It holds the 20 G plan and the off drill, and its
-order is in its section below: work the lowest item that has a READY row, item 2
-as of 2026-10-17 (LOAD-2.2's last part, decided that day), then item 8.
+Level 9 is the active level: the cross-platform fixes (`CROSS_PLATFORM_PLAN.md`),
+started on 2026-10-18 above level 8. Work its rows in the plan's order. When it
+finishes, level 8 resumes.
 
-Level 9, which sat above it, finished on 2026-10-17: the fixes for the costs that
-the attribution of the 20 G plan's items 1 to 3 found
-(`ITEMS_1_TO_3_FIXES_PLAN.md`). Every row is in and the batch's checks passed; the
-plan and the ledger's LOAD-8 keep the record.
+Level 8 holds the 20 G plan and the off drill, and its order is in its section
+below: work the lowest item that has a READY row, item 2 as of 2026-10-17
+(LOAD-2.2's last part, decided that day), then item 8.
+
+The previous level 9 finished on 2026-10-17: the fixes for the costs that the
+attribution of the 20 G plan's items 1 to 3 found (`ITEMS_1_TO_3_FIXES_PLAN.md`).
+Every row is in and the batch's checks passed; the plan and the ledger's LOAD-8
+keep the record.
 
 ## The stack
 
@@ -248,6 +252,17 @@ The off-run rows still open:
 - Settled, not pending: proposal 10 (`simdutf8`, LOAD-6 is SKIP); E4 (CACHE-6),
   E9 (CHECK-5, folded into CHECK-6.16) and E12 (CACHE-7) are SKIP; D3, D6, C7 and
   C8 are decided.
+
+### 9. The cross-platform fixes — `CROSS_PLATFORM_PLAN.md`
+
+Started on 2026-10-18, above level 8. The user corrected the claim that the project
+targets Linux only: `release.yml` ships Linux, macOS and Windows binaries, but the
+tests run on Linux alone, and the code read at `791a57c6` is scoped to Linux in
+paths, PHP-visible values, runtime behaviour, tests and build scripts. The plan's
+rows R0 to R17 are built in its order. Windows, macOS and aarch64 Linux are
+verified on CI legs, and each push is asked first.
+
+Open: every row (R0 to R17), and the batch's checks.
 
 ## Documents with no place in the stack
 
