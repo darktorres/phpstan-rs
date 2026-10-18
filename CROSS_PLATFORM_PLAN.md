@@ -4,9 +4,9 @@
 
 - **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
   tracks it.
-- **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`) and R4. The
-  rows are built in the order of the table below, one commit each, with a pathspec, since
-  another session shares the checkout.
+- **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
+  (`c6902324`) and R5. The rows are built in the order of the table below, one commit each,
+  with a pathspec, since another session shares the checkout.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -17,7 +17,7 @@
   - The gates job failed at the module graph, which predates this plan. Whether this batch
     fixes it is asked with round 2's push. Until then, `54e7e02d` runs each gates check
     whatever the one before it gave.
-- **Next:** R5, with its extension.
+- **Next:** round 2, the push asked first, together with the module-graph question; then R6.
 
 ## Context
 
@@ -517,6 +517,44 @@ on failure, and the cause becomes a row.
     URIs.
 
   Linux's URIs change only for a workspace opened through a link, which they named wrongly.
+
+**Built.**
+
+- `uri_to_path` reads a `file:` URI by RFC 8089. It refuses another scheme, a user, a port and
+  a NUL byte. It decodes strictly with its own decoder, which replaces the lossy
+  `percent_decode`.
+  - Unix: the host is empty or `localhost`, in any case, and the path must be absolute. The
+    name is its bytes. `file:///c:/x` is `/c:/x`.
+  - Windows: an empty host needs a drive. `/C:/p` and `/c%3A/p` give the drive's path; the
+    letter keeps its case, which `Path` equality ignores. A drive alone is the drive's root,
+    and a drive-relative path names nothing. Any other host is a share and needs one:
+    `\\server\share\p`, `wsl%24` decodes to `\\wsl$\…`, and the hosts `?` and `.` give the
+    verbatim and device namespaces. The text must be UTF-8.
+- `path_to_uri` writes each name after a `/`, percent-encoded with the same kept set as before
+  (the unreserved bytes and `:`).
+  - Unix: the name's bytes, so `\` and bytes that are not UTF-8 survive.
+  - Windows: a drive or verbatim drive is `/C:`, with the letter std reads. A share or
+    verbatim share is its host and share name. The verbatim and device namespaces are the
+    hosts `%3F` and `.`, as VS Code spells them.
+- The client's spelling: `uri_and_version_for` names a file that is not open by
+  `client_spelling`. That is the path under the deepest folder whose resolved root holds it,
+  spelled under the root as the client named it (`Folder::spelled`). The folder's URI is made
+  from that spelling, and clients decode a URI before comparing it.
+- Tests:
+  - per platform, for both directions: the refusals, `localhost`, another host, `/c:/`, bytes,
+    `\` in a Unix name, both drive encodings, shares both ways, `wsl$`, and the two
+    namespaces;
+  - a workspace opened through a link has its unopened file's diagnostics published, and a
+    definition answered, under the link's URIs;
+  - the existing link test now expects the target under the folder's spelling. It held on
+    Linux only because the temp directory there is canonical.
+- Checked here:
+  - clippy on Linux, and the 287 `lsp::` tests;
+  - a mutation that turns `client_spelling` off fails the new link test;
+  - the Windows type check, which now also compiles the URI functions and their tests with
+    lsp-types.
+
+  Round 2 runs the Windows and macOS legs and the smoke round trip.
 
 ### R6. Report paths spelled with `/` where PHPStan spells them so
 

@@ -93,11 +93,17 @@ pub(super) fn run_with_capabilities(
     capabilities: Value,
     extra: &[Value],
 ) -> Vec<Value> {
+    run_rooted(&dir.uri(), capabilities, extra)
+}
+
+/// Same as `run_with_capabilities`, for a workspace whose root the client
+/// names by `root_uri`.
+pub(super) fn run_rooted(root_uri: &str, capabilities: Value, extra: &[Value]) -> Vec<Value> {
     let mut input = vec![
         request(
             1,
             "initialize",
-            json!({"rootUri": dir.uri(), "capabilities": capabilities}),
+            json!({"rootUri": root_uri, "capabilities": capabilities}),
         ),
         notification("initialized", json!({})),
     ];

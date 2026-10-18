@@ -17,6 +17,7 @@
 //! the message text rather than dropped - LSP has no field for it.
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 #[cfg(test)]
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -77,8 +78,6 @@ mod settings;
 mod signature_help;
 mod workspace_symbol;
 
-#[cfg(test)]
-use protocol::percent_decode;
 use protocol::{
     Positions, diagnostic_fix_to_code_action, log_message_notification, offset_from_lsp,
     path_to_uri, progress_notification, publish_diagnostics_notification, pump_messages,
@@ -1002,16 +1001,35 @@ impl Server {
     }
 
     /// Looks up the last known `(Uri, document version)` for `path` -
-    /// falling back to a synthesized `Uri` and `None` when `path` was
-    /// never seen via `didOpen`/`didChange` (e.g. a workspace-scanned-
-    /// but-never-opened dependent, or one only ever touched via
+    /// falling back to the URI of `path` as the client spells it
+    /// (`client_spelling`) and `None` when `path` was never seen via
+    /// `didOpen`/`didChange` (e.g. a workspace-scanned-but-never-opened
+    /// dependent, or one only ever touched via
     /// `workspace/didChangeWatchedFiles`, which carries no document
     /// version at all).
     fn uri_and_version_for(&self, path: &Path) -> (Uri, Option<i32>) {
-        self.open_uris
-            .get(path)
-            .cloned()
-            .unwrap_or_else(|| (path_to_uri(path), None))
+        match self.open_uris.get(path) {
+            Some(known) => known.clone(),
+            None => (path_to_uri(&self.client_spelling(path)), None),
+        }
+    }
+
+    /// `path`, a file's key, spelled under the root of the deepest folder that
+    /// holds it as the client named that root. The client knows the folder's
+    /// files by that spelling (through a link, or `/var` for macOS's
+    /// `/private/var`), so the resolved path would name another file to it. A
+    /// path under no folder is spelled as it is.
+    fn client_spelling<'p>(&self, path: &'p Path) -> Cow<'p, Path> {
+        let Some(folder) = self.owner(path).map(|index| &self.folders[index]) else {
+            return Cow::Borrowed(path);
+        };
+        if folder.spelled == folder.resolved {
+            return Cow::Borrowed(path);
+        }
+        match path.strip_prefix(&folder.resolved) {
+            Ok(below) => Cow::Owned(folder.spelled.join(below)),
+            Err(_) => Cow::Borrowed(path),
+        }
     }
 
     /// The key `path` has in the projects: the path resolved through links.

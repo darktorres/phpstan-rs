@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::str::FromStr;
 
 use crossbeam_channel::Sender;
@@ -102,127 +102,164 @@ pub(crate) fn pump_messages<R: BufRead>(reader: &mut R, sender: &Sender<Message>
     }
 }
 
-/// `file://`-scheme only - this server has no use for any other URI
-/// scheme a client might send. `Uri::path()` is still percent-encoded
-/// (fluent_uri, `lsp_types::Uri`'s own backing type, never decodes it
-/// implicitly); the small `percent_decode` helper below covers the
-/// common escapes a real filesystem path needs.
+/// The path a `file:` URI (RFC 8089) names on this system, or `None` when
+/// it names none: another scheme, a host that is not this machine's, a
+/// user or a port, a path that is not absolute, or a NUL byte.
+///
+/// On Unix the host is empty or `localhost`, and the path is the URI's
+/// decoded bytes. On Windows a drive's path (`/C:/p`, `/c%3A/p`) gives
+/// `C:\p`, and a host names a share: `file://server/share/p` gives
+/// `\\server\share\p`, the hosts `?` and `.` the verbatim and device
+/// namespaces. A Windows name in a URI is UTF-8.
 pub(crate) fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
-    if uri.scheme()?.as_str() != "file" {
+    if !uri.scheme()?.as_str().eq_ignore_ascii_case("file") {
         return None;
     }
-    let decoded = percent_decode(uri.path().as_str());
-    let decoded = match decoded.strip_prefix('/') {
-        Some(rest) if starts_with_drive_letter(rest) => rest,
-        _ => &decoded,
+    let host = match uri.authority() {
+        Some(authority) if authority.userinfo().is_some() || authority.port().is_some() => {
+            return None;
+        }
+        Some(authority) => authority.host().as_str(),
+        None => "",
     };
-    Some(PathBuf::from(decoded))
-}
-
-pub(crate) fn path_to_uri(path: &Path) -> Uri {
-    let rendered = path_to_uri_path_string(path);
-    let rendered = if starts_with_drive_letter(&rendered) {
-        format!("/{rendered}")
+    let host = if host.eq_ignore_ascii_case("localhost") {
+        Vec::new()
     } else {
-        rendered
+        percent_decoded(host)?
     };
-    let encoded = percent_encode_path(&rendered);
-    Uri::from_str(&format!("file://{encoded}"))
-        .expect("a percent-encoded absolute filesystem path is always a valid file:// URI")
+    let path = percent_decoded(uri.path().as_str())?;
+    if host.contains(&0) || path.contains(&0) {
+        return None;
+    }
+    file_path(&host, &path)
 }
 
-/// `true` for a `C:`-style Windows drive letter at the very start of `s`
-/// (single ASCII letter, then `:`) - used both to strip the URI's leading
-/// `/` before such a path (`uri_to_path`) and to re-insert it
-/// (`path_to_uri`), since `file:///C:/...` (leading slash present) is the
-/// real shape every client sends, but a bare `C:/...` path string would
-/// otherwise parse as a URI *authority*, not a path, once prefixed with
-/// `file://`.
-fn starts_with_drive_letter(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+/// The path that a `file:` URI's decoded host and path name on Unix.
+#[cfg(unix)]
+fn file_path(host: &[u8], path: &[u8]) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    (host.is_empty() && path.starts_with(b"/"))
+        .then(|| PathBuf::from(std::ffi::OsStr::from_bytes(path)))
 }
 
-/// Renders `path` as a `/`-separated URI path string, component by
-/// component. Deliberately not
-/// `path.display().to_string().replace('\\', "/")`: that blind replace
-/// corrupts a real Unix filename containing a literal `\` (legal on
-/// Linux, this project's only build target) by silently turning it into
-/// an extra path segment. `std::path::Component` is already
-/// platform-specific internally (it only treats `\` as a separator, and
-/// ever yields `Prefix`, when actually compiled for Windows), so joining
-/// components with `/` gets Windows-correct behavior for free on a
-/// Windows build with no `cfg(windows)` branch of our own, while never
-/// touching a literal `\` inside one `Normal` component on this
-/// project's real (Linux) target.
-fn path_to_uri_path_string(path: &Path) -> String {
-    let mut out = String::new();
+/// The path that a `file:` URI's decoded host and path name on Windows.
+#[cfg(windows)]
+fn file_path(host: &[u8], path: &[u8]) -> Option<PathBuf> {
+    let host = std::str::from_utf8(host).ok()?;
+    let path = std::str::from_utf8(path).ok()?.strip_prefix('/')?;
+    let text = if host.is_empty() {
+        let drive = path.as_bytes();
+        let names_a_drive = drive.len() >= 2
+            && drive[0].is_ascii_alphabetic()
+            && drive[1] == b':'
+            && matches!(drive.get(2), None | Some(b'/'));
+        if !names_a_drive {
+            return None;
+        }
+        let mut text = path.replace('/', r"\");
+        if text.len() == 2 {
+            text.push('\\');
+        }
+        text
+    } else {
+        if path.split('/').next().is_none_or(str::is_empty) {
+            return None;
+        }
+        format!(r"\\{host}\{}", path.replace('/', r"\"))
+    };
+    Some(PathBuf::from(text))
+}
+
+/// The `file:` URI of the absolute path `path` (RFC 8089): each name
+/// percent-encoded after a `/`, on Unix from its bytes, since `\` is a name's
+/// character there. On Windows a drive's path is `/C:/…` and a share's
+/// `//server/share/…`, and the verbatim and device namespaces are shares of
+/// the hosts `?` and `.`, as VS Code spells them. A verbatim drive or share
+/// loses its prefix: resolving the path the URI names gives it back
+/// (`canonical::form`).
+pub(crate) fn path_to_uri(path: &Path) -> Uri {
+    let mut uri = String::from("file://");
+    let mut named = false;
     for component in path.components() {
-        match component {
+        let name = match component {
             Component::Prefix(prefix) => {
-                out.push_str(&prefix.as_os_str().to_string_lossy());
+                push_prefix(&mut uri, prefix.kind());
+                continue;
             }
-            Component::RootDir => {
-                if !out.ends_with('/') {
-                    out.push('/');
-                }
+            Component::RootDir => continue,
+            Component::CurDir => b".".as_slice(),
+            Component::ParentDir => b"..".as_slice(),
+            Component::Normal(name) => name.as_encoded_bytes(),
+        };
+        push_name(&mut uri, name);
+        named = true;
+    }
+    if path.has_root() && !named {
+        uri.push('/');
+    }
+    Uri::from_str(&uri).expect("a percent-encoded path makes a valid file: URI")
+}
+
+/// Appends a Windows prefix as a `file:` URI spells it: a drive as the first
+/// name, anything else as a host and the name after it.
+fn push_prefix(uri: &mut String, prefix: Prefix<'_>) {
+    let (host, name) = match prefix {
+        Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+            uri.push('/');
+            uri.push(char::from(drive));
+            uri.push(':');
+            return;
+        }
+        Prefix::UNC(server, name) | Prefix::VerbatimUNC(server, name) => {
+            (server.as_encoded_bytes(), name)
+        }
+        Prefix::Verbatim(name) => (b"?".as_slice(), name),
+        Prefix::DeviceNS(name) => (b".".as_slice(), name),
+    };
+    push_encoded(uri, host, false);
+    push_name(uri, name.as_encoded_bytes());
+}
+
+/// Appends `/` and the name `name`, percent-encoded.
+fn push_name(uri: &mut String, name: &[u8]) {
+    uri.push('/');
+    push_encoded(uri, name, true);
+}
+
+/// Appends `bytes` with every byte percent-encoded but the unreserved ones
+/// and, in a name, `:`.
+fn push_encoded(uri: &mut String, bytes: &[u8], in_name: bool) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for &byte in bytes {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                uri.push(char::from(byte));
             }
-            Component::CurDir => push_uri_path_segment(&mut out, "."),
-            Component::ParentDir => push_uri_path_segment(&mut out, ".."),
-            Component::Normal(seg) => push_uri_path_segment(&mut out, &seg.to_string_lossy()),
+            b':' if in_name => uri.push(':'),
+            _ => {
+                uri.push('%');
+                uri.push(char::from(HEX[usize::from(byte >> 4)]));
+                uri.push(char::from(HEX[usize::from(byte & 0xF)]));
+            }
         }
     }
-    out
 }
 
-/// Appends one path segment to `out`, inserting a `/` separator first
-/// unless `out` is empty or already slash-terminated (e.g. right after a
-/// `Component::RootDir`).
-fn push_uri_path_segment(out: &mut String, seg: &str) {
-    if !out.is_empty() && !out.ends_with('/') {
-        out.push('/');
-    }
-    out.push_str(seg);
-}
-
-/// Decodes the small set of percent-escapes a real filesystem path
-/// realistically contains (spaces and a few punctuation characters) -
-/// not a general-purpose URI decoder, just enough for real filesystem
-/// paths.
-pub(crate) fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16)
-        {
-            out.push(byte);
-            i += 3;
+/// The bytes the percent-encoded `text` stands for, or `None` when an
+/// escape is not `%` and two hex digits.
+fn percent_decoded(text: &str) -> Option<Vec<u8>> {
+    let mut bytes = text.bytes();
+    let mut decoded = Vec::with_capacity(text.len());
+    while let Some(byte) = bytes.next() {
+        if byte != b'%' {
+            decoded.push(byte);
             continue;
         }
-        out.push(bytes[i]);
-        i += 1;
+        let high = char::from(bytes.next()?).to_digit(16)?;
+        let low = char::from(bytes.next()?).to_digit(16)?;
+        decoded.push(u8::try_from(high << 4 | low).ok()?);
     }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// The inverse of `percent_decode` - escapes every byte outside a plain
-/// URI path's safe set (keeping `/` itself literal), so a real filesystem
-/// path containing a space or other reserved character still produces a
-/// syntactically valid `file://` URI.
-fn percent_encode_path(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    Some(decoded)
 }
 
 /// One diagnostic's LSP shape. `Span`'s 1-indexed line/col become LSP's

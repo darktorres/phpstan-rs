@@ -820,12 +820,6 @@ fn eof_with_no_exit_message_ends_the_loop_cleanly() {
 }
 
 #[test]
-fn percent_decode_handles_the_common_uri_escapes() {
-    assert_eq!(percent_decode("hello%20world"), "hello world");
-    assert_eq!(percent_decode("no_escapes_here"), "no_escapes_here");
-}
-
-#[test]
 fn log_message_notification_has_the_expected_wire_shape() {
     let message = log_message_notification(MessageType::ERROR, "oh no".to_string());
     let value = serde_json::to_value(&message).unwrap();
@@ -834,64 +828,142 @@ fn log_message_notification_has_the_expected_wire_shape() {
     assert_eq!(value["params"]["message"], "oh no");
 }
 
-#[test]
-fn uri_to_path_and_path_to_uri_round_trip() {
-    let uri: Uri = "file:///tmp/foo.php".parse().unwrap();
-    let path = uri_to_path(&uri).unwrap();
-    assert_eq!(path, PathBuf::from("/tmp/foo.php"));
-    assert_eq!(path_to_uri(&path).to_string(), uri.to_string());
-    let not_a_uri: Uri = "not-a-uri".parse().unwrap();
-    assert_eq!(uri_to_path(&not_a_uri), None);
+/// The path the URI `text` names, `None` for one that names none.
+fn uri_path(text: &str) -> Option<PathBuf> {
+    uri_to_path(&text.parse::<Uri>().unwrap())
 }
 
 #[test]
-fn uri_to_path_strips_the_leading_slash_before_a_windows_drive_letter() {
-    let uri: Uri = "file:///C:/Users/dev/foo.php".parse().unwrap();
-    let path = uri_to_path(&uri).unwrap();
-    assert_eq!(path, PathBuf::from("C:/Users/dev/foo.php"));
+fn a_uri_of_another_scheme_or_with_a_user_a_port_or_a_nul_byte_names_no_path() {
+    for text in [
+        "not-a-uri",
+        "http://example.com/a.php",
+        "untitled:Untitled-1",
+        "file://user@localhost/a.php",
+        "file://localhost:80/a.php",
+        "file:///a%00b.php",
+    ] {
+        assert_eq!(uri_path(text), None, "{text}");
+    }
 }
 
+#[cfg(unix)]
 #[test]
-fn path_to_uri_reinserts_the_leading_slash_before_a_windows_drive_letter() {
-    let path = PathBuf::from("C:/Users/dev/foo.php");
+fn on_unix_a_path_and_its_uri_round_trip_by_their_bytes() {
+    use std::os::unix::ffi::OsStrExt;
+    for (path, text) in [
+        (Path::new("/tmp/foo.php"), "file:///tmp/foo.php"),
+        (
+            Path::new("/tmp/hello world.php"),
+            "file:///tmp/hello%20world.php",
+        ),
+        // `\` is a name's character here, not a separator.
+        (Path::new("/tmp/foo\\bar.php"), "file:///tmp/foo%5Cbar.php"),
+        (
+            Path::new(std::ffi::OsStr::from_bytes(b"/tmp/caf\xe9.php")),
+            "file:///tmp/caf%E9.php",
+        ),
+        (Path::new("/"), "file:///"),
+    ] {
+        let uri = path_to_uri(path);
+        assert_eq!(uri.to_string(), text);
+        assert_eq!(uri_to_path(&uri).as_deref(), Some(path), "{text}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn on_unix_a_uri_names_a_path_of_this_machine_and_a_drive_letter_is_a_name() {
+    for (text, expected) in [
+        ("file://localhost/tmp/foo.php", Some("/tmp/foo.php")),
+        ("file://LocalHost/tmp/foo.php", Some("/tmp/foo.php")),
+        ("FILE:///tmp/foo.php", Some("/tmp/foo.php")),
+        ("file:/tmp/foo.php", Some("/tmp/foo.php")),
+        ("file:///c:/x/foo.php", Some("/c:/x/foo.php")),
+        ("file:///C%3A/x", Some("/C:/x")),
+        ("file://server/share/foo.php", None),
+        ("file:foo.php", None),
+    ] {
+        assert_eq!(uri_path(text), expected.map(PathBuf::from), "{text}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn on_windows_a_drives_path_and_its_uri_round_trip() {
+    for (path, text) in [
+        (r"C:\Users\dev\foo.php", "file:///C:/Users/dev/foo.php"),
+        (
+            r"C:\Users\dev\hello world.php",
+            "file:///C:/Users/dev/hello%20world.php",
+        ),
+        (r"C:\", "file:///C:/"),
+    ] {
+        let uri = path_to_uri(Path::new(path));
+        assert_eq!(uri.to_string(), text);
+        assert_eq!(
+            uri_to_path(&uri).as_deref(),
+            Some(Path::new(path)),
+            "{text}"
+        );
+    }
+    // The letter is the drive's, in either case; a verbatim drive is the drive.
+    assert_eq!(path_to_uri(Path::new(r"c:\a")).to_string(), "file:///C:/a");
     assert_eq!(
-        path_to_uri(&path).to_string(),
-        "file:///C:/Users/dev/foo.php"
+        path_to_uri(Path::new(r"\\?\C:\a\nul.php")).to_string(),
+        "file:///C:/a/nul.php"
     );
 }
 
+#[cfg(windows)]
 #[test]
-fn windows_drive_letter_uri_round_trips_through_uri_to_path_and_back() {
-    let uri: Uri = "file:///C:/Users/dev/foo.php".parse().unwrap();
-    let path = uri_to_path(&uri).unwrap();
-    assert_eq!(path_to_uri(&path).to_string(), uri.to_string());
+fn on_windows_a_uri_names_a_drive_in_either_encoding_or_a_share_by_its_host() {
+    for (text, expected) in [
+        (
+            "file:///c%3A/Users/dev/foo.php",
+            Some(r"c:\Users\dev\foo.php"),
+        ),
+        ("file://localhost/C:/a", Some(r"C:\a")),
+        ("file:///C:", Some(r"C:\")),
+        ("file://server/share/a.php", Some(r"\\server\share\a.php")),
+        ("file://wsl%24/Ubuntu/home", Some(r"\\wsl$\Ubuntu\home")),
+        (
+            "file://%3F/Volume%7Ba1%7D/a.php",
+            Some(r"\\?\Volume{a1}\a.php"),
+        ),
+        ("file://./pipe/x", Some(r"\\.\pipe\x")),
+        // No drive and no share, a drive's relative path, a name that is
+        // not UTF-8, a host without a share.
+        ("file:///foo.php", None),
+        ("file:///C:foo.php", None),
+        ("file:///C:/caf%E9.php", None),
+        ("file://server/", None),
+    ] {
+        assert_eq!(uri_path(text), expected.map(PathBuf::from), "{text}");
+    }
 }
 
+#[cfg(windows)]
 #[test]
-fn uri_to_path_decodes_a_percent_encoded_drive_letter_colon() {
-    let uri: Uri = "file:///C%3A/Users/dev/foo.php".parse().unwrap();
+fn on_windows_a_shares_path_and_its_uri_round_trip_as_do_the_namespaces() {
+    for (path, text) in [
+        (r"\\server\share\a.php", "file://server/share/a.php"),
+        (r"\\wsl$\Ubuntu\home", "file://wsl%24/Ubuntu/home"),
+        (r"\\?\Volume{a1}\a.php", "file://%3F/Volume%7Ba1%7D/a.php"),
+        (r"\\.\pipe\x", "file://./pipe/x"),
+    ] {
+        let uri = path_to_uri(Path::new(path));
+        assert_eq!(uri.to_string(), text);
+        assert_eq!(
+            uri_to_path(&uri).as_deref(),
+            Some(Path::new(path)),
+            "{text}"
+        );
+    }
     assert_eq!(
-        uri_to_path(&uri).unwrap(),
-        PathBuf::from("C:/Users/dev/foo.php")
+        path_to_uri(Path::new(r"\\?\UNC\server\share\a.php")).to_string(),
+        "file://server/share/a.php"
     );
-}
-
-#[test]
-fn uri_to_path_leaves_an_ordinary_unix_path_alone() {
-    let uri: Uri = "file:///tmp/foo.php".parse().unwrap();
-    assert_eq!(uri_to_path(&uri).unwrap(), PathBuf::from("/tmp/foo.php"));
-}
-
-#[test]
-fn path_to_uri_preserves_a_literal_backslash_in_a_real_unix_filename() {
-    // Regression guard: a filename that genuinely contains '\' (legal on
-    // Linux, this project's only build target), with no drive-letter
-    // prefix, must round-trip byte-for-byte - not get silently rewritten
-    // to '/' by a blind `Path::display()` string replace.
-    let path = PathBuf::from("/tmp/foo\\bar.php");
-    let uri = path_to_uri(&path);
-    assert_eq!(uri.to_string(), "file:///tmp/foo%5Cbar.php");
-    assert_eq!(uri_to_path(&uri).unwrap(), path);
 }
 
 // A malformed message body (a real Content-Length header, correctly
