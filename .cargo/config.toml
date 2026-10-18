@@ -7,4 +7,6 @@ linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold", "-Z", "threads=8"]
 
 [alias]
-xtask = "run --quiet --package xtask --"
+# The task runner builds in the test profile: `cargo test` builds most of its
+# dependencies there already, where `run`'s dev profile would build them again.
+xtask = "run --quiet --profile test --package xtask --"
