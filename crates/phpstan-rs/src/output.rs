@@ -117,7 +117,8 @@ impl Serialize for JsonMessages<'_> {
     }
 }
 
-/// The files with diagnostics, by their display path in its order.
+/// The files with diagnostics, by their report path (`diagnostics::report_path`)
+/// in its order.
 struct JsonFiles<'a>(Vec<(String, &'a [Diagnostic])>);
 
 impl Serialize for JsonFiles<'_> {
@@ -139,7 +140,9 @@ struct JsonReport<'a> {
 }
 
 /// Renders `results` (already level-/baseline-filtered) as JSON: a
-/// `totals` object plus a `files` map keyed by display path, each holding
+/// `totals` object plus a `files` map keyed by report path (a file is named
+/// with `/` between its names on every platform, `diagnostics::report_path`,
+/// so one project gives one report wherever it is run), each holding
 /// a `messages` array - the shape most CI JSON consumers (a generic
 /// "eslint-style" reporter, a small jq/Python script in a pipeline) expect
 /// out of the box. `files_checked` is passed in by the caller rather than
@@ -172,11 +175,14 @@ pub fn write_json(
         .filter(|(_, diagnostics)| !diagnostics.is_empty())
         .map(|(path, diagnostics)| {
             total_diagnostics += diagnostics.len();
-            (path.display().to_string(), diagnostics.as_slice())
+            (
+                diagnostics::report_path(path).into_owned(),
+                diagnostics.as_slice(),
+            )
         })
         .collect();
-    // In the order of the display text, which is not always the paths': a
-    // path that is not UTF-8 is shown lossily.
+    // In the order of the spelling, which is not always the paths': a path
+    // that is not UTF-8 is spelled lossily.
     files.sort_by(|a, b| a.0.cmp(&b.0));
     let report = JsonReport {
         totals: JsonTotals {
@@ -200,8 +206,8 @@ pub fn write_json(
 /// consuming tools group/suppress by, so a real rule identifier belongs
 /// there, not the `location` context label. `location` is folded into the
 /// message text instead so that breadcrumb isn't lost. A file is named with
-/// `/` between its names on every platform, as PHPStan's checkstyle report
-/// names it (`diagnostics::report_path`).
+/// `/` between its names on every platform (`diagnostics::report_path`), as
+/// in the JSON and JUnit reports.
 pub fn render_checkstyle(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> String {
     let mut paths: Vec<&PathBuf> = results.keys().filter(|p| !results[*p].is_empty()).collect();
     paths.sort();

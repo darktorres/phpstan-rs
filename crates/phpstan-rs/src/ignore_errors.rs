@@ -34,9 +34,9 @@ pub struct IgnoreErrorEntry {
     /// A glob against the diagnostic's own already-relative file path,
     /// spelled with `/` between its names on every platform
     /// (`diagnostics::report_path`, e.g. `_analysis/phpstan-latte/foo.php`).
-    /// A `\` in the glob is a separator too, as PHPStan reads one on every
-    /// platform (`path_glob_matches`). See `glob_matches`'s own doc comment
-    /// for the exact wildcard semantics.
+    /// A `\` in the glob is a separator too, so a configuration written on
+    /// Windows names the same files elsewhere (`path_glob_matches`). See
+    /// `glob_matches`'s own doc comment for the exact wildcard semantics.
     pub path: Option<String>,
     /// A regex (real PHPStan's own PCRE delimiters, e.g. `#^...$#`,
     /// already stripped - store the bare pattern) against

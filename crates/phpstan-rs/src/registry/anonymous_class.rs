@@ -39,8 +39,7 @@ pub(crate) fn synthetic_name(
 /// Names every anonymous class in `stmts` (see the module doc comment).
 /// `relative_file` is the file as reports name it, relative to the root
 /// with `/` between its names on every platform (`diagnostics::report_path`),
-/// as PHPStan's own `class@anonymous` names spell it, so a message that
-/// names the class reads the same on every platform.
+/// so a message that names the class reads the same on every platform.
 pub(crate) fn name_anonymous_classes(
     stmts: &mut [Stmt],
     relative_file: &str,

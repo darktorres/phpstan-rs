@@ -130,9 +130,10 @@ pub struct RestrictedSymbolEntry {
     /// `ignore_errors::glob_matches`' own identical semantics) against a
     /// diagnostic's own already-relative file path, spelled with `/`
     /// between its names on every platform (`diagnostics::report_path`; a
-    /// `\` in a pattern is a separator too, as the original extension reads
-    /// one on every platform, `ignore_errors::path_glob_matches`) - a match
-    /// allows (drops) it. Empty means no path-based allowance at all.
+    /// `\` in a pattern is a separator too, so a configuration written on
+    /// Windows names the same files elsewhere,
+    /// `ignore_errors::path_glob_matches`) - a match allows (drops) it.
+    /// Empty means no path-based allowance at all.
     #[serde(default)]
     pub allow_in: Vec<String>,
     /// The inverse of `allow_in`: when non-empty, the item is reported

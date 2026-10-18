@@ -1,17 +1,19 @@
 //! How reports and messages spell a file's path, and how configured path
 //! text names one.
 //!
-//! A report spells a path with `/` between its names on every platform, as
-//! PHPStan's checkstyle, JUnit and baseline files and its anonymous class
-//! names spell one. Windows separates names with `\` too, and the spelling
-//! turns it into `/`. Elsewhere `\` is a character a name can hold, so a
-//! path is spelled as it is.
+//! A report spells a path with `/` between its names on every platform, so
+//! the files that tools read (JSON, checkstyle, JUnit, a baseline) and the
+//! messages a baseline matches name a file alike wherever they were made.
+//! Windows separates names with `\` too, and the spelling turns it into
+//! `/`. Elsewhere `\` is a character a name can hold, so a path is spelled
+//! as it is.
 //!
 //! Configured path text, such as an `ignoreErrors` path or a baseline
-//! entry's file, is compared with that spelling. A `\` in it is a separator
-//! on every platform, as PHPStan reads one, so text written on Windows
-//! names the same files elsewhere. Outside Windows a `\` can also be a
-//! character of a name, and it names that as well.
+//! entry's file, is compared with that spelling. It travels between
+//! platforms with the repository, so a `\` in it is a separator on every
+//! platform and text written on Windows names the same files elsewhere.
+//! Outside Windows a `\` can also be a character of a name, and it names
+//! that as well.
 
 use std::borrow::Cow;
 use std::path::Path;

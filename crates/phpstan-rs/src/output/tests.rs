@@ -153,22 +153,50 @@ fn render_checkstyle_omits_files_with_zero_diagnostics() {
     assert!(xml.contains("</checkstyle>"));
 }
 
-#[cfg(windows)]
-#[test]
-fn checkstyle_and_junit_name_a_file_with_slashes_on_windows() {
-    let mut results = FxHashMap::default();
-    results.insert(
-        PathBuf::from("src\\sub\\bad.php"),
-        vec![diag("undefined variable: $x", 3, 12, 0)],
-    );
-    assert!(render_checkstyle(&results).contains("<file name=\"src/sub/bad.php\">"));
-    assert!(render_junit(&results).contains("<testcase name=\"src/sub/bad.php:3\""));
-    let json = render_json(&results, 1);
+/// Asserts that JSON, checkstyle and JUnit name the one file of `results`
+/// `spelled`.
+fn assert_machine_formats_name_the_file(
+    results: &FxHashMap<PathBuf, Vec<Diagnostic>>,
+    spelled: &str,
+) {
+    assert!(render_checkstyle(results).contains(&format!("<file name=\"{spelled}\">")));
+    assert!(render_junit(results).contains(&format!("<testcase name=\"{spelled}:3\"")));
+    let json = render_json(results, 1);
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
     assert!(
-        parsed["files"]["src\\sub\\bad.php"].is_object(),
-        "the JSON report keeps the platform's spelling: {json}"
+        parsed["files"][spelled].is_object(),
+        "the JSON report names the file {spelled}: {json}"
     );
+}
+
+#[test]
+fn json_checkstyle_and_junit_name_a_file_alike_on_every_platform() {
+    let mut results = FxHashMap::default();
+    let path: PathBuf = ["src", "sub", "bad.php"].iter().collect();
+    results.insert(path, vec![diag("undefined variable: $x", 3, 12, 0)]);
+    assert_machine_formats_name_the_file(&results, "src/sub/bad.php");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_backslash_separates_names_in_every_machine_format_on_windows() {
+    let mut results = FxHashMap::default();
+    results.insert(
+        PathBuf::from("src/sub\\bad.php"),
+        vec![diag("undefined variable: $x", 3, 12, 0)],
+    );
+    assert_machine_formats_name_the_file(&results, "src/sub/bad.php");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_backslash_is_a_character_of_a_name_in_every_machine_format_outside_windows() {
+    let mut results = FxHashMap::default();
+    results.insert(
+        PathBuf::from("src/sub\\bad.php"),
+        vec![diag("undefined variable: $x", 3, 12, 0)],
+    );
+    assert_machine_formats_name_the_file(&results, "src/sub\\bad.php");
 }
 
 #[test]

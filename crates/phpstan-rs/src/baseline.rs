@@ -7,9 +7,9 @@
 //! Keyed like PHPStan's: `(file, message)`, with the identifier and an
 //! occurrence count - deliberately not by line/column, so a baselined
 //! finding survives incidental code shifts elsewhere in the same file. The
-//! file is spelled as PHPStan's baselines spell it, with `/` between its
-//! names on every platform (`diagnostics::report_path`), so a baseline made
-//! on one platform matches on another. An entry's file is read as
+//! file is spelled with `/` between its names on every platform
+//! (`diagnostics::report_path`), so a baseline made on one platform matches
+//! on another. An entry's file is read as
 //! configured path text (`diagnostics::path_text_names`): a `\` in it is a
 //! separator, so an entry written with one, by hand or on Windows, names
 //! the file all the same.
