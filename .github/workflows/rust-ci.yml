@@ -1,14 +1,14 @@
 name: Rust CI
 
 # The build and test half of `cargo xtask gates --full`, and the lints,
-# tests and fixtures on the release's other platforms. Every runner image,
-# action, tool and toolchain is pinned to an exact version (actions by
-# commit), so a run changes only with the repository. The corpus,
-# type-snapshot, baseline, performance and build-time gates need the
-# frozen Piwigo checkout and a stable machine, so they run locally
-# through `cargo xtask gates`. The benches are type-checked here rather
-# than built: nothing runs them, and `cargo xtask gates --full` still links
-# them.
+# tests and fixtures on the release's other platforms. Each job runs on its
+# own runner, so the jobs run side by side. Every runner image, action, tool
+# and toolchain is pinned to an exact version (actions by commit), so a run
+# changes only with the repository. The corpus, type-snapshot, baseline,
+# performance and build-time gates need the frozen Piwigo checkout and a
+# stable machine, so they run locally through `cargo xtask gates`. The
+# benches are type-checked here rather than built: nothing runs them, and
+# `cargo xtask gates --full` still links them.
 on:
   push:
   pull_request:
@@ -17,50 +17,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  gates:
+  lint:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      # The test-name manifest searches the whole history for its base.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      # build.rs embeds vendor/phpstan-src/src; the other submodules are
-      # test corpora the build never reads.
-      - name: Fetch the phpstan-src submodule
-        run: git submodule update --init --depth 1 vendor/phpstan-src
-
-      # The pinned toolchain, keyed by the file that pins it.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.rustup/toolchains
-          key: rustup-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
-      # rust-toolchain.toml pins the nightly (and its components);
-      # `rustup install` installs it without updating rustup itself.
-      - name: Install the pinned toolchain
-        run: rustup install --no-self-update
-
-      # The cargo registry and the dependencies' build artifacts, keyed by
-      # the lockfiles and the toolchain; the workspace's own crates rebuild.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-rust
         with:
           workspaces: |
             . -> target
-            fuzz -> fuzz/target
-
-      # .cargo/config.toml links x86_64 Linux artifacts with mold.
-      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
-        with:
-          mold-version: 2.42.1
-
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
-        with:
-          tool: cargo-hack@0.6.45,cargo-machete@0.9.2,cargo-deny@0.20.2
+            fuzz -> target
+          tools: cargo-hack@0.6.45,cargo-machete@0.9.2,cargo-deny@0.20.2
 
       # Every later cargo command builds exactly what the lockfiles say. Each
       # check runs whatever the one before it gave, so one failure hides no
       # other.
       - name: Lockfiles match the manifests
-        if: ${{ !cancelled() }}
         run: |
           cargo metadata --locked --format-version 1 > /dev/null
           cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
@@ -70,55 +42,17 @@ jobs:
       - name: Clippy
         if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets --keep-going -- -D warnings
-      - name: Tests
-        if: ${{ !cancelled() }}
-        run: cargo test --workspace --all-targets --no-fail-fast
-      - name: Fixture suite
-        if: ${{ !cancelled() }}
-        run: cargo test --profile gate --test fixtures
       - name: Module graph
         if: ${{ !cancelled() }}
         run: cargo xtask modgraph
       - name: Architecture rules
         if: ${{ !cancelled() }}
         run: cargo xtask arch
-      # The last run's manifest is the base when that run was an ancestor.
-      # A manifest is kept only when its check passed, so a test that went
-      # missing is not taken as the next run's base.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: ${{ !cancelled() }}
-        with:
-          path: .corpus-runs/gate/tests
-          key: test-manifest-${{ github.sha }}
-          restore-keys: test-manifest-
-      - name: Test-name manifest
-        id: manifest
-        if: ${{ !cancelled() }}
-        run: cargo xtask tests
-      - name: Keep only this run's manifest
-        if: ${{ !cancelled() && steps.manifest.outcome == 'success' }}
-        run: >
-          find .corpus-runs/gate/tests -name '*.txt'
-          ! -name '${{ github.sha }}.txt' -delete
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: ${{ !cancelled() && steps.manifest.outcome == 'success' }}
-        with:
-          path: .corpus-runs/gate/tests
-          key: test-manifest-${{ github.sha }}
-      - name: Tests without default features
-        if: ${{ !cancelled() }}
-        run: cargo test --workspace --no-default-features --no-fail-fast
-      - name: Fixture suite without default features
-        if: ${{ !cancelled() }}
-        run: cargo test --profile gate --no-default-features --test fixtures
       - name: Docs
         if: ${{ !cancelled() }}
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
-      # The bench profile inherits the release profile's settings, so this
-      # check sees the cfgs the benches build with. It covers every workspace
-      # member's benches; the step it replaces built only the default member's.
       - name: Benches type-check
         if: ${{ !cancelled() }}
         run: cargo check --release --workspace --benches
@@ -140,6 +74,64 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo deny check
 
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      # The test-name manifest searches the whole history for its base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-rust
+      - name: Tests
+        run: cargo test --workspace --all-targets --no-fail-fast
+      # The last run's manifest is the base when that run was an ancestor.
+      # A manifest is kept only when its check passed, so a test that went
+      # missing is not taken as the next run's base.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !cancelled() }}
+        with:
+          path: .corpus-runs/gate/tests
+          key: test-manifest-${{ github.sha }}
+          restore-keys: test-manifest-
+      # Listed under the test profile the tests above built, so the listing
+      # reuses their build.
+      - name: Test-name manifest
+        id: manifest
+        if: ${{ !cancelled() }}
+        run: cargo xtask tests --profile test
+      - name: Keep only this run's manifest
+        if: ${{ !cancelled() && steps.manifest.outcome == 'success' }}
+        run: >
+          find .corpus-runs/gate/tests -name '*.txt'
+          ! -name '${{ github.sha }}.txt' -delete
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !cancelled() && steps.manifest.outcome == 'success' }}
+        with:
+          path: .corpus-runs/gate/tests
+          key: test-manifest-${{ github.sha }}
+
+  test-no-default-features:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+      - name: Tests without default features
+        run: cargo test --workspace --no-default-features --no-fail-fast
+
+  fixtures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+      - name: Fixture suite
+        run: cargo test --profile gate --test fixtures
+      - name: Fixture suite without default features
+        if: ${{ !cancelled() }}
+        run: cargo test --profile gate --no-default-features --test fixtures
+
   # The platforms the release ships besides x86_64 Linux. The tests, the
   # fixtures and the dhat build run whatever clippy gave, so one failure
   # hides no other.
@@ -149,6 +141,7 @@ jobs:
       matrix:
         os: [macos-26, windows-2025-vs2026, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       # Windows images check text out with CRLF. .gitattributes keeps this
       # repository's files LF, but not the phpstan-src submodule's stubs,

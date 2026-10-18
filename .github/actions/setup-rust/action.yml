@@ -1,0 +1,66 @@
+name: Set up Rust
+description: >-
+  Fetches the vendored phpstan-src submodule, installs the pinned toolchain,
+  restores the cargo caches and installs the pinned linker and cargo tools,
+  for a job that builds this workspace.
+
+inputs:
+  workspaces:
+    description: >-
+      The cargo workspaces whose target directories are cached, one
+      `workspace -> target` per line, as Swatinem/rust-cache takes them.
+    required: false
+    default: ". -> target"
+  tools:
+    description: Cargo tools to install, each name@version, comma-separated.
+    required: false
+    default: ""
+  cache:
+    description: >-
+      Whether to restore and save the caches. A release build does not use
+      them: it runs from a tag, and a cache a branch saved must not be what a
+      shipped binary was built from.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # build.rs embeds vendor/phpstan-src/src; the other submodules are
+    # test corpora the build never reads.
+    - name: Fetch the phpstan-src submodule
+      shell: bash
+      run: git submodule update --init --depth 1 vendor/phpstan-src
+
+    # The pinned toolchain, keyed by the file that pins it.
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: ${{ inputs.cache == 'true' }}
+      with:
+        path: ~/.rustup/toolchains
+        key: rustup-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
+    # rust-toolchain.toml pins the nightly (and its components);
+    # `rustup install` installs it without updating rustup itself.
+    - name: Install the pinned toolchain
+      shell: bash
+      run: rustup install --no-self-update
+
+    # The cargo registry and the dependencies' build artifacts, keyed by
+    # the lockfiles and the toolchain; the workspace's own crates rebuild.
+    # The caches are saved when the job fails too, so a red run still warms
+    # the next one.
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      if: ${{ inputs.cache == 'true' }}
+      with:
+        workspaces: ${{ inputs.workspaces }}
+        cache-on-failure: true
+
+    # .cargo/config.toml links x86_64 Linux artifacts with mold.
+    - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
+      if: ${{ runner.os == 'Linux' && runner.arch == 'X64' }}
+      with:
+        mold-version: 2.42.1
+
+    - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      if: ${{ inputs.tools != '' }}
+      with:
+        tool: ${{ inputs.tools }}

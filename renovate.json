@@ -29,7 +29,7 @@
     {
       "description": "mold, installed by rui314/setup-mold.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "managerFilePatterns": ["/^\\.github/(workflows|actions)/.+\\.ya?ml$/"],
       "matchStrings": ["mold-version: (?<currentValue>\\d+\\.\\d+\\.\\d+)"],
       "depNameTemplate": "rui314/mold",
       "datasourceTemplate": "github-releases",
