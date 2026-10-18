@@ -3,6 +3,7 @@
 
 use super::super::*;
 use crate::project::session::{load_test_file, load_test_files};
+use crate::project::source;
 
 #[test]
 fn updating_one_file_does_not_disturb_another_files_registry_entries() {
@@ -1341,5 +1342,35 @@ fn a_batch_load_equals_a_load_one_file_at_a_time() {
     assert_eq!(
         one_by_one.registry().classes.len(),
         batch.registry().classes.len()
+    );
+}
+
+#[test]
+fn an_edit_given_its_digest_keeps_it_as_an_edit_given_the_bytes_does() {
+    let mut project = Project::new();
+    project.apply_settings(ProjectSettings {
+        retain_source: true,
+        ..ProjectSettings::default()
+    });
+    let path = Path::new("a.php");
+    let text = "<?php function digested(): int { return 1; }";
+    project
+        .update_digested_as(
+            path,
+            source::Digested::new(text.as_bytes()),
+            true,
+            false,
+            || false,
+        )
+        .expect("parses");
+    assert_eq!(
+        project.content_hash(path),
+        Some(source::content_hash(text.as_bytes()))
+    );
+    let edited = "<?php function digested(): int { return 2; }";
+    project.update_file(path, edited).expect("parses");
+    assert_eq!(
+        project.content_hash(path),
+        Some(source::Digested::new(edited.as_bytes()).digest())
     );
 }

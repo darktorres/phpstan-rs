@@ -1960,6 +1960,49 @@ impl Project {
         source: impl AsRef<[u8]>,
         analysed: bool,
         stub: bool,
+        should_abort: impl FnMut() -> bool,
+    ) -> Result<FxHashMap<FileId, Vec<Diagnostic>>, ParseError> {
+        let bytes = source.as_ref();
+        self.update_from(
+            path,
+            bytes,
+            || source::content_hash(bytes),
+            analysed,
+            stub,
+            should_abort,
+        )
+    }
+
+    /// `update_file_as` with a document whose digest was taken already, as
+    /// the language server takes it once for every project that holds the
+    /// file.
+    pub fn update_digested_as(
+        &mut self,
+        path: &Path,
+        document: source::Digested<'_>,
+        analysed: bool,
+        stub: bool,
+        should_abort: impl FnMut() -> bool,
+    ) -> Result<FxHashMap<FileId, Vec<Diagnostic>>, ParseError> {
+        self.update_from(
+            path,
+            document.bytes(),
+            || document.digest(),
+            analysed,
+            stub,
+            should_abort,
+        )
+    }
+
+    /// `update_file_as` for `bytes`, whose digest `digest` gives when the
+    /// project retains source.
+    fn update_from(
+        &mut self,
+        path: &Path,
+        bytes: &[u8],
+        digest: impl FnOnce() -> u128,
+        analysed: bool,
+        stub: bool,
         mut should_abort: impl FnMut() -> bool,
     ) -> Result<FxHashMap<FileId, Vec<Diagnostic>>, ParseError> {
         // Parse BEFORE unindexing anything - on a parse failure (the
@@ -1978,7 +2021,6 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let bytes = source.as_ref();
         let root = self.absolute_root();
         // A file the project has seen keeps its analysed flag: an edit does
         // not change what kind of file it is. The flag is read before the
@@ -2056,7 +2098,7 @@ impl Project {
             FileState {
                 kept_ast: Some(ast),
                 source_len: bytes.len(),
-                content_hash: self.retain_source.then(|| source::content_hash(bytes)),
+                content_hash: self.retain_source.then(digest),
                 load_order,
                 mentions_phpstan: mentions_phpstan(&functions, &classes, &references),
                 functions,

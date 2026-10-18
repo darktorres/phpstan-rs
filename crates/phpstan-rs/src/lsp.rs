@@ -803,12 +803,13 @@ impl Server {
                 }
                 changed.extend(self.record(home, &path, results));
             }
+            let document = source::Digested::new(text.as_bytes());
             for (home, classified) in holders {
                 let slot = self.slot_mut(home);
                 slot.project.set_document(&path, text.as_bytes());
-                match slot.project.update_file_as(
+                match slot.project.update_digested_as(
                     &path,
-                    text.as_bytes(),
+                    document,
                     classified.role == Role::Analysed,
                     classified.is_stub,
                     || false,
@@ -1132,24 +1133,25 @@ impl Server {
         self.latest_text.insert(path.clone(), text.to_string());
         let mut recorded = Vec::new();
         let mut content_changed = false;
+        let document = source::Digested::new(text.as_bytes());
         for (home, classified) in self.holders(&path) {
             let slot = self.slot_mut(home);
             slot.project.set_document(&path, text.as_bytes());
             // Opening a file exactly as it was loaded changes nothing in that
             // project.
-            if slot.project.content_hash(&path) == Some(source::content_hash(text.as_bytes())) {
+            if slot.project.content_hash(&path) == Some(document.digest()) {
                 continue;
             }
             content_changed = true;
             // Same graceful degradation as a file that fails to parse on load,
             // and more exposed in practice here: momentarily-invalid syntax is
             // the normal state while a file is being typed, not an edge case.
-            // `update_file_as`'s `Result` makes a parse failure here a plain,
+            // `update_digested_as`'s `Result` makes a parse failure here a plain,
             // recoverable `Err` rather than unwinding and taking down the
             // whole LSP server process.
-            match slot.project.update_file_as(
+            match slot.project.update_digested_as(
                 &path,
-                text,
+                document,
                 classified.role == Role::Analysed,
                 classified.is_stub,
                 || false,
@@ -1182,7 +1184,7 @@ impl Server {
     }
 
     /// The debounce worker's own counterpart to `handle_open_or_change` -
-    /// identical except it drives `Project::update_file_as` with a real
+    /// identical except it drives `Project::update_digested_as` with a real
     /// `should_abort` closure, and takes an already-resolved `path` (the
     /// worker already has it as the `DebounceQueue` entry's own key) rather
     /// than re-deriving it from `uri`. `version` is a plain `i32`, not
@@ -1204,12 +1206,13 @@ impl Server {
             .insert(path.clone(), (uri.clone(), Some(version)));
         self.latest_text.insert(path.clone(), text.to_string());
         let mut recorded = Vec::new();
+        let document = source::Digested::new(text.as_bytes());
         for (home, classified) in self.holders(&path) {
             let slot = self.slot_mut(home);
             slot.project.set_document(&path, text.as_bytes());
-            let results = match slot.project.update_file_as(
+            let results = match slot.project.update_digested_as(
                 &path,
-                text,
+                document,
                 classified.role == Role::Analysed,
                 classified.is_stub,
                 &mut *should_abort,
@@ -1253,7 +1256,7 @@ impl Server {
     }
 
     /// Routes a `workspace/didChangeWatchedFiles` batch through the same
-    /// `update_file_as`/`remove_file` machinery `didOpen`/`didChange` and
+    /// `update_digested_as`/`remove_file` machinery `didOpen`/`didChange` and
     /// workspace-folder removal already use - an externally created,
     /// changed, or deleted file needs exactly the same recheck-and-
     /// republish treatment. Coalesces to the last event per path first: a
@@ -1295,7 +1298,7 @@ impl Server {
                 continue;
             }
             // Created and Changed both just need the path's current
-            // on-disk content reflected - `update_file_as` already tolerates
+            // on-disk content reflected - `update_digested_as` already tolerates
             // a path with no prior entry (a brand-new file), so there is
             // no separate load-vs-update branch to make here. A read
             // failure (raced with a subsequent delete before this ran, a
@@ -1311,12 +1314,13 @@ impl Server {
             self.latest_text
                 .insert(path.clone(), source::decode_text(&bytes).into_owned());
             let mut recorded = Vec::new();
+            let document = source::Digested::new(&bytes);
             for (home, classified) in self.holders(&path) {
                 let slot = self.slot_mut(home);
                 slot.project.unset_document(&path);
-                match slot.project.update_file_as(
+                match slot.project.update_digested_as(
                     &path,
-                    &bytes,
+                    document,
                     classified.role == Role::Analysed,
                     classified.is_stub,
                     || false,

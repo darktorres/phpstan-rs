@@ -62,6 +62,31 @@ pub fn content_hash(bytes: &[u8]) -> u128 {
     hasher.finish_128()
 }
 
+/// A document's bytes with their digest (`content_hash`), taken once for
+/// every project the document is given to.
+#[derive(Clone, Copy)]
+pub struct Digested<'a> {
+    bytes: &'a [u8],
+    digest: u128,
+}
+
+impl<'a> Digested<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Digested {
+            bytes,
+            digest: content_hash(bytes),
+        }
+    }
+
+    pub fn bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+
+    pub fn digest(&self) -> u128 {
+        self.digest
+    }
+}
+
 /// A file's bytes as text, when they are UTF-8.
 pub fn utf8_text(bytes: &[u8]) -> Option<&str> {
     simdutf8::basic::from_utf8(bytes).ok()
