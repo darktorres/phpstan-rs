@@ -4,16 +4,16 @@
 
 - **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
   tracks it.
-- **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`) and R3. The rows are built in
-  the order of the table below, one commit each, with a pathspec, since another session shares
-  the checkout.
+- **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`) and R4. The
+  rows are built in the order of the table below, one commit each, with a pathspec, since
+  another session shares the checkout.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
     client to run, before the 30 s wait for diagnostics began. Two things changed between the
     runs: the LF checkout and 223 commits.
   - Rust CI's result is recorded below when it ends.
-- **Next:** R4.
+- **Next:** R5.
 
 ## Context
 
@@ -353,6 +353,36 @@ Unix has no prefix, so every hash there stays the same.
 
 **Test.** `cfg(windows)`: the spellings `Path` calls equal (drive case, UNC separators) hash
 alike. The existing `hashed_path` tests run on every leg.
+
+**Built.**
+
+- `component_hash` hashes a prefix by its kind and any other component by its text, as before.
+  `new`, `path_hash` and both branches of `hashed_ancestors` fold it, and `child` extends a
+  directory's hash as before. Unix's hashes are the same values.
+- Two more places keyed a prefix by its text, and they are fixed alike:
+  - `path_order`'s key. `\\server\share` and `\\server-b\share` ordered one way by key and the
+    other way as `Path`s, and round 1's Windows leg failed `sorted_by_key_is_sorted_by_path` on
+    the mix's `//a/b` shares. The key now writes the kind, as a byte in the order the kinds are
+    declared, and what the kind holds, each name ending in a zero byte.
+  - The package index's `DirTrie`: `c:\project\src` found no owner for a root listed as
+    `C:\project`. It keys a component by `canonical::component_text`, which spells a prefix as
+    std reads it.
+- `cfg(windows)` tests:
+  - spellings `Path` calls equal hash alike, through `path_hash`, `new` and every ancestor, and
+    eleven prefixes it tells apart hash apart;
+  - the key orders 18 prefixes, each with 7 tails, as `Path` does, pair by pair;
+  - a directory has one owner in each spelling, and a verbatim drive is another prefix.
+- The `hashed_path` mix is shaped per platform. On Windows it starts with each kind of prefix in
+  each spelling and uses both separators. It has no empty name there: after a root, an empty
+  name makes `\\a`, which pushing a name turns into the share `\\a\b`. That is why round 1
+  failed `an_entry_made_from_its_directory_is_the_path_made_whole`, on a directory no canonical
+  path can be. Unix's mix is the same sequence as before.
+- Checked here:
+  - the Windows type check, which now covers `path_order.rs`;
+  - the ownership test, compiled on Linux under a cfg flipped for the check;
+  - composer's clippy and its 68 tests on Linux.
+
+  The Windows tests run on round 2.
 
 ### R5. URIs and paths on every platform
 

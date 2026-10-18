@@ -4,11 +4,12 @@
 //! `Path` compares component by component, so `a/b` comes before `a-b`
 //! though `-` is a lower byte than `/`, and every comparison walks both
 //! paths' components. The key is each component as a byte for its kind
-//! (the order the kinds are declared in), its bytes and a zero byte, which
-//! no file name holds: comparing keys as bytes is comparing the component
-//! sequences.
+//! (the order the kinds are declared in), its bytes (a prefix's as
+//! `push_prefix` writes them) and a zero byte, which no file name holds:
+//! comparing keys as bytes is comparing the component sequences.
 
-use std::path::{Component, Path};
+use std::ffi::OsStr;
+use std::path::{Component, Path, Prefix};
 
 /// The key `Path`'s order is the byte order of.
 fn key(path: &Path) -> Vec<u8> {
@@ -21,10 +22,45 @@ fn key(path: &Path) -> Vec<u8> {
             Component::ParentDir => 4,
             Component::Normal(_) => 5,
         });
-        key.extend_from_slice(component.as_os_str().as_encoded_bytes());
+        match component {
+            Component::Prefix(prefix) => push_prefix(&mut key, prefix.kind()),
+            component => key.extend_from_slice(component.as_os_str().as_encoded_bytes()),
+        }
         key.push(0);
     }
     key
+}
+
+/// `prefix` as `Path` orders prefixes: by the kind std reads, in the order the
+/// kinds are declared, then by what the kind holds, each name ending in a zero
+/// byte as a component does. Its text is not its order: `c:` is `C:`.
+fn push_prefix(key: &mut Vec<u8>, prefix: Prefix<'_>) {
+    let push_name = |key: &mut Vec<u8>, name: &OsStr| {
+        key.extend_from_slice(name.as_encoded_bytes());
+        key.push(0);
+    };
+    match prefix {
+        Prefix::Verbatim(name) => {
+            key.push(0);
+            push_name(key, name);
+        }
+        Prefix::VerbatimUNC(server, share) => {
+            key.push(1);
+            push_name(key, server);
+            push_name(key, share);
+        }
+        Prefix::VerbatimDisk(drive) => key.extend([2, drive]),
+        Prefix::DeviceNS(device) => {
+            key.push(3);
+            push_name(key, device);
+        }
+        Prefix::UNC(server, share) => {
+            key.push(4);
+            push_name(key, server);
+            push_name(key, share);
+        }
+        Prefix::Disk(drive) => key.extend([5, drive]),
+    }
 }
 
 /// How many out-of-order neighbours a list may have and still be sorted by the
@@ -112,6 +148,54 @@ mod tests {
     #[test]
     fn the_key_order_is_the_path_order_for_every_pair() {
         let all = paths(300);
+        for a in &all {
+            for b in &all {
+                assert_eq!(
+                    key(a).cmp(&key(b)),
+                    a.cmp(b),
+                    "{} against {}",
+                    a.display(),
+                    b.display()
+                );
+            }
+        }
+    }
+
+    /// On Windows, paths under each kind of prefix, in the spellings `Path`
+    /// reads alike, with names that order one way as text and the other as
+    /// components (`server` and `server-b`).
+    #[cfg(windows)]
+    #[test]
+    fn the_key_orders_prefixes_as_a_path_does() {
+        let prefixes = [
+            r"C:\",
+            "c:/",
+            "C:",
+            "d:",
+            r"\\server\share\",
+            "//server/share/",
+            r"\\server\share-b\",
+            r"\\server-b\share\",
+            r"\\?\C:\",
+            r"\\?\c:\",
+            r"\\?\UNC\server\share\",
+            r"\\?\UNC\server-b\share\",
+            r"\\?\Volume{a}\",
+            r"\\?\Volume{a-b}\",
+            r"\\.\pipe\",
+            r"\\.\pipe-b\",
+            r"\",
+            "",
+        ];
+        let tails = ["", "a", "a-b", r"a\b", "a/b", "..", "."];
+        let all: Vec<PathBuf> = prefixes
+            .iter()
+            .flat_map(|prefix| {
+                tails
+                    .iter()
+                    .map(move |tail| PathBuf::from(format!("{prefix}{tail}")))
+            })
+            .collect();
         for a in &all {
             for b in &all {
                 assert_eq!(

@@ -104,6 +104,42 @@ fn a_path_spelled_from_the_root_resolves_against_the_canonical_root() {
     );
 }
 
+/// On Windows a directory has one owner in each spelling `Path` calls equal:
+/// a drive letter in either case, a share with either separator. A verbatim
+/// drive is another prefix.
+#[cfg(windows)]
+#[test]
+fn each_spelling_paths_call_equal_has_the_same_owner() {
+    let manifests = [r"C:\project", r"\\server\share\project", r"\\?\C:\verbatim"]
+        .into_iter()
+        .map(|root| ComposerManifest {
+            absolute_root: PathBuf::from(root),
+            ..ComposerManifest::default()
+        })
+        .collect();
+    let index = PackageIndex::new(manifests);
+    for (dir, owner) in [
+        (r"c:\project\src", Some(PackageOwner::Root(0))),
+        ("C:/project/src", Some(PackageOwner::Root(0))),
+        ("//server/share/project/src", Some(PackageOwner::Root(1))),
+        (r"\\server/share\project", Some(PackageOwner::Root(1))),
+        (r"\\?\c:\verbatim\src", Some(PackageOwner::Root(2))),
+        (r"\\?\C:\project\src", None),
+        (r"D:\project\src", None),
+        (r"\\server\other\project", None),
+    ] {
+        let dir = Path::new(dir);
+        assert_eq!(index.owner_of_dir(dir), owner, "{}", dir.display());
+        let (parent, name) = (dir.parent().unwrap(), dir.file_name().unwrap());
+        assert_eq!(
+            index.owner_at(parent).child(name).owner(),
+            owner,
+            "{}",
+            dir.display()
+        );
+    }
+}
+
 /// The directories `index` owns, in listing order: each root's own, then
 /// each installed package's `vendor/` directory and its install directory.
 fn owned_dirs(index: &PackageIndex) -> Vec<(PathBuf, PackageOwner)> {

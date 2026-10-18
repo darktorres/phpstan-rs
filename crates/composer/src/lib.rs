@@ -159,7 +159,9 @@ pub struct PackageIndex {
 }
 
 /// Directories by their path components, so the directory that owns a path
-/// is found by one walk down its components, hashing each component once.
+/// is found by one walk down its components, hashing each component once. A
+/// component is keyed by its text as `canonical::component_text` gives it,
+/// so the spellings of a prefix that `Path` calls equal find one directory.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct DirTrie {
     root: TrieNode,
@@ -178,7 +180,7 @@ impl DirTrie {
         for component in dir.components() {
             node = node
                 .children
-                .entry(component.as_os_str().to_os_string())
+                .entry(canonical::component_text(component).into_owned())
                 .or_default();
         }
         // Directories are inserted in listing order.
@@ -193,7 +195,7 @@ impl DirTrie {
             node: Some(&self.root),
         };
         for component in dir.components() {
-            at = at.child(component.as_os_str());
+            at = at.child(&canonical::component_text(component));
             if at.node.is_none() {
                 break;
             }

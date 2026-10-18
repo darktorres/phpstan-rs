@@ -32,7 +32,7 @@ impl HashedPath {
     /// `path`, with its hashes.
     pub fn new(path: PathBuf) -> Self {
         let (hash, parent_hash) = path.components().fold((0, 0), |(hash, _), component| {
-            (child_hash(hash, component.as_os_str()), hash)
+            (component_hash(hash, component), hash)
         });
         HashedPath {
             path,
@@ -153,8 +153,7 @@ impl Resolved {
 
 /// The hash of `path`, to look up a path that is not held as a `HashedPath`.
 pub fn path_hash(path: &Path) -> PathHash {
-    path.components()
-        .fold(0, |hash, component| child_hash(hash, component.as_os_str()))
+    path.components().fold(0, component_hash)
 }
 
 /// Each ancestor of `path`, from `path` itself up to the top, with its hash
@@ -172,7 +171,7 @@ pub fn hashed_ancestors(
         }
         let mut hash = 0;
         for (component, ancestor) in components {
-            hash = child_hash(hash, component.as_os_str());
+            hash = component_hash(hash, component);
             let name = match component {
                 Component::Normal(name) => Some(name),
                 _ => None,
@@ -184,7 +183,7 @@ pub fn hashed_ancestors(
         hashes.push(0);
         let mut hash = 0;
         for component in path.components() {
-            hash = child_hash(hash, component.as_os_str());
+            hash = component_hash(hash, component);
             hashes.push(hash);
         }
         ancestors.extend(
@@ -197,8 +196,24 @@ pub fn hashed_ancestors(
     ancestors.into_iter().rev()
 }
 
+/// The hash of the path that `component` makes below a path of hash `parent`.
+/// A prefix hashes as `Path` compares it, by the kind std reads (`c:` and `C:`
+/// are one drive, `//server/share` and `\\server\share` one share); any other
+/// component hashes its text.
+fn component_hash(parent: PathHash, component: Component<'_>) -> PathHash {
+    match component {
+        Component::Prefix(prefix) => extended(parent, FxBuildHasher.hash_one(prefix.kind())),
+        component => child_hash(parent, component.as_os_str()),
+    }
+}
+
 /// The hash of the path that `name` makes under a directory of hash `parent`.
 fn child_hash(parent: PathHash, name: &OsStr) -> PathHash {
+    extended(parent, FxBuildHasher.hash_one(name))
+}
+
+/// The hash `parent` extends to by a component of hash `component`.
+fn extended(parent: PathHash, component: u64) -> PathHash {
     const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
-    (parent.rotate_left(5) ^ FxBuildHasher.hash_one(name)).wrapping_mul(SEED)
+    (parent.rotate_left(5) ^ component).wrapping_mul(SEED)
 }

@@ -10,10 +10,10 @@
 //! another file: `C:\a\nul.php` is the null device, and `C:\a\b.` is
 //! `C:\a\b`. On other systems the form is the system's.
 
-#[cfg(windows)]
+use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 
 /// The canonical form of `path`. A relative `path` is read against the
 /// current directory.
@@ -36,8 +36,6 @@ pub(crate) fn form(path: PathBuf) -> PathBuf {
 /// relative one, or one holding `.` or `..`, has no other.
 #[cfg(windows)]
 fn respelled(path: &Path) -> Option<PathBuf> {
-    use std::path::{Component, Prefix};
-
     let mut components = path.components();
     let Some(Component::Prefix(prefix)) = components.next() else {
         return None;
@@ -76,6 +74,33 @@ fn respelled(path: &Path) -> Option<PathBuf> {
         respelled.push(component.as_os_str());
     }
     Some(PathBuf::from(respelled))
+}
+
+/// `component`'s text, with a prefix spelled as std reads it, so that the
+/// spellings `Path` calls equal (`c:` and `C:`, `//server/share` and
+/// `\\server\share`) are one text.
+pub(crate) fn component_text(component: Component<'_>) -> Cow<'_, OsStr> {
+    let Component::Prefix(prefix) = component else {
+        return Cow::Borrowed(component.as_os_str());
+    };
+    let (start, names) = match prefix.kind() {
+        Prefix::Verbatim(name) => (r"\\?\", [Some(name), None]),
+        Prefix::VerbatimUNC(server, share) => (r"\\?\UNC\", [Some(server), Some(share)]),
+        Prefix::VerbatimDisk(drive) => {
+            return Cow::Owned(format!(r"\\?\{}:", char::from(drive)).into());
+        }
+        Prefix::DeviceNS(device) => (r"\\.\", [Some(device), None]),
+        Prefix::UNC(server, share) => (r"\\", [Some(server), Some(share)]),
+        Prefix::Disk(drive) => return Cow::Owned(format!("{}:", char::from(drive)).into()),
+    };
+    let mut text = OsString::from(start);
+    for (i, name) in names.into_iter().flatten().enumerate() {
+        if i > 0 {
+            text.push(r"\");
+        }
+        text.push(name);
+    }
+    Cow::Owned(text)
 }
 
 /// The root of `share` on `server`, after `start`.
