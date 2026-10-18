@@ -4,8 +4,10 @@
 
 /// What must be left of the stack for a walk to go on without growing
 /// it: room for the frames between two guarded calls, which are large in
-/// an unoptimized build, yet well under the smallest thread stack (2 MiB)
-/// so that ordinary code never grows at all.
+/// an unoptimized build, yet well under the smallest stack a walk runs on
+/// (a spawned thread's 2 MiB; the binary runs its command on a thread of its
+/// own, not on the main thread, whose stack the system chooses and Windows
+/// makes 1 MiB) so that ordinary code never grows at all.
 const RED_ZONE: usize = 1024 * 1024;
 
 /// How much a growth adds at a time.

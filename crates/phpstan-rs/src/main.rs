@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser as ClapParser, Subcommand};
 
+use phpstan_rs::project::WORKER_STACK_SIZE;
 use phpstan_rs::{app, lsp};
 
 #[path = "main/check.rs"]
@@ -94,7 +95,29 @@ fn main() {
         // SAFETY: no other thread has started.
         unsafe { phpstan_rs::allocator::keep_freed_memory() }
     }
-    match cli.command {
+    on_worker_stack(|| run(cli.command));
+}
+
+/// Runs `body` on a thread with the stack every checking thread has
+/// (`WORKER_STACK_SIZE`), and waits for it. The system chooses the main
+/// thread's stack, and it can be small: Windows gives it 1 MiB, which the
+/// stack guard's red zone (`syntax::stack`) fills by itself, and Unix gives it
+/// `ulimit -s`. A panic of `body` is raised again here, so the process ends
+/// as it would have if `body` had run on this thread.
+fn on_worker_stack<R: Send>(body: impl FnOnce() -> R + Send) -> R {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("phpstan-rs-main".to_string())
+            .stack_size(WORKER_STACK_SIZE)
+            .spawn_scoped(scope, body)
+            .expect("spawning the thread that runs the command")
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+fn run(command: Command) {
+    match command {
         Command::Check { paths } => check::run_check(&paths),
         Command::CheckProject(args) => check_project::run_check_project_command(args),
         Command::IncrementalBench { dir, file_to_touch } => {
@@ -102,12 +125,12 @@ fn main() {
         }
         Command::Lsp => {
             let exit_code = lsp::run(env!("CARGO_PKG_VERSION"), app::config_schema());
-            // 0 falls through to main's own normal return (so the
-            // dhat-heap profiler's, and a --features hotpath build's
-            // HotpathGuard's, Drop still flushes) - only the spec-
-            // mandated nonzero (protocol-violation: exit with no prior
-            // shutdown) path short-circuits via process::exit, the same
-            // way run_check_project's own error paths already do.
+            // 0 returns, and so does main after it (so the dhat-heap
+            // profiler's, and a --features hotpath build's HotpathGuard's,
+            // Drop still flushes) - only the spec-mandated nonzero
+            // (protocol-violation: exit with no prior shutdown) path
+            // short-circuits via process::exit, the same way
+            // run_check_project's own error paths already do.
             if exit_code != 0 {
                 std::process::exit(exit_code);
             }

@@ -1582,6 +1582,7 @@ dependencies = [
  "serde_json",
  "simdutf8",
  "sqlparser",
+ "stacker",
  "toml",
  "twox-hash",
 ]
