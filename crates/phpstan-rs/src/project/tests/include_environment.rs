@@ -1,7 +1,8 @@
 //! What the include rule is given: the configured include path and working
 //! directories, the values the analysed files set the include path to, and
 //! the directories scripts run from. An edit that moves any of them
-//! re-checks every analysed file; any other edit does not.
+//! re-checks every analysed file that includes something; any other edit
+//! does not.
 
 use super::super::session::{ErrorPolicy, Overrides, Session};
 use super::helpers::{TempDir, resolved};
@@ -98,9 +99,10 @@ fn without_an_include_path_a_plain_name_is_not_judged() {
 }
 
 #[test]
-fn an_edit_that_sets_the_include_path_re_checks_every_file_and_clears_the_reports() {
+fn an_edit_that_sets_the_include_path_re_checks_the_files_that_include_and_clears_the_reports() {
     let dir = TempDir::new("include_env_edit");
     dir.write("proj/main.php", "<?php\nrequire 'present.php';\n");
+    dir.write("proj/second.php", "<?php\nrequire 'present.php';\n");
     dir.write("proj/other.php", "<?php\n");
     dir.write("proj/bootstrap.php", "<?php\n");
     dir.write("proj/lib/present.php", "<?php\n");
@@ -109,11 +111,10 @@ fn an_edit_that_sets_the_include_path_re_checks_every_file_and_clears_the_report
     let (main, bootstrap) = (root.join("main.php"), root.join("bootstrap.php"));
     assert_eq!(missing_in(&project, &main), ["present.php"]);
 
+    // `other.php` and `present.php` include nothing, so nothing they report
+    // can change.
     let rechecked = edit(&mut project, &bootstrap, SETS_THE_INCLUDE_PATH);
-    assert_eq!(
-        rechecked,
-        ["bootstrap.php", "main.php", "other.php", "present.php"]
-    );
+    assert_eq!(rechecked, ["bootstrap.php", "main.php", "second.php"]);
     assert!(missing_in(&project, &main).is_empty());
 
     // The same value again moves nothing, so nothing else is re-checked.
@@ -127,7 +128,7 @@ fn an_edit_that_sets_the_include_path_re_checks_every_file_and_clears_the_report
 }
 
 #[test]
-fn an_edit_that_moves_the_working_directory_re_checks_every_file() {
+fn an_edit_that_moves_the_working_directory_re_checks_the_files_that_include() {
     let dir = TempDir::new("include_env_chdir");
     dir.write("proj/main.php", "<?php\nrequire './present.php';\n");
     dir.write("proj/other.php", "<?php\n");
@@ -144,7 +145,7 @@ fn an_edit_that_moves_the_working_directory_re_checks_every_file() {
         &bootstrap,
         "<?php\nchdir(__DIR__ . '/lib');\n",
     );
-    assert!(rechecked.contains(&"main.php".to_string()), "{rechecked:?}");
+    assert_eq!(rechecked, ["bootstrap.php", "main.php"]);
     assert!(missing_in(&project, &main).is_empty());
 
     // Into one that cannot be named, where anything relative may be.
@@ -170,9 +171,10 @@ fn an_edit_of_a_file_that_does_not_set_the_include_path_re_checks_only_itself() 
 }
 
 #[test]
-fn removing_the_file_that_sets_the_include_path_re_checks_every_file() {
+fn removing_the_file_that_sets_the_include_path_re_checks_the_files_that_include() {
     let dir = TempDir::new("include_env_removal");
     dir.write("proj/main.php", "<?php\nrequire 'present.php';\n");
+    dir.write("proj/other.php", "<?php\n");
     dir.write("proj/bootstrap.php", SETS_THE_INCLUDE_PATH);
     dir.write("proj/lib/present.php", "<?php\n");
     let mut project = loaded(&dir, "include_path = \".\"\nworking_dirs = [\".\"]\n");
@@ -182,7 +184,7 @@ fn removing_the_file_that_sets_the_include_path_re_checks_every_file() {
 
     let affected = project.remove_file(&root.join("bootstrap.php"));
     let rechecked = names(&project, affected.into_keys());
-    assert!(rechecked.contains(&"main.php".to_string()), "{rechecked:?}");
+    assert_eq!(rechecked, ["bootstrap.php", "main.php"]);
     assert_eq!(missing_in(&project, &main), ["present.php"]);
 }
 
@@ -204,8 +206,8 @@ fn a_value_that_cannot_be_computed_opens_the_include_path_until_it_is_edited_out
 }
 
 #[test]
-fn a_new_directory_among_the_scripts_re_checks_every_file_when_working_directories_are_undeclared()
-{
+fn a_new_directory_among_the_scripts_re_checks_the_files_that_include_when_working_directories_are_undeclared()
+ {
     let dir = TempDir::new("include_env_script_dirs");
     dir.write("proj/main.php", "<?php\nrequire './helper.php';\n");
     let mut project = loaded(&dir, "include_path = \".\"\n");

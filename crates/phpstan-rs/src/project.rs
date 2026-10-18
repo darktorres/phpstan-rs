@@ -2157,7 +2157,7 @@ impl Project {
         // and the directories that hold files, feed the include environment.
         let feeds_include_env = moves_lookup_before.is_none_or(|before| before || moves_lookup);
         if feeds_include_env && self.refresh_include_env() {
-            affected.extend(self.analyzed_files());
+            affected.extend(self.analyzed_files_that_include());
         }
 
         let mut results = FxHashMap::default();
@@ -2240,7 +2240,7 @@ impl Project {
             self.rebuild_declarations(&removed, None);
             affected.extend(self.finish_declarations(None));
             if self.refresh_include_env() {
-                affected.extend(self.analyzed_files());
+                affected.extend(self.analyzed_files_that_include());
             }
         }
 
@@ -3120,6 +3120,20 @@ impl Project {
             .map(|(id, _, _)| id)
             .collect();
         files.sort_by_key(|&id| self.files.rank_of(id));
+        files
+    }
+
+    /// The numbers of the analysed files that include something, in path
+    /// order: the only files whose reports the include environment can
+    /// change. A `global` statement also sets `has_global_or_include`, which
+    /// only widens the set.
+    fn analyzed_files_that_include(&self) -> Vec<FileId> {
+        let mut files = self.analyzed_files();
+        files.retain(|&id| {
+            self.files
+                .get_by_id(id)
+                .is_some_and(|file| file.facts.has_global_or_include)
+        });
         files
     }
 
