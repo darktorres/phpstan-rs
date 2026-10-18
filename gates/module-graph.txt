@@ -11,7 +11,7 @@
 crate syntax
 crate types syntax
 crate stub-sources
-crate phpdoc syntax
+crate phpdoc syntax types
 crate sql
 crate diagnostics syntax
 crate path-bytes
@@ -434,7 +434,6 @@ allow checker::semantic_tokens checker::internal_usage E6
 allow project checker::semantic_tokens E6
 
 allow checker::restricted_symbol_usage ignore_errors F1
-allow lsp banned F1
 allow lsp @sql F1
 allow project architecture F1
 allow checker project F1
@@ -471,16 +470,11 @@ allow project ext::sql F1
 allow project ext::strict_rules F1
 allow project ext::voku F1
 allow lsp app F1
-allow lsp ext F1
-allow lsp ext::disallowed_calls F1
-allow lsp ext::sql F1
 allow checker checker::throws::dynamic E2
-allow checker::control_flow project F1
 allow checker::expr checker::property_type_too_wide E1
 allow checker::expr::probe_checks checker::operators E3b
 allow checker::function_decl checker::phpdoc_unresolvable E3e
 allow checker::narrowing checker::operators E3b
 allow checker::stmt checker::property_type_too_wide E1
-allow checker::uninitialized_dataflow project F1
 allow project checker::property_type_too_wide E1
 allow registry project F1

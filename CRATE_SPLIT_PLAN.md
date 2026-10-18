@@ -72,11 +72,15 @@ L0  syntax        typed AST with NodeIds, lexer (returns warnings), parser,
                   coercions, accessory types, ExtensionTypeData, PhpVersion(s),
                   float formatting
     stub-sources  embedded stub sources + checked-in generated symbol index
+    path-bytes    what `Path` reads from a path's components, read from its
+                  bytes where that gives the same answer          (no deps)
     crash-context panic isolation: the hook, `isolated`, InternalError,
                   the Reporter trait                              (backtrace)
     pcre          PCRE2 behind a safe API, knowing nothing of PHP (pcre2-sys)
     crash-sys     the crash reporter's process FFI                (no deps)
-L1  phpdoc        the single PHPDoc grammar -> TypeNode AST; DocBlock  (syntax)
+L1  phpdoc        the single PHPDoc grammar -> TypeNode AST, each node kept
+                  with the Type it denotes as written; DocBlock
+                                                                  (syntax, types)
     sql           standalone SQL reflection with its own column-type model:
                   config section, DDL schema, live reflector (DB drivers,
                   sqlparser), drift, SqlContext service           (no deps)
@@ -326,8 +330,16 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 
 One grammar produces a `TypeNode` AST, which `DocBlock` stores. The
 docblock string tokenizer and `types::parse_type_string` are deleted.
-TypeNode → Type resolution lives in reflection. Doctrine-annotation
-argument parsing stays in the grammar.
+Doctrine-annotation argument parsing stays in the grammar.
+
+phpdoc depends on `types`, which depends on `syntax` alone, so the
+dependency makes no cycle (`PROFILE_DRILL_PIWIGO_25G.md` §10.1 and
+§11.7, for P7). Each type node is kept with the `Type` it denotes as
+written (`DocType`): names unresolved, template and alias references not
+yet marked. A docblock is read once for each distinct doc text, so each
+distinct written type is lowered once and not once for each use.
+Resolving that `Type` against the names, templates and aliases in scope
+lives in reflection.
 
 ### 3.4 stub-sources
 
@@ -7493,8 +7505,8 @@ held to the previous commit's:
 Stage G starts when F is done. What it starts from:
 
 - **Crates already:** `syntax`, `types`, `phpdoc`, `stub-sources`, `sql`,
-  `diagnostics`, `composer`, `config`, `reflection` and `php-regex` (B, C10,
-  E2), the sibling plans' `crash-context`, `pcre` and `crash-sys`, and `neon`
+  `diagnostics`, `composer`, `path-bytes`, `config`, `reflection` and
+  `php-regex` (B, C10, E2), the sibling plans' `crash-context`, `pcre` and `crash-sys`, and `neon`
   once Phase 183 lands.
 - **The package:** everything from `analyser` up is still modules of the one
   `phpstan-rs` package (`crates/phpstan-rs/src`), each assigned its crate by
