@@ -70,12 +70,15 @@ fn a_file_added_after_the_listing_is_seen_once_the_table_is_cleared() {
 #[test]
 fn the_entries_are_sorted_by_name_bytes() {
     let dir = TempDir::new("sorted");
-    for name in ["b.php", "A.php", "a.php", "_x.php"] {
+    // A capital, `_` and small letters sort in that order by bytes. No two
+    // names differ in case alone: a disk that folds case holds one file for
+    // both.
+    for name in ["c.php", "B.php", "a.php", "_x.php"] {
         dir.write(name, "");
     }
     let root = HashedPath::new(canonicalize(dir.path()).unwrap());
     let listing = DirListings::default().listing(&root).unwrap();
-    assert_eq!(names(&listing), ["A.php", "_x.php", "a.php", "b.php"]);
+    assert_eq!(names(&listing), ["B.php", "_x.php", "a.php", "c.php"]);
     assert!(listing.complete);
 }
 

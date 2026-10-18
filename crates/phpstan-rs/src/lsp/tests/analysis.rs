@@ -213,9 +213,12 @@ fn a_superseded_run_sends_nothing_and_the_newer_run_sends_its_result() {
         !publishes_for(&initial, &uri_text).is_empty(),
         "f.php has an undefined call, got: {initial:?}"
     );
+    // The server keeps what it sent by the file's resolved path, which is not
+    // always the spelling of the directory the file was written in.
+    let resolved = composer::canonical::canonicalize(&path).unwrap();
     let sent = server
         .published
-        .get(&path)
+        .get(&resolved)
         .map(|held| held.diagnostics.clone())
         .expect("f.php was published");
 
@@ -225,7 +228,10 @@ fn a_superseded_run_sends_nothing_and_the_newer_run_sends_its_result() {
         "a superseded run sends nothing, got: {superseded:?}"
     );
     assert_eq!(
-        server.published.get(&path).map(|held| &held.diagnostics),
+        server
+            .published
+            .get(&resolved)
+            .map(|held| &held.diagnostics),
         Some(&sent),
         "a superseded run leaves what the editor was sent unchanged"
     );

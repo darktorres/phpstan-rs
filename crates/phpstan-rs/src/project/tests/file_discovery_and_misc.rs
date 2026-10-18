@@ -16,7 +16,10 @@ fn collect_php_files_recurses_into_subdirectories_and_skips_non_php() {
     collect_php_files(&dir.0, &mut files);
     files.sort();
 
-    assert_eq!(files, vec![dir.0.join("a.php"), dir.0.join("nested/b.php")]);
+    // The walk lists a file under its resolved path, which is not always the
+    // spelling of the directory it was written in.
+    let root = resolved(&dir);
+    assert_eq!(files, vec![root.join("a.php"), root.join("nested/b.php")]);
 }
 
 #[test]

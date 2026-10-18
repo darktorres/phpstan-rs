@@ -1039,7 +1039,7 @@ fn a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session() {
             "textDocument/didOpen",
             json!({
                 "textDocument": {
-                    "uri": format!("file://{}/bad.php", dir.0.display()),
+                    "uri": path_to_uri(&dir.0.join("bad.php")).to_string(),
                     "languageId": "php",
                     "version": 1,
                     // Momentarily-invalid syntax, the normal state
