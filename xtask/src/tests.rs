@@ -1,4 +1,4 @@
-use super::test_binary_label;
+use super::{manifest_profile, test_binary_label};
 
 #[test]
 fn a_unit_test_binary_is_named_by_its_source_and_crate() {
@@ -32,6 +32,21 @@ fn doc_tests_are_named_by_their_crate() {
         test_binary_label("   Doc-tests phpstan_rs"),
         Some("doc-tests phpstan_rs".to_string())
     );
+}
+
+#[test]
+fn the_manifest_lists_under_no_profile_or_the_one_it_names() {
+    assert_eq!(manifest_profile(&[]), Ok(None));
+    let args = ["--profile".to_string(), "test".to_string()];
+    assert_eq!(manifest_profile(&args), Ok(Some("test")));
+}
+
+#[test]
+fn the_manifest_refuses_any_other_argument() {
+    assert!(manifest_profile(&["--profile".to_string()]).is_err());
+    assert!(manifest_profile(&["test".to_string()]).is_err());
+    let args = ["--profile".to_string(), "test".to_string(), "x".to_string()];
+    assert!(manifest_profile(&args).is_err());
 }
 
 #[test]

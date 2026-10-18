@@ -40,7 +40,7 @@ fn main() -> ExitCode {
         Some("perf") => perf(),
         Some("buildtime") => buildtime(),
         Some("gatetime") => gatetime::gatetime(&args[1..]),
-        Some("tests") => test_manifest(),
+        Some("tests") => test_manifest(&args[1..]),
         Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
         Some("arch") => arch::arch(&root()),
         Some("front-end-dump") => front_end::front_end_dump(&args[1..]),
@@ -70,7 +70,10 @@ const USAGE: &str = "usage: cargo xtask <command>
                          <hash>'s and write the drift report
   perf                   record wall time and peak memory of the scoped run
   buildtime              record incremental rebuild times
-  tests                  record and check the test-name manifest
+  tests [--profile <name>]
+                         record and check the test-name manifest, listing
+                         every target under <name> (the test profile, and
+                         the gate profile for benches and fixtures, if none)
   gatetime (--record | --since <hash>)
                          median wall time of the lib tests and the fixture
                          suite over three runs on prebuilt binaries;
@@ -1348,9 +1351,19 @@ fn rebuilt_workspace_crates(cmd: &mut Command) -> Result<BTreeSet<String>, Strin
 
 // --- test-name manifest ----------------------------------------------------
 
-fn list_tests() -> Result<BTreeSet<String>, String> {
+/// The names of every test, bench and fixture of the whole workspace: the
+/// lib, bin and integration-test targets under `profile` (the test profile
+/// when none is given), and the benches and the fixture target, which is
+/// `test = false`, under `profile` or else the gate profile.
+fn list_tests(profile: Option<&str>) -> Result<BTreeSet<String>, String> {
+    let (tests_profile, slow_profile) = match profile {
+        Some(name) => (name, name),
+        None => ("test", "gate"),
+    };
     let out = capture(cargo().args([
         "test",
+        "--profile",
+        tests_profile,
         "--workspace",
         "--lib",
         "--bins",
@@ -1361,12 +1374,10 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
         "--format",
         "terse",
     ]))?;
-    // The benches run in the gate profile, and the fixture target is
-    // `test = false`; list both from there.
     let benches = capture(cargo().args([
         "test",
         "--profile",
-        "gate",
+        slow_profile,
         "--workspace",
         "--bench",
         "*",
@@ -1377,7 +1388,8 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
     let fixtures = capture(cargo().args([
         "test",
         "--profile",
-        "gate",
+        slow_profile,
+        "--workspace",
         "--test",
         "fixtures",
         "--quiet",
@@ -1396,13 +1408,23 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
         .collect())
 }
 
+/// The profile `cargo xtask tests` lists under: `--profile <name>`, or none.
+fn manifest_profile(args: &[String]) -> Result<Option<&str>, String> {
+    match args {
+        [] => Ok(None),
+        [flag, name] if flag == "--profile" => Ok(Some(name.as_str())),
+        _ => Err("usage: cargo xtask tests [--profile <name>]".to_string()),
+    }
+}
+
 /// Every test of the nearest ancestor with a recorded manifest must still
 /// exist, or be listed in a `gates/test-renames/*.txt` file a commit since
 /// then added or changed, as `old -> new` or `old -> REMOVED: reason`.
-fn test_manifest() -> Result<(), String> {
+fn test_manifest(args: &[String]) -> Result<(), String> {
+    let profile = manifest_profile(args)?;
     require_clean_tree()?;
     let hash = head_hash()?;
-    let tests = list_tests()?;
+    let tests = list_tests(profile)?;
     let listing: String = tests.iter().map(|t| format!("{t}\n")).collect();
     let dir = gate_dir().join("tests");
     write(&dir.join(format!("{hash}.txt")), listing.as_bytes())?;
@@ -1525,7 +1547,7 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
         )
     })?;
     record_fixture_types(hash, timings)?;
-    timings.time("test manifest", |_| test_manifest())?;
+    timings.time("test manifest", |_| test_manifest(&[]))?;
     timings.time("module graph", |_| modgraph::modgraph(&root(), &[]))?;
     timings.time("arch", |_| arch::arch(&root()))?;
     timings.time("doc", |_| {
