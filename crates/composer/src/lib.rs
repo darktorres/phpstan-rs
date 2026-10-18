@@ -9,11 +9,12 @@ pub mod constraint;
 pub mod dir_listings;
 pub mod hashed_path;
 pub mod manifest;
+pub mod path_bytes;
 pub mod path_order;
 pub mod vendor;
 
 use rustc_hash::FxHashMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -183,19 +184,52 @@ impl DirTrie {
         node.owner = Some(owner);
     }
 
-    /// The owner of the deepest owned directory that contains `dir`, `dir`
-    /// itself included.
-    fn deepest(&self, dir: &Path) -> Option<PackageOwner> {
-        let mut node = &self.root;
-        let mut owner = None;
+    /// Where `dir` stands: the owner of the deepest owned directory that
+    /// contains it, `dir` itself included.
+    fn at(&self, dir: &Path) -> OwnerAt<'_> {
+        let mut at = OwnerAt {
+            owner: None,
+            node: Some(&self.root),
+        };
         for component in dir.components() {
-            let Some(next) = node.children.get(component.as_os_str()) else {
+            at = at.child(component.as_os_str());
+            if at.node.is_none() {
                 break;
-            };
-            node = next;
-            owner = node.owner.or(owner);
+            }
         }
-        owner
+        at
+    }
+}
+
+/// Where a directory stands among the owned directories: the owner of the
+/// deepest one that contains it, and its own node while the trie has one, so
+/// that a subdirectory's is found from its name alone.
+#[derive(Clone, Copy, Debug)]
+pub struct OwnerAt<'i> {
+    owner: Option<PackageOwner>,
+    node: Option<&'i TrieNode>,
+}
+
+impl<'i> OwnerAt<'i> {
+    /// The package owning the directory, as `PackageIndex::owner_of_dir`
+    /// gives it.
+    pub fn owner(&self) -> Option<PackageOwner> {
+        self.owner
+    }
+
+    /// Where the directory's entry `name` stands. `name` is one name, as a
+    /// listing gives it.
+    pub fn child(&self, name: &OsStr) -> OwnerAt<'i> {
+        match self.node.and_then(|node| node.children.get(name)) {
+            Some(node) => OwnerAt {
+                owner: node.owner.or(self.owner),
+                node: Some(node),
+            },
+            None => OwnerAt {
+                owner: self.owner,
+                node: None,
+            },
+        }
     }
 }
 
@@ -222,7 +256,13 @@ impl PackageIndex {
     /// absolute path with `.` and `..` taken out and its links followed, as
     /// `manifest::resolve` gives it. A file belongs to its directory's package.
     pub fn owner_of_dir(&self, dir: &Path) -> Option<PackageOwner> {
-        self.by_dir.deepest(dir)
+        self.by_dir.at(dir).owner()
+    }
+
+    /// Where the directory `dir` stands, `dir` as `owner_of_dir` takes it:
+    /// its owner, and where each of its subdirectories stands.
+    pub fn owner_at(&self, dir: &Path) -> OwnerAt<'_> {
+        self.by_dir.at(dir)
     }
 
     /// `owner`'s package name; a root package may have none.

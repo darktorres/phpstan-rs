@@ -1,3 +1,4 @@
+use composer::path_bytes;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
@@ -956,11 +957,12 @@ impl Project {
         self.retain_source && self.keeps_tree(analyzed)
     }
 
-    /// `path` as the disk names it: under the root, when there is one.
-    fn full_path(&self, path: &Path) -> PathBuf {
+    /// `path` as the disk names it: under the root, when there is one and the
+    /// path is relative. An absolute path, as a listed one is, is its own.
+    fn full_path<'p>(&self, path: &'p Path) -> Cow<'p, Path> {
         match &self.absolute_root {
-            Some(root) => root.join(path),
-            None => path.to_path_buf(),
+            Some(root) if !path.is_absolute() => Cow::Owned(root.join(path)),
+            _ => Cow::Borrowed(path),
         }
     }
 
@@ -1075,7 +1077,6 @@ impl Project {
         pool: &rayon::ThreadPool,
         files: impl IntoIterator<Item = (&'a Path, bool, &'a [BuiltDecl])>,
     ) {
-        let root = self.absolute_root.as_deref();
         let declared: Vec<DeclaredFile<'a>> = files
             .into_iter()
             .map(|(path, analyzed, decls)| {
@@ -1086,7 +1087,7 @@ impl Project {
                 DeclaredFile {
                     decls,
                     analyzed,
-                    shown: shown_path(root, path),
+                    path,
                 }
             })
             .collect();
@@ -1094,8 +1095,9 @@ impl Project {
             return;
         }
         self.begin_declaration_changes();
+        let root = self.absolute_root.as_deref();
         self.registry
-            .merge_declarations(pool, |merge| merge.insert(declared));
+            .merge_declarations(pool, |merge| merge.insert(declared, root));
     }
 
     /// Inserts `parsed` as the file `path`, which `id` numbers, without its
@@ -2516,7 +2518,11 @@ impl Project {
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_current_file(path, id);
-        checker.set_current_file_absolute(self.absolute_path(path));
+        // A path that is absolute and normal is its own absolute path, which
+        // the checker takes when it is given none.
+        if !path_bytes::is_normal_absolute(path) {
+            checker.set_current_file_absolute(self.absolute_path(path));
+        }
         checker.set_root(self.absolute_root.clone());
         checker.set_closure_rebind_possible(
             file.facts.mentions & checker::unused::MENTIONS_REBIND != 0,
@@ -3422,7 +3428,7 @@ pub fn path_under_excluded_dir(path: &Path, excluded_dir_names: &[&str]) -> bool
 /// `path` as the reports spell it: relative to `root` when it lies under it,
 /// else as given. Keys are absolute, so name-based checks read this instead.
 pub fn shown_path<'p>(root: Option<&Path>, path: &'p Path) -> &'p Path {
-    root.and_then(|root| path.strip_prefix(root).ok())
+    root.and_then(|root| path_bytes::strip_prefix(path, root))
         .unwrap_or(path)
 }
 

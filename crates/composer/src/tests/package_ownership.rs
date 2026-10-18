@@ -130,9 +130,10 @@ fn owner_by_definition(dirs: &[(PathBuf, PackageOwner)], dir: &Path) -> Option<P
         .map(|(_, (_, owner))| *owner)
 }
 
-#[test]
-fn the_owner_is_what_its_definition_gives_for_any_path() {
-    let dir = TempDir::new("owner_definition");
+/// A project whose installed packages nest: `acme/lib-extra` is installed
+/// inside `acme/lib`'s directory.
+fn nested_packages(name: &str) -> TempDir {
+    let dir = TempDir::new(name);
     dir.write(
         "composer.json",
         r#"{"name": "acme/app", "require": {"phpstan/phpstan": "^2.0", "acme/lib": "*"}}"#,
@@ -145,6 +146,12 @@ fn the_owner_is_what_its_definition_gives_for_any_path() {
             {"name": "acme/lib-extra", "type": "library", "install-path": "../acme/lib/extra"}
         ]}"#,
     );
+    dir
+}
+
+#[test]
+fn the_owner_is_what_its_definition_gives_for_any_path() {
+    let dir = nested_packages("owner_definition");
     let index = index(&dir);
     let dirs = owned_dirs(&index);
     let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -181,4 +188,35 @@ fn the_owner_is_what_its_definition_gives_for_any_path() {
     // The generated paths reach owned directories and miss them, and some
     // belong to a package nested in another's directory.
     assert!(owned > 500 && owned < checked, "{owned} of {checked}");
+}
+
+#[test]
+fn a_subdirectory_stands_where_its_directory_does_with_its_name() {
+    let dir = nested_packages("owner_at");
+    let index = index(&dir);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let names = [
+        "vendor", "phpstan", "acme", "lib", "extra", "src", "composer", "other",
+    ];
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut owned = 0;
+    for _ in 0..2000 {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let mut path = match (state >> 40) % 3 {
+            0 => root.parent().unwrap().to_path_buf(),
+            1 => PathBuf::from("/"),
+            _ => root.clone(),
+        };
+        let mut at = index.owner_at(&path);
+        assert_eq!(at.owner(), index.owner_of_dir(&path), "{}", path.display());
+        for _ in 0..(state >> 60) % 8 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let name = names[((state >> 33) % names.len() as u64) as usize];
+            path.push(name);
+            at = at.child(std::ffi::OsStr::new(name));
+            assert_eq!(at.owner(), index.owner_of_dir(&path), "{}", path.display());
+            owned += usize::from(at.owner().is_some());
+        }
+    }
+    assert!(owned > 500, "the walks reach owned directories: {owned}");
 }

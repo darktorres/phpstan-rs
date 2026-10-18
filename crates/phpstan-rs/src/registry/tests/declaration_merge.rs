@@ -178,10 +178,10 @@ fn merge(registry: &mut Registry, pool: &rayon::ThreadPool, files: &[File]) {
         .map(|file| DeclaredFile {
             decls: &file.decls,
             analyzed: file.analyzed,
-            shown: Path::new(file.path),
+            path: Path::new(file.path),
         })
         .collect();
-    registry.merge_declarations(pool, |merge| merge.insert(declared));
+    registry.merge_declarations(pool, |merge| merge.insert(declared, None));
 }
 
 /// The registry the files give when they are merged as one batch on `pool`.

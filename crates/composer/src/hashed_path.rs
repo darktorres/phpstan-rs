@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxBuildHasher;
 
+use crate::path_bytes;
+
 /// The hash of a path, as `path_hash` gives it.
 pub type PathHash = u64;
 
@@ -42,8 +44,13 @@ impl HashedPath {
     /// The entry `name` of this directory. `name` is one name, as a listing
     /// gives it.
     pub fn child(&self, name: &OsStr) -> Self {
+        // Made in one allocation, where `join` copies the directory and then
+        // grows the copy.
+        let mut path = PathBuf::with_capacity(self.path.as_os_str().len() + 1 + name.len());
+        path.push(&self.path);
+        path.push(name);
         let child = HashedPath {
-            path: self.path.join(name),
+            path,
             hash: child_hash(self.hash, name),
             parent_hash: self.hash,
         };
@@ -65,7 +72,12 @@ impl HashedPath {
 
     /// The directory that holds the path, with its hash, when it has one.
     pub fn parent(&self) -> Option<(&Path, PathHash)> {
-        self.path.parent().map(|parent| (parent, self.parent_hash))
+        path_bytes::parent(&self.path).map(|parent| (parent, self.parent_hash))
+    }
+
+    /// The path's last component, as `Path::file_name` gives it.
+    pub fn file_name(&self) -> Option<&OsStr> {
+        path_bytes::file_name(&self.path)
     }
 
     pub fn into_path_buf(self) -> PathBuf {
@@ -151,7 +163,8 @@ pub fn hashed_ancestors(path: &Path) -> impl Iterator<Item = (&Path, PathHash)> 
         hash = child_hash(hash, component.as_os_str());
         hashes.push(hash);
     }
-    path.ancestors().zip(hashes.into_iter().rev())
+    std::iter::successors(Some(path), |&ancestor| path_bytes::parent(ancestor))
+        .zip(hashes.into_iter().rev())
 }
 
 /// The hash of the path that `name` makes under a directory of hash `parent`.

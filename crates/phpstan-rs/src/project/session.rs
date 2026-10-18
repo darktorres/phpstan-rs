@@ -532,9 +532,10 @@ pub(crate) fn finalize_results(
     let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = results
         .into_iter()
         .map(|(id, diagnostics)| {
-            let path = project.path_of(id);
-            let shown = root.and_then(|root| path.strip_prefix(root).ok());
-            (shown.unwrap_or(path).to_path_buf(), diagnostics)
+            (
+                super::shown_path(root, project.path_of(id)).to_path_buf(),
+                diagnostics,
+            )
         })
         .collect();
     ignore_errors::filter(&mut results, &options.ignore_errors);

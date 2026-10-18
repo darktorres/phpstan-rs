@@ -26,8 +26,9 @@ pub(crate) struct DeclaredFile<'a> {
     pub(crate) decls: &'a [BuiltDecl],
     /// Whether the file is analysed (see `DeclTables::insert`).
     pub(crate) analyzed: bool,
-    /// The path a PHPStan class declared in the file is recorded under.
-    pub(crate) shown: &'a Path,
+    /// The file's path. A PHPStan class declared in it is recorded under the
+    /// path as the reports spell it (`shown_path`).
+    pub(crate) path: &'a Path,
 }
 
 /// The declaration tables, split into shards for a merge (see
@@ -184,8 +185,9 @@ impl Registry {
 impl DeclMerge<'_> {
     /// Applies the declarations of `files`, in order, after those of any earlier
     /// call. The files are bucketed by shard in parallel, and then each shard
-    /// applies its work in parallel.
-    pub(crate) fn insert(&mut self, files: Vec<DeclaredFile<'_>>) {
+    /// applies its work in parallel. The reports spell a path relative to
+    /// `root`.
+    pub(crate) fn insert(&mut self, files: Vec<DeclaredFile<'_>>, root: Option<&Path>) {
         let versions = self.php_versions;
         let stubs = self.built_in_stub_classes;
         let recording = self.recording;
@@ -194,7 +196,7 @@ impl DeclMerge<'_> {
             self.pool,
             shards,
             files,
-            |chunk| bucket(chunk, versions),
+            |chunk| bucket(chunk, versions, root),
             |shard, work| shard.apply(work, stubs, recording),
         );
     }
@@ -232,7 +234,11 @@ impl DeclShard {
 }
 
 /// The work one chunk of files makes for each shard, in the files' order.
-fn bucket<'a>(files: Vec<DeclaredFile<'a>>, versions: Option<PhpVersions>) -> Vec<ShardWork<'a>> {
+fn bucket<'a>(
+    files: Vec<DeclaredFile<'a>>,
+    versions: Option<PhpVersions>,
+    root: Option<&Path>,
+) -> Vec<ShardWork<'a>> {
     let mut work: Vec<ShardWork<'a>> = (0..SHARDS).map(|_| ShardWork::default()).collect();
     for file in files {
         for decl in file.decls {
@@ -243,7 +249,7 @@ fn bucket<'a>(files: Vec<DeclaredFile<'a>>, versions: Option<PhpVersions>) -> Ve
             {
                 work[shard_of(name)]
                     .phpstan
-                    .push((name.clone(), file.shown));
+                    .push((name.clone(), crate::project::shown_path(root, file.path)));
             }
             let Some(decl) = decl.clone().in_effect(versions) else {
                 continue;

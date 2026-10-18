@@ -42,6 +42,7 @@ use std::sync::{Arc, OnceLock};
 use composer::dir_listings::{DirListings, Listing};
 use composer::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors, path_hash};
 use composer::manifest::resolve;
+use composer::path_bytes;
 use hashbrown::hash_map::EntryRef;
 use hashbrown::hash_table::Entry;
 use rayon::prelude::*;
@@ -207,17 +208,21 @@ struct Roots<'a> {
     /// The resolved path of each directory an explicit file was listed in, by
     /// the directory as it was given.
     directories: hashbrown::HashMap<PathBuf, HashedPath, FxBuildHasher>,
+    /// The `Job::Files` among `jobs`, by their index there, found by the hash
+    /// of their directory.
+    file_jobs: hashbrown::HashTable<usize>,
 }
 
 /// The context roots a walk is given while its stronger walks run, which the
 /// context walks start from.
 pub(crate) struct ContextRoots<'a>(Roots<'a>);
 
-/// The walk of one root: a directory, or a file that is listed whatever its
-/// extension.
+/// The walk of one root, a directory, or of the file roots of one role in one
+/// directory, each of which is listed whatever its extension. The files of a
+/// directory share what reaches it and the package that owns it.
 enum Job<'a> {
     Dir { path: HashedPath, scope: Scope<'a> },
-    File { path: HashedPath, role: Role },
+    Files { files: Vec<HashedPath>, role: Role },
 }
 
 impl Job<'_> {
@@ -225,7 +230,7 @@ impl Job<'_> {
     fn role(&self) -> Role {
         match self {
             Job::Dir { scope, .. } => scope.role,
-            Job::File { role, .. } => *role,
+            Job::Files { role, .. } => *role,
         }
     }
 }
@@ -342,7 +347,11 @@ impl<'a> Starts<'a> {
                 Job::Dir { path, scope } => {
                     held(&mut starts.dirs, path).push((scope.role, scope.excluded));
                 }
-                Job::File { path, role } => held(&mut starts.files, path).push(*role),
+                Job::Files { files, role } => {
+                    for path in files {
+                        held(&mut starts.files, path).push(*role);
+                    }
+                }
             }
         }
         for root in roots
@@ -375,7 +384,7 @@ impl<'a> Starts<'a> {
     /// that `above` reaches: the walks that reach that directory and do not
     /// exclude the name of `dir`, and the walks that start at `dir`.
     fn below(&self, above: &Reaching<'a>, dir: &Path, hash: PathHash) -> Reaching<'a> {
-        let name = dir.file_name();
+        let name = path_bytes::file_name(dir);
         let mut walks: Vec<DirWalk<'a>> = above
             .walks
             .iter()
@@ -413,15 +422,6 @@ impl<'a> Starts<'a> {
             dir_reach.add(role);
         }
         dir_reach
-    }
-
-    /// What the walks that list the explicit file `file` decide for it: the
-    /// directory walks that reach its directory, and the file walks for it.
-    fn file_reach(&self, file: &HashedPath) -> Reach {
-        let dir_reach = file
-            .parent()
-            .map_or_else(Reach::default, |(dir, _)| self.reaching(dir).reach());
-        self.with_file_walks(dir_reach, file)
     }
 
     /// What reaches `dir`, as each ancestor of it reaches it and whether a
@@ -582,9 +582,7 @@ impl Tree {
     fn slot_of(&mut self, path: &HashedPath) -> Option<(usize, usize)> {
         let (dir, dir_hash) = path.parent()?;
         let node = self.node(dir, dir_hash)?;
-        let at = self.nodes[node]
-            .listing
-            .position(path.as_path().file_name()?)?;
+        let at = self.nodes[node].listing.position(path.file_name()?)?;
         Some((node, at))
     }
 
@@ -632,7 +630,7 @@ impl Tree {
     fn make(&mut self, dir: &Path, up: Option<usize>) -> Option<usize> {
         let (path, link) = match up {
             Some(up) => {
-                let name = dir.file_name()?;
+                let name = path_bytes::file_name(dir)?;
                 let at = self.nodes[up].listing.position(name)?;
                 if !matches!(self.nodes[up].slots[at], Slot::Empty) {
                     return None;
@@ -739,10 +737,7 @@ impl<'a> Roots<'a> {
             excluded,
         });
         if is_php(identity.as_path()) {
-            self.jobs.push(Job::File {
-                path: identity.into_hashed(),
-                role,
-            });
+            self.push_file(identity.into_hashed(), role);
         }
     }
 
@@ -775,10 +770,7 @@ impl<'a> Roots<'a> {
             stub: role == Role::Stub,
             excluded: &[],
         });
-        self.jobs.push(Job::File {
-            path: file.into_hashed(),
-            role,
-        });
+        self.push_file(file.into_hashed(), role);
     }
 
     /// Adds `path` as a root and lists it whatever its extension, as an
@@ -791,8 +783,40 @@ impl<'a> Roots<'a> {
             stub: role == Role::Stub,
             excluded: &[],
         });
-        self.jobs.push(Job::File {
-            path: identity,
+        self.push_file(identity, role);
+    }
+
+    /// Lists the explicit file `file` under `role`, in the job of the files of
+    /// its directory and role, which it starts when it is the first.
+    fn push_file(&mut self, file: HashedPath, role: Role) {
+        let Roots {
+            jobs, file_jobs, ..
+        } = self;
+        let Some((dir, hash)) = file.parent() else {
+            jobs.push(Job::Files {
+                files: vec![file],
+                role,
+            });
+            return;
+        };
+        let same = |job: &Job<'_>| match job {
+            Job::Files { files, role: held } => {
+                *held == role && files[0].parent().is_some_and(|(held, _)| held == dir)
+            }
+            Job::Dir { .. } => false,
+        };
+        if let Some(&at) = file_jobs.find(hash, |&at| same(&jobs[at]))
+            && let Job::Files { files, .. } = &mut jobs[at]
+        {
+            files.push(file);
+            return;
+        }
+        file_jobs.insert_unique(hash, jobs.len(), |&at| match &jobs[at] {
+            Job::Files { files, .. } => files[0].parent().map_or(0, |(_, hash)| hash),
+            Job::Dir { .. } => 0,
+        });
+        jobs.push(Job::Files {
+            files: vec![file],
             role,
         });
     }
@@ -987,7 +1011,7 @@ impl<'a, 'p> Walk<'a, 'p> {
         for (job, found) in found {
             match job {
                 Job::Dir { scope, .. } => self.merge(found, scope.role, scope.excluded),
-                Job::File { role, .. } => self.merge(found, *role, &[]),
+                Job::Files { role, .. } => self.merge(found, *role, &[]),
             }
         }
         pool.install(|| {
@@ -1057,7 +1081,7 @@ impl<'a, 'p> Walk<'a, 'p> {
 
     /// The package owning the resolved file `path`: the package of its directory.
     fn owner_of(&self, path: &Path) -> Option<composer::PackageOwner> {
-        self.packages.owner_of_dir(path.parent()?)
+        self.packages.owner_of_dir(path_bytes::parent(path)?)
     }
 
     /// What the walk of one root lists. The files whose roles it makes final
@@ -1065,19 +1089,28 @@ impl<'a, 'p> Walk<'a, 'p> {
     fn run(&self, job: &Job<'a>, take: Option<&Take<'_>>) -> Vec<Found> {
         match job {
             Job::Dir { path, scope } => self.walk_root(path, *scope, take),
-            Job::File { path, role } => {
-                let owner = self.owner_of(path.as_path());
-                if let Some(take) = take
-                    && let Some(stub) = self.starts_for(*role).file_reach(path).hands_over(*role)
-                {
-                    take(vec![Listed {
-                        path: path.clone(),
-                        role: *role,
-                        stub,
-                        owner: Some(owner),
-                    }]);
+            Job::Files { files, role } => {
+                let dir = files[0].parent().map(|(dir, _)| dir);
+                let owner = dir.and_then(|dir| self.packages.owner_of_dir(dir));
+                if let Some(take) = take {
+                    let starts = self.starts_for(*role);
+                    // What the directory walks that reach the directory decide.
+                    let reach = dir.map_or_else(Reach::default, |dir| starts.reaching(dir).reach());
+                    for path in files {
+                        if let Some(stub) = starts.with_file_walks(reach, path).hands_over(*role) {
+                            take(vec![Listed {
+                                path: path.clone(),
+                                role: *role,
+                                stub,
+                                owner: Some(owner),
+                            }]);
+                        }
+                    }
                 }
-                vec![Found::File(path.clone(), owner)]
+                files
+                    .iter()
+                    .map(|path| Found::File(path.clone(), owner))
+                    .collect()
             }
         }
     }
@@ -1128,6 +1161,7 @@ impl<'a, 'p> Walk<'a, 'p> {
                 parent: None,
             },
             take,
+            self.packages.owner_at(path.as_path()),
         )
     }
 
@@ -1136,7 +1170,8 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// its own, and its results are placed back among the entries in order.
     /// `ancestors` holds `dir` and the directories above it in this walk. The
     /// files of `dir` whose roles this walk makes final are handed to `take` as
-    /// one batch, once its entries are read.
+    /// one batch, once its entries are read. `owner_at` is where `dir` stands
+    /// among the packages' directories.
     fn walk_dir(
         &self,
         dir: &HashedPath,
@@ -1144,6 +1179,7 @@ impl<'a, 'p> Walk<'a, 'p> {
         scope: Scope<'a>,
         ancestors: &Ancestors<'_>,
         take: Option<&Take<'_>>,
+        owner_at: composer::OwnerAt<'p>,
     ) -> Vec<Found> {
         let Some(listing) = self.listings.listing(dir) else {
             return Vec::new();
@@ -1159,7 +1195,14 @@ impl<'a, 'p> Walk<'a, 'p> {
             );
         }
         // The files listed here are all in `dir`, so they share its owner.
-        let owner = self.packages.owner_of_dir(dir.as_path());
+        let owner = owner_at.owner();
+        #[cfg(test)]
+        assert_eq!(
+            owner,
+            self.packages.owner_of_dir(dir.as_path()),
+            "the owner of {}",
+            dir.as_path().display()
+        );
         // What the walks that reach `dir` decide for its files, when this walk
         // is the one walk of their strongest role.
         let reach = match reaching.map(Reaching::reach) {
@@ -1207,8 +1250,8 @@ impl<'a, 'p> Walk<'a, 'p> {
                     continue;
                 }
                 steps.push(Step::Dir);
-                dirs.push((child, below));
-            } else if is_php(Path::new(name)) {
+                dirs.push((child, below, owner_at.child(name)));
+            } else if path_bytes::is_php_name(name) {
                 let child = dir.child(name);
                 if !(scope.outside && self.under_root(child.as_path())) {
                     if let Some(reach) = reach
@@ -1233,8 +1276,8 @@ impl<'a, 'p> Walk<'a, 'p> {
         }
         let subtrees: Vec<Vec<Found>> = dirs
             .par_iter()
-            .map(|(child, below)| {
-                self.walk_subdirectory(child, below.as_ref(), scope, ancestors, take)
+            .map(|(child, below, owner_at)| {
+                self.walk_subdirectory(child, below.as_ref(), scope, ancestors, take, *owner_at)
             })
             .collect();
         let mut subtrees = subtrees.into_iter();
@@ -1258,6 +1301,7 @@ impl<'a, 'p> Walk<'a, 'p> {
         scope: Scope<'a>,
         ancestors: &Ancestors<'_>,
         take: Option<&Take<'_>>,
+        owner_at: composer::OwnerAt<'p>,
     ) -> Vec<Found> {
         let Ok(handle) = Handle::from_path(child) else {
             return Vec::new();
@@ -1276,6 +1320,7 @@ impl<'a, 'p> Walk<'a, 'p> {
                 parent: Some(ancestors),
             },
             take,
+            owner_at,
         )
     }
 

@@ -30,6 +30,7 @@
 //! sibling module with its own predicate and resolver, without touching
 //! this one.
 
+use composer::path_bytes;
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
@@ -227,7 +228,7 @@ impl PestFacts {
     /// The bindings of the file `path` with the tree `ast`; `None` for a
     /// file not named `Pest.php`.
     pub fn of(path: &Path, ast: &[Stmt]) -> Option<PestFacts> {
-        if path.file_name().and_then(|n| n.to_str()) != Some("Pest.php") {
+        if path_bytes::file_name(path).and_then(|n| n.to_str()) != Some("Pest.php") {
             return None;
         }
         let dir = path.parent()?;
@@ -309,7 +310,7 @@ impl PestConfig {
         let mut names: Vec<String> = self
             .bindings
             .iter()
-            .filter(|(prefix, _)| file_path.starts_with(prefix))
+            .filter(|(prefix, _)| path_bytes::starts_with(file_path, prefix))
             .flat_map(|(_, classes)| classes.iter().cloned())
             .collect();
         names.sort();
@@ -334,7 +335,7 @@ impl PestConfig {
     pub fn resolve_hook_properties(&self, file_path: &Path) -> FxHashSet<String> {
         self.hook_properties
             .iter()
-            .filter(|(prefix, _)| file_path.starts_with(prefix))
+            .filter(|(prefix, _)| path_bytes::starts_with(file_path, prefix))
             .flat_map(|(_, props)| props.iter().cloned())
             .collect()
     }

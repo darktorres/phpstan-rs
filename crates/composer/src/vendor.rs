@@ -41,6 +41,7 @@ use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 
 use crate::dir_listings::{DirListings, Listing};
 use crate::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors};
+use crate::path_bytes;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {
@@ -514,9 +515,9 @@ pub(crate) enum Place {
 
 impl Place {
     pub(crate) fn of(dir: &Path, base: &Path) -> Place {
-        if dir.starts_with(base) {
+        if path_bytes::starts_with(dir, base) {
             Place::In
-        } else if base.parent() == Some(dir) {
+        } else if path_bytes::parent(base) == Some(dir) {
             Place::Above
         } else {
             Place::Out
@@ -527,7 +528,7 @@ impl Place {
     pub(crate) fn holds(self, name: &OsStr, base: &Path) -> bool {
         match self {
             Place::In => true,
-            Place::Above => base.file_name() == Some(name),
+            Place::Above => path_bytes::file_name(base) == Some(name),
             Place::Out => false,
         }
     }
@@ -595,7 +596,7 @@ impl<'p> Resolver<'p> {
     /// outside `vendor/`, and still belongs to vendor context.
     fn locate(&mut self, raw: &Path) -> Option<Located> {
         let unknown = |path| Located { path, kind: None };
-        let (Some(dir), Some(name)) = (raw.parent(), raw.file_name()) else {
+        let (Some(dir), Some(name)) = (path_bytes::parent(raw), path_bytes::file_name(raw)) else {
             return self.path_alone(raw).map(unknown);
         };
         if dir.as_os_str().is_empty() {
@@ -623,7 +624,7 @@ impl<'p> Resolver<'p> {
             // one, so the system resolves it and it is placed itself.
             _ => {
                 let resolved = std::fs::canonicalize(raw).ok()?;
-                if resolved.starts_with(vendor_dir) {
+                if path_bytes::starts_with(&resolved, vendor_dir) {
                     return Some(unknown(HashedPath::new(resolved)));
                 }
             }
@@ -636,7 +637,7 @@ impl<'p> Resolver<'p> {
     /// directory, as written.
     fn path_alone(&self, raw: &Path) -> Option<HashedPath> {
         let resolved = std::fs::canonicalize(raw).ok()?;
-        if resolved.starts_with(self.vendor_dir) {
+        if path_bytes::starts_with(&resolved, self.vendor_dir) {
             return Some(HashedPath::new(resolved));
         }
         let lexical = lexically_normalized(raw);
@@ -703,14 +704,14 @@ impl<'p> Resolver<'p> {
                 return Some(HashedPath::new(known.to_path_buf()));
             }
         }
-        let Some(parent) = dir.parent() else {
+        let Some(parent) = path_bytes::parent(dir) else {
             // The root.
             return canonicalized(dir);
         };
         if parent.as_os_str().is_empty() {
             return canonicalized(dir);
         }
-        let Some(name) = dir.file_name() else {
+        let Some(name) = path_bytes::file_name(dir) else {
             // Ends in `..`: the parent of what precedes it, as the system
             // reads it.
             return canonicalized(dir);
@@ -821,6 +822,7 @@ fn drop_files_under_dirs(files: &mut Vec<Located>, dirs: &[Located], table: &Dir
     });
 }
 
+#[cfg(test)]
 fn is_php(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "php")
 }
@@ -857,10 +859,10 @@ impl<'d> Walks<'d> {
     /// explicitly, so a file the walk could miss (a missing one, or one
     /// behind a directory that cannot be read) is still listed.
     fn list(&mut self, file: &HashedPath) -> bool {
-        let (Some((dir, hash)), Some(name)) = (file.parent(), file.as_path().file_name()) else {
+        let (Some((dir, hash)), Some(name)) = (file.parent(), file.file_name()) else {
             return false;
         };
-        is_php(Path::new(name))
+        path_bytes::is_php_name(name)
             && self.listing(dir, hash).is_some_and(|listing| {
                 listing
                     .entry(name)
@@ -910,7 +912,7 @@ impl<'d> Walks<'d> {
             .clone()?;
         let mut path = HashedPath::clone(root);
         for ancestor in below.into_iter().rev() {
-            let name = ancestor.file_name()?;
+            let name = path_bytes::file_name(ancestor)?;
             let is_dir = listing
                 .entry(name)
                 .and_then(|entry| entry.kind)
