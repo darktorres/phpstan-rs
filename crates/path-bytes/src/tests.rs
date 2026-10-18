@@ -1,8 +1,7 @@
 //! What `path_bytes` reads from a path's bytes is what `Path` reads from its
 //! components, for paths of every shape.
 
-use crate::manifest::lexically_normalized;
-use crate::path_bytes;
+use crate as path_bytes;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
@@ -175,7 +174,21 @@ fn a_normal_absolute_path_is_its_own_normal_form() {
         if path_bytes::is_normal_absolute(&path) {
             normal += 1;
             assert!(path.is_absolute(), "{}", path.display());
-            assert_eq!(lexically_normalized(&path), path, "{}", path.display());
+            // A lexical normalization drops each `.` and resolves each `..`,
+            // and rebuilds what is left from the components.
+            assert!(
+                !path
+                    .components()
+                    .any(|c| matches!(c, Component::CurDir | Component::ParentDir)),
+                "{}",
+                path.display()
+            );
+            assert_eq!(
+                path.components().collect::<PathBuf>(),
+                path,
+                "{}",
+                path.display()
+            );
         }
     }
     assert!(normal > 50, "the mix holds normal paths: {normal}");

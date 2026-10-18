@@ -42,7 +42,6 @@ use std::sync::{Arc, OnceLock};
 use composer::dir_listings::{DirListings, Listing};
 use composer::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors, path_hash};
 use composer::manifest::resolve;
-use composer::path_bytes;
 use hashbrown::hash_map::EntryRef;
 use hashbrown::hash_table::Entry;
 use rayon::prelude::*;

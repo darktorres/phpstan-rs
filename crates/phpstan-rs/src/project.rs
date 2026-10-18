@@ -1,4 +1,3 @@
-use composer::path_bytes;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;

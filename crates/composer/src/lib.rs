@@ -10,7 +10,6 @@ pub mod constraint;
 pub mod dir_listings;
 pub mod hashed_path;
 pub mod manifest;
-pub mod path_bytes;
 pub mod path_order;
 pub mod vendor;
 

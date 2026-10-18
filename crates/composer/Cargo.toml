@@ -10,6 +10,7 @@ name = "composer"
 
 [dependencies]
 hashbrown.workspace = true
+path-bytes.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }

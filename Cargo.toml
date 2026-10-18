@@ -17,6 +17,7 @@ phpdoc = { package = "phpstan-rs-phpdoc", path = "crates/phpdoc" }
 sql = { package = "phpstan-rs-sql", path = "crates/sql" }
 diagnostics = { package = "phpstan-rs-diagnostics", path = "crates/diagnostics" }
 composer = { package = "phpstan-rs-composer", path = "crates/composer" }
+path-bytes = { package = "phpstan-rs-path-bytes", path = "crates/path-bytes" }
 config = { package = "phpstan-rs-config", path = "crates/config" }
 stub-sources = { package = "phpstan-rs-stub-sources", path = "crates/stub-sources" }
 criterion = "=0.8.2"

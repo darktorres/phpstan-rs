@@ -42,7 +42,6 @@ use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 use crate::canonical;
 use crate::dir_listings::{DirListings, Listing};
 use crate::hashed_path::{HashedPath, PathHash, Resolved, hashed_ancestors};
-use crate::path_bytes;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {

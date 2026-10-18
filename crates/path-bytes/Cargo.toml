@@ -1,0 +1,12 @@
+[package]
+name = "phpstan-rs-path-bytes"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+name = "path_bytes"
+
+[lints]
+workspace = true

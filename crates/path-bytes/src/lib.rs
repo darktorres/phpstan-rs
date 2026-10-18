@@ -5,8 +5,13 @@
 //! separator. Read so, the byte that ends a component is a separator, and a
 //! component's bytes are its name.
 
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
+
 use std::ffi::OsStr;
 use std::path::{Component, Path};
+
+#[cfg(test)]
+mod tests;
 
 /// `path.file_name()`.
 pub fn file_name(path: &Path) -> Option<&OsStr> {
@@ -95,8 +100,9 @@ pub fn strip_prefix<'p>(path: &'p Path, base: &Path) -> Option<&'p Path> {
 }
 
 /// Whether `path` is absolute and spelled as its components are, with no
-/// `.` or `..` among them, so that `manifest::lexically_normalized` gives it
-/// back as it is. `false` says only that it is not known to be.
+/// `.` or `..` among them, so that normalizing it lexically, dropping each
+/// `.` and resolving each `..`, gives it back as it is. `false` says only
+/// that it is not known to be.
 pub fn is_normal_absolute(path: &Path) -> bool {
     #[cfg(unix)]
     {

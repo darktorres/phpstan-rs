@@ -25,6 +25,7 @@ const LIBRARY_CRATES: &[&str] = &[
     "sql",
     "diagnostics",
     "composer",
+    "path-bytes",
     "stub-sources",
     "config",
 ];

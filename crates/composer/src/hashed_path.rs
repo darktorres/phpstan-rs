@@ -12,8 +12,6 @@ use std::path::{Component, Path, PathBuf};
 
 use rustc_hash::FxBuildHasher;
 
-use crate::path_bytes;
-
 /// The hash of a path, as `path_hash` gives it.
 pub type PathHash = u64;
 

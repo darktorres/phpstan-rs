@@ -1268,6 +1268,7 @@ dependencies = [
  "phpstan-rs-composer",
  "phpstan-rs-config",
  "phpstan-rs-diagnostics",
+ "phpstan-rs-path-bytes",
  "phpstan-rs-phpdoc",
  "phpstan-rs-sql",
  "phpstan-rs-stub-sources",
@@ -1292,6 +1293,7 @@ name = "phpstan-rs-composer"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.17.1",
+ "phpstan-rs-path-bytes",
  "phpstan-rs-syntax",
  "rustc-hash",
  "serde",
@@ -1323,6 +1325,10 @@ dependencies = [
  "phpstan-rs-phpdoc",
  "phpstan-rs-syntax",
 ]
+
+[[package]]
+name = "phpstan-rs-path-bytes"
+version = "0.1.0"
 
 [[package]]
 name = "phpstan-rs-phpdoc"

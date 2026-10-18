@@ -30,7 +30,6 @@
 //! sibling module with its own predicate and resolver, without touching
 //! this one.
 
-use composer::path_bytes;
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
