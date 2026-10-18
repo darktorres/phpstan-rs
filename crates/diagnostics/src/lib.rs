@@ -1,14 +1,14 @@
 //! What a check reports: a [`Diagnostic`], assembled through
 //! [`DiagnosticBuilder`], with an optional textual [`DiagnosticFix`]
 //! (applied by [`fix`]), and how reports and messages spell a file's path
-//! ([`report_path`]).
+//! and configured path text names one ([`report_path`]).
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod fix;
 pub mod report_path;
 
-pub use report_path::{report_path, report_spelling};
+pub use report_path::{path_byte_names, path_text_names, report_path, slash_spelling};
 
 use std::borrow::Cow;
 

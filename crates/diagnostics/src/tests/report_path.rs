@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use crate::{report_path, report_spelling};
+use crate::{path_text_names, report_path, slash_spelling};
 
 #[test]
 fn a_path_with_slashes_is_spelled_as_it_is() {
@@ -9,14 +9,12 @@ fn a_path_with_slashes_is_spelled_as_it_is() {
         report_path(Path::new("src/a.php")),
         Cow::Borrowed("src/a.php")
     ));
-    assert!(matches!(report_spelling("src/*"), Cow::Borrowed("src/*")));
 }
 
 #[cfg(unix)]
 #[test]
 fn a_backslash_is_a_character_of_a_name_outside_windows() {
     assert_eq!(report_path(Path::new("dir/a\\b.php")), "dir/a\\b.php");
-    assert_eq!(report_spelling("legacy\\*"), "legacy\\*");
 }
 
 #[cfg(unix)]
@@ -40,5 +38,30 @@ fn a_backslash_is_a_separator_on_windows() {
         report_path(Path::new("\\\\server\\share\\a.php")),
         "//server/share/a.php"
     );
-    assert_eq!(report_spelling("legacy\\*"), "legacy/*");
+}
+
+#[test]
+fn a_configured_backslash_names_a_slash_or_a_backslash() {
+    assert!(path_text_names("src\\a.php", "src/a.php"));
+    assert!(path_text_names("src\\a.php", "src\\a.php"));
+    assert!(path_text_names("src/a.php", "src/a.php"));
+    assert!(!path_text_names("src/a.php", "src\\a.php"));
+    assert!(!path_text_names("src\\a.php", "src/b.php"));
+    assert!(!path_text_names("src\\a.php", "src/a.php5"));
+}
+
+#[test]
+fn configured_text_and_what_it_names_have_one_slash_spelling() {
+    assert!(matches!(
+        slash_spelling("src/a.php"),
+        Cow::Borrowed("src/a.php")
+    ));
+    for (configured, reported) in [
+        ("src\\a.php", "src/a.php"),
+        ("src\\a.php", "src\\a.php"),
+        ("a\\b/c\\d.php", "a/b/c\\d.php"),
+    ] {
+        assert!(path_text_names(configured, reported));
+        assert_eq!(slash_spelling(configured), slash_spelling(reported));
+    }
 }

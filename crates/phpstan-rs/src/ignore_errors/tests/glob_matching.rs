@@ -49,3 +49,27 @@ fn a_leading_star_matches_any_prefix() {
     assert!(glob_matches("*Test.php", "tests/Unit/FooTest.php"));
     assert!(!glob_matches("*Test.php", "tests/Unit/Foo.php"));
 }
+
+#[test]
+fn a_path_pattern_reads_a_backslash_as_a_separator_wherever_it_stands() {
+    assert!(path_glob_matches(
+        "src\\Legacy\\Foo.php",
+        "src/Legacy/Foo.php"
+    ));
+    assert!(path_glob_matches("src\\*", "src/Legacy/Foo.php"));
+    assert!(path_glob_matches("*\\Event\\*", "src/Piwigo/Event/Foo.php"));
+    assert!(path_glob_matches("*\\Foo.php", "src/Legacy/Foo.php"));
+    assert!(path_glob_matches("*\\é\\*", "a/é/b.php"));
+    assert!(!path_glob_matches(
+        "*\\Event\\*",
+        "src/Piwigo/NotEvent/Foo.php"
+    ));
+    assert!(!path_glob_matches("src\\*", "srcx/Foo.php"));
+    assert!(!path_glob_matches("src/*", "src\\Foo.php"));
+}
+
+#[test]
+fn a_name_pattern_keeps_a_backslash_as_it_is() {
+    assert!(glob_matches("app\\models\\*", "app\\models\\user"));
+    assert!(!glob_matches("app\\models\\*", "app/models/user"));
+}

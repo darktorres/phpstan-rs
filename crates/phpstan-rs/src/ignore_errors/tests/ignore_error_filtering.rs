@@ -141,20 +141,44 @@ fn a_path_matches_in_either_separator_on_windows() {
     assert!(results[&PathBuf::from("generated\\b.php")].is_empty());
 }
 
-#[cfg(unix)]
 #[test]
-fn a_backslash_in_a_pattern_is_part_of_a_name_outside_windows() {
+fn a_backslash_in_a_path_pattern_is_a_separator() {
     let mut results = FxHashMap::default();
     results.insert(
-        PathBuf::from("generated/a.php"),
+        PathBuf::from("generated/cache/a.php"),
         vec![diag("variable.undefined", "Undefined variable: $x")],
     );
+    let entries = vec![IgnoreErrorEntry {
+        path: Some("generated\\cache\\*".to_string()),
+        ..Default::default()
+    }];
+    filter(&mut results, &entries);
+    assert!(results[&PathBuf::from("generated/cache/a.php")].is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_backslash_in_a_path_pattern_also_matches_one_in_a_name_outside_windows() {
+    let undefined = || vec![diag("variable.undefined", "Undefined variable: $x")];
+    let mut results = FxHashMap::default();
+    results.insert(PathBuf::from("generated\\a.php"), undefined());
+    results.insert(PathBuf::from("generated/b.php"), undefined());
     let entries = vec![IgnoreErrorEntry {
         path: Some("generated\\*".to_string()),
         ..Default::default()
     }];
     filter(&mut results, &entries);
-    assert_eq!(results[&PathBuf::from("generated/a.php")].len(), 1);
+    assert!(results[&PathBuf::from("generated\\a.php")].is_empty());
+    assert!(results[&PathBuf::from("generated/b.php")].is_empty());
+
+    let mut results = FxHashMap::default();
+    results.insert(PathBuf::from("generated\\a.php"), undefined());
+    let entries = vec![IgnoreErrorEntry {
+        path: Some("generated/*".to_string()),
+        ..Default::default()
+    }];
+    filter(&mut results, &entries);
+    assert_eq!(results[&PathBuf::from("generated\\a.php")].len(), 1);
 }
 
 #[test]

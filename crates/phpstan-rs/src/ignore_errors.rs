@@ -17,7 +17,7 @@
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
-use diagnostics::{Diagnostic, report_path, report_spelling};
+use diagnostics::{Diagnostic, report_path};
 use serde::Deserialize;
 
 /// One `ignoreErrors:` entry. Every field is optional and AND-combined
@@ -34,9 +34,9 @@ pub struct IgnoreErrorEntry {
     /// A glob against the diagnostic's own already-relative file path,
     /// spelled with `/` between its names on every platform
     /// (`diagnostics::report_path`, e.g. `_analysis/phpstan-latte/foo.php`).
-    /// On Windows a `\` in the glob is a separator too, as PHPStan reads
-    /// one there. See `glob_matches`'s own doc comment for the exact
-    /// wildcard semantics.
+    /// A `\` in the glob is a separator too, as PHPStan reads one on every
+    /// platform (`path_glob_matches`). See `glob_matches`'s own doc comment
+    /// for the exact wildcard semantics.
     pub path: Option<String>,
     /// A regex (real PHPStan's own PCRE delimiters, e.g. `#^...$#`,
     /// already stripped - store the bare pattern) against
@@ -65,7 +65,7 @@ impl IgnoreErrorEntry {
             return false;
         }
         if let Some(pattern) = &self.path
-            && !glob_matches(&report_spelling(pattern), path)
+            && !path_glob_matches(pattern, path)
         {
             return false;
         }
@@ -96,23 +96,43 @@ impl IgnoreErrorEntry {
 /// support - not used anywhere in a real `phpstan.neon`, and adding it
 /// would just be unverified surface area.
 pub(crate) fn glob_matches(pattern: &str, path: &str) -> bool {
-    let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.len() == 1 {
-        return path == pattern;
+    glob_matches_by(pattern, path, |p, s| p == s)
+}
+
+/// `glob_matches` for configured path text against a report path
+/// (`diagnostics::report_path`): each byte of `pattern` but `*` matches a
+/// byte of `path` as `diagnostics::path_byte_names` reads it, so a `\`
+/// matches a `/`, or a `\` that a name holds.
+pub(crate) fn path_glob_matches(pattern: &str, path: &str) -> bool {
+    glob_matches_by(pattern, path, diagnostics::path_byte_names)
+}
+
+/// `glob_matches`, with `matches` telling whether a byte of `pattern`
+/// matches a byte of `subject`.
+fn glob_matches_by(pattern: &str, subject: &str, matches: impl Fn(u8, u8) -> bool) -> bool {
+    let starts_with = |text: &[u8], part: &[u8]| {
+        text.len() >= part.len() && part.iter().zip(text).all(|(&p, &s)| matches(p, s))
+    };
+    let parts: Vec<&[u8]> = pattern.as_bytes().split(|&b| b == b'*').collect();
+    let mut cursor = subject.as_bytes();
+    if let [whole] = parts[..] {
+        return cursor.len() == whole.len() && starts_with(cursor, whole);
     }
     let last = parts.len() - 1;
-    let mut cursor = path;
     for (i, part) in parts.iter().enumerate() {
         if i == 0 {
-            if !cursor.starts_with(part) {
+            if !starts_with(cursor, part) {
                 return false;
             }
             cursor = &cursor[part.len()..];
         } else if i == last {
-            return cursor.ends_with(part);
+            return cursor.len() >= part.len()
+                && starts_with(&cursor[cursor.len() - part.len()..], part);
         } else if !part.is_empty() {
-            match cursor.find(part) {
-                Some(idx) => cursor = &cursor[idx + part.len()..],
+            match (0..=cursor.len().saturating_sub(part.len()))
+                .find(|&at| starts_with(&cursor[at..], part))
+            {
+                Some(at) => cursor = &cursor[at + part.len()..],
                 None => return false,
             }
         }

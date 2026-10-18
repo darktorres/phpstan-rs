@@ -129,9 +129,10 @@ pub struct RestrictedSymbolEntry {
     /// `fnmatch()`-style patterns (`*` matches `/` too, mirroring
     /// `ignore_errors::glob_matches`' own identical semantics) against a
     /// diagnostic's own already-relative file path, spelled with `/`
-    /// between its names on every platform (`diagnostics::report_path`;
-    /// on Windows a `\` in a pattern is a separator too) - a match allows
-    /// (drops) it. Empty means no path-based allowance at all.
+    /// between its names on every platform (`diagnostics::report_path`; a
+    /// `\` in a pattern is a separator too, as the original extension reads
+    /// one on every platform, `ignore_errors::path_glob_matches`) - a match
+    /// allows (drops) it. Empty means no path-based allowance at all.
     #[serde(default)]
     pub allow_in: Vec<String>,
     /// The inverse of `allow_in`: when non-empty, the item is reported
@@ -485,8 +486,7 @@ impl RestrictedSymbolEntry {
     /// zones, and an entry without one keeps the zone's unconditional
     /// behavior.
     pub(crate) fn allowed_at_path(&self, path: &str, params_gate: Option<bool>) -> bool {
-        let matches =
-            |p: &String| crate::ignore_errors::glob_matches(&diagnostics::report_spelling(p), path);
+        let matches = |p: &String| crate::ignore_errors::path_glob_matches(p, path);
         if self.allow_in.iter().any(matches) {
             return params_gate.unwrap_or(true);
         }
@@ -615,9 +615,8 @@ mod tests {
         assert!(!zoned(&[], &[]).allowed_at_path("src/Foo.php", None));
     }
 
-    #[cfg(windows)]
     #[test]
-    fn a_backslash_in_a_zone_is_a_separator_on_windows() {
+    fn a_backslash_in_a_zone_is_a_separator() {
         assert!(zoned(&["tests\\*.php"], &[]).allowed_at_path("tests/Foo.php", None));
         let e = zoned(&[], &["legacy\\*"]);
         assert!(!e.allowed_at_path("legacy/a.php", None));

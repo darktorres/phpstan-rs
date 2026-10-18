@@ -9,7 +9,10 @@
 //! finding survives incidental code shifts elsewhere in the same file. The
 //! file is spelled as PHPStan's baselines spell it, with `/` between its
 //! names on every platform (`diagnostics::report_path`), so a baseline made
-//! on one platform matches on another.
+//! on one platform matches on another. An entry's file is read as
+//! configured path text (`diagnostics::path_text_names`): a `\` in it is a
+//! separator, so an entry written with one, by hand or on Windows, names
+//! the file all the same.
 //!
 //! Stored as JSON rather than a `.neon` file - this project doesn't have a
 //! NEON parser and one isn't otherwise justified. The format is versioned
@@ -17,12 +20,11 @@
 //! still loads, its entries merged per new key, and `convert` rewrites it.
 
 use rustc_hash::FxHashMap;
-use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use diagnostics::{Diagnostic, report_path, report_spelling};
+use diagnostics::{Diagnostic, path_text_names, report_path, slash_spelling};
 use serde::{Deserialize, Serialize};
 
 /// The current on-disk format version.
@@ -113,50 +115,24 @@ fn read_file(path: &Path) -> io::Result<BaselineFile> {
     let json = fs::read_to_string(path)?;
     let invalid = |e: serde_json::Error| io::Error::new(io::ErrorKind::InvalidData, e);
     let value: serde_json::Value = serde_json::from_str(&json).map_err(invalid)?;
-    let mut file: BaselineFile = match value.get("version").and_then(serde_json::Value::as_u64) {
-        Some(v) if v == u64::from(VERSION) => serde_json::from_value(value).map_err(invalid)?,
-        Some(v) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unsupported baseline version {v}"),
-            ));
-        }
+    match value.get("version").and_then(serde_json::Value::as_u64) {
+        Some(v) if v == u64::from(VERSION) => serde_json::from_value(value).map_err(invalid),
+        Some(v) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported baseline version {v}"),
+        )),
         None => {
             let (includes, entries) = match serde_json::from_value(value).map_err(invalid)? {
                 BaselineFileV1::Entries(entries) => (Vec::new(), entries),
                 BaselineFileV1::Index { includes, entries } => (includes, entries),
             };
-            BaselineFile {
+            Ok(BaselineFile {
                 version: VERSION,
                 includes,
                 entries: merge(entries.into_iter().map(Entry::from).collect()),
-            }
-        }
-    };
-    file.entries = in_report_spelling(file.entries);
-    Ok(file)
-}
-
-/// `entries` with each file in the spelling the keys are made in
-/// (`diagnostics::report_spelling`): on Windows a `\` is read as `/`, which
-/// covers a baseline this tool wrote there with `\`. Entries whose keys
-/// then meet are merged.
-fn in_report_spelling(entries: Vec<Entry>) -> Vec<Entry> {
-    if !entries
-        .iter()
-        .any(|e| matches!(report_spelling(&e.file), Cow::Owned(_)))
-    {
-        return entries;
-    }
-    merge(
-        entries
-            .into_iter()
-            .map(|e| Entry {
-                file: report_spelling(&e.file).into_owned(),
-                ..e
             })
-            .collect(),
-    )
+        }
+    }
 }
 
 /// Entries with the same key folded into one, their counts added, in
@@ -401,18 +377,18 @@ pub fn filter(
     results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>,
     baseline: &Baseline,
 ) -> Vec<String> {
+    // Keyed by the files' slash spelling, which an entry's file shares with
+    // every file it names; a candidate is then confirmed by its own text.
     let mut by_message: FxHashMap<MessageKey, Vec<usize>> = FxHashMap::default();
     let mut by_identifier: FxHashMap<IdentifierKey, Vec<usize>> = FxHashMap::default();
     for (i, e) in baseline.entries.iter().enumerate() {
+        let file = slash_spelling(&e.file).into_owned();
         by_message
-            .entry((e.file.clone(), e.message.clone()))
+            .entry((file.clone(), e.message.clone()))
             .or_default()
             .push(i);
         if let Some(id) = &e.identifier {
-            by_identifier
-                .entry((e.file.clone(), id.clone()))
-                .or_default()
-                .push(i);
+            by_identifier.entry((file, id.clone())).or_default().push(i);
         }
     }
     let mut remaining: Vec<usize> = baseline.entries.iter().map(|e| e.count).collect();
@@ -420,29 +396,27 @@ pub fn filter(
     files.sort();
     let files: Vec<PathBuf> = files.into_iter().cloned().collect();
     for file in files {
-        let normalized = report_path(&normalize_path(&file)).into_owned();
+        let reported = report_path(&normalize_path(&file)).into_owned();
+        let key = slash_spelling(&reported).into_owned();
         let Some(diagnostics) = results.get_mut(&file) else {
             continue;
         };
         diagnostics.retain(|d| {
             let mut take = |candidates: Option<&Vec<usize>>| -> bool {
-                let Some(slot) = candidates
-                    .into_iter()
-                    .flatten()
-                    .copied()
-                    .find(|&i| remaining[i] > 0)
-                else {
+                let Some(slot) = candidates.into_iter().flatten().copied().find(|&i| {
+                    remaining[i] > 0 && path_text_names(&baseline.entries[i].file, &reported)
+                }) else {
                     return false;
                 };
                 remaining[slot] -= 1;
                 true
             };
-            let by_text = by_message.get(&(normalized.clone(), d.message.clone()));
+            let by_text = by_message.get(&(key.clone(), d.message.clone()));
             if take(by_text) {
                 return false;
             }
             if baseline.mode == MatchMode::Identifier
-                && take(by_identifier.get(&(normalized.clone(), d.identifier.to_string())))
+                && take(by_identifier.get(&(key.clone(), d.identifier.to_string())))
             {
                 return false;
             }
