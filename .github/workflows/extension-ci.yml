@@ -16,6 +16,7 @@ on:
       - "rust-toolchain.toml"
       - ".cargo/**"
       - ".gitattributes"
+      - ".github/actions/**"
       - ".github/workflows/extension-ci.yml"
   pull_request:
     paths:
@@ -28,6 +29,7 @@ on:
       - "rust-toolchain.toml"
       - ".cargo/**"
       - ".gitattributes"
+      - ".github/actions/**"
       - ".github/workflows/extension-ci.yml"
 
 # A pull request's newer run cancels the run it supersedes. A push gets a
@@ -78,10 +80,6 @@ jobs:
       - name: Check text out as committed
         run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # build.rs embeds vendor/phpstan-src/src; the other submodules are
-      # test corpora the build never reads.
-      - name: Fetch the phpstan-src submodule
-        run: git submodule update --init --depth 1 vendor/phpstan-src
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22.23.3"
@@ -90,21 +88,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: editors/vscode/package.json
-
-      # .cargo/config.toml links x86_64 Linux artifacts with mold.
-      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
-        if: ${{ runner.os == 'Linux' }}
-        with:
-          mold-version: 2.42.1
-
-      # The pinned toolchain, keyed by the file that pins it.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.rustup/toolchains
-          key: rustup-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
-      - name: Install the pinned toolchain
-        run: rustup install --no-self-update
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-rust
 
       - name: Build the phpstan-rs release binary
         run: cargo build --release --locked
