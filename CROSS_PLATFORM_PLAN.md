@@ -6,7 +6,8 @@
   tracks it.
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
-  round-2 follow-up (`8d81da46`) and R6 (`2526323b`, `3350adbd`). The rows are built in the
+  round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`)
+  and R5's second follow-up (`7a757a8e`). The rows are built in the
   order of the table below, one commit each, with a pathspec, since another session shares
   the checkout. R18 has one commit for each step, and R6 has a second for the rule its build
   found.
@@ -35,12 +36,9 @@
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
 - **Next**, in this order:
-  1. R6's corrections: the JSON report names a file with `/`, and the comments and records
-     that give PHPStan as the reason for a spelling give the run-time reason.
-  2. R5's second follow-up: a disabled server does nothing visible.
-  3. R7, with the configured paths: the case rule, the `\` in a configured root and the SQLite
+  1. R7, with the configured paths: the case rule, the `\` in a configured root and the SQLite
      path.
-  4. R8, redesigned: what a run can find.
+  2. R8, redesigned: what a run can find.
 
 ## Context
 
@@ -743,6 +741,41 @@ after R6's corrections.
   opened; each request answers empty; enabling publishes what the editor holds, including an
   edit made while disabled. The extension's unit test of the setting handlers.
 
+**Built** (`7a757a8e`).
+
+- `publish` sends only the clear of what the editor holds while disabled, and nothing for a
+  file it holds nothing for. Every trigger goes through it.
+- No work while disabled:
+  - `analyse_and_publish` is the save's, the load's and the republish step's one analysis, and
+    a disabled server runs none;
+  - `handle_open_or_change` and `handle_debounced_change` keep the document (`open_uris`,
+    `latest_text`, `file_versions`) and return;
+  - `handle_watched_files_changed` keeps the events (`deferred_file_events`), and
+    `sync_open_documents` does nothing.
+- Disabling clears every file in `published`, in path order. The old branch cleared the open
+  documents.
+- Enabling runs `catch_up`: the open documents go to the projects, the deferred events are
+  handled, and the full analysis publishes the result.
+- `FEATURE_REQUESTS`, the 13 requests that ask what the server knows of the code, answer
+  `null`. The existing test that asserted hover works while disabled now asserts the opposite,
+  and that it works again after enabling.
+- The extension:
+  - `changeNeedsNewProcess` (`config.ts`, no `vscode` import) says that `enable` and
+    `serverPath` need a new process and `configPath` does not;
+  - every start and stop goes through `serialized()`, one after the other;
+  - the prompt is gone. The README and the stale comments say what is true.
+- Tests:
+  - five server tests (`lsp/tests/disabled_server.rs`): a file nothing opened is cleared; an
+    open, an edit, a save and a watched file send nothing, change nothing in the project, and
+    are applied on enabling; a folder added while disabled is analysed on enabling; an edit
+    over the wire publishes nothing; all 13 requests answer `null`;
+  - the helpers three test files each defined (`as_values`, `publishes_for`, `diagnostics_of`,
+    `loaded_server`) moved to `helpers.rs`;
+  - the extension: four cases of `changeNeedsNewProcess` and three of `serialized`.
+- Checked here: four mutations (the debounced gate, the request gate, the clear of open files
+  only, the catch-up) each fail a test; clippy; the 294 `lsp::` tests; the extension's 41 unit
+  tests. The smoke test runs on the CI legs.
+
 ### R18. The gates job: every module has its crate, no edge breaks the layering, and the later steps pass
 
 Built after R5, in the place the table gives it. The user's decision with round 2's push: the
@@ -1056,6 +1089,16 @@ Linux output is unchanged.
   it is read.
 - **Test.** The Windows output test expects JSON in `/`, and a test on every platform holds
   JSON, checkstyle and JUnit to one spelling of a path.
+
+**Built** (`daca16d5`).
+
+- `write_json` keys `files` by `report_path` and sorts by that spelling.
+- The docs name the reason: `report_path`'s module doc, the `ignoreErrors` `path` and `allow_in`
+  docs, the baseline's module doc and the anonymous class names' doc. The checkstyle doc points
+  at the other machine formats.
+- Tests: JSON, checkstyle and JUnit name one path alike on every platform. A path that mixes
+  `/` and `\` is spelled with `/` on Windows and kept as it is on Unix.
+- Checked: clippy, `-D warnings`, and the 74 tests of the touched modules.
 
 ### R7. Case is matched as the root's directory matches it; configured paths
 
