@@ -71,7 +71,7 @@ noted):
 
 ### 2. The crate split — `CRATE_SPLIT_PLAN.md` and its companions
 
-Remaining after C1–C3 (`gates/module-graph.txt` line 218, the `finished` line):
+Remaining after C1–C3 (`gates/module-graph.txt` line 224, the `finished` line):
 
 - **C4**, REG-2 to REG-12, in the ledger's order (`PROFILE_DRILL_PIWIGO_LEDGER.md`
   §2.1 and §2.2). Part-built: REG-3, 4.1, 4.3, 4.4, 4.6, 4.8 and 16.1 are done,
@@ -262,14 +262,20 @@ paths, PHP-visible values, runtime behaviour, tests and build scripts. The plan'
 rows are built in the order of its table. Windows, macOS and aarch64 Linux are
 verified on CI legs, and each push is asked first.
 
-Done: R0 to R5 (the lockfile, the CLI test, the CI legs, the canonical form
-without Windows' verbatim prefix, prefixes hashed, ordered and owned by their
-kind, and URIs read and written by each platform's grammar), round 1, whose
-failures are classed in the plan's R2 with the rows they extend, and round 2's
-push. Open: R18, then R6 to R17, the rounds after them, and the batch's checks.
-R18 is level 2's work pulled forward: the gates job's module graph fails with
-27 problems that predate the plan, and the user chose to fix them in this
-batch, the forbidden edges refactored away.
+Done:
+
+- R0 to R5: the lockfile, the CLI test, the CI legs, the canonical form without
+  Windows' verbatim prefix, prefixes hashed, ordered and owned by their kind, and
+  URIs read and written by each platform's grammar.
+- Rounds 1 and 2. Their failures are classed in the plan's R2, with the rows they
+  extend.
+- R18, level 2's work pulled forward. The gates job's module graph failed with
+  27 problems that predate the plan, and the user chose to fix them in this
+  batch. The forbidden edges are refactored away, and the graph passes. The
+  job's later steps first ran in round 2, and their four failures are fixed too.
+
+Open: R5's round-2 follow-up, then R6 to R17, the rounds after them, and the
+batch's checks.
 
 ## Documents with no place in the stack
 

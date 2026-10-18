@@ -5,8 +5,9 @@
 - **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
   tracks it.
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
-  (`c6902324`) and R5 (`52844b07`). The rows are built in the order of the table below, one
-  commit each, with a pathspec, since another session shares the checkout.
+  (`c6902324`), R5 (`52844b07`) and R18 (eight commits, `0e908059` to `80b3bbd9`). The rows
+  are built in the order of the table below, one commit each, with a pathspec, since another
+  session shares the checkout. R18 has one commit for each step.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -24,9 +25,10 @@
     classed in R2's "Round 2's result", with the rows it extends: R5 (a follow-up), R13, R14
     and R18.
 - **The module graph is fixed in this batch** (the user's decision with round 2's push): R18,
-  built before R6. The 20 forbidden edges are refactored away, not listed as exceptions.
-  Round 2 reached the gates job's later steps, whose four failures go to R18 too.
-- **Next:** R18 (steps 1 and 2 are underway), then R5's round-2 follow-up, then R6.
+  built before R6. The 20 forbidden edges are refactored away, not listed as exceptions, and
+  the graph passes. Round 2 reached the gates job's later steps, and R18 fixes their four
+  failures too.
+- **Next:** R5's round-2 follow-up, then R6.
 
 ## Context
 
@@ -736,6 +738,68 @@ no row either.
 - Each step's moved code runs its own tests, listed when it is built.
 
 Linux output is unchanged: each step moves code and keeps what it does.
+
+**Built.** One commit for each step.
+
+1. `0e908059`: a module that only the `crate` row holds is reported, the topmost one only,
+   and the spec's parsing is unit-tested on a two-crate spec.
+2. `3773f312`: `file_id`, `shard`, `gate` and `allocator` have rows.
+   - `fixture_config` takes the schema its caller passes.
+   - The fixture harness and the runtime oracle build `app::config_schema()` once each.
+   - The gate runner passes it too.
+   - `allocator` is always built, with the binding in `allocator::mimalloc`, and the root
+     holds no function.
+3. `ac0010c9`: `syntax::completion` holds `Completion`, its rules, `Reach` and
+   `BlockCompletion`, and `syntax::ast` holds `is_truthy_literal`. The checker keeps
+   `ExitKind`, `ExitPoint` and `GotoState`.
+4. `392e75b3`: `checker::mentions` holds the two bits and the watch list.
+   - The project hands the checker the file's mentions.
+   - `WATCHED` is composed from the three layers' lists.
+   - Two tests hold the include-guard walk's function names and a rebind's spelling to the
+     list.
+5. `cbd9af81`: `set_current_file` takes the shown path, and the two rules read it.
+6. `27091848`: `phpstan-rs-path-bytes`.
+   - Its tests and the composer tests pass, 6 and 62, the 6 having been composer's.
+   - So do the package's `project::` and `pest` tests, 192 of them.
+   - The Windows type check lints the crate for both targets.
+7. `c1a7e224`: the phpdoc row, `CRATE_SPLIT_PLAN.md`'s diagram and §3.3, and the diagram's
+   `path-bytes`. The six allow lines go. The gate passes: 403 modules, 12,700 references and
+   236 listed exceptions.
+8. `80b3bbd9`: the later steps.
+   - The fuzz library's call.
+   - `hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]`.
+   - The package without `memchr`: no source, test or bench of it names the crate.
+   - rustls 0.23.46 in both lockfiles. `cargo update -p rustls` unlocks every package below
+     rustls, getrandom 0.4.3 among them (through aws-lc-sys's build dependencies), so it
+     also moved tempfile's `>=0.3, <0.5` edge to 0.3.4. That edge is set back. Each lockfile
+     changes only in rustls's version and checksum and the dropped `memchr`, and both pass
+     `--locked`.
+
+Checked here:
+
+- clippy on the workspace, `-D warnings`;
+- the lib suite (1200), the fixtures (3832), syntax (279) and the xtask tests;
+- `cargo xtask modgraph` and `arch`;
+- the gates job's later steps:
+  - the fuzz targets' check;
+  - `cargo hack check --workspace --each-feature --exclude-all-features`, 19 runs;
+  - `cargo machete`;
+  - `cargo deny check`, which reports `advisories ok`, with the duplicate-version warnings
+    as before.
+
+The test-name manifest compares against the one round 2's gates job saved, `52844b07`. Since
+that commit seven tests have moved, the allocator's one and path_bytes' six, and each has its
+line in `gates/test-renames/module-graph.txt`. No other module or test function has gone or
+been renamed. Round 3 runs the comparison.
+
+**Left as it is.** `cargo hack` gives one manifest warning under `dhat-heap`,
+`hotpath-alloc` and `system-allocator`: `libmimalloc-sys` is unused there.
+- The binding is built under every feature set, and used only when mimalloc is the
+  allocator.
+- Round 2 gave the same warning under `dhat-heap`.
+- A feature cannot remove a dependency, so dropping it there needs a `mimalloc` feature
+  among the defaults. That would change what `--no-default-features` builds.
+- It is a warning and not a failure, so it is not changed here.
 
 ### R6. Report paths spelled with `/` where PHPStan spells them so
 
