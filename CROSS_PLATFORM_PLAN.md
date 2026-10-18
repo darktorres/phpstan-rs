@@ -7,10 +7,11 @@
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
   round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
-  R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`) and R8 (`7d5bddd4`). The rows
-  are built in the order of the table below, one commit each, with a pathspec, since another
-  session shares the checkout. R18 has one commit for each step, R6 has a second for the rule
-  its build found, and R7 has a second for the case rule.
+  R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`), R8 (`7d5bddd4`, `06486da9`)
+  and R9 (`da9e86df`). The rows are built in the order of the table below, one commit each,
+  with a pathspec, since another session shares the checkout. R18 has one commit for each
+  step, R6 has a second for the rule its build found, R7 has a second for the case rule, and
+  R8 has a second for the files an environment change re-checks.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -35,7 +36,7 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** R9, discovery: unreadable spellings and listing misses.
+- **Next:** R10, the program runs on a thread whose stack it chooses.
 
 ## Context
 
@@ -1484,6 +1485,38 @@ functions.
 
 On Linux a miss is an absent file. Piwigo's misses are counted before and after: no new
 system call is expected.
+
+**Built** (`da9e86df`).
+
+- `path_of` returns `None` for bytes that are not UTF-8 where a path is text. The old reading
+  gave the empty path, which resolved to nothing too, while its doc said "read lossily". The
+  reading is `path_of_text`, which the tests compile on every platform, so Linux tests the
+  decision the Windows build takes. A Unix name stays its bytes.
+- A name its directory's listing lacks is resolved by the system, as a directory that cannot
+  be listed already was. The system finds the file where the directory folds case, and where
+  the listing is older than the file, and fails at once elsewhere. The plan placed the drop in
+  `entry_canonical`, but a miss there leaves the directory unlisted, and the file then goes to
+  the system. The drop was in `locate`, where the file's own name is looked up.
+- Tests (four, in `vendor_context_discovery`):
+  - a file written after its directory was listed is found, and one that neither the listing
+    nor the system has is not;
+  - a name, and a directory, spelled in another case name the file where the disk folds case
+    (in the spelling the disk has) and nothing where it does not. The expectation is what the
+    platform gives, as the case rule's probe test has it: found on the macOS and Windows legs,
+    absent here;
+  - bytes that are not UTF-8 name no file where a path is text.
+- Checked here:
+  - Two mutations (the miss dropped again, the lossy reading) each fail a test.
+  - Clippy, `-D warnings`, and the 17 discovery tests.
+  - The Windows reading of `path_of` type-checks, with its `cfg` flipped for one `cargo check`.
+  - The misses on Piwigo and monolog, counted by their system calls: `strace -c` on the gate
+    binaries of `7d5bddd4` and `da9e86df` gives the same `statx` and `readlink` counts for
+    both (Piwigo 16,977 and 3,171; monolog 10,707 and 1,516). No miss occurs in either, so
+    the change adds no call.
+  - The output is unchanged: monolog's, off, cold and warm, and Piwigo's JSON (171,439 bytes,
+    sha256 `8ff144c3…`).
+- Left to the legs: the folding disks. The two case tests assert what a folding disk gives
+  only on the macOS and Windows legs.
 
 ### R10. The program runs on a thread whose stack it chooses
 

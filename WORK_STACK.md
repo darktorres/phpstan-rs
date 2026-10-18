@@ -287,12 +287,15 @@ Done:
   sets with `set_include_path()`, `ini_set()`, `ini_alter()` and `chdir()`. A
   candidate outside the project, or below a `vendor` that `composer install` has
   not built, counts as found.
+- R9: discovery names no file for bytes that are not UTF-8 where a path is text, and
+  asks the system for a name its directory's listing lacks, which finds it where the
+  disk folds case.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
 path and the include rule. All four are built.
 
-Open: R9 to R17, the rounds after them, and the batch's checks.
+Open: R10 to R17, the rounds after them, and the batch's checks.
 
 ## Documents with no place in the stack
 
