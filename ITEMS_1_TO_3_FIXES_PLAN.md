@@ -50,8 +50,10 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
     hand-over (its Built). Placing the walks' results inside the walk's scope (`8f93dd07`)
     gained nothing and was reverted (`c8505326`). The Piwigo output was the oracle's in every
     run, off and warm.
+  - R5 (`0fb1a4de`): −46.9 M off, with no wall change beyond the noise (p = 0.601). The use
+    sites' target map holds the file's number too (its Built).
 
-  R5 is next.
+  R8 is next.
 - **Builds and measurement runs need no approval** (since 2026-10-17). Heavy jobs run one at
   a time.
 - **Each file and line cited here is as read at `aa896697`,** the code before R1. The rows
@@ -62,8 +64,9 @@ CACHE-12, and `WORK_STACK.md`'s level 9 tracks it.
   `dir_listings.rs` and `vendor.rs`, with `PathHash` and `path_hash` now in the composer
   crate's `hashed_path.rs`, R3 `walk.rs`, R4 `session.rs`, R6 `vendor.rs`, and R14
   `hashed_path.rs`, `vendor.rs`, `walk.rs` and `session.rs`, R13 `vendor.rs`,
-  `crates/composer/src/lib.rs`, `file_cache.rs` and `session.rs`, and R10 `walk.rs` and
-  `session.rs`.
+  `crates/composer/src/lib.rs`, `file_cache.rs` and `session.rs`, R10 `walk.rs` and
+  `session.rs`, and R5 `use_sites.rs`, `file_tables.rs`, `file_table.rs`, `project.rs`,
+  `session.rs`, `lsp.rs` and `file_id.rs`.
 - **This file and `scripts/` stand alone.** The profiles and binaries it was read from (under
   `~/.cache/prs-profile/`) are not kept: every number it uses is written here, and every
   script it uses is in `scripts/` at the repository root.
@@ -935,6 +938,19 @@ and `use_site_index.rs` (a file's use sites, and dropping them when the file is 
 
 **Measure.** Off callgrind: `file_tables::bucket` and `judge_property_types`.
 
+**Built** as `0fb1a4de`: −46.9 M off, with no wall change beyond the noise (p = 0.601).
+`Path::hash` fell from 50.4 M to 21.0 M: the merge's routing and the judgement's filter, 13.65 M
+each, and the `checked` inserts' 2.2 M are gone, and with them two lookups of each checked
+file's number. Where it differs from the Change:
+
+- `by_target`'s sites hold the file's number too, not only `by_file`'s keys, so no use site
+  holds a path; the editor's references and rename read each site's path from the table.
+- `check_files` finds each path's number once, and carries it through the size, the judgement
+  and `finish_diagnostics`, which looked it up by the path again.
+
+The `Path::hash` left on the check's path is R8's: `run_finishing_passes`' result set 12.6 M
+and the diagnostics map's 8.4 M. The ledger's LOAD-8.5 has the numbers.
+
 ### 13. R8: identity is a `FileId` inside the scope that owns the table, and the resolved path where the scope spans tables
 
 *LOAD-8.8. An Ir row. Needs R5.*
@@ -1205,6 +1221,8 @@ ours is noted, and a run it distorts is taken again.
 - Done with R10: LOAD-8.10's row, with the stub mark, the merge order, the doc comments the
   check parses again and the revert; its row in §1's table; the stale comment at
   `session.rs:1081`, replaced.
+- Done with R5: LOAD-8.5's row, with the target map's numbers; its row in §1's table;
+  LOAD-8.8 is READY.
 - Left, with the rows: §1's range rows, as each row lands.
 - Another session shares the checkout: `git status` and `git log` before starting; commit with
   a pathspec; remove scratch worktrees once they are recorded.
