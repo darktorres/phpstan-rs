@@ -28,14 +28,14 @@ chmod +x phpstan-rs-x86_64-unknown-linux-gnu
 
 ### Linux glibc compatibility
 
-The two Linux binaries are built on GitHub Actions' `ubuntu-24.04`
-runner image (glibc 2.39) - dynamically linking glibc means they will
-not run on a distro whose own glibc is older than that (e.g. Ubuntu
-20.04/22.04, Debian 11, RHEL 8/9). If GitHub later deprecates this
-runner image, `.github/workflows/release.yml` is re-pinned to whatever
-the current oldest-supported LTS is, and this note is updated to match
-the new glibc floor at that time - it is not meant to stay accurate
-indefinitely without a matching workflow change.
+The two Linux binaries are built on GitHub Actions' `ubuntu-24.04` and
+`ubuntu-24.04-arm` runner images (glibc 2.39) - dynamically linking
+glibc means they will not run on a distro whose own glibc is older than
+that (e.g. Ubuntu 20.04/22.04, Debian 11, RHEL 8/9). If GitHub later
+deprecates these runner images, `.github/workflows/release.yml` is
+re-pinned to whatever the current oldest-supported LTS is, and this
+note is updated to match the new glibc floor at that time - it is not
+meant to stay accurate indefinitely without a matching workflow change.
 
 ### macOS Gatekeeper
 

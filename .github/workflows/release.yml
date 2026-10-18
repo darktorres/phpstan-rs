@@ -1,12 +1,9 @@
 name: Release
 
-# Triggered by a `v*` tag push for a real release, plus `workflow_dispatch`
-# for a manual dry run against any branch (no tag needed) - recommended
-# for validating all 5 matrix legs before ever wiring this to a real tag,
-# since none of the cross-compile/toolchain assumptions below have been
-# verified by an actual CI run yet (this repo has no GitHub remote at the
-# time this workflow was authored - see VSCODE_EXTENSION_PLAN.md's own
-# open-risks note on item 4.2).
+# A `v*` tag push builds the five binaries, runs each, and uploads them to
+# that tag's release. `workflow_dispatch` is a dry run on any branch: the
+# same builds and runs, and an upload that fails harmlessly, since there is
+# no release to upload to.
 on:
   push:
     tags:
@@ -19,93 +16,55 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Two Linux legs on an EXPLICITLY PINNED older Ubuntu LTS image
-          # (not `ubuntu-latest`) - this is what actually addresses glibc
-          # symbol-versioning skew against an end user's own, possibly
-          # older distro. `ubuntu-24.04` was the current actively-
-          # supported LTS at the time this workflow was authored;
-          # `ubuntu-22.04` had just entered its own deprecation window
-          # (GitHub deprecates runner images on a rolling schedule) - if
-          # this image is itself later deprecated, re-pin to whatever
-          # GitHub's current oldest-supported LTS is at that time, and
-          # update the minimum-glibc claim in README.md's own
-          # "Installing a pre-built binary" section to match.
+          # The Linux legs run on an explicitly pinned Ubuntu LTS image, not
+          # `ubuntu-latest`: its glibc is the oldest the binaries run on
+          # (README, "Linux glibc compatibility"). When GitHub deprecates
+          # the image, re-pin both legs to the oldest LTS it still supports
+          # and update that note to match.
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            native: true
-          - os: ubuntu-24.04
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            native: false
-          # macOS and Windows need native/first-party runners regardless
-          # of this crate's own dependencies - a generic Linux cross
-          # image carries neither Apple's proprietary SDK nor the MSVC
-          # toolchain. `pcre2-sys` (this crate's own optional, on-by-
-          # default `pcre-validate` feature) is the ADDITIONAL, separate
-          # reason the two Linux legs need their own C cross-toolchain
-          # setup below - it vendors and compiles real PCRE2 C source via
-          # `cc-rs` whenever no system libpcre2/pkg-config match exists.
           - os: macos-26
             target: aarch64-apple-darwin
-            native: true
+          # Built on the arm64 runner, and run there under Rosetta 2.
           - os: macos-26
             target: x86_64-apple-darwin
-            native: false
           - os: windows-2025-vs2026
             target: x86_64-pc-windows-msvc
-            native: true
     runs-on: ${{ matrix.os }}
     steps:
+      # Windows images check text out with CRLF. .gitattributes keeps this
+      # repository's files LF, but not the phpstan-src submodule's stubs,
+      # which the build embeds.
+      - name: Check text out as committed
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # build.rs embeds vendor/phpstan-src/src; the other submodules are
       # test corpora the build never reads.
       - name: Fetch the phpstan-src submodule
         run: git submodule update --init --depth 1 vendor/phpstan-src
 
-      # .cargo/config.toml links x86_64 Linux artifacts (including the
-      # cross leg's own host-side build scripts) with mold.
+      # .cargo/config.toml links x86_64 Linux artifacts with mold.
       - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
-        if: ${{ runner.os == 'Linux' }}
+        if: ${{ runner.os == 'Linux' && runner.arch == 'X64' }}
         with:
           mold-version: 2.42.1
 
-      # Runner images ship rustup already - this only adds the
-      # non-native target; the native one and the pinned nightly toolchain
-      # itself come from the checked-in rust-toolchain.toml, which every
-      # `cargo`/`rustup` invocation below picks up automatically.
-      - name: Add the cross-compilation target
-        if: ${{ !matrix.native }}
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Install an aarch64 cross C toolchain (Linux only)
-        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
-        run: |
-          # Release-pocket versions, which the archive keeps for the
-          # series' lifetime.
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            gcc-aarch64-linux-gnu=4:13.2.0-7ubuntu1 \
-            cpp-aarch64-linux-gnu=4:13.2.0-7ubuntu1 \
-            gcc-13-aarch64-linux-gnu=13.2.0-23ubuntu4cross1 \
-            cpp-13-aarch64-linux-gnu=13.2.0-23ubuntu4cross1 \
-            gcc-13-aarch64-linux-gnu-base=13.2.0-23ubuntu4cross1 \
-            libgcc-13-dev-arm64-cross=13.2.0-23ubuntu4cross1 \
-            binutils-aarch64-linux-gnu=2.42-4ubuntu2
-
-      - name: Point pcre2-sys's C build and the linker at the cross toolchain
-        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
-        run: |
-          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+      # rust-toolchain.toml pins the nightly (and its components);
+      # `rustup install` installs it without updating rustup itself.
+      - name: Install the pinned toolchain
+        run: rustup install --no-self-update
+      # Every other leg builds for its runner's own architecture.
+      - name: Add the x86_64 macOS target
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+        run: rustup target add x86_64-apple-darwin
+      - name: Install Rosetta 2 where the image lacks it
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
-        # If the aarch64 cross C toolchain above ever proves flaky/
-        # unavailable on the pinned runner image, `--no-default-features`
-        # is a documented fallback HERE ONLY (dropping just the
-        # regexp.pattern PCRE2-backed diagnostic) - it does NOT address
-        # the separate glibc-skew concern the runner-image pin above
-        # already handles, and must not be reached for by reflex if this
-        # step ever fails for an unrelated reason.
 
       - name: Package the binary
         shell: bash
@@ -124,22 +83,39 @@ jobs:
           fi
           cp "$src" "$dest"
           gzip -k "$dest"
-          sha256sum "$dest.gz" > "$dest.gz.sha256"
+          # macOS has no sha256sum; shasum writes the same line.
+          if command -v sha256sum > /dev/null; then
+            sha256sum "$dest.gz" > "$dest.gz.sha256"
+          else
+            shasum -a 256 "$dest.gz" > "$dest.gz.sha256"
+          fi
 
-      - name: Smoke-check the native-arch binary
-        if: matrix.native
+      # The packaged binary prints its version, and checks one file against
+      # the stubs it embeds.
+      - name: Run the binary
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          bin_name="phpstan-rs"
+          bin="./phpstan-rs-$TARGET"
           if [[ "$TARGET" == *windows* ]]; then
-            bin_name="phpstan-rs.exe"
+            bin="$bin.exe"
           fi
-          version_output="$("./target/$TARGET/release/$bin_name" --version)"
+          run=("$bin")
+          if [[ "$TARGET" == x86_64-apple-darwin ]]; then
+            run=(arch -x86_64 "$bin")
+          fi
+          version_output="$("${run[@]}" --version)"
           echo "$version_output"
           echo "$version_output" | grep -Eq '^phpstan-rs [0-9]+\.[0-9]+\.[0-9]+$'
+          project="$RUNNER_TEMP/smoke"
+          mkdir -p "$project"
+          printf '<?php strlen(42);\n' > "$project/a.php"
+          report="$("${run[@]}" check-project --no-composer --format json "$project")"
+          echo "$report"
+          echo "$report" | jq -e '.totals == {"files_checked": 1, "diagnostics": 1}
+            and [.files[].messages[].identifier] == ["argument.type"]'
 
       - name: Upload the release asset
         env:
@@ -156,8 +132,6 @@ jobs:
           fi
           gh release upload "$REF_NAME" "$bin_name.gz" "$bin_name.gz.sha256" \
             --repo "$REPOSITORY" --clobber
-        # A `workflow_dispatch` dry run (no real tag) has no matching
-        # release to upload to - this step is expected to fail harmlessly
-        # in that mode; the point of a dry run is validating the build/
-        # smoke-check steps above, not the upload itself.
+        # A `workflow_dispatch` dry run has no release to upload to, so this
+        # step fails there; the run is judged by the steps above.
         continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}

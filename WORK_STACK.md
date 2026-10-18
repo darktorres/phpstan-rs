@@ -262,7 +262,8 @@ paths, PHP-visible values, runtime behaviour, tests and build scripts. The plan'
 rows R0 to R17 are built in its order. Windows, macOS and aarch64 Linux are
 verified on CI legs, and each push is asked first.
 
-Open: every row (R0 to R17), and the batch's checks.
+Done: R0 to R2, the lockfile, the CLI test and the CI legs. Open: round 1 (the
+first push, asked), R3 to R17, and the batch's checks.
 
 ## Documents with no place in the stack
 

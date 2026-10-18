@@ -4,8 +4,10 @@
 
 - **The plan is approved** (2026-10-18), with the four decisions below. `WORK_STACK.md`'s level 9
   tracks it.
-- **No row is built yet.** The rows are built in the order of the table below, one commit each,
-  with a pathspec, since another session shares the checkout.
+- **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`) and R2 (`.gitattributes`, the `platforms` job and
+  the release and extension workflows' changes). The rows are built in the order of the table
+  below, one commit each, with a pathspec, since another session shares the checkout.
+- **Next:** round 1, the push that runs the legs, asked first. Then R3.
 
 ## Context
 
@@ -193,14 +195,43 @@ The message keeps the status and the stderr.
     - `cargo test --profile gate --test fixtures`;
     - R14's dhat check.
   - The `gates` job stays Linux's, with xtask, deny, machete and hack.
-- `.gitattributes`: `* text=auto eol=lf`, with the binary types marked binary. The repository's
-  own files check out LF everywhere.
-- `extension-ci.yml` and `release.yml`: their Windows legs set `core.autocrlf false` before
-  checkout, so the binary they build embeds Linux's bytes. The stale comments go.
+- `.gitattributes`: `* text=auto eol=lf`. The repository's own files check out LF everywhere.
+  - The one file committed with CRLF on purpose, the fixture
+    `the_single_newline_after_a_closing_tag_is_part_of_the_tag__1.php` (`?>\r\n`), is `-text`.
+  - No binary type is listed: the repository tracks no binary file. The only files `text=auto`
+    reads as binary are two gate approvals whose lone CRs it leaves as they are.
+  - Renormalising changes no blob: every other tracked file is LF or has no line ending.
+  - No tracked name is one a Windows or macOS checkout cannot hold: no reserved device name, no
+    forbidden character, no trailing dot or space, and no two paths that differ only in case,
+    here or in the submodule. The longest path is 200 characters, 227 under the runner's
+    `D:\a\phpstan-rs\phpstan-rs\`.
+- `extension-ci.yml` and `release.yml`: every leg sets `core.autocrlf false` before checkout,
+  since `.gitattributes` does not reach the submodule's 65 `.stub` files. The binary they build
+  embeds Linux's bytes. The stale comments go.
+- The toolchain cache key adds `runner.arch` in every workflow, since an x64 and an arm64 Linux
+  leg now share `runner.os`.
 - `release.yml`:
   - The aarch64 Linux leg builds natively on `ubuntu-24.04-arm` and runs its binary. This
-    replaces the cross toolchain step.
-  - The x86_64 macOS binary runs under Rosetta on the arm64 runner (`arch -x86_64`).
+    replaces the cross toolchain step. The image's glibc is 2.39, as `ubuntu-24.04`'s, and the
+    README's note names both images.
+  - The x86_64 macOS binary runs under Rosetta on the arm64 runner (`arch -x86_64`). The image's
+    software list does not name Rosetta 2, so the leg installs it when `arch -x86_64
+    /usr/bin/true` fails.
+  - Every leg runs its packaged binary: `--version`, then `check-project --no-composer --format
+    json` over `<?php strlen(42);`, which must report one `argument.type` diagnostic, from the
+    embedded stubs.
+  - The checksum uses `shasum -a 256` where `sha256sum` is missing: the macOS image has no GNU
+    coreutils. The line is the same.
+  - The pinned toolchain is installed by its own step, as in the other workflows. mold is set up
+    on x86_64 Linux only, the one target `.cargo/config.toml` links with it.
+- `extension-ci.yml`:
+  - Its path filters add what the binary embeds (`vendor/phpstan-src`,
+    `vendor/phpstorm-stubs/**`) and `.gitattributes`.
+  - A failed smoke run prints the last VS Code session's logs. The language server's channel
+    holds the server's stderr and, since the test sets `phpstan-rs.trace.server` to `verbose`,
+    every message with its parameters. The smoke step sets `RUST_BACKTRACE=1`.
+  - When no diagnostics arrive, the test's failure names the document's URI and every URI that
+    has diagnostics.
 
 **Round 1, the inventory.** The first push, asked, gives every failure on the legs. The run is
 recorded here by class, and each class goes to the row that owns it, or to a new one. From the
@@ -212,7 +243,8 @@ code, these are expected:
   - `/`-spelled report tests (R6);
   - `stub_index` (R14);
   - temp paths spelled with the 8.3 short name (`RUNNER~1`) against canonical ones (R13);
-  - the smoke round trip (R3, R5).
+  - the smoke round trip (R3, R5);
+  - the dhat build: the frame-pointer walk calls `pthread_getattr_np` (R14).
 - macOS: temp paths under `/var/folders` against canonical `/private/var/…` ones (R13).
 
 ### R3. One canonical form of a path, without Windows' verbatim prefix
@@ -592,6 +624,9 @@ are unchanged.
   - the pinned nightly (`rust-toolchain.toml`);
   - clang and mold on x86_64 Linux (`.cargo/config.toml`), and how to build without them;
   - where the caches are on each platform.
+- README's "Installing a pre-built binary" verifies the checksum on each platform: `sha256sum -c`
+  on Linux, `shasum -a 256 -c` on macOS, and PowerShell's `Get-FileHash` on Windows, whose
+  output is compared with the `.sha256` file's hash.
 
 ### R16. `path_bytes` reads Windows paths from their bytes
 

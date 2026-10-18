@@ -62,6 +62,9 @@ describe("phpstan-rs activation", function () {
       requireTestBinary(),
       vscode.ConfigurationTarget.Global,
     );
+    // Every message, with its parameters, goes to the server's output
+    // channel, whose log CI prints when a test fails.
+    await config.update("trace.server", "verbose", vscode.ConfigurationTarget.Global);
   });
 
   after(() => {
@@ -126,10 +129,23 @@ describe("phpstan-rs activation", function () {
     const exports = ext!.exports as { getClientState: () => State | undefined };
     await waitUntil(() => exports.getClientState() === State.Running, 10_000);
 
-    await waitUntil(
-      () => vscode.languages.getDiagnostics(doc.uri).length > 0,
-      30_000,
-    );
+    try {
+      await waitUntil(
+        () => vscode.languages.getDiagnostics(doc.uri).length > 0,
+        30_000,
+      );
+    } catch {
+      // Diagnostics published under another spelling of the file's URI
+      // land on a document of their own.
+      const published = vscode.languages
+        .getDiagnostics()
+        .filter(([, found]) => found.length > 0)
+        .map(([uri, found]) => `${uri.toString()} (${found.length})`);
+      assert.fail(
+        `no diagnostics arrived for ${doc.uri.toString()} within 30 s; ` +
+          `URIs with diagnostics: ${published.length > 0 ? published.join(", ") : "none"}`,
+      );
+    }
     const diagnostics = vscode.languages.getDiagnostics(doc.uri);
     assert.ok(
       diagnostics.length > 0,

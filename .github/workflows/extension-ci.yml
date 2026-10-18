@@ -1,28 +1,33 @@
 name: Extension CI
 
-# Not yet exercised by a real CI run (this repo has no GitHub remote at
-# the time this workflow was authored - same caveat as release.yml).
-# Path filters cover all Rust source, not just editors/vscode/: the LSP
-# the extension drives depends on the whole analyzer, so a Rust-side
-# regression anywhere should fail this job as loudly as a TypeScript one.
+# Path filters cover everything the server binary is built from, not just
+# editors/vscode/: the LSP the extension drives depends on the whole
+# analyzer and the stubs it embeds, so a regression anywhere there should
+# fail this job as loudly as a TypeScript one.
 on:
   push:
     paths:
       - "editors/vscode/**"
       - "crates/**"
+      - "vendor/phpstan-src"
+      - "vendor/phpstorm-stubs/**"
       - "**/Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".cargo/**"
+      - ".gitattributes"
       - ".github/workflows/extension-ci.yml"
   pull_request:
     paths:
       - "editors/vscode/**"
       - "crates/**"
+      - "vendor/phpstan-src"
+      - "vendor/phpstorm-stubs/**"
       - "**/Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".cargo/**"
+      - ".gitattributes"
       - ".github/workflows/extension-ci.yml"
 
 jobs:
@@ -61,6 +66,11 @@ jobs:
         os: [ubuntu-24.04, macos-26, windows-2025-vs2026]
     runs-on: ${{ matrix.os }}
     steps:
+      # Windows images check text out with CRLF. .gitattributes keeps this
+      # repository's files LF, but not the phpstan-src submodule's stubs,
+      # which the build embeds.
+      - name: Check text out as committed
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # build.rs embeds vendor/phpstan-src/src; the other submodules are
       # test corpora the build never reads.
@@ -85,7 +95,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.rustup/toolchains
-          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+          key: rustup-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
       - name: Install the pinned toolchain
         run: rustup install --no-self-update
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -127,6 +137,7 @@ jobs:
         shell: bash
         env:
           RUNNER_OS: ${{ runner.os }}
+          RUST_BACKTRACE: "1"
         run: |
           set -euo pipefail
           # `@vscode/test-electron` launches a real (headless-incapable)
@@ -137,3 +148,18 @@ jobs:
           else
             bun run test:smoke
           fi
+
+      # The last VS Code session's logs. The language server's channel holds
+      # the server's stderr and the traced messages.
+      - name: Print the smoke test's logs
+        if: ${{ failure() }}
+        working-directory: editors/vscode
+        shell: bash
+        run: |
+          set -euo pipefail
+          session="$(find .vscode-test/user-data/logs -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          find "$session" -name '*.log' -print0 | while IFS= read -r -d '' log; do
+            echo "::group::$log"
+            cat "$log"
+            echo "::endgroup::"
+          done
