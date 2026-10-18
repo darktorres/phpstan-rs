@@ -322,7 +322,7 @@ fn read_entry<T: serde::de::DeserializeOwned>(key: &Key) -> Option<T> {
                 .and_then(|modified| modified.elapsed().ok())
                 .is_some_and(|age| age > REFRESH_AFTER)
             {
-                let _ = file.set_modified(SystemTime::now());
+                refresh_last_use(&key.file);
             }
             Some(cached)
         }
@@ -333,6 +333,17 @@ fn read_entry<T: serde::de::DeserializeOwned>(key: &Key) -> Option<T> {
             None
         }
     }
+}
+
+/// Sets the last use of the entry at `path` to now, which is the order
+/// eviction goes in. A time is set through a handle opened for writing, as
+/// Windows requires and a read does not open, so the entry is opened again.
+/// An entry that can't be refreshed keeps the age it had.
+fn refresh_last_use(path: &Path) {
+    let _ = fs::File::options()
+        .write(true)
+        .open(path)
+        .and_then(|file| file.set_modified(SystemTime::now()));
 }
 
 /// The payload of an entry that is whole.
@@ -535,5 +546,60 @@ mod tests {
 
     fn payload_of(bytes: &[u8]) -> Option<&[u8]> {
         payload(bytes)
+    }
+
+    /// The time the entry at `path` was last used.
+    fn last_use(path: &Path) -> SystemTime {
+        fs::metadata(path).unwrap().modified().unwrap()
+    }
+
+    fn set_last_use(path: &Path, time: SystemTime) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    }
+
+    #[test]
+    fn reading_an_entry_older_than_the_refresh_age_moves_its_last_use_to_now() {
+        let dir = scratch("refresh_old");
+        let key = Key {
+            file: dir.join("entry.bin"),
+        };
+        write_entry(&key, &vec![1u32, 2, 3]);
+        let old = SystemTime::now() - 2 * REFRESH_AFTER;
+        set_last_use(&key.file, old);
+        let read: Option<Vec<u32>> = read_entry(&key);
+        assert_eq!(read, Some(vec![1, 2, 3]));
+        // Moved by nearly the whole age, to a time that is now.
+        let moved = last_use(&key.file);
+        assert!(moved > old + REFRESH_AFTER, "{moved:?} against {old:?}");
+        assert!(moved.elapsed().unwrap() < REFRESH_AFTER);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reading_a_recent_entry_leaves_its_last_use_as_it_was() {
+        let dir = scratch("refresh_recent");
+        let key = Key {
+            file: dir.join("entry.bin"),
+        };
+        write_entry(&key, &vec![1u32, 2, 3]);
+        let recent = SystemTime::now() - REFRESH_AFTER / 2;
+        set_last_use(&key.file, recent);
+        let read: Option<Vec<u32>> = read_entry(&key);
+        assert_eq!(read, Some(vec![1, 2, 3]));
+        assert_eq!(last_use(&key.file), recent);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_entry_that_is_not_there_has_nothing_to_refresh() {
+        let dir = scratch("refresh_missing");
+        refresh_last_use(&dir.join("absent.bin"));
+        assert!(!dir.join("absent.bin").exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -21,6 +21,7 @@ crc32fast.workspace = true
 clap = { version = "=4.6.7", features = ["derive"] }
 crossbeam-channel = "=0.5.17"
 dhat = { path = "../../patches/dhat", optional = true }
+dirs = "=7.0.0"
 hashbrown.workspace = true
 hotpath.workspace = true
 imbl.workspace = true

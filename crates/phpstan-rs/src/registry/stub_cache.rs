@@ -8,6 +8,7 @@
 //! decode is a bug, and says so. `PHPSTAN_RS_NO_STUB_CACHE`
 //! turns the cache off.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -29,19 +30,34 @@ pub(super) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, 
     postcard::from_bytes(bytes).map_err(|e| e.to_string())
 }
 
-/// The cache directory: `PHPSTAN_RS_CACHE_DIR`, else `phpstan-rs` under
-/// `XDG_CACHE_HOME` or `~/.cache`; `None` when the cache is off.
+/// The cache directory: `PHPSTAN_RS_CACHE_DIR`, else `phpstan-rs` in the
+/// platform's cache directory (`dirs::cache_dir`: `XDG_CACHE_HOME` or
+/// `~/.cache` on Linux, `~/Library/Caches` on macOS, the local application
+/// data folder on Windows); `None` when the cache is off or the platform has
+/// none.
 pub(crate) fn cache_dir() -> Option<PathBuf> {
-    if std::env::var_os("PHPSTAN_RS_NO_STUB_CACHE").is_some() {
+    cache_dir_of(
+        std::env::var_os("PHPSTAN_RS_NO_STUB_CACHE").is_some(),
+        std::env::var_os("PHPSTAN_RS_CACHE_DIR"),
+        dirs::cache_dir,
+    )
+}
+
+/// `cache_dir` with the environment given: whether the cache is switched
+/// off, the directory chosen, and the platform's cache directory, asked for
+/// only when none is chosen.
+fn cache_dir_of(
+    off: bool,
+    chosen: Option<OsString>,
+    platform: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    if off {
         return None;
     }
-    if let Some(dir) = std::env::var_os("PHPSTAN_RS_CACHE_DIR") {
-        return Some(PathBuf::from(dir));
+    match chosen {
+        Some(dir) => Some(PathBuf::from(dir)),
+        None => Some(platform()?.join("phpstan-rs")),
     }
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(base.join("phpstan-rs"))
 }
 
 /// A cache directory, and whether it can be written: found once, at the
@@ -205,6 +221,71 @@ fn prune(dir: &std::path::Path, name: &str, keep: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
+    use super::cache_dir_of;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    /// A platform that has no cache directory.
+    fn none() -> Option<PathBuf> {
+        None
+    }
+
+    #[test]
+    fn the_cache_is_off_whatever_else_is_set() {
+        let platform = || Some(PathBuf::from("/platform"));
+        assert_eq!(cache_dir_of(true, None, platform), None);
+        assert_eq!(
+            cache_dir_of(true, Some(OsString::from("/chosen")), platform),
+            None
+        );
+    }
+
+    #[test]
+    fn a_chosen_directory_is_used_as_it_is_and_the_platform_is_not_asked() {
+        let asked = || -> Option<PathBuf> { panic!("the platform is asked") };
+        assert_eq!(
+            cache_dir_of(false, Some(OsString::from("/chosen")), asked),
+            Some(PathBuf::from("/chosen"))
+        );
+    }
+
+    #[test]
+    fn without_a_choice_the_cache_is_phpstan_rs_in_the_platforms_cache_directory() {
+        assert_eq!(
+            cache_dir_of(false, None, || Some(PathBuf::from("/platform"))),
+            Some(PathBuf::from("/platform").join("phpstan-rs"))
+        );
+        assert_eq!(cache_dir_of(false, None, none), None);
+    }
+
+    /// The platform's cache directory is where its convention puts it.
+    #[test]
+    fn the_platforms_cache_directory_follows_its_convention() {
+        let platform = dirs::cache_dir().expect("the platform has a cache directory");
+        assert!(platform.is_absolute(), "{}", platform.display());
+        #[cfg(target_os = "macos")]
+        if let Some(home) = std::env::var_os("HOME") {
+            assert_eq!(platform, PathBuf::from(home).join("Library/Caches"));
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let xdg = std::env::var_os("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .filter(|dir| dir.is_absolute());
+            let expected = xdg.or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache"))
+            });
+            if let Some(expected) = expected {
+                assert_eq!(platform, expected);
+            }
+        }
+        #[cfg(windows)]
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            // The same folder, whichever way the environment spells it.
+            assert!(same_file::is_same_file(&platform, local).unwrap());
+        }
+    }
+
     /// The key hashes every path the stub build reads: a path read but not
     /// hashed lets an edit there run on a stale cache.
     #[test]
