@@ -28,7 +28,6 @@ lsp-server = "=0.10.0"
 lsp-types = "=0.97.0"
 # `extended` declares the options API (`mi_option_set`); the C build is the same.
 libmimalloc-sys = { workspace = true, features = ["extended"] }
-memchr.workspace = true
 path-bytes.workspace = true
 pcre2-sys = { version = "=0.2.10", optional = true }
 rayon = "=1.12.0"
@@ -47,7 +46,7 @@ default = ["pcre-validate"]
 # Leaves the allocator to the system's: for comparing it with mimalloc.
 system-allocator = []
 hotpath = ["hotpath/hotpath"]
-hotpath-alloc = ["hotpath/hotpath-alloc"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 # One-shot heap profiler (https://docs.rs/dhat): swaps in `dhat::Alloc` as
 # the global allocator and dumps a `dhat-heap.json` on clean exit, showing
 # which call sites hold live bytes at peak (not just alloc/dealloc churn,
