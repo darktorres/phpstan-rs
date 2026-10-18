@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use crate::{path_text_names, report_path, slash_spelling};
+use crate::{CaseRule, path_text_names, report_path, slash_spelling};
 
 #[test]
 fn a_path_with_slashes_is_spelled_as_it_is() {
@@ -64,4 +64,55 @@ fn configured_text_and_what_it_names_have_one_slash_spelling() {
         assert!(path_text_names(configured, reported));
         assert_eq!(slash_spelling(configured), slash_spelling(reported));
     }
+}
+
+#[test]
+fn an_exact_rule_compares_text_as_it_is() {
+    assert!(matches!(
+        CaseRule::Exact.key("Src/Foo.php"),
+        Cow::Borrowed("Src/Foo.php")
+    ));
+    assert_ne!(CaseRule::Exact.key("Src"), CaseRule::Exact.key("src"));
+}
+
+#[test]
+fn a_folded_rule_gives_one_key_to_the_spellings_of_a_name() {
+    for (a, b) in [
+        ("Src/Foo.PHP", "src/foo.php"),
+        ("École", "école"),
+        ("ÉCOLE", "école"),
+        ("ΟΔΟΣ", "οδος"),
+        ("ΟΔΟΣ", "οδοσ"),
+        ("\u{212A}", "k"),
+    ] {
+        assert_eq!(CaseRule::Folded.key(a), CaseRule::Folded.key(b), "{a} {b}");
+    }
+}
+
+#[test]
+fn a_folded_rule_keeps_apart_what_simple_mappings_keep_apart() {
+    for (a, b) in [
+        ("straße", "strasse"),
+        ("İ", "i"),
+        ("a", "b"),
+        ("src/a", "src\\a"),
+    ] {
+        assert_ne!(CaseRule::Folded.key(a), CaseRule::Folded.key(b), "{a} {b}");
+    }
+}
+
+#[test]
+fn a_folded_key_of_text_that_is_folded_already_is_borrowed() {
+    assert!(matches!(
+        CaseRule::Folded.key("src/foo.php"),
+        Cow::Borrowed("src/foo.php")
+    ));
+    assert!(matches!(CaseRule::Folded.key("Src/Foo.php"), Cow::Owned(_)));
+}
+
+#[test]
+fn the_rule_of_a_directory_follows_whether_it_folds_case() {
+    assert_eq!(CaseRule::of_folding(true), CaseRule::Folded);
+    assert_eq!(CaseRule::of_folding(false), CaseRule::Exact);
+    assert_eq!(CaseRule::default(), CaseRule::Exact);
 }

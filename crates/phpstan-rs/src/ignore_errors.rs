@@ -17,7 +17,7 @@
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
-use diagnostics::{Diagnostic, report_path};
+use diagnostics::{CaseRule, Diagnostic, report_path};
 use serde::Deserialize;
 
 /// One `ignoreErrors:` entry. Every field is optional and AND-combined
@@ -35,8 +35,10 @@ pub struct IgnoreErrorEntry {
     /// spelled with `/` between its names on every platform
     /// (`diagnostics::report_path`, e.g. `_analysis/phpstan-latte/foo.php`).
     /// A `\` in the glob is a separator too, so a configuration written on
-    /// Windows names the same files elsewhere (`path_glob_matches`). See
-    /// `glob_matches`'s own doc comment for the exact wildcard semantics.
+    /// Windows names the same files elsewhere (`path_glob_matches`). Its
+    /// letters name those of the path as the project root's directory names
+    /// them (`diagnostics::CaseRule`). See `glob_matches`'s own doc comment
+    /// for the exact wildcard semantics.
     pub path: Option<String>,
     /// A regex (real PHPStan's own PCRE delimiters, e.g. `#^...$#`,
     /// already stripped - store the bare pattern) against
@@ -58,14 +60,14 @@ pub struct IgnoreErrorEntry {
 }
 
 impl IgnoreErrorEntry {
-    fn matches(&self, path: &str, d: &Diagnostic) -> bool {
+    fn matches(&self, path: &str, case: CaseRule, d: &Diagnostic) -> bool {
         if let Some(identifier) = &self.identifier
             && *identifier != *d.identifier
         {
             return false;
         }
         if let Some(pattern) = &self.path
-            && !path_glob_matches(pattern, path)
+            && !path_glob_matches(pattern, path, case)
         {
             return false;
         }
@@ -102,9 +104,14 @@ pub(crate) fn glob_matches(pattern: &str, path: &str) -> bool {
 /// `glob_matches` for configured path text against a report path
 /// (`diagnostics::report_path`): each byte of `pattern` but `*` matches a
 /// byte of `path` as `diagnostics::path_byte_names` reads it, so a `\`
-/// matches a `/`, or a `\` that a name holds.
-pub(crate) fn path_glob_matches(pattern: &str, path: &str) -> bool {
-    glob_matches_by(pattern, path, diagnostics::path_byte_names)
+/// matches a `/`, or a `\` that a name holds. The letters of both are
+/// compared as `case` compares them.
+pub(crate) fn path_glob_matches(pattern: &str, path: &str, case: CaseRule) -> bool {
+    glob_matches_by(
+        &case.key(pattern),
+        &case.key(path),
+        diagnostics::path_byte_names,
+    )
 }
 
 /// `glob_matches`, with `matches` telling whether a byte of `pattern`
@@ -153,15 +160,22 @@ fn glob_matches_by(pattern: &str, subject: &str, matches: impl Fn(u8, u8) -> boo
 /// `@phpstan-ignore-line` suppression already applies - a config-level
 /// entry must never suppress a diagnostic real PHPStan itself would
 /// refuse to let any ignore mechanism touch.
-pub fn filter(results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>, entries: &[IgnoreErrorEntry]) {
+pub fn filter(
+    results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>,
+    entries: &[IgnoreErrorEntry],
+    case: CaseRule,
+) {
     if entries.is_empty() {
         return;
     }
     for (file, diagnostics) in results.iter_mut() {
         // Borrowed from the path where it is UTF-8 and needs no other spelling.
-        let path = report_path(file);
-        diagnostics
-            .retain(|d| d.non_ignorable || !entries.iter().any(|entry| entry.matches(&path, d)));
+        let shown = report_path(file);
+        // Keyed once for the file's diagnostics, not once for each.
+        let path = case.key(&shown);
+        diagnostics.retain(|d| {
+            d.non_ignorable || !entries.iter().any(|entry| entry.matches(&path, case, d))
+        });
     }
 }
 

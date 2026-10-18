@@ -98,6 +98,10 @@ pub struct CheckSettings {
     /// Whether phpstan/phpstan-deprecation-rules is active.
     pub deprecation_rules: bool,
     pub restricted_symbols: crate::restricted_symbols::RestrictedSymbols,
+    /// How the letters of configured path text compare with a path's: as the
+    /// project root's directory compares names. The restricted symbols'
+    /// `allow_in` zones and the include rule's guarded paths are compared so.
+    pub path_case: diagnostics::CaseRule,
     /// Whether phpstan/phpstan-doctrine is active: Doctrine ORM/DBAL
     /// result types are inferred only then.
     pub doctrine: bool,

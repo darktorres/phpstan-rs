@@ -48,6 +48,7 @@ mod file_declarations;
 mod file_table;
 mod file_tables;
 mod mock_hygiene;
+mod path_spelling;
 pub mod session;
 pub mod source;
 pub(crate) mod use_sites;
@@ -501,6 +502,9 @@ pub struct ProjectSettings {
     /// The root as it resolves on disk, links followed. Every file's key is
     /// under it; `None` for a project whose files are given in memory.
     pub absolute_root: Option<PathBuf>,
+    /// How configured path text compares with the letters of a path: as the
+    /// root's directory compares names (`Session::resolve` probes it).
+    pub path_case: diagnostics::CaseRule,
     /// The composer packages, and which directories each owns.
     pub packages: composer::PackageIndex,
     pub php_versions: Option<types::PhpVersions>,
@@ -647,6 +651,7 @@ impl Project {
     pub fn apply_settings(&mut self, settings: ProjectSettings) {
         let ProjectSettings {
             absolute_root,
+            path_case,
             packages,
             php_versions,
             configured_level,
@@ -701,6 +706,7 @@ impl Project {
             restricted_symbols: crate::restricted_symbols::RestrictedSymbols::compile(
                 &restricted_symbols,
             ),
+            path_case,
             doctrine: active.doctrine,
             doctrine_custom_functions: doctrine
                 .custom_functions
@@ -1948,7 +1954,7 @@ impl Project {
     ) -> Result<FxHashMap<FileId, Vec<Diagnostic>>, ParseError> {
         let analysed = !path_under_excluded_dir(
             shown_path(self.absolute_root(), path),
-            DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
+            walk::Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, self.settings.path_case),
         );
         self.update_file_as(path, source, analysed, false, should_abort)
     }
@@ -3408,16 +3414,13 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
 /// unaffected).
 pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &["vendor", ".git", "node_modules"];
 
-/// `true` if any component of `path` is named exactly one of
-/// `excluded_dir_names` - a pure name check, no filesystem access. Used in
+/// `true` if any component of `path` is one of the `excluded` directory
+/// names - a pure name check, no filesystem access. Used in
 /// `Project::update_file_cancellable`, as a never-before-seen path's default
 /// `analyzed` classification (see that call site's own doc comment).
-pub fn path_under_excluded_dir(path: &Path, excluded_dir_names: &[&str]) -> bool {
-    path.components().any(|c| {
-        c.as_os_str()
-            .to_str()
-            .is_some_and(|s| excluded_dir_names.contains(&s))
-    })
+pub(crate) fn path_under_excluded_dir(path: &Path, excluded: walk::Excluded<'_>) -> bool {
+    path.components()
+        .any(|component| excluded.excludes(component.as_os_str()))
 }
 
 /// `path` as the reports spell it: relative to `root` when it lies under it,

@@ -38,11 +38,12 @@ use crate::{ext, ignore_errors};
 
 use super::configured_path;
 use super::file_cache;
+use super::path_spelling;
 use super::source::FileSource;
-use super::walk::{FileIndex, FinalFiles, Listed, Role, Root, Unstreamed, Walk, Walked};
+use super::walk::{Excluded, FileIndex, FinalFiles, Listed, Role, Root, Unstreamed, Walk, Walked};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
 use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, FileText, ParsedFile, Project, ProjectSettings};
-use diagnostics::{self, Diagnostic, DiagnosticBuilder};
+use diagnostics::{self, CaseRule, Diagnostic, DiagnosticBuilder};
 
 /// The level reported when neither the command line nor the config sets
 /// one: every level this project's diagnostics are tagged with.
@@ -184,6 +185,9 @@ pub struct Session {
     /// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` when the root is analysed because no
     /// `paths` are configured, nothing otherwise.
     excluded_dir_names: &'static [&'static str],
+    /// How the letters of configured path text compare with a path's: as the
+    /// root's directory compares names (`Session::resolve` probes it).
+    path_case: CaseRule,
     /// The baseline the run reports against, resolved, with how its entries
     /// match and whether it is written per identifier.
     baseline: Option<PathBuf>,
@@ -352,10 +356,7 @@ impl Root<'_> {
         };
         let mut directories = rest.parent().into_iter().flat_map(Path::components);
         !directories.any(|component| match component {
-            Component::Normal(name) => self
-                .excluded
-                .iter()
-                .any(|e| std::ffi::OsStr::new(e) == name),
+            Component::Normal(name) => self.excluded.excludes(name),
             _ => false,
         })
     }
@@ -373,9 +374,10 @@ pub(crate) struct Classified {
 
 /// The role of a file no root lists: context when a directory the walk
 /// excludes by default holds it below `root`, analysed otherwise.
-fn unlisted_role(path: &Path, root: Option<&Path>) -> Role {
+fn unlisted_role(path: &Path, root: Option<&Path>, case: CaseRule) -> Role {
     let shown = super::shown_path(root, path);
-    if super::path_under_excluded_dir(shown, DEFAULT_SCAN_EXCLUDED_DIR_NAMES) {
+    let excluded = Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case);
+    if super::path_under_excluded_dir(shown, excluded) {
         Role::Context
     } else {
         Role::Analysed
@@ -386,7 +388,7 @@ fn unlisted_role(path: &Path, root: Option<&Path>) -> Role {
 /// path, with the role `unlisted_role` gives it, and not a stub.
 pub(crate) fn classify_unlisted(path: &Path) -> Classified {
     let path = composer::manifest::resolve(path);
-    let role = unlisted_role(&path, None);
+    let role = unlisted_role(&path, None, CaseRule::Exact);
     Classified {
         path,
         role,
@@ -454,6 +456,10 @@ pub struct Finalize {
     pub level: u8,
     pub report_unmatched_ignores: bool,
     pub ignore_errors: Vec<ignore_errors::IgnoreErrorEntry>,
+    /// How the letters of the `ignore_errors` paths compare with a report
+    /// path's. The baseline's entries are exact: they are made from the
+    /// files' own spellings.
+    pub path_case: CaseRule,
     pub baseline: Option<crate::baseline::Baseline>,
     pub order: DiagnosticOrder,
 }
@@ -539,7 +545,7 @@ pub(crate) fn finalize_results(
             )
         })
         .collect();
-    ignore_errors::filter(&mut results, &options.ignore_errors);
+    ignore_errors::filter(&mut results, &options.ignore_errors, options.path_case);
     let stale_baseline_entries = match &options.baseline {
         Some(baseline) => crate::baseline::filter(&mut results, baseline),
         None => Vec::new(),
@@ -679,6 +685,19 @@ impl Session {
             Some(dir) => dir.join(p),
             None => p,
         };
+        let dir_listings = Arc::new(DirListings::default());
+        let absolute_root = composer::manifest::resolve(&root);
+        // Configured path text compares with the letters of a path as the
+        // root's directory compares names. The listing this reads is the one
+        // the walk reads when the root is walked.
+        let path_case = CaseRule::of_folding(dir_listings.folds_case(
+            &composer::hashed_path::HashedPath::new(absolute_root.clone()),
+        ));
+        // A root spelled as the listings of its directories spell it, which
+        // is how the walk finds its files: one key for each file.
+        let as_listed = |path: PathBuf| -> PathBuf {
+            path_spelling::as_listed(&absolute_root, &path, path_case, &dir_listings)
+        };
         // The roots one entry of a list of paths names, resolved against the
         // config file (`configured_path`).
         let configured_roots = |text: &PathBuf| -> Vec<PathBuf> {
@@ -723,6 +742,7 @@ impl Session {
                 }
             }
         }
+        dirs = dirs.into_iter().map(&as_listed).collect();
         let configured_level = overrides.level.or(session.level);
         let level = overrides
             .report_level
@@ -823,7 +843,7 @@ impl Session {
             }
         }
 
-        let mut scan_dirs: Vec<PathBuf> = if !overrides.scan_paths.is_empty() {
+        let scan_dirs: Vec<PathBuf> = if !overrides.scan_paths.is_empty() {
             overrides.scan_paths
         } else {
             reflection
@@ -832,6 +852,7 @@ impl Session {
                 .flat_map(configured_roots)
                 .collect()
         };
+        let mut scan_dirs: Vec<PathBuf> = scan_dirs.into_iter().map(&as_listed).collect();
         let no_composer = overrides.no_composer || reflection.no_composer.unwrap_or(false);
         let stub_dirs: Vec<PathBuf> = if !overrides.stub_paths.is_empty() {
             overrides.stub_paths
@@ -842,13 +863,12 @@ impl Session {
                 .flat_map(configured_roots)
                 .collect()
         };
+        let stub_dirs: Vec<PathBuf> = stub_dirs.into_iter().map(&as_listed).collect();
         let mut scan_files: Vec<PathBuf> = Vec::new();
-        let dir_listings = Arc::new(DirListings::default());
         let mut vendors = Vec::new();
         let mut promoted: Vec<PathBuf> = Vec::new();
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
-        let absolute_root = composer::manifest::resolve(&root);
         let mut composer_php_versions = None;
         let mut root_manifest = None;
         if !no_composer {
@@ -924,6 +944,7 @@ impl Session {
 
         let settings = ProjectSettings {
             absolute_root: Some(absolute_root.clone()),
+            path_case,
             packages: composer::PackageIndex::new(composer_manifests),
             php_versions,
             configured_level,
@@ -980,6 +1001,7 @@ impl Session {
             check_mock_hygiene: mockstan.check_mock_hygiene.unwrap_or(extensions.mockstan),
             mock_banned_classes: mockstan.mock_banned_classes,
             excluded_dir_names,
+            path_case,
             baseline,
             baseline_mode,
             baseline_per_identifier,
@@ -1044,6 +1066,7 @@ impl Session {
             level: self.level,
             report_unmatched_ignores: self.session.report_unmatched_ignored_errors,
             ignore_errors: self.session.ignore_errors.clone(),
+            path_case: self.path_case,
             baseline: None,
             order: if self.emission_order {
                 DiagnosticOrder::Emission
@@ -1123,7 +1146,8 @@ impl Session {
                 roots: Vec::new(),
             };
         }
-        let mut walk = Walk::new(Arc::clone(&self.dir_listings), &self.settings.packages);
+        let mut walk = Walk::new(Arc::clone(&self.dir_listings), &self.settings.packages)
+            .with_path_case(self.path_case);
         for dir in &self.dirs {
             let excluded: &'static [&'static str] = if self.promoted.contains(dir) {
                 &[]
@@ -1204,7 +1228,9 @@ impl Session {
             role = Some(role.map_or(root.role, |role: Role| role.max(root.role)));
             is_stub |= root.stub;
         }
-        let role = role.unwrap_or_else(|| unlisted_role(&path, Some(self.absolute_root.as_path())));
+        let role = role.unwrap_or_else(|| {
+            unlisted_role(&path, Some(self.absolute_root.as_path()), self.path_case)
+        });
         Classified {
             path,
             role,

@@ -479,15 +479,21 @@ impl RestrictedSymbols {
 impl RestrictedSymbolEntry {
     /// Whether the path-scoped `allow_in`/`allow_except_in` zones allow
     /// this entry in the file at `path` (spelled relative to the project
-    /// root, as `diagnostics::report_path` spells it). `params_gate` is the
+    /// root, as `diagnostics::report_path` spells it), with the letters of
+    /// the zones and the path compared as `case` compares them. `params_gate` is the
     /// already-resolved
     /// `allow_params_in_allowed`/`allow_except_params_in_allowed` verdict
     /// at the call site, when the entry configures either: it narrows a
     /// matched zone the same way it narrows the instance-of/methods
     /// zones, and an entry without one keeps the zone's unconditional
     /// behavior.
-    pub(crate) fn allowed_at_path(&self, path: &str, params_gate: Option<bool>) -> bool {
-        let matches = |p: &String| crate::ignore_errors::path_glob_matches(p, path);
+    pub(crate) fn allowed_at_path(
+        &self,
+        path: &str,
+        case: diagnostics::CaseRule,
+        params_gate: Option<bool>,
+    ) -> bool {
+        let matches = |p: &String| crate::ignore_errors::path_glob_matches(p, path, case);
         if self.allow_in.iter().any(matches) {
             return params_gate.unwrap_or(true);
         }
@@ -596,55 +602,97 @@ mod tests {
 
     #[test]
     fn a_matching_allow_in_pattern_allows_the_entry() {
-        assert!(zoned(&["tests/*.php"], &[]).allowed_at_path("tests/Foo.php", None));
+        assert!(zoned(&["tests/*.php"], &[]).allowed_at_path(
+            "tests/Foo.php",
+            diagnostics::CaseRule::Exact,
+            None
+        ));
     }
 
     #[test]
     fn a_non_matching_allow_in_pattern_keeps_the_entry_restricted() {
-        assert!(!zoned(&["tests/*.php"], &[]).allowed_at_path("src/Foo.php", None));
+        assert!(!zoned(&["tests/*.php"], &[]).allowed_at_path(
+            "src/Foo.php",
+            diagnostics::CaseRule::Exact,
+            None
+        ));
     }
 
     #[test]
     fn allow_except_in_only_reports_inside_the_matching_paths() {
         let e = zoned(&[], &["legacy/*.php"]);
-        assert!(!e.allowed_at_path("legacy/Foo.php", None));
-        assert!(e.allowed_at_path("src/Foo.php", None));
+        assert!(!e.allowed_at_path("legacy/Foo.php", diagnostics::CaseRule::Exact, None));
+        assert!(e.allowed_at_path("src/Foo.php", diagnostics::CaseRule::Exact, None));
     }
 
     #[test]
     fn an_entry_without_path_zones_is_never_allowed_by_path() {
-        assert!(!zoned(&[], &[]).allowed_at_path("src/Foo.php", None));
+        assert!(!zoned(&[], &[]).allowed_at_path(
+            "src/Foo.php",
+            diagnostics::CaseRule::Exact,
+            None
+        ));
     }
 
     #[test]
     fn a_backslash_in_a_zone_is_a_separator() {
-        assert!(zoned(&["tests\\*.php"], &[]).allowed_at_path("tests/Foo.php", None));
+        assert!(zoned(&["tests\\*.php"], &[]).allowed_at_path(
+            "tests/Foo.php",
+            diagnostics::CaseRule::Exact,
+            None
+        ));
         let e = zoned(&[], &["legacy\\*"]);
-        assert!(!e.allowed_at_path("legacy/a.php", None));
-        assert!(e.allowed_at_path("src/a.php", None));
+        assert!(!e.allowed_at_path("legacy/a.php", diagnostics::CaseRule::Exact, None));
+        assert!(e.allowed_at_path("src/a.php", diagnostics::CaseRule::Exact, None));
+    }
+
+    #[test]
+    fn a_folded_rule_matches_a_zone_whatever_the_case_of_its_letters() {
+        use diagnostics::CaseRule;
+        assert!(zoned(&["Tests/*.php"], &[]).allowed_at_path(
+            "tests/foo.PHP",
+            CaseRule::Folded,
+            None
+        ));
+        assert!(!zoned(&["Tests/*.php"], &[]).allowed_at_path(
+            "tests/foo.PHP",
+            CaseRule::Exact,
+            None
+        ));
+        let e = zoned(&[], &["Legacy/*"]);
+        assert!(!e.allowed_at_path("legacy/a.php", CaseRule::Folded, None));
+        assert!(e.allowed_at_path("legacy/a.php", CaseRule::Exact, None));
     }
 
     #[test]
     fn params_in_allowed_gate_narrows_an_allow_in_match() {
         let e = zoned(&["views/*"], &[]);
-        assert!(e.allowed_at_path("views/Foo.php", Some(true)));
-        assert!(!e.allowed_at_path("views/Foo.php", Some(false)));
+        assert!(e.allowed_at_path("views/Foo.php", diagnostics::CaseRule::Exact, Some(true)));
+        assert!(!e.allowed_at_path("views/Foo.php", diagnostics::CaseRule::Exact, Some(false)));
     }
 
     #[test]
     fn params_in_allowed_gate_is_ignored_when_the_allow_in_path_does_not_match() {
-        assert!(!zoned(&["views/*"], &[]).allowed_at_path("src/Foo.php", Some(true)));
+        assert!(!zoned(&["views/*"], &[]).allowed_at_path(
+            "src/Foo.php",
+            diagnostics::CaseRule::Exact,
+            Some(true)
+        ));
     }
 
     #[test]
     fn params_in_allowed_gate_narrows_an_allow_except_in_match() {
         let e = zoned(&[], &["legacy/*.php"]);
-        assert!(e.allowed_at_path("legacy/Foo.php", Some(true)));
-        assert!(!e.allowed_at_path("legacy/Foo.php", Some(false)));
+        assert!(e.allowed_at_path("legacy/Foo.php", diagnostics::CaseRule::Exact, Some(true)));
+        assert!(!e.allowed_at_path("legacy/Foo.php", diagnostics::CaseRule::Exact, Some(false)));
     }
 
     #[test]
     fn params_in_allowed_gate_is_irrelevant_outside_an_allow_except_in_zone() {
-        assert!(zoned(&[], &["legacy/*.php"]).allowed_at_path("src/Foo.php", Some(false)));
+        assert!(zoned(&[], &["legacy/*.php"]).allowed_at_path(
+            "src/Foo.php",
+            diagnostics::CaseRule::Exact,
+            Some(false)
+        ));
     }
 }

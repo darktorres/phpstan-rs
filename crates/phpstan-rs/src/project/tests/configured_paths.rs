@@ -224,3 +224,13 @@ fn a_path_without_a_backslash_is_listed_as_it_is() {
     assert_eq!(listed_names(&session), vec!["a.php".to_string()]);
     let _: Option<PathBuf> = session.baseline_path().map(Path::to_path_buf);
 }
+
+#[test]
+fn the_root_has_the_case_rule_its_directory_has() {
+    let dir = TempDir::new("configured_case_rule");
+    let session = resolve_over_src(&dir, "", ErrorPolicy::Fail).unwrap();
+    assert_eq!(
+        session.finalize_options().path_case,
+        diagnostics::CaseRule::of_folding(cfg!(any(windows, target_os = "macos")))
+    );
+}

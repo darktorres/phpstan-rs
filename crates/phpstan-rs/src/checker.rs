@@ -614,7 +614,8 @@ pub struct Checker<'a> {
     // `current_file` as the reports spell it (`project::shown_path`): what
     // a rule that reads the file's name by its directories reads.
     pub(crate) current_file_shown: Option<std::path::PathBuf>,
-    // Paths the file tests with `file_exists()` and friends.
+    // Paths the file tests with `file_exists()` and friends, as keys of
+    // `CheckSettings::path_case`.
     pub(crate) include_guarded_paths: FxHashSet<String>,
     // `include_path` directories for the file being checked.
     pub(crate) include_path_dirs: Vec<String>,

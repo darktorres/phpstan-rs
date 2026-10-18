@@ -8,7 +8,7 @@
 pub mod fix;
 pub mod report_path;
 
-pub use report_path::{path_byte_names, path_text_names, report_path, slash_spelling};
+pub use report_path::{CaseRule, path_byte_names, path_text_names, report_path, slash_spelling};
 
 use std::borrow::Cow;
 

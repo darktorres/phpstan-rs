@@ -919,6 +919,7 @@ impl Server {
                 level: DEFAULT_REPORT_LEVEL,
                 report_unmatched_ignores: false,
                 ignore_errors: Vec::new(),
+                path_case: diagnostics::CaseRule::Exact,
                 baseline: None,
                 order: DiagnosticOrder::Sorted,
             },

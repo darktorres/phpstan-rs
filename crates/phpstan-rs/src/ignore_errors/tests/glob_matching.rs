@@ -54,22 +54,64 @@ fn a_leading_star_matches_any_prefix() {
 fn a_path_pattern_reads_a_backslash_as_a_separator_wherever_it_stands() {
     assert!(path_glob_matches(
         "src\\Legacy\\Foo.php",
-        "src/Legacy/Foo.php"
+        "src/Legacy/Foo.php",
+        CaseRule::Exact
     ));
-    assert!(path_glob_matches("src\\*", "src/Legacy/Foo.php"));
-    assert!(path_glob_matches("*\\Event\\*", "src/Piwigo/Event/Foo.php"));
-    assert!(path_glob_matches("*\\Foo.php", "src/Legacy/Foo.php"));
-    assert!(path_glob_matches("*\\é\\*", "a/é/b.php"));
+    assert!(path_glob_matches(
+        "src\\*",
+        "src/Legacy/Foo.php",
+        CaseRule::Exact
+    ));
+    assert!(path_glob_matches(
+        "*\\Event\\*",
+        "src/Piwigo/Event/Foo.php",
+        CaseRule::Exact
+    ));
+    assert!(path_glob_matches(
+        "*\\Foo.php",
+        "src/Legacy/Foo.php",
+        CaseRule::Exact
+    ));
+    assert!(path_glob_matches("*\\é\\*", "a/é/b.php", CaseRule::Exact));
     assert!(!path_glob_matches(
         "*\\Event\\*",
-        "src/Piwigo/NotEvent/Foo.php"
+        "src/Piwigo/NotEvent/Foo.php",
+        CaseRule::Exact
     ));
-    assert!(!path_glob_matches("src\\*", "srcx/Foo.php"));
-    assert!(!path_glob_matches("src/*", "src\\Foo.php"));
+    assert!(!path_glob_matches(
+        "src\\*",
+        "srcx/Foo.php",
+        CaseRule::Exact
+    ));
+    assert!(!path_glob_matches("src/*", "src\\Foo.php", CaseRule::Exact));
 }
 
 #[test]
 fn a_name_pattern_keeps_a_backslash_as_it_is() {
     assert!(glob_matches("app\\models\\*", "app\\models\\user"));
     assert!(!glob_matches("app\\models\\*", "app/models/user"));
+}
+
+#[test]
+fn a_folded_rule_matches_a_pattern_whatever_the_case_of_its_letters() {
+    assert!(path_glob_matches("Src/*", "src/Foo.php", CaseRule::Folded));
+    assert!(path_glob_matches("src/*", "SRC/foo.php", CaseRule::Folded));
+    assert!(path_glob_matches(
+        "*\\Event\\*.PHP",
+        "src/event/foo.php",
+        CaseRule::Folded
+    ));
+    assert!(path_glob_matches("é/*", "É/a.php", CaseRule::Folded));
+    assert!(!path_glob_matches("Src/*", "lib/Foo.php", CaseRule::Folded));
+    assert!(!path_glob_matches(
+        "src/*",
+        "srcx/Foo.php",
+        CaseRule::Folded
+    ));
+}
+
+#[test]
+fn an_exact_rule_matches_a_pattern_by_the_case_of_its_letters_only() {
+    assert!(!path_glob_matches("Src/*", "src/Foo.php", CaseRule::Exact));
+    assert!(path_glob_matches("Src/*", "Src/Foo.php", CaseRule::Exact));
 }

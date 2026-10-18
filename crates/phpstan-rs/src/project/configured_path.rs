@@ -1,14 +1,14 @@
 //! How a path the configuration names reads.
 //!
-//! A configuration travels between platforms with the repository, so a `\`
-//! in a path it names is a separator wherever it is read, as it is on
-//! Windows. Elsewhere a `\` can also be a character of a name. Text that
-//! holds one has two readings: the separator reading, which takes each `\` as
-//! `/`, and the name reading, which takes the text as it is. A `/` is a
-//! character of no platform's names, so text without a `\` has one reading.
+//! A configuration travels between platforms with the repository, so a `\` in
+//! a path it names is a separator wherever it is read, as it is on Windows.
+//! Elsewhere a `\` can also be a character of a name. Text that holds one has
+//! two readings: the separator reading, which takes each `\` as `/`, and the
+//! name reading, which takes the text as it is. A `/` is a character of no
+//! platform's names, so text without a `\` has one reading.
 //!
-//! Which reading a path takes is a question for the disk, and the callers
-//! ask it through `exists`. Text with one reading is not asked about.
+//! Which reading a path takes is a question for the disk, and the callers ask
+//! it through `exists`. Text with one reading is not asked about.
 
 use std::path::{Path, PathBuf};
 

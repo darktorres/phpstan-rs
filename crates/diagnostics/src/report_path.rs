@@ -14,9 +14,71 @@
 //! platform and text written on Windows names the same files elsewhere.
 //! Outside Windows a `\` can also be a character of a name, and it names
 //! that as well.
+//!
+//! Letters follow the case rule of the directory the paths lie in
+//! ([`CaseRule`]): configured text names a file by any case of its letters
+//! where the directory's file system folds case, and by its own spelling
+//! elsewhere.
 
 use std::borrow::Cow;
 use std::path::Path;
+
+/// How the letters of configured path text name the letters of a path.
+///
+/// A directory whose file system folds case (NTFS, the default APFS, and a
+/// casefold directory of a Unix file system) holds one file under every
+/// spelling of its letters, so configured text that spells a name in another
+/// case still names it. In any other directory the spelling is exact.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CaseRule {
+    /// A letter names only itself.
+    #[default]
+    Exact,
+    /// A letter names each case of itself.
+    Folded,
+}
+
+impl CaseRule {
+    /// The rule of a directory whose file system folds case when `folds`.
+    pub fn of_folding(folds: bool) -> CaseRule {
+        if folds {
+            CaseRule::Folded
+        } else {
+            CaseRule::Exact
+        }
+    }
+
+    /// `text` as this rule compares it: as it is under `Exact`, and with each
+    /// letter in its simple lower case under `Folded`. Two texts name alike
+    /// under the rule when their keys are equal. A letter whose case mapping
+    /// is more than one letter (`ß`) is not folded, as a file system that
+    /// folds case by simple mappings does not fold it.
+    pub fn key(self, text: &str) -> Cow<'_, str> {
+        match self {
+            CaseRule::Exact => Cow::Borrowed(text),
+            CaseRule::Folded if text.chars().all(|c| fold_letter(c) == c) => Cow::Borrowed(text),
+            CaseRule::Folded => Cow::Owned(text.chars().map(fold_letter).collect()),
+        }
+    }
+}
+
+/// `c`'s simple lower case, taken through its simple upper case so that
+/// letters with one upper case (`ς` and `σ`) have one key.
+fn fold_letter(c: char) -> char {
+    if c.is_ascii() {
+        return c.to_ascii_lowercase();
+    }
+    let upper = simple(c.to_uppercase(), c);
+    simple(upper.to_lowercase(), upper)
+}
+
+/// The one letter `mapped` yields, else `otherwise`.
+fn simple(mut mapped: impl Iterator<Item = char>, otherwise: char) -> char {
+    match (mapped.next(), mapped.next()) {
+        (Some(only), None) => only,
+        _ => otherwise,
+    }
+}
 
 /// `path`'s text with `/` between its names: on Windows each `\` becomes
 /// `/`, and elsewhere it is the path's own text. Bytes that are not UTF-8

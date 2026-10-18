@@ -59,6 +59,13 @@ impl DirListings {
             .clone()
     }
 
+    /// Whether `dir`, a resolved directory, folds case: it holds one file
+    /// under every spelling of its letters. `false` when it cannot be read.
+    pub fn folds_case(&self, dir: &HashedPath) -> bool {
+        self.listing(dir)
+            .is_some_and(|listing| listing.folds_case(dir.as_path()))
+    }
+
     /// Forgets every listing. A listing already handed out stays valid for its
     /// holder.
     pub fn clear(&self) {
@@ -82,6 +89,39 @@ impl Listing {
     pub fn entry(&self, name: &OsStr) -> Option<&Entry> {
         self.entries.get(self.position(name)?)
     }
+
+    /// Whether `dir`, the directory this is the listing of, folds case. It is
+    /// read from one entry that has a letter and whose name with the case of
+    /// each letter flipped the listing does not hold: the system finds a file
+    /// of that name when the directory folds case, and none otherwise. A
+    /// directory with no such entry, or whose listing is not complete, is
+    /// taken not to fold.
+    pub fn folds_case(&self, dir: &Path) -> bool {
+        if !self.complete {
+            return false;
+        }
+        let flipped = self.entries.iter().find_map(|entry| {
+            let flipped = OsString::from(flipped_case(entry.name.to_str()?)?);
+            self.entry(&flipped).is_none().then_some(flipped)
+        });
+        flipped.is_some_and(|name| std::fs::symlink_metadata(dir.join(name)).is_ok())
+    }
+}
+
+/// `name` with the case of each ASCII letter flipped; `None` when it has no
+/// letter.
+fn flipped_case(name: &str) -> Option<String> {
+    name.bytes().any(|b| b.is_ascii_alphabetic()).then(|| {
+        name.chars()
+            .map(|c| {
+                if c.is_ascii_lowercase() {
+                    c.to_ascii_uppercase()
+                } else {
+                    c.to_ascii_lowercase()
+                }
+            })
+            .collect()
+    })
 }
 
 fn read_listing(dir: &Path) -> Option<Listing> {

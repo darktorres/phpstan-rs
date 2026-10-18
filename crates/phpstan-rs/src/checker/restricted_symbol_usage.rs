@@ -407,9 +407,9 @@ impl<'a> Checker<'a> {
         if self.is_allowed_by_attribute_context(entry)
             || self.is_allowed_by_calling_context(entry)
             || self.is_allowed_by_instance_of_context(entry)
-            || self
-                .project_relative_path()
-                .is_some_and(|path| entry.allowed_at_path(&path, params_gate))
+            || self.project_relative_path().is_some_and(|path| {
+                entry.allowed_at_path(&path, self.settings.path_case, params_gate)
+            })
         {
             return;
         }

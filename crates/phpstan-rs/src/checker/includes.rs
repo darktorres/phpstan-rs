@@ -309,7 +309,9 @@ impl<'a> Checker<'a> {
         };
         for path in paths {
             if is_stream_wrapper_path(&path)
-                || self.include_guarded_paths.contains(&path)
+                || self
+                    .include_guarded_paths
+                    .contains(&*self.settings.path_case.key(&path))
                 || self.include_target_exists(&path)
             {
                 continue;
@@ -336,7 +338,14 @@ impl<'a> Checker<'a> {
         let mut on_call = |call: IncludeCall| match call {
             IncludeCall::Guard(arg) => {
                 if let Some(paths) = self.resolve_include_paths(arg, &locals) {
-                    guarded.extend(paths);
+                    // Keyed as `check_include_path` looks them up: a guard
+                    // names the file whatever the case of its letters where
+                    // the root's directory folds case.
+                    guarded.extend(
+                        paths
+                            .iter()
+                            .map(|path| self.settings.path_case.key(path).into_owned()),
+                    );
                 }
             }
             IncludeCall::SetIncludePath(arg) => {

@@ -3,7 +3,7 @@
 
 use super::helpers::*;
 use crate::canonical::canonicalize;
-use crate::dir_listings::{DirListings, Listing};
+use crate::dir_listings::{DirListings, Entry, Listing};
 use crate::hashed_path::HashedPath;
 use std::ffi::OsStr;
 use std::sync::Arc;
@@ -161,4 +161,77 @@ return array(
     std::fs::remove_file(src.as_path().join("Bar.php")).unwrap();
     let listing = listings.listing(&src).unwrap();
     assert_eq!(names(&listing), ["Bar.php"]);
+}
+
+/// A listing of entries called `names`, as a directory that holds them gives
+/// it.
+fn listing_of(names: &[&str], complete: bool) -> Listing {
+    let mut entries: Vec<Entry> = names
+        .iter()
+        .map(|name| Entry {
+            name: (*name).into(),
+            kind: None,
+        })
+        .collect();
+    entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    Listing { entries, complete }
+}
+
+#[test]
+fn a_directory_folds_case_where_its_platform_does() {
+    let dir = TempDir::new("folds_case_probe");
+    dir.write("Src/Foo.php", "<?php");
+    let root = HashedPath::new(canonicalize(dir.path()).unwrap());
+    let listings = DirListings::default();
+    assert_eq!(
+        listings.folds_case(&root),
+        cfg!(any(windows, target_os = "macos"))
+    );
+}
+
+#[test]
+fn a_directory_that_cannot_be_read_does_not_fold_case() {
+    let dir = TempDir::new("folds_case_unreadable");
+    let missing = HashedPath::new(canonicalize(dir.path()).unwrap().join("missing"));
+    assert!(!DirListings::default().folds_case(&missing));
+}
+
+#[test]
+fn a_directory_that_finds_the_flipped_spelling_of_an_entry_folds_case() {
+    let dir = TempDir::new("folds_case_found");
+    dir.write("abc.TXT", "");
+    let listing = listing_of(&["ABC.txt"], true);
+    assert!(listing.folds_case(dir.path()));
+}
+
+#[test]
+fn a_directory_that_does_not_find_the_flipped_spelling_does_not_fold_case() {
+    let dir = TempDir::new("folds_case_not_found");
+    let listing = listing_of(&["ABC.txt"], true);
+    assert!(!listing.folds_case(dir.path()));
+}
+
+#[test]
+fn an_entry_whose_flipped_spelling_is_listed_does_not_decide() {
+    let dir = TempDir::new("folds_case_twins");
+    dir.write("cD", "");
+    // `Ab` and `aB` are two files of a directory that keeps case, so neither
+    // says anything; `Cd` is the first entry that does.
+    assert!(listing_of(&["Ab", "aB", "Cd"], true).folds_case(dir.path()));
+    let other = TempDir::new("folds_case_twins_not_found");
+    assert!(!listing_of(&["Ab", "aB", "Cd"], true).folds_case(other.path()));
+}
+
+#[test]
+fn names_without_a_letter_say_nothing_of_case() {
+    let dir = TempDir::new("folds_case_no_letters");
+    dir.write("123", "");
+    assert!(!listing_of(&["123", "4.5"], true).folds_case(dir.path()));
+}
+
+#[test]
+fn an_incomplete_listing_says_nothing_of_case() {
+    let dir = TempDir::new("folds_case_incomplete");
+    dir.write("abc.TXT", "");
+    assert!(!listing_of(&["ABC.txt"], false).folds_case(dir.path()));
 }

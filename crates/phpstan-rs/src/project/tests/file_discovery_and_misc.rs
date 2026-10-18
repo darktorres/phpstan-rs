@@ -277,3 +277,20 @@ fn update_file_defaults_a_never_before_seen_path_by_its_excluded_dir_status() {
         "a never-before-seen path outside any excluded dir must default to analyzed"
     );
 }
+
+#[test]
+fn update_file_reads_the_excluded_dir_names_by_the_roots_case_rule() {
+    for (case, analysed) in [
+        (diagnostics::CaseRule::Folded, false),
+        (diagnostics::CaseRule::Exact, true),
+    ] {
+        let mut project = Project::new();
+        project.apply_settings(ProjectSettings {
+            path_case: case,
+            ..ProjectSettings::default()
+        });
+        let path = PathBuf::from("Vendor/acme/Foo.php");
+        project.update_file(&path, "<?php class Foo {}").unwrap();
+        assert_eq!(project.is_analyzed(&path), analysed, "{case:?}");
+    }
+}
