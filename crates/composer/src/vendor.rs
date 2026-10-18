@@ -580,7 +580,7 @@ impl<'p> Resolver<'p> {
         let (generated_dir, vendor_dir, base_dir) =
             (self.generated_dir, self.vendor_dir, self.base_dir);
         paths.each(generated_dir, vendor_dir, base_dir, |raw| {
-            if let Some(found) = self.locate(path_of(raw)) {
+            if let Some(found) = path_of(raw).and_then(|path| self.locate(path)) {
                 out.push(found);
             }
         });
@@ -593,7 +593,9 @@ impl<'p> Resolver<'p> {
     /// which must never be silently treated as vendor context. A path that
     /// resolves outside it but is written inside it is kept as written: a
     /// path-repository package is a `vendor/<name>` symlink to a directory
-    /// outside `vendor/`, and still belongs to vendor context.
+    /// outside `vendor/`, and still belongs to vendor context. A name its
+    /// directory's listing does not hold is resolved by the system, which
+    /// finds the file under another spelling where the directory folds case.
     fn locate(&mut self, raw: &Path) -> Option<Located> {
         let unknown = |path| Located { path, kind: None };
         let Some((dir, name)) = path_bytes::split(raw) else {
@@ -608,7 +610,9 @@ impl<'p> Resolver<'p> {
             // but to pass through it) is still resolved as the system does.
             return self.path_alone(raw).map(unknown);
         };
-        let entry = listed.listing.entry(name)?;
+        let Some(entry) = listed.listing.entry(name) else {
+            return self.path_alone(raw).map(unknown);
+        };
         match entry.kind {
             // An entry that is not a link lies where its directory's
             // canonical form does.
@@ -736,17 +740,24 @@ fn entry_canonical(listed: &Listed, name: &OsStr, path: &Path) -> Option<HashedP
     }
 }
 
-/// The path `bytes` spell.
+/// The path `bytes` spell. A Unix name is its bytes.
 #[cfg(unix)]
-fn path_of(bytes: &[u8]) -> &Path {
+fn path_of(bytes: &[u8]) -> Option<&Path> {
     use std::os::unix::ffi::OsStrExt;
-    Path::new(std::ffi::OsStr::from_bytes(bytes))
+    Some(Path::new(std::ffi::OsStr::from_bytes(bytes)))
 }
 
-/// The path `bytes` spell, read lossily where they are not UTF-8.
+/// The path `bytes` spell.
 #[cfg(not(unix))]
-fn path_of(bytes: &[u8]) -> &Path {
-    Path::new(std::str::from_utf8(bytes).unwrap_or_default())
+fn path_of(bytes: &[u8]) -> Option<&Path> {
+    path_of_text(bytes)
+}
+
+/// The path `bytes` spell where a path is text: bytes that are not UTF-8 name
+/// no file, since PHP opens a path there as UTF-8 and refuses these.
+#[cfg(any(not(unix), test))]
+pub(crate) fn path_of_text(bytes: &[u8]) -> Option<&Path> {
+    std::str::from_utf8(bytes).ok().map(Path::new)
 }
 
 /// `path` with `.` and `..` components folded away, without resolving

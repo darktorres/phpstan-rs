@@ -5,7 +5,7 @@
 use super::helpers::*;
 use crate::canonical::canonicalize;
 use crate::dir_listings::DirListings;
-use crate::hashed_path::Resolved;
+use crate::hashed_path::{HashedPath, Resolved};
 use crate::vendor::*;
 use std::path::PathBuf;
 use syntax::ast::*;
@@ -639,4 +639,101 @@ return array(
         .map(|(reading, ..)| *reading)
         .collect();
     assert_eq!(readings, [Reading::Files, Reading::Dirs]);
+}
+
+/// A project whose classmap lists `entries`, each a path below
+/// `vendor/acme/lib`, over a vendor directory that holds `lib/Foo.php`.
+fn project_listing(label: &str, entries: &[&str]) -> TempDir {
+    let dir = TempDir::new(label);
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/lib/Foo.php", "<?php class Foo {}");
+    let listed: String = entries
+        .iter()
+        .enumerate()
+        .map(|(n, entry)| format!("    'Acme\\\\C{n}' => $vendorDir . '{entry}',\n"))
+        .collect();
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        &format!("<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n{listed});\n"),
+    );
+    dir
+}
+
+/// Whether the project's directories fold case: the system finds
+/// `vendor/acme/lib/Foo.php` under a spelling of its letters that the
+/// listing of its directory does not hold.
+fn folds_case(dir: &TempDir) -> bool {
+    std::fs::symlink_metadata(dir.path().join("vendor/acme/lib/foo.php")).is_ok()
+}
+
+#[test]
+fn a_file_the_listing_lacks_is_found_when_the_system_has_it() {
+    let dir = project_listing(
+        "listing_older_than_the_file",
+        &[
+            "/acme/lib/Foo.php",
+            "/acme/lib/Late.php",
+            "/acme/lib/Gone.php",
+        ],
+    );
+    let lib = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
+    // The directory is listed before `Late.php` is written, so its listing
+    // has `Foo.php` alone.
+    let table = DirListings::default();
+    let listing = table.listing(&HashedPath::new(lib.clone())).unwrap();
+    assert_eq!(listing.entries.len(), 1);
+    dir.write("vendor/acme/lib/Late.php", "<?php class Late {}");
+
+    // `Late.php` is a miss of the listing that the system settles, and
+    // `Gone.php` is a miss that it settles the other way.
+    let ctx = discover_vendor_context(dir.path(), &table, None);
+    assert_eq!(
+        paths(&ctx.files),
+        [lib.join("Foo.php"), lib.join("Late.php")]
+    );
+}
+
+#[test]
+fn a_spelling_whose_case_differs_names_the_file_where_the_directory_folds_case() {
+    let dir = project_listing("case_of_the_name", &["/acme/lib/foo.php"]);
+    let lib = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    // The file is named in the spelling the disk has, where the disk takes
+    // the other spelling for it.
+    let expected: Vec<PathBuf> = if folds_case(&dir) {
+        vec![lib.join("Foo.php")]
+    } else {
+        Vec::new()
+    };
+    assert_eq!(paths(&ctx.files), expected);
+}
+
+#[test]
+fn a_directory_whose_case_differs_names_the_file_where_the_directory_folds_case() {
+    let dir = project_listing("case_of_the_directory", &["/ACME/Lib/Foo.php"]);
+    let lib = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
+    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let folds = std::fs::symlink_metadata(dir.path().join("vendor/ACME/Lib/Foo.php")).is_ok();
+    let expected: Vec<PathBuf> = if folds {
+        vec![lib.join("Foo.php")]
+    } else {
+        Vec::new()
+    };
+    assert_eq!(paths(&ctx.files), expected);
+}
+
+#[test]
+fn bytes_that_are_not_utf8_name_no_file_where_paths_are_text() {
+    use std::path::Path;
+
+    assert_eq!(
+        path_of_text(b"vendor/acme/a.php"),
+        Some(Path::new("vendor/acme/a.php"))
+    );
+    assert_eq!(
+        path_of_text("vendor/acme/é.php".as_bytes()),
+        Some(Path::new("vendor/acme/é.php"))
+    );
+    assert_eq!(path_of_text(b"vendor/acme/\xff.php"), None);
+    assert_eq!(path_of_text(b"\xc3"), None);
 }
