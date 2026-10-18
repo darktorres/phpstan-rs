@@ -262,8 +262,12 @@ paths, PHP-visible values, runtime behaviour, tests and build scripts. The plan'
 rows R0 to R17 are built in its order. Windows, macOS and aarch64 Linux are
 verified on CI legs, and each push is asked first.
 
-Done: R0 to R2, the lockfile, the CLI test and the CI legs. Open: round 1 (the
-first push, asked), R3 to R17, and the batch's checks.
+Done: R0 to R4 (the lockfile, the CLI test, the CI legs, the canonical form
+without Windows' verbatim prefix, and prefixes hashed, ordered and owned by their
+kind) and round 1, whose failures are classed in the plan's R2 with the rows they
+extend. Open: R5 to R17, the rounds after them, and the batch's checks. The gates
+job's module graph fails with 27 problems that predate the plan and belong to
+level 2. Whether this batch fixes them is asked with round 2's push.
 
 ## Documents with no place in the stack
 

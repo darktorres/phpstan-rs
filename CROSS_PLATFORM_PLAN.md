@@ -12,8 +12,12 @@
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
     client to run, before the 30 s wait for diagnostics began. Two things changed between the
     runs: the LF checkout and 223 commits.
-  - Rust CI's result is recorded below when it ends.
-- **Next:** R5.
+  - Rust CI passed on aarch64 Linux and failed on macOS, Windows and the gates job. Each failure
+    is classed in R2's "Round 1's result", with the rows it extends: R5, R6, R7, R13 and R15.
+  - The gates job failed at the module graph, which predates this plan. Whether this batch
+    fixes it is asked with round 2's push. Until then, `54e7e02d` runs each gates check
+    whatever the one before it gave.
+- **Next:** R5, with its extension.
 
 ## Context
 
@@ -208,9 +212,12 @@ The message keeps the status and the stderr.
     reads as binary are two gate approvals whose lone CRs it leaves as they are.
   - Renormalising changes no blob: every other tracked file is LF or has no line ending.
   - No tracked name is one a Windows or macOS checkout cannot hold: no reserved device name, no
-    forbidden character, no trailing dot or space, and no two paths that differ only in case,
-    here or in the submodule. The longest path is 200 characters, 227 under the runner's
-    `D:\a\phpstan-rs\phpstan-rs\`.
+    forbidden character, and no trailing dot or space, here or in the submodule. The longest
+    path is 200 characters, 227 under the runner's `D:\a\phpstan-rs\phpstan-rs\`.
+  - One pair of tracked directories differs only in case: `src/Http/` and `src/http/` in the
+    fixture `psr4_locations_are_checked`. Round 1 found it. The first scan compared whole file
+    paths and not their directories; the scan of every directory finds no other pair, here or in
+    the submodule. R13 reshapes the fixture.
 - `extension-ci.yml` and `release.yml`: every leg sets `core.autocrlf false` before checkout,
   since `.gitattributes` does not reach the submodule's 65 `.stub` files. The binary they build
   embeds Linux's bytes. The stale comments go.
@@ -252,6 +259,71 @@ code, these are expected:
   - the smoke round trip (R3, R5);
   - the dhat build: the frame-pointer walk calls `pthread_getattr_np` (R14).
 - macOS: temp paths under `/var/folders` against canonical `/private/var/…` ones (R13).
+
+**Round 1's result.** Rust CI run 39124821751 on `d8de9530`. The logs are in
+`~/.cache/prs-profile/fixes/logs/round1-*`.
+
+- **aarch64 Linux:** every step passed.
+- **gates (x86_64 Linux):**
+  - The lockfiles, format, clippy, tests and fixtures passed.
+  - The module graph failed with 27 problems, and the 13 steps after it were skipped.
+  - The failure predates this plan. `crate::file_id` (`1cd01bc4`, 2026-10-02) came after the
+    graph was last settled (`c7ffe38f`). Since then no run had reached the step, because R0's
+    lockfile stopped every run before it.
+  - The problems are the crate split's (WORK_STACK level 2): 20 edges the layering forbids,
+    6 allow lines whose edge is gone, and phpdoc's dependency on types.
+  - Whether this batch fixes them is asked with round 2's push. Until then, `54e7e02d` runs
+    each gates check whatever the one before it gave.
+- **macOS:** lib 47 of 1202 failed, composer 1 of 67, fixtures 1 of 3832.
+  - 46 LSP tests: the server published, and navigated to, canonical URIs
+    (`file:///private/var/…`), where the test client had sent `file:///var/…`. This goes to R5's
+    extension.
+  - `collect_php_files_recurses_into_subdirectories_and_skips_non_php` compares canonical results
+    with the temp directory's spelling (R13).
+  - `the_entries_are_sorted_by_name_bytes` writes `a.php` and `A.php`, which are one file on
+    APFS (R13).
+  - `psr4_locations_are_checked` (R13). The fixture tracks `src/Http/` and `src/http/`, and a
+    case-insensitive checkout merges them into `src/Http/`. The walk resolves the configured
+    `src/http/Router.php` to the disk's spelling, which is where PSR-4 maps the class. So no
+    `psr4.caseMismatch` is reported, rightly for that disk.
+- **Windows:** clippy failed on one unused import, and the steps after it ran anyway. lib 52 of
+  1177 failed, cli 1 of 44, file_cache 1 of 5, stub_index 1 of 1, composer 9 of 60 and fixtures
+  26 of 3832. The dhat build failed.
+  - **Clippy.** `tests/package_ownership.rs` imports `resolve` for a `cfg(unix)` test (R13, with
+    the links). Clippy stopped at that crate, so `54e7e02d` adds `--keep-going`.
+  - **The verbatim prefix** (R3, built; checked on round 2):
+    - Published URIs were `file://%5C%5C%3F%5CC:/…`, with the prefix encoded into the
+      authority.
+    - The vendor context was empty in 9 tests: `workspace_config` and `workspace_scan` (3), the
+      cli's `check_project_auto_detects_composer_vendor_and_never_reports_on_it`, the file
+      cache's `a_warm_run_reads_a_generated_autoload_files_entries_back`, and composer's vendor
+      discovery and listing tests (4).
+    - 9 include fixtures: `__DIR__` held `\\?\`, so `__DIR__ . '/lib/x.php'` named no file.
+  - **The 8.3 short name.** The same 46 LSP tests as on macOS failed. The test client sends
+    `file:///C:/Users/RUNNER~1/…`, while the canonical path is `C:\Users\runneradmin\…`. Like
+    macOS's `/var`, this goes to R5's extension.
+  - **Prefixes hashed and ordered by their text** (R4, built):
+    - `sorted_by_key_is_sorted_by_path` failed on the mix's `//a/b` shares;
+    - `an_entry_made_from_its_directory_is_the_path_made_whole` failed on a `\\a` directory,
+      which pushing a name turns into a share.
+  - **`path_bytes`.** Two mixes count no paths read by bytes (R16).
+  - **URIs.**
+    - `path_to_uri_preserves_a_literal_backslash_in_a_real_unix_filename` runs on Windows (R5).
+    - `a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session` sends `file://`
+      followed by a Windows path (R13).
+  - **Unix spellings in tests** (R13): `the_entries_are_sorted_by_name_bytes` fails as on macOS
+    (NTFS), and so does `collect_php_files_…`.
+  - **`stub_index`.** `index.tsv` is stale, because the paths are spelled with `\` (R14).
+  - **The fixture harness's path column.** It prints the relative path with `\` (`src\Ext.php`).
+    14 fixtures differ only there: pest 6, phpstan_api_gating 5 and composer_hygiene 3. This is
+    R13's, and it comes with:
+    - `restricted_symbol_usage`: `allowIn` `legacy/*` never matched `legacy\a.php` (R6);
+    - two composer_hygiene fixtures, `provide_scripts_and_platform_are_checked` and
+      `psr4_locations_are_checked`: the messages name the file as `src\Logger.php` and the
+      PSR-4 target in its canonical spelling (R6). The second also misses its case mismatch, as
+      on macOS.
+  - **The dhat build.** It calls `pthread_getattr_np` (R14).
+- **Extension CI** passed on all three systems, as the State records.
 
 ### R3. One canonical form of a path, without Windows' verbatim prefix
 
@@ -424,6 +496,28 @@ alike. The existing `hashed_path` tests run on every leg.
 Round 2 runs the smoke round trip. If it still fails, the smoke test prints the server's stderr
 on failure, and the cause becomes a row.
 
+**Round 1's extension: a file's URI in its client's spelling.**
+
+- **Now.** A file the client has not opened is named by its canonical path's URI. That covers a
+  published diagnostic and a definition, reference or rename edit in such a file; each one goes
+  through `uri_and_version_for` (`lsp.rs:1010`). The client may spell the workspace another
+  way:
+  - macOS's `/var` is a link to `/private/var`;
+  - Windows' `%TEMP%` holds the 8.3 name `RUNNER~1`;
+  - on any system, a workspace can be opened through a link.
+
+  An editor shows such a URI as another file. That is how the 46 LSP tests failed on macOS and
+  Windows.
+- **Change.** A file that is not open gets the URI of the deepest workspace folder whose
+  canonical root holds it, with its components below that root appended. A file under no folder
+  keeps its canonical URI, and an open document keeps the URI its client sent, as now.
+- **Test.**
+  - The 46 tests, unchanged, on every leg.
+  - Here: a workspace opened through a link gets its diagnostics and definitions on the link's
+    URIs.
+
+  Linux's URIs change only for a workspace opened through a link, which they named wrongly.
+
 ### R6. Report paths spelled with `/` where PHPStan spells them so
 
 **Now.** `shown_path` (`project.rs:3430`) gives `src\Foo.php` on Windows. So:
@@ -454,6 +548,16 @@ on failure, and the cause becomes a row.
 
 Linux output is unchanged.
 
+**Round 1.**
+
+- The restricted symbols' `allowIn` and `allowExceptIn` (`restricted_symbols.rs:484`) match the
+  root-relative path with `ignoreErrors`' matcher, so on Windows `legacy/*` never matched
+  `legacy\a.php`. They take the same `/` form.
+- composer_hygiene's messages name the file as `shown_path` spells it (`src\Logger.php`), and
+  the PSR-4 target in its canonical spelling. A baseline matches by message. So R6 settles the
+  messages' spelling with the report's: a path below the root is spelled alike on every
+  platform, and Linux's messages stay as they are.
+
 ### R7. Case is matched as the root's directory matches it
 
 **Now.** Matching against configured text is exact on every platform. On NTFS, default APFS
@@ -483,6 +587,16 @@ or a Linux casefold directory, `Src/*` and `src/*` name the same files.
 
 On Linux the probe gives exact, so the output is unchanged. Its cost is about one `lstat` per
 configured root.
+
+**Round 1.**
+
+- The restricted symbols' `allowIn` and `allowExceptIn` are configured paths too, and take the
+  project root's rule.
+- macOS and Windows resolve a configured path to the disk's spelling, which is how round 1's
+  PSR-4 fixture lost its case mismatch there. glibc's `realpath` builds its result from the
+  names it is given, on a casefold directory too, so on Linux `psr4.caseMismatch` can report a
+  file whose name on disk is right. On a root that folds case, the walk spells a configured
+  path as its directories' listings do.
 
 ### R8. The include rule's platform values
 
@@ -635,8 +749,20 @@ are unchanged.
   `phpdoc`, `LineIndex` and the LSP positions over CRLF sources: line numbers, columns, heredoc
   terminators and doc tags.
 - **Round 1's Unix assumptions.** Every test that round 1 shows to assume Unix spellings is
-  fixed. Examples are a temp path in the 8.3 short form or under `/var`, compared with a canonical
-  one, and a path compared as `/`-joined text.
+  fixed:
+  - The fixture harness prints the path column with the relative path's components joined with
+    `/`. `portable` names the fixture's directory in the spelling the messages use, the
+    canonical one.
+  - `psr4_locations_are_checked` gets a layout every filesystem holds. The correctly placed
+    class moves out of `src/Http/`, so `src/http/` is the only spelling of that directory, and
+    the case mismatch is reported on every leg.
+  - `the_entries_are_sorted_by_name_bytes` keeps its order (a capital, then `_`, then small
+    letters) with names that differ in more than case.
+  - A test URI is made by `path_to_uri`, not by `format!("file://{}", …)`.
+  - A test that compares the walk's paths compares them with the canonical form of the paths
+    it wrote (`collect_php_files_…`).
+  - R5's extension fixes the LSP tests that compared canonical URIs with the temp directory's
+    spelling, without changing them.
 
 ### R14. Build scripts: the same embedded data everywhere, and dhat's walk per platform
 
@@ -681,6 +807,9 @@ are unchanged.
   - The perf gate's peak RSS (`:1118`) uses GNU `time -f %M` on Linux and BSD `time -l` on
     macOS, which reports bytes. On Windows the gate says that it has no peak-RSS reading, and
     hyperfine's timing still runs.
+  - `arch`'s `is_engine_source` (`arch.rs:75`) matches the path below `src` by its
+    components. It splits the text on `/`, so on Windows the exempt files and the `tests`
+    directories never match.
 - `scripts/`: each script that reads `/proc`, `perf`, valgrind, THP or `systemd-run` says in
   its usage that it runs on Linux.
 - README's "Building from source" adds:
