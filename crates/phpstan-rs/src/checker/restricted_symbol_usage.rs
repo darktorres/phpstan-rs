@@ -416,13 +416,13 @@ impl<'a> Checker<'a> {
         self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier));
     }
 
-    /// The checked file's path as path-scoped config spells it, the path
-    /// the reports show: relative to the project's working directory when
-    /// it lies below it, as given otherwise. `None` when no file is being
-    /// checked.
+    /// The checked file's path as path-scoped config spells it: relative to
+    /// the project's working directory when it lies below it, as given
+    /// otherwise, with `/` between its names on every platform
+    /// (`diagnostics::report_path`). `None` when no file is being checked.
     fn project_relative_path(&self) -> Option<String> {
         let shown = self.current_file_shown.as_deref()?;
-        Some(shown.display().to_string())
+        Some(diagnostics::report_path(shown).into_owned())
     }
 
     /// `allow_in_class_with_attributes`/`allow_except_in_class_with_

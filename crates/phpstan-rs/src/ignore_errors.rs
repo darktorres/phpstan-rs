@@ -17,7 +17,7 @@
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
-use diagnostics::Diagnostic;
+use diagnostics::{Diagnostic, report_path, report_spelling};
 use serde::Deserialize;
 
 /// One `ignoreErrors:` entry. Every field is optional and AND-combined
@@ -31,10 +31,12 @@ pub struct IgnoreErrorEntry {
     /// Exact match against `Diagnostic::identifier` - real PHPStan does
     /// exact string equality here too, never a glob.
     pub identifier: Option<String>,
-    /// A glob against the diagnostic's own already-relative file path (the
-    /// same string this project's `check-project` output already reports
-    /// paths as, e.g. `_analysis/phpstan-latte/foo.php`). See
-    /// `glob_matches`'s own doc comment for the exact wildcard semantics.
+    /// A glob against the diagnostic's own already-relative file path,
+    /// spelled with `/` between its names on every platform
+    /// (`diagnostics::report_path`, e.g. `_analysis/phpstan-latte/foo.php`).
+    /// On Windows a `\` in the glob is a separator too, as PHPStan reads
+    /// one there. See `glob_matches`'s own doc comment for the exact
+    /// wildcard semantics.
     pub path: Option<String>,
     /// A regex (real PHPStan's own PCRE delimiters, e.g. `#^...$#`,
     /// already stripped - store the bare pattern) against
@@ -63,7 +65,7 @@ impl IgnoreErrorEntry {
             return false;
         }
         if let Some(pattern) = &self.path
-            && !glob_matches(pattern, path)
+            && !glob_matches(&report_spelling(pattern), path)
         {
             return false;
         }
@@ -136,8 +138,8 @@ pub fn filter(results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>, entries: &[Igno
         return;
     }
     for (file, diagnostics) in results.iter_mut() {
-        // The text `display` writes, borrowed from the path where it is UTF-8.
-        let path = file.to_string_lossy();
+        // Borrowed from the path where it is UTF-8 and needs no other spelling.
+        let path = report_path(file);
         diagnostics
             .retain(|d| d.non_ignorable || !entries.iter().any(|entry| entry.matches(&path, d)));
     }

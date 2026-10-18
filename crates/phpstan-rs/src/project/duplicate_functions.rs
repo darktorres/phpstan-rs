@@ -26,7 +26,7 @@ use std::path::Path;
 
 use crate::file_id::FileId;
 use crate::project::duplicate_fn_sites::{DuplicateFunctionSites, FnDeclSite};
-use diagnostics::{Diagnostic, DiagnosticBuilder};
+use diagnostics::{Diagnostic, DiagnosticBuilder, report_path};
 use syntax::span::LineIndex;
 
 fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
@@ -77,12 +77,14 @@ pub(crate) fn check_duplicate_function_declarations<'a>(
             if group.len() < 2 {
                 continue;
             }
+            // Each site as reports name a file, with `/` between its names on
+            // every platform, so a baseline made on one matches on another.
             let location_list = group
                 .iter()
                 .map(|(site_file, site)| {
                     format!(
                         "- {}:{}",
-                        super::shown_path(root, path_of(*site_file)).display(),
+                        report_path(super::shown_path(root, path_of(*site_file))),
                         line_in(*site_file, site.span.start)
                     )
                 })

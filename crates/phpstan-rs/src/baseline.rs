@@ -6,7 +6,10 @@
 //!
 //! Keyed like PHPStan's: `(file, message)`, with the identifier and an
 //! occurrence count - deliberately not by line/column, so a baselined
-//! finding survives incidental code shifts elsewhere in the same file.
+//! finding survives incidental code shifts elsewhere in the same file. The
+//! file is spelled as PHPStan's baselines spell it, with `/` between its
+//! names on every platform (`diagnostics::report_path`), so a baseline made
+//! on one platform matches on another.
 //!
 //! Stored as JSON rather than a `.neon` file - this project doesn't have a
 //! NEON parser and one isn't otherwise justified. The format is versioned
@@ -14,11 +17,12 @@
 //! still loads, its entries merged per new key, and `convert` rewrites it.
 
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use diagnostics::Diagnostic;
+use diagnostics::{Diagnostic, report_path, report_spelling};
 use serde::{Deserialize, Serialize};
 
 /// The current on-disk format version.
@@ -109,24 +113,50 @@ fn read_file(path: &Path) -> io::Result<BaselineFile> {
     let json = fs::read_to_string(path)?;
     let invalid = |e: serde_json::Error| io::Error::new(io::ErrorKind::InvalidData, e);
     let value: serde_json::Value = serde_json::from_str(&json).map_err(invalid)?;
-    match value.get("version").and_then(serde_json::Value::as_u64) {
-        Some(v) if v == u64::from(VERSION) => serde_json::from_value(value).map_err(invalid),
-        Some(v) => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unsupported baseline version {v}"),
-        )),
+    let mut file: BaselineFile = match value.get("version").and_then(serde_json::Value::as_u64) {
+        Some(v) if v == u64::from(VERSION) => serde_json::from_value(value).map_err(invalid)?,
+        Some(v) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported baseline version {v}"),
+            ));
+        }
         None => {
             let (includes, entries) = match serde_json::from_value(value).map_err(invalid)? {
                 BaselineFileV1::Entries(entries) => (Vec::new(), entries),
                 BaselineFileV1::Index { includes, entries } => (includes, entries),
             };
-            Ok(BaselineFile {
+            BaselineFile {
                 version: VERSION,
                 includes,
                 entries: merge(entries.into_iter().map(Entry::from).collect()),
-            })
+            }
         }
+    };
+    file.entries = in_report_spelling(file.entries);
+    Ok(file)
+}
+
+/// `entries` with each file in the spelling the keys are made in
+/// (`diagnostics::report_spelling`): on Windows a `\` is read as `/`, which
+/// covers a baseline this tool wrote there with `\`. Entries whose keys
+/// then meet are merged.
+fn in_report_spelling(entries: Vec<Entry>) -> Vec<Entry> {
+    if !entries
+        .iter()
+        .any(|e| matches!(report_spelling(&e.file), Cow::Owned(_)))
+    {
+        return entries;
     }
+    merge(
+        entries
+            .into_iter()
+            .map(|e| Entry {
+                file: report_spelling(&e.file).into_owned(),
+                ..e
+            })
+            .collect(),
+    )
 }
 
 /// Entries with the same key folded into one, their counts added, in
@@ -198,7 +228,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 fn entries_for(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
     let mut counts: FxHashMap<Entry, usize> = FxHashMap::default();
     for (file, diagnostics) in results {
-        let file = normalize_path(file).display().to_string();
+        let file = report_path(&normalize_path(file)).into_owned();
         for d in diagnostics {
             let key = Entry {
                 file: file.clone(),
@@ -390,7 +420,7 @@ pub fn filter(
     files.sort();
     let files: Vec<PathBuf> = files.into_iter().cloned().collect();
     for file in files {
-        let normalized = normalize_path(&file).display().to_string();
+        let normalized = report_path(&normalize_path(&file)).into_owned();
         let Some(diagnostics) = results.get_mut(&file) else {
             continue;
         };

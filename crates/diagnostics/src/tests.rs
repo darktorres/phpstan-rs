@@ -1,6 +1,8 @@
 use crate::{DiagnosticBuilder, Identifier};
 use syntax::span::{LineIndex, Span};
 
+mod report_path;
+
 fn dummy_span() -> Span {
     Span::default()
 }

@@ -199,7 +199,9 @@ pub fn write_json(
 /// Checkstyle producers use for `source` - the field most Checkstyle-
 /// consuming tools group/suppress by, so a real rule identifier belongs
 /// there, not the `location` context label. `location` is folded into the
-/// message text instead so that breadcrumb isn't lost.
+/// message text instead so that breadcrumb isn't lost. A file is named with
+/// `/` between its names on every platform, as PHPStan's checkstyle report
+/// names it (`diagnostics::report_path`).
 pub fn render_checkstyle(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> String {
     let mut paths: Vec<&PathBuf> = results.keys().filter(|p| !results[*p].is_empty()).collect();
     paths.sort();
@@ -209,7 +211,7 @@ pub fn render_checkstyle(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Strin
     for path in paths {
         out.push_str(&format!(
             "  <file name=\"{}\">\n",
-            xml_escape(&path.display().to_string())
+            xml_escape(&diagnostics::report_path(path))
         ));
         for d in &results[path] {
             out.push_str(&format!(
@@ -229,7 +231,8 @@ pub fn render_checkstyle(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Strin
 /// Renders `results` as a JUnit XML report: a `<testsuite>` whose test
 /// cases are every diagnostic (a `<failure>`, named `path:line` and
 /// classed by identifier) plus one passing case per file without any, so
-/// CI test-report views show both.
+/// CI test-report views show both. A file is named as in the checkstyle
+/// report, with `/` between its names on every platform.
 pub fn render_junit(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> String {
     let mut paths: Vec<&PathBuf> = results.keys().collect();
     paths.sort();
@@ -241,7 +244,7 @@ pub fn render_junit(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> String {
         failures + clean
     ));
     for path in paths {
-        let display = xml_escape(&path.display().to_string());
+        let display = xml_escape(&diagnostics::report_path(path));
         let diagnostics = &results[path];
         if diagnostics.is_empty() {
             out.push_str(&format!("  <testcase name=\"{display}\"/>\n"));

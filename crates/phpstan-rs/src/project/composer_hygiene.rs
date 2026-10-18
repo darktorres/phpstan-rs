@@ -36,7 +36,7 @@ use syntax::visit::{Visitor, walk_expr, walk_stmts};
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use super::{FileState, Project};
 use crate::file_id::FileId;
-use diagnostics::{Diagnostic, DiagnosticBuilder};
+use diagnostics::{Diagnostic, DiagnosticBuilder, report_path};
 
 /// PSR virtual packages and the interfaces a provider must implement.
 const PSR_VIRTUAL_PACKAGES: &[(&str, &[&str])] = &[
@@ -540,9 +540,14 @@ impl Project {
         if declared.is_empty() {
             return;
         }
-        // Compared against the manifest's paths resolved; reported as the
-        // file's own spelling.
-        let shown = super::shown_path(self.absolute_root(), path);
+        // Compared against the manifest's paths resolved. The file and the
+        // path PSR-4 maps a class to are named as reports name a file:
+        // relative to the root, with `/` between their names.
+        let shown = report_path(super::shown_path(self.absolute_root(), path)).into_owned();
+        let named = |expected: &Path| {
+            let absolute = manifest.absolute(expected);
+            report_path(super::shown_path(self.absolute_root(), &absolute)).into_owned()
+        };
         let path = self.absolute_path(path);
         let path = path.as_path();
         let sections = [&manifest.autoload, &manifest.autoload_dev];
@@ -609,9 +614,8 @@ impl Project {
             }) {
                 diagnostics.push(diagnostic(
                     format!(
-                        "Class {fqn} is declared in {}, whose letter case differs from {} that PSR-4 prefix {prefix} maps it to; a case-sensitive filesystem won't find it.",
-                        shown.display(),
-                        case_variant.display()
+                        "Class {fqn} is declared in {shown}, whose letter case differs from {} that PSR-4 prefix {prefix} maps it to; a case-sensitive filesystem won't find it.",
+                        named(case_variant)
                     ),
                     span,
                     "psr4.caseMismatch",
@@ -621,9 +625,8 @@ impl Project {
             }
             diagnostics.push(diagnostic(
                 format!(
-                    "Class {fqn} is declared in {}, but PSR-4 prefix {prefix} maps it to {}.",
-                    shown.display(),
-                    first.display()
+                    "Class {fqn} is declared in {shown}, but PSR-4 prefix {prefix} maps it to {}.",
+                    named(first)
                 ),
                 span,
                 "psr4.pathMismatch",

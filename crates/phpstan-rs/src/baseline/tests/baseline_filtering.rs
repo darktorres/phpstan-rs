@@ -142,6 +142,50 @@ fn filter_reports_nothing_stale_when_every_entry_still_matches() {
     let _ = fs::remove_file(&path);
 }
 
+#[cfg(windows)]
+#[test]
+fn a_baseline_spells_a_file_with_slashes_and_reads_backslashes_as_them() {
+    let path = temp_path("report_spelling");
+    let recorded = results_of("src\\a.php", vec![diag("p")]);
+    generate(&path, &recorded).unwrap();
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.contains("\"file\": \"src/a.php\""), "{written}");
+
+    fs::write(
+        &path,
+        r#"{"version": 2, "entries": [
+            {"file": "src\\a.php", "message": "p"},
+            {"file": "src/a.php", "message": "p"}
+        ]}"#,
+    )
+    .unwrap();
+    let baseline = Baseline::load(&path).unwrap();
+    let mut now = results_of("src\\a.php", vec![diag("p"), diag("p"), diag("p")]);
+    let stale = filter(&mut now, &baseline);
+    assert!(stale.is_empty(), "{stale:?}");
+    assert_eq!(now[&PathBuf::from("src\\a.php")].len(), 1);
+    let _ = fs::remove_file(&path);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_backslash_in_a_baseline_file_stays_part_of_the_name_outside_windows() {
+    let path = temp_path("backslash_name");
+    fs::write(
+        &path,
+        r#"{"version": 2, "entries": [{"file": "dir\\a.php", "message": "p"}]}"#,
+    )
+    .unwrap();
+    let baseline = Baseline::load(&path).unwrap();
+    let mut now = results_of("dir/a.php", vec![diag("p")]);
+    filter(&mut now, &baseline);
+    assert_eq!(now[&PathBuf::from("dir/a.php")].len(), 1);
+    let mut now = results_of("dir\\a.php", vec![diag("p")]);
+    filter(&mut now, &baseline);
+    assert!(now[&PathBuf::from("dir\\a.php")].is_empty());
+    let _ = fs::remove_file(&path);
+}
+
 #[test]
 fn normalize_path_resolves_dot_and_dotdot_segments() {
     assert_eq!(normalize_path(Path::new("./t.php")), PathBuf::from("t.php"));

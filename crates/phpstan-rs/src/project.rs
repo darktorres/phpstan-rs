@@ -3147,7 +3147,7 @@ fn parse_with_ignores<'a>(
     if parsed.facts.has_anonymous_class {
         crate::registry::name_anonymous_classes(
             &mut ast,
-            &shown_path(root, path).display().to_string(),
+            &diagnostics::report_path(shown_path(root, path)),
             &parsed.line_index,
         );
     }

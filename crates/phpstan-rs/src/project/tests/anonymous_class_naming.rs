@@ -197,3 +197,23 @@ fn anonymous_class_extending_an_interface_is_flagged_by_target_kind() {
         "got: {d:?}"
     );
 }
+
+#[cfg(windows)]
+#[test]
+fn an_anonymous_class_names_its_file_with_slashes_on_windows() {
+    let mut project = Project::new();
+    load_test_file(
+        &mut project,
+        PathBuf::from("src\\build.php"),
+        "<?php\n$x = new class { public function f() {} };\n",
+        false,
+    );
+    project.finish_loading();
+
+    let d = project.check_file(&PathBuf::from("src\\build.php"));
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("class@anonymous/src/build.php:2::f()")),
+        "got: {d:?}"
+    );
+}

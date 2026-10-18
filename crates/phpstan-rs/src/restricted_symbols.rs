@@ -128,7 +128,9 @@ pub struct RestrictedSymbolEntry {
     pub message: String,
     /// `fnmatch()`-style patterns (`*` matches `/` too, mirroring
     /// `ignore_errors::glob_matches`' own identical semantics) against a
-    /// diagnostic's own already-relative file path - a match allows
+    /// diagnostic's own already-relative file path, spelled with `/`
+    /// between its names on every platform (`diagnostics::report_path`;
+    /// on Windows a `\` in a pattern is a separator too) - a match allows
     /// (drops) it. Empty means no path-based allowance at all.
     #[serde(default)]
     pub allow_in: Vec<String>,
@@ -475,26 +477,21 @@ impl RestrictedSymbols {
 impl RestrictedSymbolEntry {
     /// Whether the path-scoped `allow_in`/`allow_except_in` zones allow
     /// this entry in the file at `path` (spelled relative to the project
-    /// root). `params_gate` is the already-resolved
+    /// root, as `diagnostics::report_path` spells it). `params_gate` is the
+    /// already-resolved
     /// `allow_params_in_allowed`/`allow_except_params_in_allowed` verdict
     /// at the call site, when the entry configures either: it narrows a
     /// matched zone the same way it narrows the instance-of/methods
     /// zones, and an entry without one keeps the zone's unconditional
     /// behavior.
     pub(crate) fn allowed_at_path(&self, path: &str, params_gate: Option<bool>) -> bool {
-        if self
-            .allow_in
-            .iter()
-            .any(|p| crate::ignore_errors::glob_matches(p, path))
-        {
+        let matches =
+            |p: &String| crate::ignore_errors::glob_matches(&diagnostics::report_spelling(p), path);
+        if self.allow_in.iter().any(matches) {
             return params_gate.unwrap_or(true);
         }
         if !self.allow_except_in.is_empty() {
-            if !self
-                .allow_except_in
-                .iter()
-                .any(|p| crate::ignore_errors::glob_matches(p, path))
-            {
+            if !self.allow_except_in.iter().any(matches) {
                 return true;
             }
             return params_gate.unwrap_or(false);
@@ -616,6 +613,15 @@ mod tests {
     #[test]
     fn an_entry_without_path_zones_is_never_allowed_by_path() {
         assert!(!zoned(&[], &[]).allowed_at_path("src/Foo.php", None));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_backslash_in_a_zone_is_a_separator_on_windows() {
+        assert!(zoned(&["tests\\*.php"], &[]).allowed_at_path("tests/Foo.php", None));
+        let e = zoned(&[], &["legacy\\*"]);
+        assert!(!e.allowed_at_path("legacy/a.php", None));
+        assert!(e.allowed_at_path("src/a.php", None));
     }
 
     #[test]

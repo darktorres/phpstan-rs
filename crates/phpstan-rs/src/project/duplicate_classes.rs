@@ -33,7 +33,7 @@ use std::path::Path;
 use crate::checker::{class_kind_identifier, class_kind_word};
 use crate::file_id::FileId;
 use crate::project::duplicate_class_sites::{ClassDeclSite, DuplicateClassSites};
-use diagnostics::{Diagnostic, DiagnosticBuilder};
+use diagnostics::{Diagnostic, DiagnosticBuilder, report_path};
 use syntax::span::LineIndex;
 
 /// `file` is the file being checked, and `index` holds its lines. `path_of`
@@ -63,12 +63,14 @@ pub(crate) fn check_duplicate_class_declarations<'a>(
         real_sites
             .sort_by(|a, b| (path_of(a.0), a.1.span.start).cmp(&(path_of(b.0), b.1.span.start)));
 
+        // Each site as reports name a file, with `/` between its names on
+        // every platform, so a baseline made on one matches on another.
         let location_list = real_sites
             .iter()
             .map(|(site_file, site)| {
                 format!(
                     "- {}:{}",
-                    super::shown_path(root, path_of(*site_file)).display(),
+                    report_path(super::shown_path(root, path_of(*site_file))),
                     line_in(*site_file, site.span.start)
                 )
             })

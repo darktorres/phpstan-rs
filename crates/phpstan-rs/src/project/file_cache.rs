@@ -234,7 +234,7 @@ pub(super) struct Key {
 }
 
 /// The entry of a file with these `bytes`, named `path` and spelled as
-/// `shown_path(root, path)` says (its anonymous classes carry that spelling),
+/// `shown_path(root, path)` says (its anonymous classes are named from it),
 /// parsed as `is_stub` says and with use sites indexed as `index_use_sites`
 /// says; `None` when the cache is off.
 pub(super) fn key(

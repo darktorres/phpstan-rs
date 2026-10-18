@@ -153,6 +153,24 @@ fn render_checkstyle_omits_files_with_zero_diagnostics() {
     assert!(xml.contains("</checkstyle>"));
 }
 
+#[cfg(windows)]
+#[test]
+fn checkstyle_and_junit_name_a_file_with_slashes_on_windows() {
+    let mut results = FxHashMap::default();
+    results.insert(
+        PathBuf::from("src\\sub\\bad.php"),
+        vec![diag("undefined variable: $x", 3, 12, 0)],
+    );
+    assert!(render_checkstyle(&results).contains("<file name=\"src/sub/bad.php\">"));
+    assert!(render_junit(&results).contains("<testcase name=\"src/sub/bad.php:3\""));
+    let json = render_json(&results, 1);
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert!(
+        parsed["files"]["src\\sub\\bad.php"].is_object(),
+        "the JSON report keeps the platform's spelling: {json}"
+    );
+}
+
 #[test]
 fn output_format_default_is_text() {
     assert_eq!(OutputFormat::default(), OutputFormat::Text);

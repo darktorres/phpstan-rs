@@ -164,7 +164,7 @@ fn leaving_out_the_walks_a_file_cannot_need_gives_the_tree_the_walks_gave() {
         crate::stub_attributes::apply_stub_attributes(&mut every);
         crate::registry::name_anonymous_classes(
             &mut every,
-            &path.display().to_string(),
+            &diagnostics::report_path(path),
             &syntax::span::LineIndex::new(source.as_bytes()),
         );
         let Parsed {
