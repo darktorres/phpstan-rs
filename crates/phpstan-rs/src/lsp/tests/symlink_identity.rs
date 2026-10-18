@@ -2,7 +2,9 @@
 //! keys the file by its resolved path, so its diagnostics are published on
 //! the URI the editor opened, and navigation from it resolves in the
 //! target's own files. A file the editor has not opened is named under its
-//! folder's root as the editor named that root.
+//! folder's root as the editor named that root. A file's diagnostics are
+//! cleared on the URI they were sent on, and move with the file when the
+//! editor comes to know it by another.
 
 use super::super::*;
 use super::helpers::run;
@@ -94,5 +96,82 @@ fn a_workspace_opened_through_a_link_is_answered_in_the_links_spelling() {
     assert_eq!(
         result["uri"],
         path_to_uri(&link.join("defs.php")).to_string()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_workspace_opened_through_a_link_and_removed_is_cleared_on_the_links_uris() {
+    let dir = TempDir::new("link_workspace_removed");
+    dir.write(
+        "real/unopened.php",
+        "<?php function f() { echo $undefinedInLinked; }",
+    );
+    std::os::unix::fs::symlink("real", dir.0.join("link")).unwrap();
+    let link = dir.0.join("link");
+    let link_uri = path_to_uri(&link).to_string();
+    let unopened_uri = path_to_uri(&link.join("unopened.php")).to_string();
+
+    let removed = json!({"uri": link_uri, "name": "link"});
+    let messages = run_rooted(
+        &link_uri,
+        json!({}),
+        &[did_change_workspace_folders(vec![], vec![removed])],
+    );
+
+    let published: Vec<(&str, &Vec<serde_json::Value>)> = messages
+        .iter()
+        .filter(|m| m["method"] == "textDocument/publishDiagnostics")
+        .map(|m| {
+            (
+                m["params"]["uri"].as_str().unwrap(),
+                m["params"]["diagnostics"].as_array().unwrap(),
+            )
+        })
+        .collect();
+    assert!(
+        matches!(
+            published.as_slice(),
+            [(first, sent), (last, cleared)]
+                if *first == unopened_uri
+                    && *last == unopened_uri
+                    && sent.iter().any(|d| d["code"] == "variable.undefined")
+                    && cleared.is_empty()
+        ),
+        "the file is published and then cleared on the link's URI alone, got: {published:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_opened_by_another_spelling_has_its_diagnostics_moved_to_that_uri() {
+    let dir = TempDir::new("link_workspace_moved");
+    let src = "<?php function f() { echo $undefinedInLinked; }";
+    dir.write("real/a.php", src);
+    std::os::unix::fs::symlink("real", dir.0.join("link")).unwrap();
+    let link = dir.0.join("link");
+    let link_uri = path_to_uri(&link).to_string();
+    let linked_uri = path_to_uri(&link.join("a.php")).to_string();
+    let real_uri = path_to_uri(&dir.0.join("real/a.php")).to_string();
+
+    let open = notification(
+        "textDocument/didOpen",
+        json!({"textDocument": {"uri": real_uri, "languageId": "php", "version": 1, "text": src}}),
+    );
+    let messages = run_rooted(&link_uri, json!({}), &[open]);
+
+    assert_eq!(
+        last_publish_diagnostics_for(&messages, &linked_uri)["params"]["diagnostics"],
+        json!([]),
+        "the URI the diagnostics were first sent on is cleared, got: {messages:?}"
+    );
+    let moved = last_publish_diagnostics_for(&messages, &real_uri);
+    assert!(
+        moved["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "variable.undefined"),
+        "the diagnostics move to the URI the file was opened by, got: {moved:?}"
     );
 }

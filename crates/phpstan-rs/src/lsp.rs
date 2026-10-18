@@ -176,21 +176,21 @@ struct Server {
     // `didChange` do), so `publishDiagnostics` can be stamped with it -
     // see `uri_and_version_for`.
     open_uris: FxHashMap<PathBuf, (Uri, Option<i32>)>,
-    // The last-computed, post-`finalized` diagnostic set for
-    // every path this server has ever checked - `code_actions` reads
-    // this instead of re-running a whole-file checker pass per request
-    // (a real editor's lightbulb fires `textDocument/codeAction` far
-    // more often than actual edits, e.g. on cursor movement). Holds what
-    // the editor was last sent for each path, and only a publish changes
-    // it: a set that was not sent is never stored here, and
-    // `publish_analysis` compares against it to decide what to send. A
-    // removed file's entry goes with the empty set that clears it
-    // (`publish_paths`). Safe under
+    // What the editor holds for every path this server has checked: the
+    // post-`finalized` diagnostic set it was last sent, and the URI it went
+    // to (see `Published`) - `code_actions` reads this instead of
+    // re-running a whole-file checker pass per request (a real editor's
+    // lightbulb fires `textDocument/codeAction` far more often than actual
+    // edits, e.g. on cursor movement). Only a publish changes it, besides
+    // an analysed path with nothing to report that was never sent
+    // anything, which is recorded as holding nothing; `publish_analysis`
+    // compares against it to decide what to send. A removed file's entry
+    // goes with the empty set that clears it (`publish_paths`). Safe under
     // today's fully synchronous, one-message-at-a-time `run_loop`: a
     // `codeAction` request can only ever see whatever the most recently
     // processed `didChange`/scan already committed, never a torn or
     // stale-relative-to-an-earlier-unprocessed-edit state.
-    last_diagnostics: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    published: FxHashMap<PathBuf, Published>,
     // The exact current text `didOpen`/`didChange` last sent for a path,
     // regardless of whether it parses - `Project::source`/`Project::ast`
     // only ever reflect the last *successfully parsed* version, but
@@ -290,6 +290,16 @@ struct Server {
     version: String,
     // Every section a workspace's `phpstan-rs.toml` may set.
     config_schema: config::Schema,
+}
+
+/// What the editor holds for a file: the diagnostics it was last sent for
+/// the file, and the URI they went to, `None` when it was never sent any.
+/// The editor keys diagnostics by URI, so a set sent on another URI leaves
+/// these where they are, and a clear has to go to this one: the spelling
+/// that gave it can have gone with its folder.
+struct Published {
+    diagnostics: Vec<diagnostics::Diagnostic>,
+    uri: Option<Uri>,
 }
 
 /// What a project runs and reports from: the project itself, and the raw
@@ -410,7 +420,7 @@ impl Server {
             loose: Slot::new(&stubs),
             stubs,
             open_uris: FxHashMap::default(),
-            last_diagnostics: FxHashMap::default(),
+            published: FxHashMap::default(),
             latest_text: FxHashMap::default(),
             unit: Unit::default(),
             shutdown_received: false,
@@ -954,32 +964,39 @@ impl Server {
     }
 
     /// Publishes what the last analysis changed: each analysed path whose
-    /// finalized diagnostics differ from what the editor was last sent. A path
-    /// with nothing to report is published only when it had something before,
-    /// so the editor sees it cleared.
+    /// finalized diagnostics differ from what the editor holds for it, or
+    /// that the editor holds under a URI it no longer knows the file by. A
+    /// path with nothing to report is published only when it had something
+    /// before, so the editor sees it cleared.
     fn publish_analysis(&mut self) -> Vec<Message> {
         let mut paths: Vec<PathBuf> = self
             .homes()
             .into_iter()
             .flat_map(|home| self.slot(home).project.analyzed_paths())
             .collect();
-        paths.extend(self.last_diagnostics.keys().cloned());
+        paths.extend(self.published.keys().cloned());
         paths.sort();
         paths.dedup();
         let mut finalized = self.finalized(&paths);
-        let previous = std::mem::take(&mut self.last_diagnostics);
         let mut messages = Vec::new();
         for path in paths {
             let diags = finalized.remove(&path).unwrap_or_default();
-            let changed = match previous.get(&path) {
-                Some(before) => *before != diags,
-                None => !diags.is_empty(),
-            };
-            if changed {
-                let (uri, version) = self.uri_and_version_for(&path);
-                messages.push(self.diagnostics_message(&path, uri, version, &diags));
+            match self.published.get(&path) {
+                Some(held)
+                    if held.diagnostics == diags
+                        && (diags.is_empty()
+                            || held.uri.as_ref() == Some(&self.uri_and_version_for(&path).0)) => {}
+                None if diags.is_empty() => {
+                    self.published.insert(
+                        path,
+                        Published {
+                            diagnostics: diags,
+                            uri: None,
+                        },
+                    );
+                }
+                _ => messages.extend(self.publish(&path, diags)),
             }
-            self.last_diagnostics.insert(path, diags);
         }
         messages
     }
@@ -1092,17 +1109,10 @@ impl Server {
         if !self.enabled {
             // The editor now shows nothing for an open file, which the next
             // publish has to change from.
-            for path in self.open_uris.keys() {
-                self.last_diagnostics.insert(path.clone(), Vec::new());
-            }
-            let unit = self.unit;
-            return self
-                .open_uris
-                .values()
-                .cloned()
-                .map(|(uri, version)| {
-                    publish_diagnostics_notification(uri, version, &[], None, unit)
-                })
+            let open: Vec<PathBuf> = self.open_uris.keys().cloned().collect();
+            return open
+                .into_iter()
+                .flat_map(|path| self.publish(&path, Vec::new()))
                 .collect();
         }
         self.analyse_workspace();
@@ -1192,11 +1202,11 @@ impl Server {
         }
         if !content_changed {
             // Only the document's own diagnostics need publishing.
-            let diags = match self.last_diagnostics.get(&path) {
-                Some(diags) => diags.clone(),
+            let diags = match self.published.get(&path) {
+                Some(held) => held.diagnostics.clone(),
                 None => self.checked_and_finalized(&path),
             };
-            return self.publish_diagnostics_for(FxHashMap::from_iter([(path, diags)]));
+            return self.publish(&path, diags);
         }
         self.publish_paths(&recorded)
     }
@@ -1360,24 +1370,59 @@ impl Server {
     }
 
     /// Converts a diagnostics-by-path map into `publishDiagnostics`
-    /// messages, resolving each path to whatever URI the client last
-    /// used for it (a re-checked dependent might not itself be open in
-    /// the editor - it still needs a fresh notification, using the
-    /// workspace scan's own synthesized URI if nothing else ever opened
-    /// it). Shared by `handle_open_or_change` and the removal paths.
+    /// messages, each path's sent as `publish` sends it (a re-checked
+    /// dependent might not itself be open in the editor - it still needs a
+    /// fresh notification, on the URI of the path as the client spells it if
+    /// nothing ever opened it). Shared by `handle_open_or_change` and the
+    /// removal paths.
     fn publish_diagnostics_for(
         &mut self,
         results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
     ) -> Vec<Message> {
         results
             .into_iter()
-            .map(|(p, diags)| {
-                let (dep_uri, dep_version) = self.uri_and_version_for(&p);
-                let message = self.diagnostics_message(&p, dep_uri, dep_version, &diags);
-                self.last_diagnostics.insert(p, diags);
-                message
-            })
+            .flat_map(|(path, diags)| self.publish(&path, diags))
             .collect()
+    }
+
+    /// Sends `diags` as `path`'s diagnostics, and records them as what the
+    /// editor holds for it. They go to the URI the editor knows the file by
+    /// now (`uri_and_version_for`), and when the editor holds the file's
+    /// diagnostics under another URI, they are cleared there first. An empty
+    /// set is that clear alone: the URI the file is known by now can be one
+    /// the editor never had its diagnostics on.
+    fn publish(&mut self, path: &Path, diags: Vec<diagnostics::Diagnostic>) -> Vec<Message> {
+        let (uri, version) = self.uri_and_version_for(path);
+        let elsewhere = self
+            .published
+            .get(path)
+            .filter(|held| !held.diagnostics.is_empty())
+            .and_then(|held| held.uri.clone())
+            .filter(|held| *held != uri);
+        let mut messages = Vec::new();
+        let (uri, version) = match elsewhere {
+            Some(held) if diags.is_empty() => (held, None),
+            Some(held) => {
+                messages.push(publish_diagnostics_notification(
+                    held,
+                    None,
+                    &[],
+                    None,
+                    self.unit,
+                ));
+                (uri, version)
+            }
+            None => (uri, version),
+        };
+        messages.push(self.diagnostics_message(path, uri.clone(), version, &diags));
+        self.published.insert(
+            path.to_path_buf(),
+            Published {
+                diagnostics: diags,
+                uri: Some(uri),
+            },
+        );
+        messages
     }
 
     /// `navigation::resolve_at` finds what symbol is under the cursor;
@@ -2346,7 +2391,7 @@ impl Server {
     }
 
     /// Quick fixes for whatever diagnostics in `path` overlap `range` and
-    /// carry a `DiagnosticFix`. Reads `self.last_diagnostics` rather than
+    /// carry a `DiagnosticFix`. Reads `self.published` rather than
     /// re-running the checker - see that field's own doc comment for why.
     /// A cache miss (a workspace file requested before any `didOpen`/
     /// `didChange`/scan ever populated it) is computed via
@@ -2357,8 +2402,8 @@ impl Server {
         let path = self.document_path(uri)?;
         let home = self.home_of(&path);
         let computed;
-        let diagnostics = match self.last_diagnostics.get(&path) {
-            Some(diags) => diags,
+        let diagnostics = match self.published.get(&path) {
+            Some(held) => &held.diagnostics,
             None => {
                 computed = self.checked_and_finalized(&path);
                 &computed

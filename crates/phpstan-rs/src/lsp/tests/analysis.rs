@@ -240,9 +240,9 @@ fn a_superseded_run_sends_nothing_and_the_newer_run_sends_its_result() {
         "f.php has an undefined call, got: {initial:?}"
     );
     let sent = server
-        .last_diagnostics
+        .published
         .get(&path)
-        .cloned()
+        .map(|held| held.diagnostics.clone())
         .expect("f.php was published");
 
     let superseded = server.handle_debounced_change(&path, &uri, IGNORED_CALL, 2, &mut || true);
@@ -251,7 +251,7 @@ fn a_superseded_run_sends_nothing_and_the_newer_run_sends_its_result() {
         "a superseded run sends nothing, got: {superseded:?}"
     );
     assert_eq!(
-        server.last_diagnostics.get(&path),
+        server.published.get(&path).map(|held| &held.diagnostics),
         Some(&sent),
         "a superseded run leaves what the editor was sent unchanged"
     );

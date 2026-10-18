@@ -1,8 +1,8 @@
 //! `textDocument/codeAction`: converting a `DiagnosticFix` into a
 //! `quickfix` `CodeAction`, the range-overlap check, and the LSP-side
 //! wiring (capability advertisement, the `context.only` kind gate, and
-//! the `last_diagnostics` cache `code_actions` reads instead of
-//! re-running a whole-file checker pass per request).
+//! the `published` record `code_actions` reads instead of re-running a
+//! whole-file checker pass per request).
 
 use super::super::*;
 use super::helpers::run;
@@ -229,13 +229,13 @@ fn code_action_for_a_workspace_file_never_opened_still_returns_diagnostics() {
     let uri = path_to_uri(&path).to_string();
     let r = point_range(lsp_pos(src, "$undefinedVariable"));
 
-    // No didOpen - a.php is only ever seen via the workspace scan, so
-    // last_diagnostics has no entry for it yet when this request arrives.
+    // No didOpen - a.php is only ever seen via the workspace scan, whose
+    // publish is what `published` holds for it when this request arrives.
     let messages = run(&dir, &[code_action_request(2, &uri, r, None)]);
     let result = response_result(&messages, 2);
     assert_eq!(
         *result,
         json!([]),
-        "the cache-miss fallback must still compute a real (if empty-of-fixes) answer, got: {result:?}"
+        "a never-opened file must still get a real (if empty-of-fixes) answer, got: {result:?}"
     );
 }
