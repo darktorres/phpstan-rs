@@ -11,9 +11,16 @@
 //! `include_str!`'s path is resolved relative to the file containing the
 //! macro call, not the crate root - a relative path here would resolve
 //! against the wrong directory once `include!`-ed into `lib.rs`.
+//!
+//! The data is the same on every platform: a path is spelled with `/`, and
+//! a source whose checkout wrote `\r\n` is embedded from a copy with `\n`
+//! under `OUT_DIR` (`embed.rs`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[path = "src/embed.rs"]
+mod embed;
 
 fn collect_php_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -31,10 +38,37 @@ fn collect_php_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn write_source_array(out: &mut String, name: &str, files: &[PathBuf]) {
+/// The file to embed for `path`, which is below `vendor`: itself, or, when it
+/// holds `\r\n`, a copy under `copies` at the same place below `vendor` with
+/// `\n` alone.
+fn embedded(path: &Path, vendor: &Path, copies: &Path) -> PathBuf {
+    let bytes =
+        fs::read(path).unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+    let Some(lf) = embed::with_lf_breaks(&bytes) else {
+        return path.to_path_buf();
+    };
+    let below = path
+        .strip_prefix(vendor)
+        .expect("a vendored file is below the vendor directory");
+    let copy = copies.join(below);
+    fs::create_dir_all(copy.parent().expect("a copy is in a directory")).unwrap();
+    fs::write(&copy, lf).unwrap();
+    copy
+}
+
+fn write_source_array(
+    out: &mut String,
+    name: &str,
+    files: &[PathBuf],
+    vendor: &Path,
+    copies: &Path,
+) {
     out.push_str(&format!("pub static {name}: &[&str] = &[\n"));
     for path in files {
-        out.push_str(&format!("    include_str!({:?}),\n", path));
+        out.push_str(&format!(
+            "    include_str!({:?}),\n",
+            embedded(path, vendor, copies)
+        ));
     }
     out.push_str("];\n");
 }
@@ -44,7 +78,7 @@ fn write_path_array(out: &mut String, name: &str, files: &[PathBuf], root: &Path
     out.push_str(&format!("pub static {name}: &[&str] = &[\n"));
     for path in files {
         let relative = path.strip_prefix(root).unwrap_or(path);
-        out.push_str(&format!("    {:?},\n", relative.to_string_lossy()));
+        out.push_str(&format!("    {:?},\n", embed::slash_spelling(relative)));
     }
     out.push_str("];\n");
 }
@@ -106,8 +140,18 @@ fn main() {
         .unwrap_or_default();
     phpstan_stub_files.sort();
 
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let copies = Path::new(&out_dir).join("lf");
+    let _ = fs::remove_dir_all(&copies);
+
     let mut generated = String::new();
-    write_source_array(&mut generated, "PHPSTORM_STUBS_SOURCES", &phpstorm_files);
+    write_source_array(
+        &mut generated,
+        "PHPSTORM_STUBS_SOURCES",
+        &phpstorm_files,
+        &vendor,
+        &copies,
+    );
     // Each stub file's top-level directory under `vendor/phpstorm-stubs`
     // - the extension it documents - parallel to `PHPSTORM_STUBS_SOURCES`.
     let stubs_root = vendor.join("phpstorm-stubs");
@@ -128,21 +172,33 @@ fn main() {
         &phpstorm_files,
         &stubs_root,
     );
-    write_source_array(&mut generated, "PHPSTAN_SRC_SOURCES", &phpstan_src_files);
+    write_source_array(
+        &mut generated,
+        "PHPSTAN_SRC_SOURCES",
+        &phpstan_src_files,
+        &vendor,
+        &copies,
+    );
     write_path_array(
         &mut generated,
         "PHPSTAN_SRC_PATHS",
         &phpstan_src_files,
         &vendor.join("phpstan-src/src"),
     );
-    write_source_array(&mut generated, "PHPSTAN_STUB_SOURCES", &phpstan_stub_files);
+    write_source_array(
+        &mut generated,
+        "PHPSTAN_STUB_SOURCES",
+        &phpstan_stub_files,
+        &vendor,
+        &copies,
+    );
 
-    let out_dir = std::env::var("OUT_DIR").unwrap();
     fs::write(Path::new(&out_dir).join("stub_sources.rs"), generated).unwrap();
 
     println!("cargo:rerun-if-changed=../../vendor/phpstorm-stubs");
     println!("cargo:rerun-if-changed=../../vendor/phpstan-src/src");
     println!("cargo:rerun-if-changed=../../vendor/phpstan-src/stubs");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/embed.rs");
     println!("cargo:rerun-if-changed=index.tsv");
 }
