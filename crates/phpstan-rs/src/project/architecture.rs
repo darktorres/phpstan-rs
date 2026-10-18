@@ -6,9 +6,9 @@
 //! and the class itself don't count.
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
+use crate::file_id::FileId;
 use syntax::ast::*;
 use syntax::span::Span;
 use syntax::visit::{Visitor, walk_expr, walk_stmts};
@@ -205,12 +205,13 @@ impl<'p> Context<'p> {
 }
 
 impl Project {
-    /// Every `rules` violation among the analysed classes, keyed by file.
+    /// Every `rules` violation among the analysed classes, keyed by the
+    /// file's number.
     pub fn check_architecture(
         &self,
         rules: &[ArchitectureRule],
-    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
+    ) -> FxHashMap<FileId, Vec<Diagnostic>> {
+        let mut out: FxHashMap<FileId, Vec<Diagnostic>> = FxHashMap::default();
         if rules.is_empty() {
             return out;
         }
@@ -226,10 +227,14 @@ impl Project {
             patterns: FxHashMap::default(),
         };
 
-        let mut analyzed: Vec<(&PathBuf, &super::FileState)> =
-            self.files.iter().filter(|(_, f)| f.analyzed).collect();
-        analyzed.sort_by(|a, b| a.0.cmp(b.0));
-        for (path, file) in analyzed {
+        let mut analyzed: Vec<(FileId, &super::FileState)> = self
+            .files
+            .iter_with_ids()
+            .filter(|(_, _, f)| f.analyzed)
+            .map(|(id, _, f)| (id, f))
+            .collect();
+        analyzed.sort_by_key(|&(id, _)| self.files.rank_of(id));
+        for (id, file) in analyzed {
             let mut classes = FxHashMap::default();
             for class in &file.declared_classes {
                 classes.insert(class.name.to_ascii_lowercase(), class);
@@ -259,11 +264,11 @@ impl Project {
                     let found =
                         self.check_rule(&mut ctx, rule, &rule_name, &fqn, decl, &dependencies);
                     if !found.is_empty() {
-                        out.entry((*path).clone())
-                            .or_default()
-                            .extend(found.into_iter().map(|(span, message, id)| {
+                        out.entry(id).or_default().extend(found.into_iter().map(
+                            |(span, message, id)| {
                                 DiagnosticBuilder::new(message, span, 0, id).build(&file.line_index)
-                            }));
+                            },
+                        ));
                     }
                 }
             }

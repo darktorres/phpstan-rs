@@ -29,15 +29,17 @@ fn a_file_with_no_kept_tree_is_parsed_from_its_open_document() {
     let path = PathBuf::from("open.php");
     let mut project = project_with_a_context_file(&path);
     project.set_document(&path, EDITOR.as_bytes());
-    assert_eq!(project.ast_of(&path).map(|ast| ast.len()), Some(1));
+    let id = project.number_of(&path);
+    assert_eq!(project.ast_of(id).map(|ast| ast.len()), Some(1));
 }
 
 #[test]
 fn a_file_edited_after_a_parse_is_parsed_again_from_its_new_text() {
     let path = PathBuf::from("open.php");
     let mut project = project_with_a_context_file(&path);
+    let id = project.number_of(&path);
     project.set_document(&path, EDITOR.as_bytes());
-    assert_eq!(project.ast_of(&path).map(|ast| ast.len()), Some(1));
+    assert_eq!(project.ast_of(id).map(|ast| ast.len()), Some(1));
     project.set_document(&path, EDITED_AGAIN.as_bytes());
-    assert_eq!(project.ast_of(&path).map(|ast| ast.len()), Some(2));
+    assert_eq!(project.ast_of(id).map(|ast| ast.len()), Some(2));
 }

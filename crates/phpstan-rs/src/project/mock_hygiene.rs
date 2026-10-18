@@ -19,8 +19,8 @@
 //! - `mock.bannedClass`: mocking a class `mock_banned_classes` lists.
 
 use rustc_hash::FxHashMap;
-use std::path::PathBuf;
 
+use crate::file_id::FileId;
 use syntax::ast::*;
 use syntax::span::{LineIndex, Span};
 use syntax::visit::{Visitor, walk_expr, walk_expr_in_scope, walk_stmt, walk_stmts};
@@ -360,9 +360,9 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
 impl Project {
     /// PHPUnit mock-builder misuse in the analysed files; `banned` lists
     /// classes that must not be mocked.
-    pub fn check_mock_hygiene(&self, banned: &[String]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    pub fn check_mock_hygiene(&self, banned: &[String]) -> FxHashMap<FileId, Vec<Diagnostic>> {
         let mut out = FxHashMap::default();
-        for (path, file) in &self.files {
+        for (id, _, file) in self.files.iter_with_ids() {
             if !file.analyzed {
                 continue;
             }
@@ -377,7 +377,7 @@ impl Project {
             if !walker.out.is_empty() {
                 let mut found = walker.out;
                 found.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-                out.insert(path.clone(), found);
+                out.insert(id, found);
             }
         }
         out

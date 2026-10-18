@@ -47,9 +47,9 @@ fn check_all_covers_every_loaded_file_not_just_one() {
     let all = project.check_all(&crate::project::worker_pool());
     assert_eq!(project.file_count(), 2);
     assert_eq!(all.len(), 2);
-    assert!(all[&PathBuf::from("good.php")].is_empty());
+    assert!(all[&project.number_of("good.php")].is_empty());
     assert!(
-        all[&PathBuf::from("bad.php")]
+        all[&project.number_of("bad.php")]
             .iter()
             .any(|d| d.message.contains("undefined variable"))
     );
@@ -76,7 +76,7 @@ fn check_paths_restricts_output_but_keeps_whole_project_facts() {
 
     assert_eq!(result.len(), 1, "got: {result:?}");
     assert!(
-        result[&PathBuf::from("bad.php")]
+        result[&project.number_of("bad.php")]
             .iter()
             .any(|d| d.message.contains("undefined variable"))
     );
@@ -216,7 +216,7 @@ fn deferred_registry_passes_all_run_through_the_real_project_path() {
     project.finish_loading();
 
     let all = project.check_all(&crate::project::worker_pool());
-    let consumer_diagnostics = &all[&PathBuf::from("consumer.php")];
+    let consumer_diagnostics = &all[&project.number_of("consumer.php")];
     // Only the @phpstan-import-type call is a real type mismatch (string
     // isn't int) - @mixin's count() and @method's getX() both return int
     // already, so those two calls should be silent.

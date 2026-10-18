@@ -87,10 +87,12 @@ pub(crate) fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
             full_load.as_secs_f64() / incremental.as_secs_f64()
         );
     }
-    let mut result_paths: Vec<&PathBuf> = results.keys().collect();
-    result_paths.sort();
-    for path in result_paths {
-        let diagnostics = &results[path];
+    let mut result_paths: Vec<_> = results
+        .iter()
+        .map(|(&id, diagnostics)| (project.path_of(id), diagnostics))
+        .collect();
+    result_paths.sort_by_key(|&(path, _)| path);
+    for (path, diagnostics) in result_paths {
         let shown = project::shown_path(project.absolute_root(), path);
         println!("{}: {} diagnostic(s)", shown.display(), diagnostics.len());
         for d in diagnostics {

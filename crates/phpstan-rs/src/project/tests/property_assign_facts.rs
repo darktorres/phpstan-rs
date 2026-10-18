@@ -47,7 +47,7 @@ fn a_trait_file_left_out_of_the_checked_paths_still_contributes_its_writes() {
     let host = PathBuf::from("host.php");
     let results = project.check_paths(std::slice::from_ref(&host), &worker_pool());
     assert_eq!(
-        messages(&results[&host]),
+        messages(&results[&project.number_of(&host)]),
         ["Foo::$x is never assigned string so it can be removed from the property type."]
     );
 }
@@ -95,7 +95,7 @@ fn a_property_a_trait_declares_is_judged_against_every_hosts_writes() {
     let path = PathBuf::from("trait.php");
     let results = project.check_paths(std::slice::from_ref(&path), &worker_pool());
     assert_eq!(
-        messages(&results[&path]),
+        messages(&results[&project.number_of(&path)]),
         ["T::$x is never assigned bool so it can be removed from the property type."]
     );
 }
@@ -187,7 +187,7 @@ fn a_file_whose_check_panics_costs_only_its_own_results() {
     assert_eq!(panics.len(), 1, "{panics:?}");
     assert_eq!(panics[0].0, panicking);
     assert_eq!(
-        messages(&results[&survivor]),
+        messages(&results[&project.number_of(&survivor)]),
         ["B::$y is never assigned string so it can be removed from the property type."]
     );
 }

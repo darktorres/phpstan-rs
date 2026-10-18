@@ -50,6 +50,7 @@ use lsp_types::{
 
 use crate::app::check_project::{self, CheckRequest};
 use crate::checker::Checker;
+use crate::file_id::FileId;
 use crate::project::session::{
     Classified, DEFAULT_REPORT_LEVEL, DiagnosticOrder, ErrorPolicy, Finalize, Session,
     classify_unlisted, finalize_results, identify_through,
@@ -296,13 +297,15 @@ struct Server {
 /// results of its last analysis, which publishing finalizes.
 struct Slot {
     project: Project,
-    // The raw per-file checks of every analysed path: the last full
-    // analysis's, updated by the files each edit re-checked.
-    file_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    // The raw per-file checks of every analysed file, by its number in
+    // `project`: the last full analysis's, updated by the files each edit
+    // re-checked.
+    file_results: FxHashMap<FileId, Vec<diagnostics::Diagnostic>>,
     // The raw project-wide diagnostics of the last full analysis, by the
-    // file each is reported in. An edit drops the edited file's own entry,
-    // whose spans do not fit the edited text, until the next save.
-    whole_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+    // number of the file each is reported in. An edit drops the edited
+    // file's own entry, whose spans do not fit the edited text, until the
+    // next save.
+    whole_results: FxHashMap<FileId, Vec<diagnostics::Diagnostic>>,
 }
 
 impl Slot {
@@ -324,14 +327,22 @@ impl Slot {
         }
     }
 
-    /// The raw diagnostics of `path`: its per-file checks, then its
-    /// project-wide ones.
-    fn raw(&self, path: &Path) -> Vec<diagnostics::Diagnostic> {
-        let mut diags = self.file_results.get(path).cloned().unwrap_or_default();
-        if let Some(whole) = self.whole_results.get(path) {
+    /// The raw diagnostics of the file numbered `id`: its per-file checks,
+    /// then its project-wide ones.
+    fn raw(&self, id: FileId) -> Vec<diagnostics::Diagnostic> {
+        let mut diags = self.file_results.get(&id).cloned().unwrap_or_default();
+        if let Some(whole) = self.whole_results.get(&id) {
             diags.extend(whole.iter().cloned());
         }
         diags
+    }
+
+    /// Drops the raw diagnostics of `path`, of both kinds.
+    fn forget(&mut self, path: &Path) {
+        if let Some(id) = self.project.file_id(path) {
+            self.file_results.remove(&id);
+            self.whole_results.remove(&id);
+        }
     }
 }
 
@@ -633,11 +644,10 @@ impl Server {
         if !removed.is_empty() {
             for path in &removed {
                 self.latest_text.remove(path);
-                folder.slot.file_results.remove(path);
-                folder.slot.whole_results.remove(path);
+                folder.slot.forget(path);
             }
-            for (path, diags) in folder.slot.project.remove_files(&removed) {
-                folder.slot.file_results.insert(path, diags);
+            for (id, diags) in folder.slot.project.remove_files(&removed) {
+                folder.slot.file_results.insert(id, diags);
             }
         }
 
@@ -788,7 +798,9 @@ impl Server {
                 let slot = self.slot_mut(home);
                 slot.project.unset_document(&path);
                 let results = slot.project.remove_file(&path);
-                slot.file_results.remove(&path);
+                if let Some(id) = slot.project.file_id(&path) {
+                    slot.file_results.remove(&id);
+                }
                 changed.extend(self.record(home, &path, results));
             }
             for (home, classified) in holders {
@@ -830,13 +842,12 @@ impl Server {
     /// publishing. A file whose check panicked keeps no results.
     fn analyse_workspace(&mut self) {
         for folder in &mut self.folders {
-            let mut paths = folder.slot.project.analyzed_paths();
-            // Sorted, so repeated runs against an unchanged workspace check the
-            // same files in the same order.
-            paths.sort();
+            // In path order, so repeated runs against an unchanged workspace
+            // check the same files in the same order.
+            let files = folder.slot.project.analyzed_files();
             let checks = folder
                 .session
-                .check_project(&mut folder.slot.project, &paths, false);
+                .check_project(&mut folder.slot.project, &files, false);
             for (path, msg) in &checks.check_panics {
                 eprintln!(
                     "phpstan-rs lsp: checking {} panicked: {msg}",
@@ -852,14 +863,12 @@ impl Server {
     /// The per-file checks of the loose project's files. It has no
     /// configuration, so it has no project-wide passes.
     fn analyse_loose(&mut self) {
-        let mut paths = self.loose.project.analyzed_paths();
-        paths.sort();
-        let file_results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> = paths
+        let file_results: FxHashMap<FileId, Vec<diagnostics::Diagnostic>> = self
+            .loose
+            .project
+            .analyzed_files()
             .into_iter()
-            .map(|path| {
-                let diags = self.loose.project.check_file(&path);
-                (path, diags)
-            })
+            .map(|id| (id, self.loose.project.check_file_by_id(id)))
             .collect();
         self.loose.file_results = file_results;
         self.loose.whole_results.clear();
@@ -870,7 +879,7 @@ impl Server {
     fn finalize_in(
         &self,
         home: Home,
-        results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+        results: FxHashMap<FileId, Vec<diagnostics::Diagnostic>>,
     ) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
         let slot = self.slot(home);
         // The post-processing a published diagnostic set gets: the one
@@ -905,17 +914,33 @@ impl Server {
         }
     }
 
+    /// The diagnostics of `path` in the home that holds it, checked now and
+    /// finalized as a published set is.
+    fn checked_and_finalized(&self, path: &Path) -> Vec<diagnostics::Diagnostic> {
+        let home = self.home_of(path);
+        let project = &self.slot(home).project;
+        let Some(id) = project.file_id(path) else {
+            return Vec::new();
+        };
+        let checked = FxHashMap::from_iter([(id, project.check_file_by_id(id))]);
+        self.finalize_in(home, checked)
+            .into_values()
+            .next()
+            .unwrap_or_default()
+    }
+
     /// The post-processed diagnostics of `paths`. Each path is finalized by the
     /// home that publishes it (see `publisher`), and a path no home publishes
     /// has none.
     fn finalized(&self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>> {
-        let mut raw: FxHashMap<Home, FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>> =
+        let mut raw: FxHashMap<Home, FxHashMap<FileId, Vec<diagnostics::Diagnostic>>> =
             FxHashMap::default();
         for path in paths {
             if let Some(home) = self.publisher(path) {
-                raw.entry(home)
-                    .or_default()
-                    .insert(path.clone(), self.slot(home).raw(path));
+                let slot = self.slot(home);
+                if let Some(id) = slot.project.file_id(path) {
+                    raw.entry(home).or_default().insert(id, slot.raw(id));
+                }
             }
         }
         let mut out = FxHashMap::default();
@@ -1073,15 +1098,17 @@ impl Server {
         &mut self,
         home: Home,
         edited: &Path,
-        results: FxHashMap<PathBuf, Vec<diagnostics::Diagnostic>>,
+        results: FxHashMap<FileId, Vec<diagnostics::Diagnostic>>,
     ) -> Vec<PathBuf> {
         let slot = self.slot_mut(home);
-        slot.whole_results.remove(edited);
+        if let Some(id) = slot.project.file_id(edited) {
+            slot.whole_results.remove(&id);
+        }
         let mut paths: Vec<PathBuf> = results
             .into_iter()
-            .map(|(path, diags)| {
-                slot.file_results.insert(path.clone(), diags);
-                path
+            .map(|(id, diags)| {
+                slot.file_results.insert(id, diags);
+                slot.project.path_of(id).to_path_buf()
             })
             .collect();
         if !paths.iter().any(|path| path.as_path() == edited) {
@@ -1147,16 +1174,7 @@ impl Server {
             // Only the document's own diagnostics need publishing.
             let diags = match self.last_diagnostics.get(&path) {
                 Some(diags) => diags.clone(),
-                None => {
-                    let home = self.home_of(&path);
-                    let checked = FxHashMap::from_iter([(
-                        path.clone(),
-                        self.slot(home).project.check_file(&path),
-                    )]);
-                    self.finalize_in(home, checked)
-                        .remove(&path)
-                        .unwrap_or_default()
-                }
+                None => self.checked_and_finalized(&path),
             };
             return self.publish_diagnostics_for(FxHashMap::from_iter([(path, diags)]));
         }
@@ -1223,9 +1241,9 @@ impl Server {
         // the editor was last sent. Their raw results are stale, so they
         // are dropped until a save's full analysis recomputes them.
         for home in self.homes() {
-            for stale in self.slot_mut(home).project.take_unchecked() {
-                if !finalized.contains_key(&stale) {
-                    let slot = self.slot_mut(home);
+            let slot = self.slot_mut(home);
+            for stale in slot.project.take_unchecked() {
+                if !finalized.contains_key(slot.project.path_of(stale)) {
                     slot.file_results.remove(&stale);
                     slot.whole_results.remove(&stale);
                 }
@@ -1265,7 +1283,9 @@ impl Server {
                     }
                     slot.project.unset_document(&path);
                     let results = slot.project.remove_file(&path);
-                    slot.file_results.remove(&path);
+                    if let Some(id) = slot.project.file_id(&path) {
+                        slot.file_results.remove(&id);
+                    }
                     recorded.extend(self.record(home, &path, results));
                 }
                 recorded.sort();
@@ -2318,12 +2338,7 @@ impl Server {
         let diagnostics = match self.last_diagnostics.get(&path) {
             Some(diags) => diags,
             None => {
-                let raw = self.slot(home).project.check_file(&path);
-                computed = self
-                    .finalize_in(home, FxHashMap::from_iter([(path.clone(), raw)]))
-                    .into_values()
-                    .next()
-                    .unwrap_or_default();
+                computed = self.checked_and_finalized(&path);
                 &computed
             }
         };

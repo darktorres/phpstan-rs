@@ -12,31 +12,30 @@
 //! statically-declared one.
 
 use crate::checker::NamedArgumentCallFacts;
+use crate::file_id::FileId;
 use crate::project::declared_classes::DeclaredClass;
 use crate::registry::Registry;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
 use syntax::ast::Visibility;
 use syntax::span::Span;
 use types::Name;
 
 /// Project-wide merge of every analysed file's `NamedArgumentCallFacts`,
-/// each call site tagged with the file it came from.
-pub(crate) type NamedArgumentCallFactsWithPath =
-    FxHashMap<(Name, Name, Name), Vec<(PathBuf, Span)>>;
+/// each call site tagged with the number of the file it came from.
+pub(crate) type NamedArgumentCallFactsWithFile = FxHashMap<(Name, Name, Name), Vec<(FileId, Span)>>;
 
 /// Merges each analysed file's call sites in the order given, which the
 /// caller makes path order.
 pub(crate) fn merge_named_argument_calls(
-    per_file: Vec<(PathBuf, NamedArgumentCallFacts)>,
-) -> NamedArgumentCallFactsWithPath {
-    let mut merged: NamedArgumentCallFactsWithPath = FxHashMap::default();
-    for (path, calls) in per_file {
+    per_file: Vec<(FileId, NamedArgumentCallFacts)>,
+) -> NamedArgumentCallFactsWithFile {
+    let mut merged: NamedArgumentCallFactsWithFile = FxHashMap::default();
+    for (file, calls) in per_file {
         for (key, spans) in calls {
             merged
                 .entry(key)
                 .or_default()
-                .extend(spans.into_iter().map(|span| (path.clone(), span)));
+                .extend(spans.into_iter().map(|span| (file, span)));
         }
     }
     merged
@@ -141,9 +140,9 @@ fn method_overrides(
 }
 
 pub(crate) fn find_renamed_named_argument_collisions(
-    calls: &NamedArgumentCallFactsWithPath,
+    calls: &NamedArgumentCallFactsWithFile,
     overrides: &RenamedParameterOverrideFacts,
-) -> Vec<(PathBuf, Span, String)> {
+) -> Vec<(FileId, Span, String)> {
     let mut collisions = Vec::new();
     for RenamedParameterOverride {
         prototype_class,
@@ -160,10 +159,10 @@ pub(crate) fn find_renamed_named_argument_collisions(
         )) else {
             continue;
         };
-        for (path, span) in sites {
+        for &(file, span) in sites {
             collisions.push((
-                path.clone(),
-                *span,
+                file,
+                span,
                 format!(
                     "Call to {prototype_class}::{method}() uses named argument for parameter \
                      ${prototype_param}, but {overriding_class} renames it to ${overriding_param}."

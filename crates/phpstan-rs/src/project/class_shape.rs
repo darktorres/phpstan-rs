@@ -8,8 +8,8 @@
 //! as protected, a Doctrine entity its proxies subclass).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
 
+use crate::file_id::FileId;
 use crate::parent_calls::{HasContent, Invocation, ParentCallRule};
 use syntax::ast::*;
 use syntax::span::{LineIndex, Span};
@@ -90,15 +90,19 @@ impl Project {
         &self,
         closed_classes: bool,
         parent_calls: &[ParentCallRule],
-    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
+    ) -> FxHashMap<FileId, Vec<Diagnostic>> {
+        let mut out: FxHashMap<FileId, Vec<Diagnostic>> = FxHashMap::default();
         if !closed_classes && parent_calls.is_empty() {
             return out;
         }
-        let mut files: Vec<(&PathBuf, &super::FileState)> =
-            self.files.iter().filter(|(_, f)| f.analyzed).collect();
-        files.sort_by(|a, b| a.0.cmp(b.0));
-        for (path, file) in files {
+        let mut files: Vec<(FileId, &super::FileState)> = self
+            .files
+            .iter_with_ids()
+            .filter(|(_, _, f)| f.analyzed)
+            .map(|(id, _, f)| (id, f))
+            .collect();
+        files.sort_by_key(|&(id, _)| self.files.rank_of(id));
+        for (id, file) in files {
             let mut classes = Vec::new();
             collect_classes(file.ast(), &mut classes);
             let mut found = Vec::new();
@@ -118,7 +122,7 @@ impl Project {
             }
             if !found.is_empty() {
                 found.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-                out.insert(path.clone(), found);
+                out.insert(id, found);
             }
         }
         out

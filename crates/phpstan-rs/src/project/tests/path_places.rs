@@ -81,6 +81,57 @@ fn a_batch_load_into_a_fresh_project_sets_the_places_too() {
 }
 
 #[test]
+fn a_load_places_the_composer_manifests_among_its_files() {
+    let manifest = |path: &str| composer::manifest::ComposerManifest {
+        path: PathBuf::from(path),
+        ..Default::default()
+    };
+    let mut project = Project::new();
+    project.apply_settings(ProjectSettings {
+        packages: composer::PackageIndex::new(vec![
+            manifest("/w/lib/composer.json"),
+            manifest("/w/composer.json"),
+        ]),
+        ..ProjectSettings::default()
+    });
+    let failures = load_test_files(
+        &mut project,
+        &[
+            (
+                PathBuf::from("/w/z.php"),
+                "<?php function z_first() {}",
+                false,
+            ),
+            (
+                PathBuf::from("/w/lib/x.php"),
+                "<?php function x_second() {}",
+                false,
+            ),
+            (
+                PathBuf::from("/w/a.php"),
+                "<?php function a_third() {}",
+                true,
+            ),
+        ],
+    );
+    assert!(failures.is_empty(), "{failures:?}");
+    assert!(
+        project.files.has_places(),
+        "the listing and the manifests set the places"
+    );
+    assert_places_follow_paths(
+        &project,
+        &[
+            "/w/a.php",
+            "/w/composer.json",
+            "/w/lib/composer.json",
+            "/w/lib/x.php",
+            "/w/z.php",
+        ],
+    );
+}
+
+#[test]
 fn a_project_numbered_before_its_load_sorts_the_places_on_first_use() {
     let mut project = Project::new();
     project.files.id_for(Path::new("/w/stray.php"));

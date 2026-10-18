@@ -35,6 +35,7 @@ use syntax::visit::{Visitor, walk_expr, walk_stmts};
 
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use super::{FileState, Project};
+use crate::file_id::FileId;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// PSR virtual packages and the interfaces a provider must implement.
@@ -235,34 +236,38 @@ fn psr4_expected_path(dir: &Path, prefix: &str, fqn: &str) -> PathBuf {
 impl Project {
     /// Every composer-hygiene diagnostic for the analysed files of the
     /// composer root `root` (an index into `packages().manifests()`),
-    /// keyed by the file each belongs to (`composer.json` itself for the
-    /// manifest-level ones).
-    pub fn check_composer_hygiene(&self, root: usize) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    /// keyed by the number of the file each belongs to (`composer.json`
+    /// itself for the manifest-level ones).
+    pub fn check_composer_hygiene(&self, root: usize) -> FxHashMap<FileId, Vec<Diagnostic>> {
         let manifest = &self.packages.manifests()[root];
-        let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
+        let mut out: FxHashMap<FileId, Vec<Diagnostic>> = FxHashMap::default();
         // Every loaded file declaring each class and function, whichever
         // declaration the registry keeps (a built-in stub can win a name a
         // package also declares): the first such file by path.
-        let mut declaring_files: Vec<(&PathBuf, &FileState)> = self.files.iter().collect();
-        declaring_files.sort_by_key(|(path, _)| *path);
-        let mut classes_by_lower: FxHashMap<String, (&str, &Path)> = FxHashMap::default();
-        let mut functions_by_lower: FxHashMap<String, (&str, &Path)> = FxHashMap::default();
-        for (path, file) in &declaring_files {
+        let mut declaring_files: Vec<(FileId, &FileState)> = self
+            .files
+            .iter_with_ids()
+            .map(|(id, _, file)| (id, file))
+            .collect();
+        declaring_files.sort_by_key(|&(id, _)| self.files.rank_of(id));
+        let mut classes_by_lower: FxHashMap<String, (&str, FileId)> = FxHashMap::default();
+        let mut functions_by_lower: FxHashMap<String, (&str, FileId)> = FxHashMap::default();
+        for &(id, file) in &declaring_files {
             for name in &file.classes {
                 classes_by_lower
                     .entry(name.to_ascii_lowercase())
-                    .or_insert((name.as_str(), path.as_path()));
+                    .or_insert((name.as_str(), id));
             }
             for name in &file.functions {
                 functions_by_lower
                     .entry(name.to_ascii_lowercase())
-                    .or_insert((name.as_str(), path.as_path()));
+                    .or_insert((name.as_str(), id));
             }
         }
-        // The package installed under this root that `path`, a loaded
-        // file, belongs to.
-        let installed_owner = |path: &Path| -> Option<&InstalledPackage> {
-            match self.files.get(path)?.owner? {
+        // The package installed under this root that the loaded file
+        // numbered `file` belongs to.
+        let installed_owner = |file: FileId| -> Option<&InstalledPackage> {
+            match self.files.get_by_id(file)?.owner? {
                 owner @ PackageOwner::Installed(i, _) if i == root => {
                     self.packages.installed(owner)
                 }
@@ -272,12 +277,17 @@ impl Project {
 
         let mut used_packages: FxHashSet<String> = FxHashSet::default();
         let mut used_outside_dev: FxHashSet<String> = FxHashSet::default();
-        let mut analyzed: Vec<(&PathBuf, &super::FileState)> =
-            self.files.iter().filter(|(_, f)| f.analyzed).collect();
-        analyzed.sort_by(|a, b| a.0.cmp(b.0));
+        let mut analyzed: Vec<(FileId, &super::FileState)> = self
+            .files
+            .iter_with_ids()
+            .filter(|(_, _, f)| f.analyzed)
+            .map(|(id, _, f)| (id, f))
+            .collect();
+        analyzed.sort_by_key(|&(id, _)| self.files.rank_of(id));
 
         analyzed.retain(|(_, file)| file.owner == Some(PackageOwner::Root(root)));
-        for (path, file) in &analyzed {
+        for &(id, file) in &analyzed {
+            let path = self.files.path(id);
             let absolute = self.absolute_path(path);
             let production = manifest.covers(&manifest.autoload, &absolute);
             let dev_only = !production && manifest.covers(&manifest.autoload_dev, &absolute);
@@ -289,7 +299,7 @@ impl Project {
             for s in &facts.strings {
                 let trimmed = s.trim_start_matches('\\');
                 if trimmed.contains('\\')
-                    && let Some((_, declared_in)) =
+                    && let Some(&(_, declared_in)) =
                         classes_by_lower.get(&trimmed.to_ascii_lowercase())
                     && let Some(package) = installed_owner(declared_in)
                 {
@@ -299,7 +309,7 @@ impl Project {
             let mut reported_packages: FxHashSet<String> = FxHashSet::default();
             let mut reported_extensions: FxHashSet<String> = FxHashSet::default();
             let mut reported_dev_symbols: FxHashSet<String> = FxHashSet::default();
-            let diagnostics = out.entry((*path).clone()).or_default();
+            let diagnostics = out.entry(id).or_default();
             for (span, target) in index_class_fn_refs_without_source(file.ast()) {
                 let (kind, display, declared_in, builtin_extension) = match &target {
                     RefTarget::Class(fqn) => {
@@ -378,11 +388,16 @@ impl Project {
                 let Some(declared_in) = declared_in else {
                     continue;
                 };
-                if self.files.get(declared_in).is_some_and(|f| f.analyzed) {
+                if self
+                    .files
+                    .get_by_id(declared_in)
+                    .is_some_and(|f| f.analyzed)
+                {
+                    let declared_path = || self.absolute_path(self.files.path(declared_in));
                     if production
                         && kind == "Class"
-                        && manifest.covers(&manifest.autoload_dev, &self.absolute_path(declared_in))
-                        && !manifest.covers(&manifest.autoload, &self.absolute_path(declared_in))
+                        && manifest.covers(&manifest.autoload_dev, &declared_path())
+                        && !manifest.covers(&manifest.autoload, &declared_path())
                         && reported_dev_symbols.insert(display.clone())
                     {
                         diagnostics.push(diagnostic(
@@ -447,7 +462,6 @@ impl Project {
             }
         }
 
-        let composer_json = manifest.path.clone();
         let mut manifest_diagnostics = Vec::new();
         let sections = [
             (&manifest.require, "require"),
@@ -496,9 +510,16 @@ impl Project {
         self.check_composer_scripts(manifest, &mut manifest_diagnostics);
         check_platform_php(manifest, &mut manifest_diagnostics);
         if !manifest_diagnostics.is_empty() {
-            out.entry(composer_json)
-                .or_default()
-                .extend(manifest_diagnostics);
+            let composer_json = self.files.id_of(&manifest.path);
+            debug_assert!(
+                composer_json.is_some(),
+                "the manifests are numbered when the files are"
+            );
+            if let Some(composer_json) = composer_json {
+                out.entry(composer_json)
+                    .or_default()
+                    .extend(manifest_diagnostics);
+            }
         }
         out.retain(|_, diagnostics| !diagnostics.is_empty());
         for diagnostics in out.values_mut() {

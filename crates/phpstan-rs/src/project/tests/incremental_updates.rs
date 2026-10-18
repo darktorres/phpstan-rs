@@ -123,9 +123,9 @@ fn changing_a_declaration_re_checks_files_that_reference_it() {
         )
         .unwrap();
 
-    assert!(result.contains_key(&PathBuf::from("base.php")));
-    assert!(result.contains_key(&PathBuf::from("caller.php")));
-    assert!(!result.contains_key(&PathBuf::from("unrelated.php")));
+    assert!(result.contains_key(&project.number_of("base.php")));
+    assert!(result.contains_key(&project.number_of("caller.php")));
+    assert!(!result.contains_key(&project.number_of("unrelated.php")));
 }
 
 #[test]
@@ -153,8 +153,8 @@ fn removing_a_referenced_declaration_still_flags_its_old_dependents() {
         .update_file(&PathBuf::from("thing.php"), "<?php // now empty")
         .unwrap();
 
-    assert!(result.contains_key(&PathBuf::from("thing.php")));
-    assert!(result.contains_key(&PathBuf::from("caller.php")));
+    assert!(result.contains_key(&project.number_of("thing.php")));
+    assert!(result.contains_key(&project.number_of("caller.php")));
     assert!(!project.registry().functions.contains_key("thing"));
 }
 
@@ -194,9 +194,9 @@ fn invalidation_is_transitive_across_an_inheritance_chain() {
         )
         .unwrap();
 
-    assert!(result.contains_key(&PathBuf::from("c.php")));
-    assert!(result.contains_key(&PathBuf::from("b.php")));
-    assert!(result.contains_key(&PathBuf::from("a.php")));
+    assert!(result.contains_key(&project.number_of("c.php")));
+    assert!(result.contains_key(&project.number_of("b.php")));
+    assert!(result.contains_key(&project.number_of("a.php")));
 }
 
 #[test]
@@ -232,16 +232,22 @@ fn invalidation_still_works_for_namespaced_classes() {
         )
         .unwrap();
 
-    assert!(result.contains_key(&PathBuf::from("c.php")));
+    assert!(result.contains_key(&project.number_of("c.php")));
     assert!(
-        result.contains_key(&PathBuf::from("b.php")),
+        result.contains_key(&project.number_of("b.php")),
         "b.php (extends C) should have been re-checked, got: {:?}",
-        result.keys().collect::<Vec<_>>()
+        result
+            .keys()
+            .map(|&id| project.path_of(id))
+            .collect::<Vec<_>>()
     );
     assert!(
-        result.contains_key(&PathBuf::from("a.php")),
+        result.contains_key(&project.number_of("a.php")),
         "a.php (references B) should have been re-checked, got: {:?}",
-        result.keys().collect::<Vec<_>>()
+        result
+            .keys()
+            .map(|&id| project.path_of(id))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -278,9 +284,12 @@ fn a_class_referenced_only_inside_a_property_hook_body_is_a_real_dependency() {
         )
         .unwrap();
     assert!(
-        result.contains_key(&PathBuf::from("holder.php")),
+        result.contains_key(&project.number_of("holder.php")),
         "holder.php (references Dep only inside a property hook body) should have been re-checked, got: {:?}",
-        result.keys().collect::<Vec<_>>()
+        result
+            .keys()
+            .map(|&id| project.path_of(id))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -312,9 +321,12 @@ fn a_class_referenced_only_via_an_enum_is_a_real_dependency() {
         )
         .unwrap();
     assert!(
-        result.contains_key(&PathBuf::from("status.php")),
+        result.contains_key(&project.number_of("status.php")),
         "status.php (enum implements Dep) should have been re-checked, got: {:?}",
-        result.keys().collect::<Vec<_>>()
+        result
+            .keys()
+            .map(|&id| project.path_of(id))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -354,7 +366,7 @@ fn unrelated_files_are_not_swept_into_transitive_invalidation() {
         )
         .unwrap();
 
-    assert!(!result.contains_key(&PathBuf::from("unrelated.php")));
+    assert!(!result.contains_key(&project.number_of("unrelated.php")));
 }
 
 #[test]
@@ -676,7 +688,10 @@ fn rechecked_by_edit(files: &[(&str, &str)], edited: &str, new_source: &str) -> 
     let result = project
         .update_file(&PathBuf::from(edited), new_source)
         .unwrap();
-    let mut rechecked: Vec<String> = result.keys().map(|p| p.display().to_string()).collect();
+    let mut rechecked: Vec<String> = result
+        .keys()
+        .map(|&id| project.path_of(id).display().to_string())
+        .collect();
     rechecked.sort();
     rechecked
 }
@@ -1245,7 +1260,7 @@ fn a_changed_global_variable_type_rechecks_the_files_declaring_it_global() {
         )
         .unwrap();
     let reader = results
-        .get(&PathBuf::from("reader.php"))
+        .get(&project.number_of("reader.php"))
         .expect("the reader is rechecked");
     assert!(
         reader.iter().any(|d| d.message.contains("m()")),

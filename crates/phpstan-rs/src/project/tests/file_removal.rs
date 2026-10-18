@@ -43,7 +43,7 @@ fn removing_a_file_re_checks_its_former_dependents() {
     let result = project.remove_file(&PathBuf::from("thing.php"));
 
     let caller_diagnostics = result
-        .get(&PathBuf::from("caller.php"))
+        .get(&project.number_of("caller.php"))
         .unwrap_or_else(|| panic!("expected caller.php in {result:?}"));
     assert!(
         caller_diagnostics
@@ -67,10 +67,13 @@ fn removing_a_file_returns_it_with_empty_diagnostics_so_the_editor_can_clear_it(
     let result = project.remove_file(&PathBuf::from("a.php"));
 
     assert_eq!(
-        result.keys().collect::<Vec<_>>(),
-        vec![&PathBuf::from("a.php")]
+        result
+            .keys()
+            .map(|&id| project.path_of(id))
+            .collect::<Vec<_>>(),
+        vec![Path::new("a.php")]
     );
-    assert!(result[&PathBuf::from("a.php")].is_empty());
+    assert!(result[&project.number_of("a.php")].is_empty());
 }
 
 #[test]
@@ -87,10 +90,13 @@ fn removing_a_never_loaded_file_is_a_harmless_no_op() {
     let result = project.remove_file(&PathBuf::from("never.php"));
 
     assert_eq!(
-        result.keys().collect::<Vec<_>>(),
-        vec![&PathBuf::from("never.php")]
+        result
+            .keys()
+            .map(|&id| project.path_of(id))
+            .collect::<Vec<_>>(),
+        vec![Path::new("never.php")]
     );
-    assert!(result[&PathBuf::from("never.php")].is_empty());
+    assert!(result[&project.number_of("never.php")].is_empty());
     assert!(project.registry().functions.contains_key("helperA"));
 }
 

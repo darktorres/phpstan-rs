@@ -396,12 +396,13 @@ pub(crate) fn classify_unlisted(path: &Path) -> Classified {
 /// A configured `Project` with every file loaded, before any check ran.
 pub struct Loaded {
     pub project: Project,
-    analyze_files_by_size: Vec<PathBuf>,
+    /// The numbers of the analysed files, the largest first.
+    analyze_files_by_size: Vec<FileId>,
     skipped_analyze: usize,
     skipped_context: usize,
     context_loaded: usize,
     /// The analysed files that do not parse, which are reported.
-    parse_failures: Vec<(PathBuf, ParseFailure)>,
+    parse_failures: Vec<(FileId, ParseFailure)>,
     /// What the lexer skipped over in the loaded files, and the context
     /// files that do not parse, one line each.
     pub lex_warnings: Vec<String>,
@@ -410,10 +411,11 @@ pub struct Loaded {
 /// What the checks of a project's analysed files produced, split by the
 /// pass that produced it.
 pub(crate) struct ProjectChecks {
-    /// Each analysed file's own checks.
-    pub(crate) per_file: FxHashMap<PathBuf, Vec<Diagnostic>>,
-    /// The project-wide passes' diagnostics, by the file each is reported in.
-    pub(crate) whole_program: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    /// Each analysed file's own checks, by its number.
+    pub(crate) per_file: FxHashMap<FileId, Vec<Diagnostic>>,
+    /// The project-wide passes' diagnostics, by the number of the file each
+    /// is reported in.
+    pub(crate) whole_program: FxHashMap<FileId, Vec<Diagnostic>>,
     /// Files whose check panicked, with the panic message, sorted.
     pub(crate) check_panics: Vec<(PathBuf, String)>,
     /// The `--dump-types` output when requested.
@@ -425,8 +427,8 @@ pub(crate) struct ProjectChecks {
 /// `finalize` needs for inline ignores.
 pub struct AnalysisResult {
     project: Project,
-    /// Per-file diagnostics as the checks emitted them.
-    results: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    /// Per-file diagnostics as the checks emitted them, by the file's number.
+    results: FxHashMap<FileId, Vec<Diagnostic>>,
     /// Analysed files that parsed and checked without an internal error.
     pub checked: usize,
     pub skipped_analyze: usize,
@@ -512,14 +514,14 @@ impl AnalysisResult {
     }
 }
 
-/// The report `options` make of `results`, checked in `project`: the level
-/// filter, inline ignores, `ignore_errors`, the baseline, then the order.
-/// The project's own keys name the files inline ignores apply to. The
-/// report names each file relative to `root`, as the ignore entries and the
-/// baseline do; a file outside `root` keeps its path.
+/// The report `options` make of `results`, checked in `project` and keyed by
+/// the files' numbers: the level filter, inline ignores, `ignore_errors`, the
+/// baseline, then the order. The report names each file by its path relative
+/// to `root`, as the ignore entries and the baseline do; a file outside
+/// `root` keeps its path.
 pub(crate) fn finalize_results(
     project: &Project,
-    mut results: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    mut results: FxHashMap<FileId, Vec<Diagnostic>>,
     options: &Finalize,
     root: Option<&Path>,
 ) -> Report {
@@ -527,18 +529,14 @@ pub(crate) fn finalize_results(
         diagnostics.retain(|d| d.level <= options.level);
     }
     project.apply_inline_ignores(&mut results, options.report_unmatched_ignores);
-    let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = match root {
-        Some(root) => results
-            .into_iter()
-            .map(|(path, diagnostics)| {
-                let relative = path
-                    .strip_prefix(root)
-                    .map_or_else(|_| path.clone(), Path::to_path_buf);
-                (relative, diagnostics)
-            })
-            .collect(),
-        None => results,
-    };
+    let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = results
+        .into_iter()
+        .map(|(id, diagnostics)| {
+            let path = project.path_of(id);
+            let shown = root.and_then(|root| path.strip_prefix(root).ok());
+            (shown.unwrap_or(path).to_path_buf(), diagnostics)
+        })
+        .collect();
     ignore_errors::filter(&mut results, &options.ignore_errors);
     let stale_baseline_entries = match &options.baseline {
         Some(baseline) => crate::baseline::filter(&mut results, baseline),
@@ -1387,11 +1385,17 @@ impl Session {
         let numbers = project.number_files(numbering);
         bind_numbers(&mut parsed, &numbers);
         let (context_numbers, analysed_numbers) = numbers.split_at(context_count);
-        project.set_path_order(&ids_in_listed_order(
+        let manifests = project.number_manifests();
+        let order = ids_in_path_order(
             listed,
             context_numbers,
             analysed_numbers,
-        ));
+            manifests
+                .iter()
+                .map(|&id| (project.path_of(id), id))
+                .collect(),
+        );
+        project.set_path_order(&order);
         project.expect_files(
             parsed.iter().filter_map(|read| match read {
                 Read::Loaded(file) => Some(&file.parsed),
@@ -1585,11 +1589,17 @@ impl Session {
         let numbers = project.number_files(numbering);
         bind_numbers(&mut combined_parsed, &numbers);
         let (context_numbers, analyze_numbers) = numbers.split_at(context_files.len());
-        project.set_path_order(&ids_in_listed_order(
+        let manifests = project.number_manifests();
+        let order = ids_in_path_order(
             &listing.files,
             context_numbers,
             analyze_numbers,
-        ));
+            manifests
+                .iter()
+                .map(|&id| (project.path_of(id), id))
+                .collect(),
+        );
+        project.set_path_order(&order);
         let mut analyze_parsed = combined_parsed.split_off(context_files.len());
         let mut context_parsed = combined_parsed;
         project.expect_files(
@@ -1694,7 +1704,7 @@ impl Session {
                 }
                 Read::Unparsed(failure) => {
                     skipped_analyze += 1;
-                    parse_failures.push((path.to_path_buf(), failure));
+                    parse_failures.push((id, failure));
                 }
                 Read::Unread => skipped_analyze += 1,
             }
@@ -1708,7 +1718,7 @@ impl Session {
         by_size.sort_by_key(|&index| std::cmp::Reverse(analyze_sizes[index]));
         let analyze_files_by_size = by_size
             .into_iter()
-            .map(|index| analyze_files[index].path.as_path().to_path_buf())
+            .map(|index| analyze_numbers[index])
             .collect();
         Ok(Loaded {
             project,
@@ -1739,19 +1749,19 @@ impl Session {
         let mut results = checks.per_file;
         // A file that does not parse is reported where it fails: PHP
         // refuses to run it.
-        for (path, failure) in parse_failures {
+        for (id, failure) in parse_failures {
             let at = syntax::span::LineCol {
                 line: failure.line,
                 col: failure.col,
             };
-            results.entry(path).or_default().push(
+            results.entry(id).or_default().push(
                 DiagnosticBuilder::new(failure.message, Span::default(), 0, "parse.error")
                     .non_ignorable()
                     .build_at(syntax::span::Range { start: at, end: at }),
             );
         }
-        for (path, diags) in checks.whole_program {
-            results.entry(path).or_default().extend(diags);
+        for (id, diags) in checks.whole_program {
+            results.entry(id).or_default().extend(diags);
         }
 
         AnalysisResult {
@@ -1774,13 +1784,13 @@ impl Session {
         }
     }
 
-    /// Checks `files`, the analysed paths of `project`, then runs the
-    /// project-wide passes over what they found. `project` must be loaded
-    /// and finished.
+    /// Checks the files numbered `files`, the analysed files of `project`,
+    /// then runs the project-wide passes over what they found. `project`
+    /// must be loaded and finished.
     pub(crate) fn check_project(
         &self,
         project: &mut Project,
-        files: &[PathBuf],
+        files: &[FileId],
         dump_types: bool,
     ) -> ProjectChecks {
         let needs_tier_2 =
@@ -1788,41 +1798,42 @@ impl Session {
         let checked_results =
             project.check_files(files, Some(&self.pool), needs_tier_2, dump_types);
 
-        let mut per_file: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
+        let mut per_file: FxHashMap<FileId, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
         // Only the rule that reads named-argument facts is given them.
         let check_renamed_arguments = self.settings.rules.check_renamed_named_arguments;
         let mut named_argument_calls = Vec::new();
         let mut type_dumps = Vec::new();
-        for (path, outcome) in checked_results {
+        for (id, outcome) in checked_results {
             match outcome {
                 Ok(check) => {
                     if needs_tier_2 {
                         project.seed_member_refs(
-                            &path,
+                            id,
                             check.member_refs,
                             check.escaped_enums,
                             check.escaped_member_classes,
                         );
                     }
                     if check_renamed_arguments {
-                        named_argument_calls.push((path.clone(), check.named_argument_calls));
+                        named_argument_calls.push((id, check.named_argument_calls));
                     }
                     if dump_types {
-                        type_dumps.push((path.clone(), check.type_dump));
+                        type_dumps.push((id, check.type_dump));
                     }
-                    per_file.insert(path, check.diagnostics);
+                    per_file.insert(id, check.diagnostics);
                 }
-                Err(msg) => check_panics.push((path, msg)),
+                Err(msg) => check_panics.push((project.path_of(id).to_path_buf(), msg)),
             }
         }
         check_panics.sort();
-        named_argument_calls.sort_by_cached_key(|(path, _)| project.path_rank(path));
+        named_argument_calls.sort_by_key(|&(id, _)| project.files.rank_of(id));
         let type_dump = dump_types.then(|| {
-            type_dumps.sort_by(|a, b| a.0.cmp(&b.0));
+            type_dumps.sort_by_key(|&(id, _)| project.files.rank_of(id));
             let mut text = String::new();
-            for (path, lines) in type_dumps {
-                let shown = super::shown_path(Some(self.absolute_root.as_path()), &path);
+            for (id, lines) in type_dumps {
+                let shown =
+                    super::shown_path(Some(self.absolute_root.as_path()), project.path_of(id));
                 for line in lines {
                     text.push_str(&format!("{}:{line}\n", shown.display()));
                 }
@@ -1834,10 +1845,10 @@ impl Session {
             project.mark_member_index_built();
         }
 
-        let mut whole_program: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
-        let mut extend = |found: FxHashMap<PathBuf, Vec<Diagnostic>>| {
-            for (path, diags) in found {
-                whole_program.entry(path).or_default().extend(diags);
+        let mut whole_program: FxHashMap<FileId, Vec<Diagnostic>> = FxHashMap::default();
+        let mut extend = |found: FxHashMap<FileId, Vec<Diagnostic>>| {
+            for (id, diags) in found {
+                whole_program.entry(id).or_default().extend(diags);
             }
         };
         extend(project.check_whole_program(&named_argument_calls));
@@ -1860,6 +1871,26 @@ impl Session {
             type_dump,
         }
     }
+}
+
+/// The ids of the files `listed` lists and of `others`, paths it does not
+/// list, in path order. `context` and `analysed` hold the ids of each role's
+/// files, in the order `listed` lists them, and each of `others` is placed
+/// among them by its path.
+fn ids_in_path_order(
+    listed: &[Listed],
+    context: &[FileId],
+    analysed: &[FileId],
+    mut others: Vec<(&Path, FileId)>,
+) -> Vec<FileId> {
+    let mut ids = ids_in_listed_order(listed, context, analysed);
+    others.sort_by(|a, b| a.0.cmp(b.0));
+    others.dedup_by_key(|other| other.1);
+    for (placed, (path, id)) in others.into_iter().enumerate() {
+        let at = listed.partition_point(|file| file.path.as_path() < path);
+        ids.insert(at + placed, id);
+    }
+    ids
 }
 
 /// The ids of the files `listed` lists, in the order it lists them. `context`

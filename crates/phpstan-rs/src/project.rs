@@ -31,7 +31,7 @@ use syntax::lexer::LexWarning;
 use syntax::parser::ParseError;
 use syntax::span::{LineIndex, Span};
 use types::Name;
-use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
+use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithFile;
 
 mod architecture;
 mod banned;
@@ -315,7 +315,7 @@ pub struct Project {
     skipped_bodies: bool,
     // The files a cancelled recheck never reached, whose last diagnostics
     // are therefore stale (`take_unchecked`).
-    unchecked: Vec<PathBuf>,
+    unchecked: Vec<FileId>,
     // Every top-level function's own unconditional declaration site(s) -
     // always populated (no `retain_source` gate), the same indexing-side/
     // check-side split
@@ -396,7 +396,7 @@ pub fn worker_pool() -> Arc<rayon::ThreadPool> {
 /// The result of `Project::check_paths_isolating_panics`: successful
 /// per-file diagnostics, plus every path whose own check panicked
 /// (message, not a diagnostic list) instead of completing.
-pub type CheckPathsIsolatingPanics = (FxHashMap<PathBuf, Vec<Diagnostic>>, Vec<(PathBuf, String)>);
+pub type CheckPathsIsolatingPanics = (FxHashMap<FileId, Vec<Diagnostic>>, Vec<(PathBuf, String)>);
 
 /// Everything one main-pass check of a file produces.
 pub(crate) struct FileCheck {
@@ -771,10 +771,10 @@ impl Project {
     }
 
     /// The 1-based line of the byte offset `offset` of the loaded file
-    /// `path`: the first line for a file that is not loaded.
-    pub(crate) fn line_in(&self, path: &Path, offset: u32) -> u32 {
+    /// numbered `file`: the first line for a file that is not loaded.
+    pub(crate) fn line_in(&self, file: FileId, offset: u32) -> u32 {
         self.files
-            .get(path)
+            .get_by_id(file)
             .map_or(1, |file| file.line_index.line(offset))
     }
 
@@ -784,17 +784,17 @@ impl Project {
     /// except inside a trait, whose diagnostics depend on its users.
     pub fn apply_inline_ignores(
         &self,
-        results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>,
+        results: &mut FxHashMap<FileId, Vec<Diagnostic>>,
         report_unmatched: bool,
     ) {
-        for (path, file) in &self.files {
+        for (id, _, file) in self.files.iter_with_ids() {
             if !file.analyzed {
                 continue;
             }
             let ignores = &file.ignores;
             let mut matched_lines: FxHashSet<u32> = FxHashSet::default();
             let mut matched_ids: FxHashSet<(u32, &str)> = FxHashSet::default();
-            if let Some(diagnostics) = results.get_mut(path) {
+            if let Some(diagnostics) = results.get_mut(&id) {
                 diagnostics.retain(|d| {
                     // Reserved for diagnostics about an ignore comment itself,
                     // which no ignore comment may suppress, as in PHPStan.
@@ -852,7 +852,7 @@ impl Project {
                 }
             }
             if !unmatched.is_empty() {
-                let entry = results.entry(path.clone()).or_default();
+                let entry = results.entry(id).or_default();
                 entry.extend(unmatched);
                 entry.sort_by(|a, b| {
                     (a.span.start.line, a.span.start.col, &a.message).cmp(&(
@@ -885,12 +885,6 @@ impl Project {
     /// The root every file's key is under, as it resolves on disk.
     pub fn absolute_root(&self) -> Option<&Path> {
         self.absolute_root.as_deref()
-    }
-
-    /// The name of the composer package `path` belongs to.
-    pub(crate) fn package_name(&self, path: &Path) -> Option<&str> {
-        let owner = self.files.get(path)?.owner?;
-        self.packages.name(owner)
     }
 
     /// A loaded file's own retained raw source text, when the file keeps its
@@ -970,10 +964,11 @@ impl Project {
         }
     }
 
-    /// The tree of a loaded file: the one it kept, or, for a context file
-    /// of a batch run, one parsed from the file again.
-    pub(crate) fn ast_of(&self, path: &Path) -> Option<AstRef<'_>> {
-        let file = self.files.get(path)?;
+    /// The tree of the loaded file numbered `id`: the one it kept, or, for a
+    /// context file of a batch run, one parsed from the file again.
+    pub(crate) fn ast_of(&self, id: FileId) -> Option<AstRef<'_>> {
+        let file = self.files.get_by_id(id)?;
+        let path = self.files.path(id);
         if let Some(ast) = file.tree() {
             return Some(AstRef::Kept(ast));
         }
@@ -1018,16 +1013,44 @@ impl Project {
         numbers
     }
 
+    /// Numbers the paths of the composer manifests, which the composer
+    /// checks report in, though no file is held for them. Their numbers,
+    /// one for each manifest.
+    pub(crate) fn number_manifests(&mut self) -> Vec<FileId> {
+        let Project {
+            files, packages, ..
+        } = self;
+        packages
+            .manifests()
+            .iter()
+            .map(|manifest| files.id_for(&manifest.path))
+            .collect()
+    }
+
     /// The path `file` was numbered by. The path is kept whether or not the
     /// file is held.
-    pub(crate) fn path_of(&self, file: FileId) -> &Path {
+    pub fn path_of(&self, file: FileId) -> &Path {
         self.files.path(file)
+    }
+
+    /// The number of `path`, if the project has numbered it.
+    pub(crate) fn file_id(&self, path: &Path) -> Option<FileId> {
+        self.files.id_of(path)
+    }
+
+    /// The number of `path`, which the project has numbered.
+    #[cfg(test)]
+    pub(crate) fn number_of(&self, path: impl AsRef<Path>) -> FileId {
+        self.files
+            .id_of(path.as_ref())
+            .expect("the path is numbered")
     }
 
     /// The place of `path` among the numbered paths, in path order, which is
     /// the order a sort of paths gives (`FileTable::rank_of`). A path with no
     /// number holds no file, and a check of it records nothing, so its place
     /// does not change a merge: it sorts last.
+    #[cfg(test)]
     pub(crate) fn path_rank(&self, path: &Path) -> u32 {
         self.files
             .id_of(path)
@@ -1492,7 +1515,7 @@ impl Project {
     /// registry may have to be waited for, which a pool thread must not do.
     /// `stubs` is only needed by a project that is not finished and holds
     /// none yet or gains a file mentioning PHPStan.
-    fn finish_declarations(&mut self, stubs: Option<&Stubs>) -> FxHashSet<PathBuf> {
+    fn finish_declarations(&mut self, stubs: Option<&Stubs>) -> FxHashSet<FileId> {
         self.begin_declaration_changes();
         self.sync_phpstan_stubs(stubs);
         let pool = match stubs {
@@ -1502,10 +1525,10 @@ impl Project {
         pool.install(|| self.run_finishing_passes())
     }
 
-    /// Runs the finishing passes, returning the `deps::dependency_key`s of
-    /// the classes, functions and constants whose resolved form they
-    /// changed (none the first time, when everything is new).
-    fn run_finishing_passes(&mut self) -> FxHashSet<PathBuf> {
+    /// Runs the finishing passes, returning the files that read a class,
+    /// function or constant whose resolved form they changed, or a global
+    /// variable whose type they changed (`walk_affected`).
+    fn run_finishing_passes(&mut self) -> FxHashSet<FileId> {
         self.begin_declaration_changes();
         // What changed is looked up in `dependents`, which holds what every
         // body refers to from here on. A project built once is looked up
@@ -1594,9 +1617,6 @@ impl Project {
             self.walk_affected(&mut walk, self.registry.changed_global_variables(before));
         }
         walk.affected
-            .into_iter()
-            .map(|id| self.files.path(id).to_path_buf())
-            .collect()
     }
 
     /// Re-parses one already-loaded file, patches just its own registry
@@ -1604,8 +1624,9 @@ impl Project {
     /// other file that references a symbol it declared (before or after
     /// the change - a symbol the new version dropped still needs its old
     /// dependents re-checked, since they'll now see it as undefined).
-    /// Returns every re-checked file's fresh diagnostics, keyed by path -
-    /// the changed file is always included, even with zero diagnostics.
+    /// Returns every re-checked file's fresh diagnostics, keyed by its
+    /// number - the changed file is always included, even with zero
+    /// diagnostics.
     /// Unwinds `path`'s prior contributions to the shared registry/
     /// `dependents` - the same undo both `update_file` (before
     /// re-indexing a new parse) and `remove_files` (permanently) need.
@@ -1763,11 +1784,12 @@ impl Project {
         }
     }
 
-    /// Recomputes `path`'s own Tier-1 (class/function) use-sites from its
-    /// currently-loaded `FileState`, replacing whatever was previously
-    /// indexed for it - a no-op past the initial `use_sites.remove_file`
-    /// when `retain_source` is off, while `indexes_class_fn_sites` is off,
-    /// or when `path` isn't currently loaded at all. Called for EVERY
+    /// Recomputes the own Tier-1 (class/function) use-sites of the file
+    /// numbered `id` from its currently-loaded `FileState`, replacing
+    /// whatever was previously indexed for it - a no-op past the initial
+    /// `use_sites.remove_file` when `retain_source` is off, while
+    /// `indexes_class_fn_sites` is off, or when the file isn't currently
+    /// loaded at all. Called for EVERY
     /// file `update_file`'s own affected-file loop re-checks, not just
     /// the one that was directly edited: a dependent file's own bare-
     /// `Name`/`ClassConstFetch`/`StaticPropertyFetch` resolution can change (e.g. registry-wide
@@ -1786,12 +1808,9 @@ impl Project {
     /// freshly-inserted entries for the same path.
     fn reindex_use_sites_for_file(
         &mut self,
-        path: &Path,
+        id: FileId,
         member_refs: Option<Vec<(Span, String, String)>>,
     ) {
-        let Some(id) = self.files.id_of(path) else {
-            return;
-        };
         self.use_sites.remove_file(id);
         if self.retain_source
             && self.indexes_class_fn_sites()
@@ -1815,9 +1834,9 @@ impl Project {
     /// while the member index is unbuilt: the per-file re-index replaces every
     /// entry a file has, Tier 2 included.
     fn reindex_class_fn_sites(&mut self) {
-        let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
-        for path in paths {
-            self.reindex_use_sites_for_file(&path, None);
+        let files: Vec<FileId> = self.files.iter_with_ids().map(|(id, _, _)| id).collect();
+        for id in files {
+            self.reindex_use_sites_for_file(id, None);
         }
     }
 
@@ -1856,11 +1875,11 @@ impl Project {
                 }
             }
         }
-        let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
-        for path in paths {
-            let check = self.run_checker(&path, true, false);
+        let files: Vec<FileId> = self.files.iter_with_ids().map(|(id, _, _)| id).collect();
+        for id in files {
+            let check = self.run_checker(id, true, false);
             self.seed_member_refs(
-                &path,
+                id,
                 check.member_refs,
                 check.escaped_enums,
                 check.escaped_member_classes,
@@ -1870,26 +1889,24 @@ impl Project {
     }
 
     /// Adopts already-computed Tier-2 member-ref/escaped-enum/escaped-
-    /// member-class data for `path` into `use_sites`/`escaped_enum_
-    /// cases`/`escaped_member_classes` - the per-file work `ensure_
-    /// member_index_built`'s own loop body does above, factored out so
-    /// `check-project`'s own primary pass can feed it data it already
+    /// member-class data for the file numbered `id` into `use_sites`/
+    /// `escaped_enum_cases`/`escaped_member_classes` - the per-file work
+    /// `ensure_member_index_built`'s own loop body does above, factored out
+    /// so `check-project`'s own primary pass can feed it data it already
     /// computed inline (via `check_files`) instead of
     /// `ensure_member_index_built`
     /// re-deriving it via a second, redundant pass. Caller must call
     /// `mark_member_index_built` once every file has been seeded.
     pub fn seed_member_refs(
         &mut self,
-        path: &Path,
+        id: FileId,
         member_refs: Vec<(Span, String, String)>,
         escaped_enums: FxHashSet<String>,
         escaped_member_classes: FxHashSet<String>,
     ) {
-        if let Some(id) = self.files.id_of(path) {
-            for (span, owner, member) in member_refs {
-                self.use_sites
-                    .insert(id, use_sites::RefTarget::Member(owner, member), span);
-            }
+        for (span, owner, member) in member_refs {
+            self.use_sites
+                .insert(id, use_sites::RefTarget::Member(owner, member), span);
         }
         self.escaped_enum_cases.extend(escaped_enums);
         self.escaped_member_classes.extend(escaped_member_classes);
@@ -1909,7 +1926,7 @@ impl Project {
         &mut self,
         path: &Path,
         source: impl AsRef<[u8]>,
-    ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+    ) -> Result<FxHashMap<FileId, Vec<Diagnostic>>, ParseError> {
         self.update_file_cancellable(path, source, || false)
     }
 
@@ -1926,7 +1943,7 @@ impl Project {
         path: &Path,
         source: impl AsRef<[u8]>,
         should_abort: impl FnMut() -> bool,
-    ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+    ) -> Result<FxHashMap<FileId, Vec<Diagnostic>>, ParseError> {
         let analysed = !path_under_excluded_dir(
             shown_path(self.absolute_root(), path),
             DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
@@ -1944,7 +1961,7 @@ impl Project {
         analysed: bool,
         stub: bool,
         mut should_abort: impl FnMut() -> bool,
-    ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+    ) -> Result<FxHashMap<FileId, Vec<Diagnostic>>, ParseError> {
         // Parse BEFORE unindexing anything - on a parse failure (the
         // normal, common state while a file is mid-edit, not an edge
         // case), this must leave every existing registry/
@@ -2064,30 +2081,30 @@ impl Project {
         let mut affected = self.finish_declarations(None);
 
         let mut results = FxHashMap::default();
-        affected.insert(path.to_path_buf());
+        affected.insert(id);
         self.unchecked.clear();
         let mut affected = affected.into_iter();
-        while let Some(p) = affected.next() {
+        while let Some(file) = affected.next() {
             if should_abort() {
-                self.unchecked.push(p);
+                self.unchecked.push(file);
                 self.unchecked.extend(affected);
                 break;
             }
             let (diagnostics, member_refs) = if self.member_index_built {
-                let (d, m) = self.check_file_and_member_refs(&p);
+                let (d, m) = self.check_file_and_member_refs(file);
                 (d, Some(m))
             } else {
-                (self.check_file(&p), None)
+                (self.check_file_by_id(file), None)
             };
-            self.reindex_use_sites_for_file(&p, member_refs);
-            results.insert(p, diagnostics);
+            self.reindex_use_sites_for_file(file, member_refs);
+            results.insert(file, diagnostics);
         }
         Ok(results)
     }
 
     /// The files the last cancelled `update_file_cancellable` affected but
     /// never rechecked; their previous diagnostics no longer hold.
-    pub fn take_unchecked(&mut self) -> Vec<PathBuf> {
+    pub fn take_unchecked(&mut self) -> Vec<FileId> {
         std::mem::take(&mut self.unchecked)
     }
 
@@ -2104,12 +2121,13 @@ impl Project {
     /// inherited PHPDoc); a class still naming a removed one directly
     /// (`extends Base`) reads as it would with `Base` never loaded.
     ///
-    /// `path` itself is always a key in the returned map, with an empty `Vec` when `path` was never loaded in the first
-    /// place - a harmless no-op a caller doesn't need to guard with a
-    /// prior loaded-state check, and exactly the empty
+    /// `path`'s number is always a key in the returned map, with an empty
+    /// `Vec` when `path` was never loaded in the first place (it is
+    /// numbered then) - a harmless no-op a caller doesn't need to guard
+    /// with a prior loaded-state check, and exactly the empty
     /// `publishDiagnostics` payload needed to clear whatever the editor
     /// was last showing for a file that no longer exists.
-    pub fn remove_file(&mut self, path: &Path) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    pub fn remove_file(&mut self, path: &Path) -> FxHashMap<FileId, Vec<Diagnostic>> {
         self.remove_files(std::slice::from_ref(&path.to_path_buf()))
     }
 
@@ -2118,14 +2136,14 @@ impl Project {
     /// (`finish_loading`) at most ONCE for the whole batch, not once per
     /// path - the same "one recompute per batch, not per item" discipline
     /// `Server::add_workspace_folders` (3.2) needs on the load side.
-    /// Every one of `paths` is always a key in the result (generalizing
-    /// `remove_file`'s own guarantee - `check_file` already returns an
-    /// empty `Vec` for an unloaded/just-removed path, exactly the
+    /// The number of every one of `paths` is always a key in the result
+    /// (generalizing `remove_file`'s own guarantee - a check of an
+    /// unloaded/just-removed file returns an empty `Vec`, exactly the
     /// clearing `publishDiagnostics` payload a caller needs for a file
     /// that no longer exists), even when none of them were actually
     /// loaded - but the recompute/BFS itself is skipped entirely in that
     /// case, since there is nothing for it to discover.
-    pub fn remove_files(&mut self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    pub fn remove_files(&mut self, paths: &[PathBuf]) -> FxHashMap<FileId, Vec<Diagnostic>> {
         let mut removed = DeclaredNames::default();
         let mut any_removed = false;
         for path in paths {
@@ -2136,7 +2154,8 @@ impl Project {
                 any_removed = true;
             }
         }
-        let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
+        let mut affected: FxHashSet<FileId> =
+            paths.iter().map(|path| self.files.id_for(path)).collect();
         if any_removed {
             self.rebuild_declarations(&removed, None);
             affected.extend(self.finish_declarations(None));
@@ -2144,15 +2163,15 @@ impl Project {
 
         affected
             .into_iter()
-            .map(|p| {
+            .map(|file| {
                 let (diagnostics, member_refs) = if self.member_index_built {
-                    let (d, m) = self.check_file_and_member_refs(&p);
+                    let (d, m) = self.check_file_and_member_refs(file);
                     (d, Some(m))
                 } else {
-                    (self.check_file(&p), None)
+                    (self.check_file_by_id(file), None)
                 };
-                self.reindex_use_sites_for_file(&p, member_refs);
-                (p, diagnostics)
+                self.reindex_use_sites_for_file(file, member_refs);
+                (file, diagnostics)
             })
             .collect()
     }
@@ -2240,10 +2259,10 @@ impl Project {
     /// `path`'s type dump: every statement's recorded variable types.
     #[cfg(test)]
     pub(crate) fn type_dump(&self, path: &Path) -> Vec<String> {
-        match self
-            .check_files(&[path.to_path_buf()], None, false, true)
-            .pop()
-        {
+        let Some(id) = self.files.id_of(path) else {
+            return Vec::new();
+        };
+        match self.check_files(&[id], None, false, true).pop() {
             Some((_, Ok(check))) => check.type_dump,
             Some((_, Err(message))) => panic!("{message}"),
             None => Vec::new(),
@@ -2256,7 +2275,14 @@ impl Project {
     /// those declaring its classes' traits (`check_files`).
     #[hotpath::measure]
     pub fn check_file(&self, path: &Path) -> Vec<Diagnostic> {
-        self.check_one(path, false).diagnostics
+        self.files
+            .id_of(path)
+            .map_or_else(Vec::new, |id| self.check_file_by_id(id))
+    }
+
+    /// `check_file` of the file numbered `id`.
+    pub(crate) fn check_file_by_id(&self, id: FileId) -> Vec<Diagnostic> {
+        self.check_one(id, false).diagnostics
     }
 
     /// The Tier-2 (member-reference) counterpart of `check_file` - the
@@ -2268,16 +2294,15 @@ impl Project {
     /// own doc comment.
     pub(crate) fn check_file_and_member_refs(
         &self,
-        path: &Path,
+        id: FileId,
     ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
-        let check = self.check_one(path, true);
+        let check = self.check_one(id, true);
         (check.diagnostics, check.member_refs)
     }
 
     /// `check_files` for one file, whose panic propagates.
-    fn check_one(&self, path: &Path, collect_member_refs: bool) -> FileCheck {
-        let paths = [path.to_path_buf()];
-        let mut checks = self.check_files(&paths, None, collect_member_refs, false);
+    fn check_one(&self, id: FileId, collect_member_refs: bool) -> FileCheck {
+        let mut checks = self.check_files(&[id], None, collect_member_refs, false);
         match checks.pop() {
             Some((_, Ok(check))) => check,
             Some((_, Err(message))) => panic!("{message}"),
@@ -2285,49 +2310,41 @@ impl Project {
         }
     }
 
-    /// Checks `paths` (in parallel on `pool` when there is one), each
-    /// file's panic caught as its outcome. With `collect_member_refs`, the
-    /// Tier-2 member-reference data too (fed to `seed_member_refs`); with
-    /// `dump_types`, the file's `--dump-types` lines. The private property
-    /// types each file declares are judged once every file is checked,
-    /// against the writes all of them made plus those of any other file
-    /// writing the same properties (`judge_property_types`).
+    /// Checks the files numbered `files` (in parallel on `pool` when there
+    /// is one), each file's panic caught as its outcome. With
+    /// `collect_member_refs`, the Tier-2 member-reference data too (fed to
+    /// `seed_member_refs`); with `dump_types`, the file's `--dump-types`
+    /// lines. The private property types each file declares are judged once
+    /// every file is checked, against the writes all of them made plus those
+    /// of any other file writing the same properties (`judge_property_types`).
+    /// A number whose file is not held is checked as an empty file.
     pub(crate) fn check_files(
         &self,
-        paths: &[PathBuf],
+        files: &[FileId],
         pool: Option<&rayon::ThreadPool>,
         collect_member_refs: bool,
         dump_types: bool,
-    ) -> Vec<(PathBuf, CheckOutcome)> {
-        // Each path's number, found once: `None` for a path the project never
-        // numbered, which holds no file, so its check records nothing.
-        let files: Vec<(Option<FileId>, &PathBuf)> = paths
-            .iter()
-            .map(|path| (self.files.id_of(path), path))
-            .collect();
+    ) -> Vec<(FileId, CheckOutcome)> {
         let mut checks = map_on_pool_largest_first(
             pool,
-            &files,
-            |&(id, _)| {
-                id.and_then(|id| self.files.get_by_id(id))
-                    .map_or(0, |file| file.source_len)
-            },
-            |&(id, path)| {
+            files,
+            |&id| self.files.get_by_id(id).map_or(0, |file| file.source_len),
+            |&id| {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.run_checker(path, collect_member_refs, dump_types)
+                    self.run_checker(id, collect_member_refs, dump_types)
                 }))
                 .map_err(panic_message);
-                (id, path.clone(), outcome)
+                (id, outcome)
             },
         );
         self.judge_property_types(&mut checks, pool);
         // Each file's diagnostics are finished from the project as it is,
         // which nothing here changes, so the files are finished side by
         // side; they stay where they are in `checks`.
-        let finish = |(id, path, outcome): &mut (Option<FileId>, PathBuf, CheckOutcome)| {
-            if let (Some(id), Ok(check)) = (*id, outcome) {
+        let finish = |(id, outcome): &mut (FileId, CheckOutcome)| {
+            if let Ok(check) = outcome {
                 let diagnostics = std::mem::take(&mut check.diagnostics);
-                check.diagnostics = self.finish_diagnostics(id, path, diagnostics);
+                check.diagnostics = self.finish_diagnostics(*id, diagnostics);
             }
         };
         match pool {
@@ -2335,9 +2352,6 @@ impl Project {
             None => checks.iter_mut().for_each(finish),
         }
         checks
-            .into_iter()
-            .map(|(_, path, outcome)| (path, outcome))
-            .collect()
     }
 
     /// Judges the private property types `checks` recorded against the
@@ -2348,11 +2362,11 @@ impl Project {
     /// depend on scheduling. A file that panicked contributes nothing.
     fn judge_property_types(
         &self,
-        checks: &mut [(Option<FileId>, PathBuf, CheckOutcome)],
+        checks: &mut [(FileId, CheckOutcome)],
         pool: Option<&rayon::ThreadPool>,
     ) {
         let mut writers: NameSet = NameSet::default();
-        for (_, _, outcome) in checks.iter() {
+        for (_, outcome) in checks.iter() {
             if let Ok(check) = outcome {
                 for site in &check.property_type_sites {
                     writers.extend(site.writers().iter().cloned());
@@ -2371,12 +2385,10 @@ impl Project {
             scopes.insert(class);
         }
         let mut checked = FileIdSet::default();
-        for &(id, _, _) in checks.iter() {
-            if let Some(id) = id {
-                checked.insert(id);
-            }
+        for &(id, _) in checks.iter() {
+            checked.insert(id);
         }
-        let mut others: Vec<(FileId, &PathBuf)> = self
+        let mut others: Vec<FileId> = self
             .files
             .iter_with_ids()
             .filter(|&(id, _, file)| {
@@ -2386,26 +2398,25 @@ impl Project {
                         .iter()
                         .any(|class| scopes.contains(class.as_str()))
             })
-            .map(|(id, path, _)| (id, path))
+            .map(|(id, _, _)| id)
             .collect();
-        others.sort_by_key(|&(id, _)| self.files.rank_of(id));
-        let other_facts = map_on_pool(pool, &others, |&(_, path)| {
+        others.sort_by_key(|&id| self.files.rank_of(id));
+        let other_facts = map_on_pool(pool, &others, |&id| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.run_checker(path, false, false).property_assign_facts
+                self.run_checker(id, false, false).property_assign_facts
             }))
             .ok()
         });
-        // Each source with its path's place, so the facts merge in path order;
-        // a path with no number sorts last.
+        // Each source with its path's place, so the facts merge in path order.
         let mut sources: Vec<(u32, PropertyAssignFacts)> = others
             .iter()
             .zip(other_facts)
-            .filter_map(|(&(id, _), facts)| Some((self.files.rank_of(id), facts?)))
+            .filter_map(|(&id, facts)| Some((self.files.rank_of(id), facts?)))
             .collect();
-        for (id, _, outcome) in checks.iter_mut() {
+        for (id, outcome) in checks.iter_mut() {
             if let Ok(check) = outcome {
                 sources.push((
-                    id.map_or(u32::MAX, |id| self.files.rank_of(id)),
+                    self.files.rank_of(*id),
                     std::mem::take(&mut check.property_assign_facts),
                 ));
             }
@@ -2424,9 +2435,9 @@ impl Project {
             }
         }
         let relation = self.settings.rule_levels.relation(&self.registry);
-        for (id, _, outcome) in checks.iter_mut() {
+        for (id, outcome) in checks.iter_mut() {
             if let Ok(check) = outcome
-                && let Some(file) = id.and_then(|id| self.files.get_by_id(id))
+                && let Some(file) = self.files.get_by_id(*id)
             {
                 let sites = std::mem::take(&mut check.property_type_sites);
                 check
@@ -2447,9 +2458,14 @@ impl Project {
     /// `collect_inlay_hints`) rather than through `check_files`'
     /// fixed diagnostic pipeline. Mirrors `run_checker`'s setup exactly.
     pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, AstRef<'_>)> {
-        let id = self.files.id_of(path)?;
+        self.checker_for_file(self.files.id_of(path)?)
+    }
+
+    /// `checker_for` the file numbered `id`.
+    fn checker_for_file(&self, id: FileId) -> Option<(Checker<'_>, AstRef<'_>)> {
         let file = self.files.get_by_id(id)?;
-        let ast = self.ast_of(path)?;
+        let path = self.files.path(id);
+        let ast = self.ast_of(id)?;
         let mut checker = Checker::new(&self.registry)
             .with_sql(&self.sql)
             .with_settings(&self.settings)
@@ -2484,12 +2500,13 @@ impl Project {
         checker.take_semantic_tokens()
     }
 
-    /// Runs the checker over `path`, leaving its private property types
-    /// unjudged and its diagnostics unfiltered (`finish_diagnostics`).
-    fn run_checker(&self, path: &Path, collect_member_refs: bool, dump_types: bool) -> FileCheck {
+    /// Runs the checker over the file numbered `id`, leaving its private
+    /// property types unjudged and its diagnostics unfiltered
+    /// (`finish_diagnostics`).
+    fn run_checker(&self, id: FileId, collect_member_refs: bool, dump_types: bool) -> FileCheck {
         #[cfg(test)]
-        tests::panic_injection::panic_if_injected(path);
-        let Some((mut checker, ast)) = self.checker_for(path) else {
+        tests::panic_injection::panic_if_injected(self.files.path(id));
+        let Some((mut checker, ast)) = self.checker_for_file(id) else {
             return FileCheck::empty();
         };
         checker.set_defer_property_type_checks(true);
@@ -2511,14 +2528,9 @@ impl Project {
         }
     }
 
-    /// The checker `diagnostics` of `path`, numbered `id`, with the
+    /// The checker `diagnostics` of the file numbered `id`, with the
     /// project-level ones added and sorted.
-    fn finish_diagnostics(
-        &self,
-        id: FileId,
-        path: &Path,
-        mut diagnostics: Vec<Diagnostic>,
-    ) -> Vec<Diagnostic> {
+    fn finish_diagnostics(&self, id: FileId, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         let Some(file) = self.files.get_by_id(id) else {
             return diagnostics;
         };
@@ -2528,7 +2540,7 @@ impl Project {
                 self.absolute_root(),
                 &file.line_index,
                 &|site| self.files.path(site),
-                &|site, offset| self.line_in(self.files.path(site), offset),
+                &|site, offset| self.line_in(site, offset),
                 &self.duplicate_fn_sites,
             ));
         }
@@ -2538,7 +2550,7 @@ impl Project {
                 self.absolute_root(),
                 &file.line_index,
                 &|site| self.files.path(site),
-                &|site, offset| self.line_in(self.files.path(site), offset),
+                &|site, offset| self.line_in(site, offset),
                 &self.duplicate_class_sites,
             ));
         }
@@ -2560,7 +2572,7 @@ impl Project {
                 file.ast(),
                 &file.line_index,
                 &self.registry,
-                Some(self.package_name(path)),
+                Some(file.owner.and_then(|owner| self.packages.name(owner))),
             ));
             // `into_diagnostics` above already sorted the checker's own
             // diagnostics into span order - re-sort once more now that
@@ -2606,20 +2618,44 @@ impl Project {
     }
 
     /// Runs the checker over exactly `paths` (which must already be
-    /// loaded), on `pool`. Panic-transparent - a real checker panic in
-    /// `paths` propagates to the caller, which is what a unit test wants;
-    /// see `check_paths_isolating_panics` for the batch-safe counterpart.
+    /// loaded), on `pool`, keyed by each file's number; a path the project
+    /// never numbered holds no file and has no entry. Panic-transparent - a
+    /// real checker panic in `paths` propagates to the caller, which is what
+    /// a unit test wants; see `check_paths_isolating_panics` for the
+    /// batch-safe counterpart.
     pub fn check_paths(
         &self,
         paths: &[PathBuf],
         pool: &rayon::ThreadPool,
-    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        self.check_files(paths, Some(pool), false, false)
+    ) -> FxHashMap<FileId, Vec<Diagnostic>> {
+        self.check_numbered(&self.numbers_of(paths), pool)
+    }
+
+    /// `check_paths` of the files numbered `files`.
+    fn check_numbered(
+        &self,
+        files: &[FileId],
+        pool: &rayon::ThreadPool,
+    ) -> FxHashMap<FileId, Vec<Diagnostic>> {
+        self.check_files(files, Some(pool), false, false)
             .into_iter()
-            .map(|(path, outcome)| match outcome {
-                Ok(check) => (path, check.diagnostics),
-                Err(message) => panic!("checking {} panicked: {message}", path.display()),
+            .map(|(id, outcome)| match outcome {
+                Ok(check) => (id, check.diagnostics),
+                Err(message) => {
+                    panic!(
+                        "checking {} panicked: {message}",
+                        self.path_of(id).display()
+                    )
+                }
             })
+            .collect()
+    }
+
+    /// The numbers of those of `paths` the project has numbered, in order.
+    fn numbers_of(&self, paths: &[PathBuf]) -> Vec<FileId> {
+        paths
+            .iter()
+            .filter_map(|path| self.files.id_of(path))
             .collect()
     }
 
@@ -2642,17 +2678,17 @@ impl Project {
     ) -> CheckPathsIsolatingPanics {
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let outcomes = self.check_files(paths, Some(pool), false, false);
+        let outcomes = self.check_files(&self.numbers_of(paths), Some(pool), false, false);
         std::panic::set_hook(default_hook);
 
         let mut results = FxHashMap::default();
         let mut panics = Vec::new();
-        for (path, outcome) in outcomes {
+        for (id, outcome) in outcomes {
             match outcome {
                 Ok(check) => {
-                    results.insert(path, check.diagnostics);
+                    results.insert(id, check.diagnostics);
                 }
-                Err(msg) => panics.push((path, msg)),
+                Err(msg) => panics.push((self.path_of(id).to_path_buf(), msg)),
             }
         }
         panics.sort();
@@ -2668,8 +2704,9 @@ impl Project {
     /// corpus at once, rather than one file (and its
     /// transitively-affected dependents) at a time the way `update_file`
     /// does.
-    pub fn check_all(&self, pool: &rayon::ThreadPool) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        self.check_paths(&self.files.keys().cloned().collect::<Vec<_>>(), pool)
+    pub fn check_all(&self, pool: &rayon::ThreadPool) -> FxHashMap<FileId, Vec<Diagnostic>> {
+        let files: Vec<FileId> = self.files.iter_with_ids().map(|(id, _, _)| id).collect();
+        self.check_numbered(&files, pool)
     }
 
     /// Resolves one whole-program finding's own reportable location and
@@ -2678,16 +2715,16 @@ impl Project {
     /// never see: only first-party files are reported, never vendor or
     /// context ones swept in only because the registry records every
     /// loaded file's declarations, analyzed or not. `None` for an unloaded
-    /// or context path. Inline ignore comments apply when the results are
+    /// or context file. Inline ignore comments apply when the results are
     /// reported.
     fn whole_program_diagnostic(
         &self,
-        path: &Path,
+        file: FileId,
         span: Span,
         message: String,
         identifier: &'static str,
     ) -> Option<Diagnostic> {
-        let file = self.files.get(path)?;
+        let file = self.files.get_by_id(file)?;
         if !file.analyzed {
             return None;
         }
@@ -2726,9 +2763,9 @@ impl Project {
     /// large the project is.
     pub(crate) fn check_whole_program(
         &mut self,
-        named_argument_calls: &NamedArgumentCallFactsWithPath,
-    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
+        named_argument_calls: &NamedArgumentCallFactsWithFile,
+    ) -> FxHashMap<FileId, Vec<Diagnostic>> {
+        let mut results: FxHashMap<FileId, Vec<Diagnostic>> = FxHashMap::default();
 
         if self.settings.rules.check_dead_enum_cases {
             self.ensure_member_index_built();
@@ -2741,14 +2778,13 @@ impl Project {
                 let Some((file, span)) = self.registry.constant_declaration(&fqn, &case) else {
                     continue;
                 };
-                let path = self.path_of(file).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
+                    file,
                     span,
                     format!("Enum case {fqn}::{case} is never used."),
                     "enumCase.unused",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results.entry(file).or_default().push(d);
                 }
             }
         }
@@ -2760,14 +2796,13 @@ impl Project {
                 let Some((file, span)) = self.registry.function_declaration(&name) else {
                     continue;
                 };
-                let path = self.path_of(file).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
+                    file,
                     span,
                     format!("Function {name} is never referenced."),
                     "function.unused",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results.entry(file).or_default().push(d);
                 }
             }
             let dead_classes =
@@ -2776,14 +2811,13 @@ impl Project {
                 let Some((file, span)) = self.registry.class_declaration(&name) else {
                     continue;
                 };
-                let path = self.path_of(file).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
+                    file,
                     span,
                     format!("Class {name} is never referenced."),
                     "class.unused",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results.entry(file).or_default().push(d);
                 }
             }
         }
@@ -2797,15 +2831,14 @@ impl Project {
                 else {
                     continue;
                 };
-                let path = self.path_of(file).to_path_buf();
                 let namespaces = cycle.namespaces.join(", ");
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
+                    file,
                     span,
                     format!("Circular namespace dependency: {namespaces}."),
                     "namespace.circularDependency",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results.entry(file).or_default().push(d);
                 }
             }
         }
@@ -2817,16 +2850,15 @@ impl Project {
                 let Some((file, span)) = self.registry.class_declaration(&name) else {
                     continue;
                 };
-                let path = self.path_of(file).to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
+                    file,
                     span,
                     format!(
                         "Abstract class {name} has no concrete subclass anywhere in the project."
                     ),
                     "class.deadAbstract",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results.entry(file).or_default().push(d);
                 }
             }
         }
@@ -2853,7 +2885,6 @@ impl Project {
                 let Some((file, span)) = declaration else {
                     continue;
                 };
-                let path = self.path_of(file).to_path_buf();
                 let (noun, identifier) = match kind {
                     whole_program::dead_members::MemberKind::Method => ("Method", "method.unused"),
                     whole_program::dead_members::MemberKind::Property => {
@@ -2864,12 +2895,12 @@ impl Project {
                     }
                 };
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
+                    file,
                     span,
                     format!("{noun} {owner}::{name} is never used."),
                     identifier,
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results.entry(file).or_default().push(d);
                 }
             }
         }
@@ -2890,14 +2921,14 @@ impl Project {
                     named_argument_calls,
                     &overrides,
                 );
-            for (path, span, message) in collisions {
+            for (file, span, message) in collisions {
                 if let Some(d) = self.whole_program_diagnostic(
-                    &path,
+                    file,
                     span,
                     message,
                     "argument.parameterRenamedInSubtype",
                 ) {
-                    results.entry(path).or_default().push(d);
+                    results.entry(file).or_default().push(d);
                 }
             }
         }
@@ -2925,6 +2956,18 @@ impl Project {
             .filter(|(_, state)| state.analyzed)
             .map(|(path, _)| path.clone())
             .collect()
+    }
+
+    /// The numbers of `analyzed_paths`' files, in path order.
+    pub(crate) fn analyzed_files(&self) -> Vec<FileId> {
+        let mut files: Vec<FileId> = self
+            .files
+            .iter_with_ids()
+            .filter(|(_, _, state)| state.analyzed)
+            .map(|(id, _, _)| id)
+            .collect();
+        files.sort_by_key(|&id| self.files.rank_of(id));
+        files
     }
 
     /// `true` if `path` is loaded and analyzed; `false` for an unloaded

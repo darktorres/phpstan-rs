@@ -5,9 +5,9 @@
 //! signatures, and - for `float` - in float literals and `(float)` casts.
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
 
 use crate::banned::BannedConstruct;
+use crate::file_id::FileId;
 use crate::registry::Registry;
 use syntax::ast::*;
 use syntax::span::{LineIndex, Span};
@@ -447,12 +447,13 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
 }
 
 impl Project {
-    /// Every banned construct/type in the analysed files, keyed by file.
+    /// Every banned construct/type in the analysed files, keyed by the file's
+    /// number.
     pub fn check_banned(
         &self,
         constructs: &[BannedConstruct],
         types: &[String],
-    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    ) -> FxHashMap<FileId, Vec<Diagnostic>> {
         let mut out = FxHashMap::default();
         if constructs.is_empty() && types.is_empty() {
             return out;
@@ -462,7 +463,7 @@ impl Project {
             .iter()
             .map(|t| t.trim_start_matches('\\').to_ascii_lowercase())
             .collect();
-        for (path, file) in &self.files {
+        for (id, _, file) in self.files.iter_with_ids() {
             if !file.analyzed {
                 continue;
             }
@@ -497,7 +498,7 @@ impl Project {
             if !walker.out.is_empty() {
                 let mut found = walker.out;
                 found.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-                out.insert(path.clone(), found);
+                out.insert(id, found);
             }
         }
         out
