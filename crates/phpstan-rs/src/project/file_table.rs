@@ -84,6 +84,13 @@ impl<V> FileTable<V> {
         self.number(path, path_hash(path))
     }
 
+    /// The number of the path `other` numbers `id`, given now if it has none,
+    /// by the hash `other` keeps for it.
+    pub(crate) fn id_for_numbered<W>(&mut self, other: &FileTable<W>, id: FileId) -> FileId {
+        let slot = &other.slots[id.index()];
+        self.number(&slot.path, slot.hash)
+    }
+
     /// The number of `path`, whose hash is `hash`, if it has one.
     fn find(&self, hash: PathHash, path: &Path) -> Option<FileId> {
         let slots = &self.slots;
@@ -225,14 +232,19 @@ impl<V> FileTable<V> {
         })
     }
 
-    /// `iter`, side by side.
-    pub(crate) fn par_iter(&self) -> impl ParallelIterator<Item = (&PathBuf, &V)>
+    /// `iter_with_ids`, side by side.
+    pub(crate) fn par_iter_with_ids(&self) -> impl ParallelIterator<Item = (FileId, &PathBuf, &V)>
     where
         V: Sync,
     {
         self.slots
             .par_iter()
-            .filter_map(|slot| slot.value.as_ref().map(|value| (&slot.path, value)))
+            .enumerate()
+            .filter_map(|(index, slot)| {
+                slot.value
+                    .as_ref()
+                    .map(|value| (FileId::new(index), &slot.path, value))
+            })
     }
 
     pub(crate) fn keys(&self) -> impl Iterator<Item = &PathBuf> {

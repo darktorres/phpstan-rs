@@ -97,10 +97,8 @@ fn parsed_files() -> Vec<(FileId, PathBuf, ParsedFile)> {
 /// `files` as the entries one batch takes.
 fn entries(
     files: &mut [(FileId, PathBuf, ParsedFile)],
-) -> impl Iterator<Item = (FileId, &Path, &mut ParsedFile)> {
-    files
-        .iter_mut()
-        .map(|(id, path, parsed)| (*id, path.as_path(), parsed))
+) -> impl Iterator<Item = (FileId, &mut ParsedFile)> {
+    files.iter_mut().map(|(id, _, parsed)| (*id, parsed))
 }
 
 /// The project the batch makes of `files`, merged as one batch on `pool`.
@@ -114,9 +112,9 @@ fn merged(pool: &rayon::ThreadPool, files: &mut [(FileId, PathBuf, ParsedFile)])
 /// the files.
 fn serial(files: &[(FileId, PathBuf, ParsedFile)]) -> Project {
     let mut project = Project::new();
-    for (id, path, parsed) in files {
+    for (id, _, parsed) in files {
         for (span, target) in parsed.class_fn_refs.clone().unwrap_or_default() {
-            project.use_sites.insert(path, target, span);
+            project.use_sites.insert(*id, target, span);
         }
         for (name, site) in parsed.duplicate_fn_sites.clone() {
             project.duplicate_fn_sites.add(name, *id, site);

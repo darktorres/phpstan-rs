@@ -1411,8 +1411,8 @@ impl Session {
                 .iter()
                 .zip(&ordered)
                 .zip(parsed.iter_mut())
-                .filter_map(|((&id, file), read)| match read {
-                    Read::Loaded(loaded) => Some((id, file.path.as_path(), &mut loaded.parsed)),
+                .filter_map(|((&id, _), read)| match read {
+                    Read::Loaded(loaded) => Some((id, &mut loaded.parsed)),
                     _ => None,
                 }),
         );
@@ -1630,8 +1630,8 @@ impl Session {
                         .zip(analyze_numbers)
                         .zip(&mut analyze_parsed),
                 )
-                .filter_map(|((file, &id), read)| match read {
-                    Read::Loaded(loaded) => Some((id, file.path.as_path(), &mut loaded.parsed)),
+                .filter_map(|((_, &id), read)| match read {
+                    Read::Loaded(loaded) => Some((id, &mut loaded.parsed)),
                     _ => None,
                 }),
         );

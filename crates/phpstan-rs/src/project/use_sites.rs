@@ -29,12 +29,12 @@
 //! `Project::reindex_tier2_for_file`.
 
 use rustc_hash::FxHashMap;
-use std::path::{Path, PathBuf};
 
 use syntax::ast::*;
 use syntax::span::Span;
 use syntax::visit::{Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_stmts};
 
+use crate::file_id::FileId;
 use crate::shard::{join_map, split_map};
 
 /// What a reference site points at - no local-variable variant (see
@@ -55,38 +55,33 @@ pub(crate) enum RefTarget {
 /// Every reference site this project has ever indexed, in both
 /// directions: `by_target` answers "where is X used" (`references`'s own
 /// query shape); `by_file` answers "what did this file contribute"
-/// (`remove_file`'s own undo shape).
+/// (`remove_file`'s own undo shape). A site's file is the project's number
+/// for it.
 #[derive(Default, Debug, PartialEq, Eq)]
 pub(crate) struct UseSiteIndex {
-    by_target: FxHashMap<RefTarget, Vec<(PathBuf, Span)>>,
-    by_file: FxHashMap<PathBuf, Vec<(RefTarget, Span)>>,
+    by_target: FxHashMap<RefTarget, Vec<(FileId, Span)>>,
+    by_file: FxHashMap<FileId, Vec<(RefTarget, Span)>>,
 }
 
 impl UseSiteIndex {
-    pub(crate) fn insert(&mut self, path: &Path, target: RefTarget, span: Span) {
-        self.add_target_site(target.clone(), path, span);
-        self.add_file_site(path, target, span);
+    pub(crate) fn insert(&mut self, file: FileId, target: RefTarget, span: Span) {
+        self.add_target_site(target.clone(), file, span);
+        self.add_file_site(file, target, span);
     }
 
-    /// Adds a site at `span` in the file `path` to the sites of `target`.
-    pub(crate) fn add_target_site(&mut self, target: RefTarget, path: &Path, span: Span) {
-        self.by_target
-            .entry(target)
-            .or_default()
-            .push((path.to_path_buf(), span));
+    /// Adds a site at `span` in `file` to the sites of `target`.
+    pub(crate) fn add_target_site(&mut self, target: RefTarget, file: FileId, span: Span) {
+        self.by_target.entry(target).or_default().push((file, span));
     }
 
-    /// Adds a site of `target` at `span` to the sites of the file `path`.
-    pub(crate) fn add_file_site(&mut self, path: &Path, target: RefTarget, span: Span) {
-        self.by_file
-            .entry(path.to_path_buf())
-            .or_default()
-            .push((target, span));
+    /// Adds a site of `target` at `span` to the sites of `file`.
+    pub(crate) fn add_file_site(&mut self, file: FileId, target: RefTarget, span: Span) {
+        self.by_file.entry(file).or_default().push((target, span));
     }
 
     /// Takes the index apart into `SHARDS` indexes for a merge. Each target's
     /// sites are in the index their target routes to, and each file's in the
-    /// index its path routes to. `join_shards` puts them back together.
+    /// index its number routes to. `join_shards` puts them back together.
     pub(crate) fn split_shards(self) -> Vec<UseSiteIndex> {
         split_map(self.by_target)
             .into_iter()
@@ -107,17 +102,17 @@ impl UseSiteIndex {
         }
     }
 
-    /// Drops every site `path` previously contributed, from both
+    /// Drops every site `file` previously contributed, from both
     /// directions - called unconditionally on every re-index/removal of
-    /// `path` (a no-op before anything was ever inserted for it, in
+    /// `file` (a no-op before anything was ever inserted for it, in
     /// particular before Tier 2's own index is first built at all).
-    pub(crate) fn remove_file(&mut self, path: &Path) {
-        let Some(entries) = self.by_file.remove(path) else {
+    pub(crate) fn remove_file(&mut self, file: FileId) {
+        let Some(entries) = self.by_file.remove(&file) else {
             return;
         };
         for (target, span) in entries {
             if let Some(sites) = self.by_target.get_mut(&target) {
-                sites.retain(|(p, s)| !(p == path && *s == span));
+                sites.retain(|(f, s)| !(*f == file && *s == span));
                 if sites.is_empty() {
                     self.by_target.remove(&target);
                 }
@@ -125,7 +120,7 @@ impl UseSiteIndex {
         }
     }
 
-    pub(crate) fn references(&self, target: &RefTarget) -> &[(PathBuf, Span)] {
+    pub(crate) fn references(&self, target: &RefTarget) -> &[(FileId, Span)] {
         self.by_target.get(target).map(Vec::as_slice).unwrap_or(&[])
     }
 }

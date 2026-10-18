@@ -1840,8 +1840,8 @@ impl Server {
         let project = &self.slot(home).project;
         let mut locations: Vec<Location> = Vec::new();
         for target in &targets {
-            for (p, span) in project.use_sites().references(target) {
-                locations.push(self.location(p, *span));
+            for &(file, span) in project.use_sites().references(target) {
+                locations.push(self.location(project.path_of(file), span));
             }
         }
         if include_declaration {
@@ -1905,13 +1905,14 @@ impl Server {
         self.slot_mut(home).project.ensure_member_index_built();
         let project = &self.slot(home).project;
         let mut changes: FxHashMap<Uri, Vec<lsp_types::TextEdit>> = FxHashMap::default();
-        for (p, span) in project.use_sites().references(&target) {
+        for &(file, span) in project.use_sites().references(&target) {
+            let p = project.path_of(file);
             let (edit_uri, _) = self.uri_and_version_for(p);
             changes
                 .entry(edit_uri)
                 .or_default()
                 .push(lsp_types::TextEdit {
-                    range: self.lsp_range(p, *span),
+                    range: self.lsp_range(p, span),
                     new_text: new_name.to_string(),
                 });
         }

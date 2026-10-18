@@ -43,7 +43,7 @@ fn insert_context(project: &mut Project, skip: BodyText) {
         &worker_pool(),
         [(path.as_path(), false, file.built_decls())],
     );
-    project.insert_file_tables(&worker_pool(), [(id, path.as_path(), &mut file)]);
+    project.insert_file_tables(&worker_pool(), [(id, &mut file)]);
     project.insert_numbered_file(id, &path, file, text, false);
 }
 

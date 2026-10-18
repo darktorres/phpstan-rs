@@ -1011,7 +1011,7 @@ impl Project {
         if self.files.has_numbers() {
             return numbers
                 .iter()
-                .map(|&id| self.files.id_for(table.path(id)))
+                .map(|&id| self.files.id_for_numbered(&table, id))
                 .collect();
         }
         self.files = table;
@@ -1624,7 +1624,7 @@ impl Project {
             .cloned()
             .collect();
         self.registry.remove_declarations(&old.functions, &classes);
-        self.use_sites.remove_file(path);
+        self.use_sites.remove_file(id);
         self.duplicate_fn_sites
             .remove_declarations(id, &old.functions);
         self.duplicate_class_sites
@@ -1789,20 +1789,23 @@ impl Project {
         path: &Path,
         member_refs: Option<Vec<(Span, String, String)>>,
     ) {
-        self.use_sites.remove_file(path);
+        let Some(id) = self.files.id_of(path) else {
+            return;
+        };
+        self.use_sites.remove_file(id);
         if self.retain_source
             && self.indexes_class_fn_sites()
-            && let Some(file) = self.files.get(path)
+            && let Some(file) = self.files.get_by_id(id)
             && let Some(source) = &file.source
         {
             for (span, target) in use_sites::index_class_fn_refs(file.ast(), source) {
-                self.use_sites.insert(path, target, span);
+                self.use_sites.insert(id, target, span);
             }
         }
         if let Some(member_refs) = member_refs {
             for (span, owner, member) in member_refs {
                 self.use_sites
-                    .insert(path, use_sites::RefTarget::Member(owner, member), span);
+                    .insert(id, use_sites::RefTarget::Member(owner, member), span);
             }
         }
     }
@@ -1837,23 +1840,19 @@ impl Project {
         if self.retain_source && !self.indexes_class_fn_sites() {
             // The files were loaded without their class and function sites
             // (`class_fn_refs_of`), so those are indexed here.
-            let indexed: Vec<(&PathBuf, Vec<(Span, use_sites::RefTarget)>)> = worker_pool()
-                .install(|| {
+            let indexed: Vec<(FileId, Vec<(Span, use_sites::RefTarget)>)> =
+                worker_pool().install(|| {
                     self.files
-                        .par_iter()
-                        .filter_map(|(path, file)| {
+                        .par_iter_with_ids()
+                        .filter_map(|(id, _, file)| {
                             let source = file.source.as_ref()?;
-                            Some((path, use_sites::index_class_fn_refs(file.ast(), source)))
+                            Some((id, use_sites::index_class_fn_refs(file.ast(), source)))
                         })
                         .collect()
                 });
-            let indexed: Vec<(PathBuf, Vec<(Span, use_sites::RefTarget)>)> = indexed
-                .into_iter()
-                .map(|(path, refs)| (path.clone(), refs))
-                .collect();
-            for (path, refs) in indexed {
+            for (id, refs) in indexed {
                 for (span, target) in refs {
-                    self.use_sites.insert(&path, target, span);
+                    self.use_sites.insert(id, target, span);
                 }
             }
         }
@@ -1886,9 +1885,11 @@ impl Project {
         escaped_enums: FxHashSet<String>,
         escaped_member_classes: FxHashSet<String>,
     ) {
-        for (span, owner, member) in member_refs {
-            self.use_sites
-                .insert(path, use_sites::RefTarget::Member(owner, member), span);
+        if let Some(id) = self.files.id_of(path) {
+            for (span, owner, member) in member_refs {
+                self.use_sites
+                    .insert(id, use_sites::RefTarget::Member(owner, member), span);
+            }
         }
         self.escaped_enum_cases.extend(escaped_enums);
         self.escaped_member_classes.extend(escaped_member_classes);
@@ -2298,26 +2299,35 @@ impl Project {
         collect_member_refs: bool,
         dump_types: bool,
     ) -> Vec<(PathBuf, CheckOutcome)> {
+        // Each path's number, found once: `None` for a path the project never
+        // numbered, which holds no file, so its check records nothing.
+        let files: Vec<(Option<FileId>, &PathBuf)> = paths
+            .iter()
+            .map(|path| (self.files.id_of(path), path))
+            .collect();
         let mut checks = map_on_pool_largest_first(
             pool,
-            paths,
-            |path| self.files.get(path).map_or(0, |file| file.source_len),
-            |path| {
+            &files,
+            |&(id, _)| {
+                id.and_then(|id| self.files.get_by_id(id))
+                    .map_or(0, |file| file.source_len)
+            },
+            |&(id, path)| {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     self.run_checker(path, collect_member_refs, dump_types)
                 }))
                 .map_err(panic_message);
-                (path.clone(), outcome)
+                (id, path.clone(), outcome)
             },
         );
         self.judge_property_types(&mut checks, pool);
         // Each file's diagnostics are finished from the project as it is,
         // which nothing here changes, so the files are finished side by
         // side; they stay where they are in `checks`.
-        let finish = |(path, outcome): &mut (PathBuf, CheckOutcome)| {
-            if let Ok(check) = outcome {
+        let finish = |(id, path, outcome): &mut (Option<FileId>, PathBuf, CheckOutcome)| {
+            if let (Some(id), Ok(check)) = (*id, outcome) {
                 let diagnostics = std::mem::take(&mut check.diagnostics);
-                check.diagnostics = self.finish_diagnostics(path, diagnostics);
+                check.diagnostics = self.finish_diagnostics(id, path, diagnostics);
             }
         };
         match pool {
@@ -2325,6 +2335,9 @@ impl Project {
             None => checks.iter_mut().for_each(finish),
         }
         checks
+            .into_iter()
+            .map(|(_, path, outcome)| (path, outcome))
+            .collect()
     }
 
     /// Judges the private property types `checks` recorded against the
@@ -2335,11 +2348,11 @@ impl Project {
     /// depend on scheduling. A file that panicked contributes nothing.
     fn judge_property_types(
         &self,
-        checks: &mut [(PathBuf, CheckOutcome)],
+        checks: &mut [(Option<FileId>, PathBuf, CheckOutcome)],
         pool: Option<&rayon::ThreadPool>,
     ) {
         let mut writers: NameSet = NameSet::default();
-        for (_, outcome) in checks.iter() {
+        for (_, _, outcome) in checks.iter() {
             if let Ok(check) = outcome {
                 for site in &check.property_type_sites {
                     writers.extend(site.writers().iter().cloned());
@@ -2357,12 +2370,17 @@ impl Project {
             }
             scopes.insert(class);
         }
-        let checked: FxHashSet<&PathBuf> = checks.iter().map(|(path, _)| path).collect();
+        let mut checked = FileIdSet::default();
+        for &(id, _, _) in checks.iter() {
+            if let Some(id) = id {
+                checked.insert(id);
+            }
+        }
         let mut others: Vec<(FileId, &PathBuf)> = self
             .files
             .iter_with_ids()
-            .filter(|(_, path, file)| {
-                !checked.contains(path)
+            .filter(|&(id, _, file)| {
+                !checked.contains(id)
                     && file
                         .classes
                         .iter()
@@ -2377,17 +2395,22 @@ impl Project {
             }))
             .ok()
         });
-        let mut sources: Vec<(&PathBuf, PropertyAssignFacts)> = others
+        // Each source with its path's place, so the facts merge in path order;
+        // a path with no number sorts last.
+        let mut sources: Vec<(u32, PropertyAssignFacts)> = others
             .iter()
             .zip(other_facts)
-            .filter_map(|(&(_, path), facts)| Some((path, facts?)))
+            .filter_map(|(&(id, _), facts)| Some((self.files.rank_of(id), facts?)))
             .collect();
-        for (path, outcome) in checks.iter_mut() {
+        for (id, _, outcome) in checks.iter_mut() {
             if let Ok(check) = outcome {
-                sources.push((path, std::mem::take(&mut check.property_assign_facts)));
+                sources.push((
+                    id.map_or(u32::MAX, |id| self.files.rank_of(id)),
+                    std::mem::take(&mut check.property_assign_facts),
+                ));
             }
         }
-        sources.sort_by_cached_key(|source| self.path_rank(source.0));
+        sources.sort_by_key(|&(rank, _)| rank);
         let mut merged: PropertyAssignFacts = NameMap::default();
         for (_, facts) in sources {
             for (class, props) in facts {
@@ -2401,9 +2424,9 @@ impl Project {
             }
         }
         let relation = self.settings.rule_levels.relation(&self.registry);
-        for (path, outcome) in checks.iter_mut() {
+        for (id, _, outcome) in checks.iter_mut() {
             if let Ok(check) = outcome
-                && let Some(file) = self.files.get(path.as_path())
+                && let Some(file) = id.and_then(|id| self.files.get_by_id(id))
             {
                 let sites = std::mem::take(&mut check.property_type_sites);
                 check
@@ -2488,12 +2511,14 @@ impl Project {
         }
     }
 
-    /// `path`'s checker `diagnostics` with the project-level ones added and
-    /// sorted.
-    fn finish_diagnostics(&self, path: &Path, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-        let Some(id) = self.files.id_of(path) else {
-            return diagnostics;
-        };
+    /// The checker `diagnostics` of `path`, numbered `id`, with the
+    /// project-level ones added and sorted.
+    fn finish_diagnostics(
+        &self,
+        id: FileId,
+        path: &Path,
+        mut diagnostics: Vec<Diagnostic>,
+    ) -> Vec<Diagnostic> {
         let Some(file) = self.files.get_by_id(id) else {
             return diagnostics;
         };

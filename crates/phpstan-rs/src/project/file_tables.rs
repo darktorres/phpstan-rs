@@ -5,10 +5,8 @@
 //! shards by key (`shard::shard_of_key`), and each shard applies the entries
 //! that route to it in the order of the files, so each key ends as the serial
 //! inserts of the files leave it. A use site routes twice, by its target for
-//! the target map and by its file's path for the file map, so each map of each
-//! shard holds the keys that route to that shard.
-
-use std::path::Path;
+//! the target map and by its file's number for the file map, so each map of
+//! each shard holds the keys that route to that shard.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::span::Span;
@@ -31,7 +29,6 @@ struct FileEntries {
 /// A file's entries, and the reference keys of its parse, for one merge.
 struct FileTables<'a> {
     id: FileId,
-    path: &'a Path,
     entries: FileEntries,
     references: &'a FxHashSet<RefKey>,
     declaration_references: &'a FxHashSet<RefKey>,
@@ -49,10 +46,10 @@ struct ProjectShard {
 /// The work one chunk of files makes for one shard, in the files' order.
 #[derive(Default)]
 struct ChunkWork<'a> {
-    /// The use sites whose target the shard holds, each with its file's path.
-    target_sites: Vec<(RefTarget, &'a Path, Span)>,
-    /// The use sites whose file's path the shard holds, each with its target.
-    file_sites: Vec<(&'a Path, RefTarget, Span)>,
+    /// The use sites whose target the shard holds, each with its file.
+    target_sites: Vec<(RefTarget, FileId, Span)>,
+    /// The use sites whose file the shard holds, each with its target.
+    file_sites: Vec<(FileId, RefTarget, Span)>,
     duplicate_fn_sites: Vec<(String, FileId, FnDeclSite)>,
     duplicate_class_sites: Vec<(String, FileId, ClassDeclSite)>,
     dependents: Vec<(&'a RefKey, FileId)>,
@@ -77,24 +74,23 @@ impl ParsedFile {
 }
 
 impl Project {
-    /// Inserts the entries of `files`, each with its id, path and parse, in
-    /// the order given. Each table ends as the serial inserts of the files in
+    /// Inserts the entries of `files`, each with its id and parse, in the
+    /// order given. Each table ends as the serial inserts of the files in
     /// turn leave it. A file's entries are taken out of its parse, and its
     /// references are borrowed from it, so `insert_numbered_file` takes the
     /// parse after this. An empty batch changes nothing.
     pub(crate) fn insert_file_tables<'a>(
         &mut self,
         pool: &rayon::ThreadPool,
-        files: impl IntoIterator<Item = (FileId, &'a Path, &'a mut ParsedFile)>,
+        files: impl IntoIterator<Item = (FileId, &'a mut ParsedFile)>,
     ) {
         let tables: Vec<FileTables<'a>> = files
             .into_iter()
-            .map(|(id, path, parsed)| {
+            .map(|(id, parsed)| {
                 let entries = parsed.take_entries();
                 let parsed: &'a ParsedFile = parsed;
                 FileTables {
                     id,
-                    path,
                     entries,
                     references: &parsed.references,
                     declaration_references: &parsed.declaration_references,
@@ -160,11 +156,11 @@ impl Project {
 impl ProjectShard {
     /// Applies one chunk's work to the shard's tables.
     fn apply(&mut self, work: ChunkWork<'_>) {
-        for (target, path, span) in work.target_sites {
-            self.use_sites.add_target_site(target, path, span);
+        for (target, file, span) in work.target_sites {
+            self.use_sites.add_target_site(target, file, span);
         }
-        for (path, target, span) in work.file_sites {
-            self.use_sites.add_file_site(path, target, span);
+        for (file, target, span) in work.file_sites {
+            self.use_sites.add_file_site(file, target, span);
         }
         for (name, file, site) in work.duplicate_fn_sites {
             self.duplicate_fn_sites.add(name, file, site);
@@ -187,7 +183,6 @@ fn bucket<'a>(files: Vec<FileTables<'a>>) -> Vec<ChunkWork<'a>> {
     for file in files {
         let FileTables {
             id,
-            path,
             entries,
             references,
             declaration_references,
@@ -197,13 +192,13 @@ fn bucket<'a>(files: Vec<FileTables<'a>>) -> Vec<ChunkWork<'a>> {
             duplicate_fn_sites,
             duplicate_class_sites,
         } = entries;
-        let path_shard = shard_of_key(path);
+        let file_shard = shard_of_key(&id);
         for (span, target) in class_fn_refs {
             let target_shard = shard_of_key(&target);
             work[target_shard]
                 .target_sites
-                .push((target.clone(), path, span));
-            work[path_shard].file_sites.push((path, target, span));
+                .push((target.clone(), id, span));
+            work[file_shard].file_sites.push((id, target, span));
         }
         for (name, site) in duplicate_fn_sites {
             work[shard_of_key(&name)]

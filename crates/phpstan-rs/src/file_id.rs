@@ -28,6 +28,14 @@ impl FileIdSet {
         self.words[word] |= 1 << bit;
         new
     }
+
+    /// Whether `file` is in the set.
+    pub(crate) fn contains(&self, file: FileId) -> bool {
+        let (word, bit) = (file.index() / 64, file.index() % 64);
+        self.words
+            .get(word)
+            .is_some_and(|word| word & (1 << bit) != 0)
+    }
 }
 
 impl FileId {
