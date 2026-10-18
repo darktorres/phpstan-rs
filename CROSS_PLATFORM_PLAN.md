@@ -7,10 +7,10 @@
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
   round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
-  R5's second follow-up (`7a757a8e`) and R7 (`1146b4f6`, `1fe8c8e4`). The rows are built in the
-  order of the table below, one commit each, with a pathspec, since another session shares
-  the checkout. R18 has one commit for each step, R6 has a second for the rule its build
-  found, and R7 has a second for the case rule.
+  R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`) and R8 (`7d5bddd4`). The rows
+  are built in the order of the table below, one commit each, with a pathspec, since another
+  session shares the checkout. R18 has one commit for each step, R6 has a second for the rule
+  its build found, and R7 has a second for the case rule.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -35,7 +35,7 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** R8, redesigned: what a run can find.
+- **Next:** R9, discovery: unreadable spellings and listing misses.
 
 ## Context
 
@@ -1353,6 +1353,111 @@ functions.
   with the rule that changes it: a plain name only the system include path could resolve, an
   absolute path elsewhere, and `./` beside the includer under a declared working directory.
   The Piwigo and monolog `fileNotFound` lines are compared before and after.
+
+**Built** (`7d5bddd4`, `06486da9`).
+
+- **Three modules,** cut by what the project may depend on. The project builds the include
+  environment, so what it reads may not be a rule.
+  - `checker::include_lookup` (analyser) is the pure lookup. It reads no file system: whether
+    a candidate is a file is a predicate its caller passes.
+  - `checker::include_values` (analyser) holds the strings an operand can take in a world
+    (what `includes.rs` held for one), and the walk that finds the calls the lookup depends
+    on: the guard functions, `set_include_path()`, `ini_set()` and `ini_alter()` of
+    `include_path`, and `chdir()`.
+  - `checker::includes` (rules) judges each value.
+- **Two worlds.** An operand is resolved once in each. `PATH_SEPARATOR`, `DIRECTORY_SEPARATOR`
+  and `dirname()` take the world's, and `get_include_path()` is a placeholder that the
+  environment expands to the declared value, so an operand that names the include path is not
+  judged as a path. The two results are judged as pairs. A pair is skipped when either world
+  guards it or finds it, and the message names the Unix value. A name is classified by a pure
+  function of the world and its text: absolute (root, drive, share), `./` or `../`, plain, or
+  not a path this analysis can see (a stream wrapper's URL, a drive-relative `C:x`).
+- **PHP's order,** read with php 8.5. An absolute name is that file. `./x` and `../x` are
+  looked up in the working directory alone. A plain name is looked up in each include path
+  entry, then the includer's directory, then the working directory. A relative entry is
+  relative to the working directory. An empty entry before another is the root of the file
+  system, a trailing one names nothing, and PHP refuses an empty value (`set_include_path('')`
+  fails), so a declared `""` is not known.
+- **The include path** is the new `include_path` key (the deployment's syntax, split by each
+  world's separator), the values the analysed files set, and the `include-path` directories of
+  the root package and of every installed package, which Composer's autoloader puts in front
+  (below the package's directory, a leading or trailing `/` trimmed). It is open while the key
+  is undeclared, a set value cannot be computed, or an entry leaves the project. An open path
+  judges no plain name. The Composer directories are known, so they do not open it.
+- **The working directories** are the new `working_dirs` key (relative to the config file) or,
+  undeclared, the root and the directory of every analysed file. A `chdir()` adds its
+  directory when that is absolute and this machine has it. One that cannot be computed in
+  either world, or that is relative or has no path here in this machine's world, opens the
+  working directory, and no name that depends on it is judged. The other world's reading of
+  the same call adds a directory only when this machine has it: otherwise it is that world's
+  spelling of the same place.
+- **Outside the project.** The trees are the root, `paths`, the scan and stub roots and the
+  vendor directories that exist. A candidate outside them counts as found. So does one below
+  an unbuilt directory: the `vendor` of a Composer root whose `composer.json` is here and whose
+  `vendor` is not, whatever `no_composer` says, since `composer install` makes it. A `..` stays
+  where it is written, because the file system takes it after the names before it
+  (`link/../x` is not `x`). Only the test of whether a candidate lies in a tree folds it.
+- **Incremental.** The environment is built once, on first use. `ini_set`, `ini_alter` and
+  `set_include_path` set one mention bit and `chdir` another, so a file that names none of them
+  is not read for values. The project builds the environment again when a file that sets a bit
+  is edited, and when any file is added or removed, since the directories scripts run from
+  change with the files. If the environment differs as a whole, the analysed files that
+  include something are checked again (`FileFacts::has_global_or_include`; a `global`
+  statement sets it too, which only widens the set), and no other file is. Applying settings
+  and finishing a load drop it. That is the plan's "the files whose includes depend on it":
+  only an include is judged against the environment.
+- **Added to the plan's text,** each from what a run can know:
+  - `ini_alter()`, `ini_set`'s alias, and `chdir()`, which moves the working directory that
+    every relative name depends on;
+  - the unbuilt `vendor` directories;
+  - the `""` rule and the trailing empty entry, found by running php.
+- **The cache.** The per-file cache is in a directory named by the build's source hash, so
+  entries parsed before the new mention bits are never read.
+- **Linux's output.**
+  - 15 new fixtures cover the rules:
+    - an undeclared include path, a relative entry, a value set in another file, `ini_alter()`,
+      a value that cannot be computed, an entry outside the project, and Composer's
+      `include-path`;
+    - a declared working directory with `./x`, `./x` not looked up beside the includer, and
+      `chdir()` to a known and to an unknown directory;
+    - a built and an unbuilt `vendor`, an include outside the project, and the Windows
+      world's `\`.
+  - Six existing fixtures include a plain name, which is judged only once the include path is
+    declared. They have an `include_path = "."` configuration now; the old rule judged them
+    against Debian's include path.
+  - `missing_paths_are_reported_per_construct` named `dirname(__DIR__, 1) . '/elsewhere.php'`,
+    which leaves the project and so is no longer judged. It now names `dirname(__FILE__, 1)`,
+    the file's own directory, and the message reads `<fixture>/elsewhere.php`.
+  - `check-project vendor/monolog` loses six `fileNotFound` lines and gains none (25,951 lines
+    to 25,945; 20,111 diagnostics to 20,105). One is an absolute path of the deployment
+    (`require "/app/source/vendor/autoload.php"`, in the FrankenPHP test), and five are plain
+    names judged against an include path that monolog's configuration does not declare
+    (`lib/byte_safe_strings.php` and three more in `random_compat`, and `not-exists`). The
+    file cache off, cold and warm give the same output for each binary, and a warm run writes
+    no cache file.
+  - The Piwigo oracle is byte-identical to the base (171,439 bytes, sha256 `8ff144c3…`), with
+    an empty stderr.
+- **Tests.**
+  - The lookup, 62 on Linux, with the platform-conditional ones on their own platform: the
+    classification of a name in each world, `dirname()` in each, the environment's building,
+    and the search.
+  - The checker's guard tests, with a helper that reads all the diagnostics under a root.
+  - The project's nine: the configuration reaching the rule, the undeclared path, and the
+    edit, `chdir()`, removal, open-value and new-directory cases in both directions. Their
+    exact sets of re-checked files show that a file with no include is left alone.
+  - One server test, the edit that sets the include path clearing a report in another file.
+  - Composer's `include-path` of a root and of a package, and a malformed one.
+  - The mention bits of the three functions that set the include path and of `chdir`.
+- **Checked here.**
+  - Clippy, `-D warnings`; the lib suite (1,337) and the fixtures (3,847); the integration
+    tests; the module graph (423 modules, 13,013 references, 236 listed exceptions) and
+    `arch`.
+  - The Windows type check, which now covers the lookup and its tests.
+  - Mutations, each failing tests: the hooks in the edit, the removal and the refresh, the
+    Composer directories, the declared working directories, the unbuilt directories, `chdir()`,
+    and the filter of files that include.
+- **Left to the legs.** The Windows machine's branches of the lookup (a rooted path takes the
+  project's drive, a drive or share is a real path) and their tests run on the Windows leg.
 
 ### R9. Discovery: unreadable spellings and listing misses
 

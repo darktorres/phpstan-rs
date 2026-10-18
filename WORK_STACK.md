@@ -281,13 +281,18 @@ Done:
   editor can see) and R7: configured paths are relative to the config file and
   read a `\` both ways, the SQLite file is read-only and must exist, and
   configured path text follows the case rule of the root's directory.
+- R8: an include is reported only when no run could find its file. Its text is read
+  in a Unix and a Windows world and looked up in PHP's order, against the declared
+  `include_path` and `working_dirs`, Composer's `include-path`, and what the code
+  sets with `set_include_path()`, `ini_set()`, `ini_alter()` and `chdir()`. A
+  candidate outside the project, or below a `vendor` that `composer install` has
+  not built, counts as found.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
-path and the include rule. All but the include rule are built; R8 redesigned is
-next.
+path and the include rule. All four are built.
 
-Open: R8 to R17, the rounds after them, and the batch's checks.
+Open: R9 to R17, the rounds after them, and the batch's checks.
 
 ## Documents with no place in the stack
 
