@@ -50,6 +50,7 @@ crate root syntax types phpdoc stub-sources sql composer config diagnostics refl
 # module <path> <crate>
 module crate root
 module main bin
+module allocator bin
 
 # extern <library> <crate>: crates already extracted from the package.
 extern syntax syntax
@@ -72,6 +73,8 @@ module php_date_parser builtins
 module regex_groups builtins
 module pcre_validate builtins
 module stub_attributes reflection
+module file_id reflection
+module shard reflection
 module registry reflection
 module registry::assertion_table reflection
 module assertion_tables reflection
@@ -93,6 +96,7 @@ module project::banned rules
 module project::class_shape rules
 module project::composer_hygiene rules
 module project::mock_hygiene ext-mockstan
+module gate testing
 module lsp lsp
 module ext root
 module ext::extras ext-extras

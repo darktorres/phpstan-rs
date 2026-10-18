@@ -21,7 +21,7 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use diagnostics::Diagnostic;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -124,7 +124,7 @@ fn requires_missing_feature(expect_file: &Path) -> bool {
     if !gate::declares_required_feature(&config_file) {
         return false;
     }
-    match gate::fixture_config(&config_file) {
+    match gate::fixture_config(&config_file, fixture_schema()) {
         Ok(config) => config
             .requires_feature
             .iter()
@@ -193,11 +193,18 @@ fn enabled(name: &str) -> Result<bool, String> {
 
 /// The fixture's config, each feature it requires a known one.
 fn fixture_config(path: &Path) -> Result<FixtureConfig, Failed> {
-    let config = gate::fixture_config(path)?;
+    let config = gate::fixture_config(path, fixture_schema())?;
     for feature in &config.requires_feature {
         enabled(feature)?;
     }
     Ok(config)
+}
+
+/// The schema every fixture's config is read against, built once: every
+/// section the application's config may set.
+fn fixture_schema() -> &'static config::Schema {
+    static SCHEMA: OnceLock<config::Schema> = OnceLock::new();
+    SCHEMA.get_or_init(phpstan_rs::app::config_schema)
 }
 
 /// Writes `text`, the session's type dump, to `out`: each line's path

@@ -92,7 +92,7 @@ fn main() {
     #[allow(unsafe_code)]
     if only_thread && cli.command.keeps_freed_memory() {
         // SAFETY: no other thread has started.
-        unsafe { phpstan_rs::keep_freed_memory() }
+        unsafe { phpstan_rs::allocator::keep_freed_memory() }
     }
     match cli.command {
         Command::Check { paths } => check::run_check(&paths),

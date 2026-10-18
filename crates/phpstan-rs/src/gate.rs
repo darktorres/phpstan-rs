@@ -136,9 +136,10 @@ impl FixtureConfig {
     }
 }
 
-/// The fixture config at `path`, empty when there's none. An old key a
-/// schema moves is an error: a fixture is written in the current layout.
-pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
+/// The fixture config at `path`, read against `schema`, empty when there's
+/// none. An old key a schema moves is an error: a fixture is written in the
+/// current layout.
+pub fn fixture_config(path: &Path, schema: &config::Schema) -> Result<FixtureConfig, String> {
     if !path.is_file() {
         return Ok(FixtureConfig {
             config: config::ConfigFile::empty(),
@@ -147,7 +148,6 @@ pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
             runtime_packages: Vec::new(),
         });
     }
-    let schema = fixture_schema();
     let mut config = config::ConfigFile::load(path, schema)?;
     let strings = |value: Option<toml::Value>, key: &str| -> Result<Vec<String>, String> {
         let Some(value) = value else {
@@ -184,12 +184,6 @@ pub fn fixture_config(path: &Path) -> Result<FixtureConfig, String> {
         runtime_warnings_exact,
         runtime_packages,
     })
-}
-
-/// The config schema every fixture is read against, built once.
-fn fixture_schema() -> &'static config::Schema {
-    static SCHEMA: std::sync::OnceLock<config::Schema> = std::sync::OnceLock::new();
-    SCHEMA.get_or_init(crate::app::config_schema)
 }
 
 /// Whether the config at `path` sets `requires_feature`: a plain parse of
@@ -233,14 +227,15 @@ pub fn type_drift_in_project(project: &crate::Project, old: &str, new: &str) -> 
 
 /// The drift between two fixture dumps (`types-fixtures`), whose lines
 /// start `<fixture>: `: each fixture's bindings related within that
-/// fixture's own project, loaded from `root` with its `X.toml`. A fixture
-/// in one dump only was renamed or deleted; its bindings are added or
-/// removed, unrelated.
+/// fixture's own project, loaded from `root` with its `X.toml`, read
+/// against `schema`. A fixture in one dump only was renamed or deleted; its
+/// bindings are added or removed, unrelated.
 pub fn type_drift_of_fixtures(
     root: &Path,
     old: &str,
     new: &str,
     stubs: Stubs,
+    schema: &config::Schema,
 ) -> Result<Drift, String> {
     let by_fixture = |text: &str| {
         let mut split: std::collections::BTreeMap<String, String> = Default::default();
@@ -264,7 +259,7 @@ pub fn type_drift_of_fixtures(
             continue;
         }
         let stem = root.join(&fixture);
-        let config = fixture_config(&stem.with_extension("toml"))?;
+        let config = fixture_config(&stem.with_extension("toml"), schema)?;
         let (session, base) = load_fixture(&stem, &config, stubs.clone())?;
         let loaded = session.load()?;
         let registry = loaded.project.registry();

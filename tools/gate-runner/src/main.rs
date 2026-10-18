@@ -156,7 +156,7 @@ fn drift(args: &Args, old: &Path, new: &Path) -> Result<(), String> {
     };
     let (old, new) = (read(old)?, read(new)?);
     let drift = if let Some(root) = &args.fixture_root {
-        gate::type_drift_of_fixtures(root, &old, &new, stubs())?
+        gate::type_drift_of_fixtures(root, &old, &new, stubs(), &phpstan_rs::app::config_schema())?
     } else if args.request.config_file.is_some() || !args.request.paths.is_empty() {
         let stubs = stubs();
         let config = check_project::load_config(&args.request)?;

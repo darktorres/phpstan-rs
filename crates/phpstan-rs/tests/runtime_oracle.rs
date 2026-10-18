@@ -127,8 +127,15 @@ enum Runner {
     Docker(String),
 }
 
+/// The schema every fixture's config is read against, built once: every
+/// section the application's config may set.
+fn fixture_schema() -> &'static config::Schema {
+    static SCHEMA: OnceLock<config::Schema> = OnceLock::new();
+    SCHEMA.get_or_init(phpstan_rs::app::config_schema)
+}
+
 fn run(name: &str, stem: &Path, stubs: Stubs, local: &str) -> Result<Outcome, Failed> {
-    let config = gate::fixture_config(&stem.with_extension("toml"))?;
+    let config = gate::fixture_config(&stem.with_extension("toml"), fixture_schema())?;
     if config
         .requires_feature
         .iter()
