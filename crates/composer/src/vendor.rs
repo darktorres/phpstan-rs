@@ -276,8 +276,9 @@ fn discover_inner(
     let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, listings, outside);
     let mut entries = Entries::default();
     for generated in &generated {
-        resolver.collect(&generated.files, &mut entries.files);
-        resolver.collect(&generated.dirs, &mut entries.dirs);
+        let dirs = generated.heads.dirs(composer_dir, vendor_dir, base_dir);
+        resolver.collect(&generated.files, &dirs, &mut entries.files);
+        resolver.collect(&generated.dirs, &dirs, &mut entries.dirs);
     }
     // Composer's own bootstrap loader class - unlike every other file
     // this function discovers, it's never listed in any of the generated
@@ -353,13 +354,18 @@ pub struct GeneratedEntries {
     psr4: Keyed,
     /// The PSR-0 entries, each class name prefix with its directories.
     psr0: Keyed,
+    /// The directories the file's own `$vendorDir` and `$baseDir` name.
+    heads: Heads,
 }
 
 impl GeneratedEntries {
     /// What `stmts`, a generated file's, list when read as `reading` says;
     /// `None` when they are not of the shape it expects.
     fn read(stmts: &[Stmt], reading: Reading) -> Option<GeneratedEntries> {
-        let mut entries = GeneratedEntries::default();
+        let mut entries = GeneratedEntries {
+            heads: Heads::read(stmts),
+            ..GeneratedEntries::default()
+        };
         match reading {
             Reading::StaticClass => {
                 let class = find_class_decl(stmts)?;
@@ -412,37 +418,174 @@ impl GeneratedEntries {
         Some(entries)
     }
 
-    /// Each class of the classmap with the file it maps to, spelled from the
-    /// given directories.
+    /// Each class of the classmap with the file it maps to. `vendor_dir` and
+    /// `base_dir` are what the file's own heads replace when it has them.
     pub fn classes(
         &self,
         generated_dir: &Path,
         vendor_dir: &Path,
         base_dir: &Path,
     ) -> Vec<(String, Vec<PathBuf>)> {
-        self.classes.paths(generated_dir, vendor_dir, base_dir)
+        let dirs = self.heads.dirs(generated_dir, vendor_dir, base_dir);
+        self.classes.paths(generated_dir, &dirs)
     }
 
-    /// Each PSR-4 namespace prefix with its directories, spelled from the
-    /// given directories.
+    /// Each PSR-4 namespace prefix with its directories, as `classes` gives
+    /// them.
     pub fn psr4(
         &self,
         generated_dir: &Path,
         vendor_dir: &Path,
         base_dir: &Path,
     ) -> Vec<(String, Vec<PathBuf>)> {
-        self.psr4.paths(generated_dir, vendor_dir, base_dir)
+        let dirs = self.heads.dirs(generated_dir, vendor_dir, base_dir);
+        self.psr4.paths(generated_dir, &dirs)
     }
 
-    /// Each PSR-0 class name prefix with its directories, spelled from the
-    /// given directories.
+    /// Each PSR-0 class name prefix with its directories, as `classes` gives
+    /// them.
     pub fn psr0(
         &self,
         generated_dir: &Path,
         vendor_dir: &Path,
         base_dir: &Path,
     ) -> Vec<(String, Vec<PathBuf>)> {
-        self.psr0.paths(generated_dir, vendor_dir, base_dir)
+        let dirs = self.heads.dirs(generated_dir, vendor_dir, base_dir);
+        self.psr0.paths(generated_dir, &dirs)
+    }
+}
+
+/// The directories a generated file names in its first statements, as
+/// `$vendorDir` and `$baseDir`. Composer writes them in the separate files
+/// (`autoload_classmap.php` and the like), and the static file, which
+/// spells its paths from `__DIR__`, writes neither.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct Heads {
+    vendor: Option<Head>,
+    base: Option<Head>,
+}
+
+impl Heads {
+    /// The heads of the assignments at the top of `stmts`, before its `return`.
+    fn read(stmts: &[Stmt]) -> Heads {
+        let mut heads = Heads::default();
+        for stmt in stmts {
+            let expr = match &stmt.kind {
+                StmtKind::Expression(expr) => expr,
+                StmtKind::Return(_) => break,
+                _ => continue,
+            };
+            let ExprKind::Assign(lhs, rhs) = &expr.kind else {
+                continue;
+            };
+            let ExprKind::Variable(name) = &lhs.kind else {
+                continue;
+            };
+            if **name == *"vendorDir" {
+                heads.vendor = Head::of(rhs);
+            } else if **name == *"baseDir" {
+                heads.base = Head::of(rhs);
+            }
+        }
+        heads
+    }
+
+    /// The vendor and base directories of the file: each head resolved, the
+    /// base against the vendor the file names, and each kept at the given
+    /// directory where the file has no head for it.
+    fn dirs(&self, generated_dir: &Path, vendor_dir: &Path, base_dir: &Path) -> Dirs {
+        let vendor = self
+            .vendor
+            .as_ref()
+            .and_then(|head| head.resolve(generated_dir, vendor_dir))
+            .unwrap_or_else(|| vendor_dir.to_path_buf());
+        let base = self
+            .base
+            .as_ref()
+            .and_then(|head| head.resolve(generated_dir, &vendor))
+            .unwrap_or_else(|| base_dir.to_path_buf());
+        Dirs { vendor, base }
+    }
+}
+
+/// The vendor and base directories a generated file resolves its paths
+/// against.
+struct Dirs {
+    vendor: PathBuf,
+    base: PathBuf,
+}
+
+/// The expression a generated file gives for `$vendorDir` or `$baseDir`, as
+/// Composer's `Filesystem::findShortestPathCode` spells it: `__DIR__`, a
+/// `dirname()` of another head, a string appended to one, or an absolute
+/// literal when the directories share only the root.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum Head {
+    /// `__DIR__`: the generated file's own directory.
+    GeneratedDir,
+    /// `$vendorDir`: the vendor directory the file names.
+    VendorDir,
+    /// `dirname(...)` of a head.
+    Parent(Box<Head>),
+    /// A head with a string appended to it.
+    Joined(Box<Head>, Bytes),
+    /// A string literal, taken as the path it spells.
+    Absolute(Bytes),
+}
+
+impl Head {
+    /// The head `expr` spells, or `None` when it spells none of these.
+    fn of(expr: &Expr) -> Option<Head> {
+        syntax::stack::guard(|| {
+            let expr = expr.peeled();
+            Some(match &expr.kind {
+                ExprKind::Literal(Literal::String(text)) => {
+                    Head::Absolute(Bytes(text.as_bytes().to_vec()))
+                }
+                ExprKind::Name(name) if name == "__DIR__" => Head::GeneratedDir,
+                ExprKind::Variable(name) if **name == *"vendorDir" => Head::VendorDir,
+                ExprKind::Call(callee, args) => {
+                    let [arg] = args.as_slice() else {
+                        return None;
+                    };
+                    let names_dirname = matches!(
+                        &callee.peeled().kind,
+                        ExprKind::Name(name) if name == "dirname"
+                    );
+                    if !names_dirname || arg.name.is_some() || arg.spread {
+                        return None;
+                    }
+                    Head::Parent(Box::new(Head::of(&arg.value)?))
+                }
+                ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
+                    let ExprKind::Literal(Literal::String(tail)) = &rhs.peeled().kind else {
+                        return None;
+                    };
+                    Head::Joined(Box::new(Head::of(lhs)?), Bytes(tail.as_bytes().to_vec()))
+                }
+                _ => return None,
+            })
+        })
+    }
+
+    /// The path this head names, with `generated_dir` for `__DIR__` and
+    /// `vendor_dir` for `$vendorDir`.
+    fn resolve(&self, generated_dir: &Path, vendor_dir: &Path) -> Option<PathBuf> {
+        match self {
+            Head::GeneratedDir => Some(generated_dir.to_path_buf()),
+            Head::VendorDir => Some(vendor_dir.to_path_buf()),
+            Head::Parent(head) => {
+                let dir = head.resolve(generated_dir, vendor_dir)?;
+                path_bytes::parent(&dir).map(Path::to_path_buf)
+            }
+            Head::Joined(head, tail) => {
+                let dir = head.resolve(generated_dir, vendor_dir)?;
+                let mut bytes = dir.as_os_str().as_encoded_bytes().to_vec();
+                bytes.extend_from_slice(&tail.0);
+                path_of(&bytes).map(Path::to_path_buf)
+            }
+            Head::Absolute(text) => path_of(&text.0).map(Path::to_path_buf),
+        }
     }
 }
 
@@ -474,17 +617,12 @@ impl Keyed {
     }
 
     /// Each key with the paths it names, spelled from the directories given.
-    fn paths(
-        &self,
-        generated_dir: &Path,
-        vendor_dir: &Path,
-        base_dir: &Path,
-    ) -> Vec<(String, Vec<PathBuf>)> {
+    fn paths(&self, generated_dir: &Path, dirs: &Dirs) -> Vec<(String, Vec<PathBuf>)> {
         self.0
             .iter()
             .map(|(key, spelled)| {
                 let mut paths = Vec::new();
-                spelled.each(generated_dir, vendor_dir, base_dir, |raw| {
+                spelled.each(generated_dir, &dirs.vendor, &dirs.base, |raw| {
                     paths.extend(path_of(raw).map(Path::to_path_buf));
                 });
                 (key.clone(), paths)
@@ -817,11 +955,11 @@ impl<'p> Resolver<'p> {
     }
 
     /// Each of `paths` that `locate` finds, or that lies in a package Composer
-    /// installed outside the vendor directory, onto `out`.
-    fn collect(&mut self, paths: &Spelled, out: &mut Vec<Located>) {
-        let (generated_dir, vendor_dir, base_dir) =
-            (self.generated_dir, self.vendor_dir, self.base_dir);
-        paths.each(generated_dir, vendor_dir, base_dir, |raw| {
+    /// installed outside the vendor directory, onto `out`. `dirs` are the
+    /// directories of the generated file the paths come from.
+    fn collect(&mut self, paths: &Spelled, dirs: &Dirs, out: &mut Vec<Located>) {
+        let generated_dir = self.generated_dir;
+        paths.each(generated_dir, &dirs.vendor, &dirs.base, |raw| {
             if let Some(found) = path_of(raw)
                 .and_then(|path| self.locate(path).or_else(|| self.installed_elsewhere(path)))
             {
