@@ -6,7 +6,7 @@ A task is listed where it is built; the state is the ledger's, as of `a3931d49d`
 
 | task | state | built by |
 |---|---|---|
-| LOAD-2.2 | PART | A1: the name floor's replacement, `097c164b`, `40d889bb`, `df9640fe`, `c14aa865`, `fc1c65eca`, `00081301`, `2e1728bb`; the name list's deletion waits for LOAD-7.8 (`exclude_paths`, OPEN) |
+| LOAD-2.2 | DONE `4f3d5c29` | A1: the name floor's replacement, `097c164b`, `40d889bb`, `df9640fe`, `c14aa865`, `fc1c65eca`, `00081301`, `2e1728bb`; the name list's deletion and its `exclude_paths` floor are `4f3d5c29` |
 | COMP-1 | DONE | A1: `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` |
 | COMP-7 | DONE | A1: `acf48fb8`, `16418a2c`, `c14aa865` |
 | LOAD-9 | DONE | A2: `3dcb1192` |
@@ -22,7 +22,7 @@ A6 is the validation, not a task.
 
 | # | row | item | what | where |
 |---|---|---|---|---|
-| 1 | LOAD-2.2, last part | 2 | the name floor is replaced: a Composer vendor directory is recognised by what Composer wrote in it, and so is third-party code that Composer installed outside it, whose classes become context in every mode (COMP-7); `.git` and `node_modules` stay by name; the project's vendor directory is resolved as Composer does, for discovery, `read_installed` and the include lookup | `project/session.rs`, `project.rs`, `project/walk.rs`, `crates/composer` |
+| 1 | LOAD-2.2, last part | 2 | the name floor is replaced: a Composer vendor directory is recognised by what Composer wrote in it, and so is third-party code that Composer installed outside it, whose classes become context in every mode (COMP-7); `.git` and `node_modules` are the editor's floor, the same matcher as `exclude_paths` (LOAD-7.8); the project's vendor directory is resolved as Composer does, for discovery, `read_installed` and the include lookup | `project/session.rs`, `project.rs`, `project/walk.rs`, `crates/composer` |
 | 2 | LOAD-9 | none (R14's finding) | installed packages resolved once, beside vendor discovery | `crates/composer/src/lib.rs`, `manifest.rs` |
 | 3 | REG-14.4 | 8 | `from_decl` passes the parameters on, not a `Vec<&str>` of names | `registry/function_sig.rs`, `function_sig/asserts.rs` |
 | 4 | SYN-1.1 | 9, step 1 | `Expr::peeled` becomes a loop | `crates/syntax/src/ast.rs:1417` |
