@@ -1,7 +1,7 @@
 # Part K. The task-by-task review
 
 
-This part checks the tasks in the order of "The sequence this gives". For each, it reads the ledger row (or its finding), the plan's design for it and the code it touches, and checks three things: that the design meets the row, that its facts hold in the code at `52844b07`, and that it holds on the platforms the project ships (`CROSS_PLATFORM_PLAN.md`) and against the tasks it meets. A verdict is "sound" (the row, the design and the code agree) or the change the design makes. Nothing was built or run.
+This part checks the tasks in the order of the README's "The sequence". For each, it reads the ledger row (or its finding), the plan's design for it and the code it touches, and checks three things: that the design meets the row, that its facts hold in the code at `52844b07`, and that it holds on the platforms the project ships (`CROSS_PLATFORM_PLAN.md`) and against the tasks it meets. A verdict is "sound" (the row, the design and the code agree) or the change the design makes. Nothing was built or run.
 
 ## Tasks this part owns
 

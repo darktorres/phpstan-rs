@@ -75,7 +75,7 @@ report's estimates for the off run (the ledger's "now" is 20.37 G at `8a1ca1e0`;
 `cl-20g`, file cache off with a warm stub cache); PROD-1 to PROD-3 and DOC-1 overtook parts of
 items 13 and 14, so none is a claim. Validation is at the end of each item.
 
-## C1. The path, in order (the order of Part E's "The sequence this gives")
+## C1. The path, in order (the order of the README's "The sequence")
 
 1. The cross-platform fixes (finished at `a83b1675`); then Part A's rows
    (A1 to A3, A5, A5a, A7 and A8).
