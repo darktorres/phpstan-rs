@@ -28,7 +28,7 @@
 //! and merged into this same index by `Project::ensure_member_index_built`/
 //! `Project::reindex_tier2_for_file`.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use syntax::ast::*;
 use syntax::span::Span;
@@ -422,6 +422,10 @@ fn push_path_parts(expr: &Expr, parts: &mut Vec<PathPart>) {
 /// word, which no class is named by. A word with a namespace is kept whole,
 /// since a namespace segment may be a reserved word.
 pub(crate) fn doc_names(source: &str) -> Vec<String> {
+    // A file without a doc comment has none to read.
+    if !source.contains("/**") {
+        return Vec::new();
+    }
     let mut namespace = String::new();
     let mut uses: FxHashMap<String, String> = FxHashMap::default();
     for line in source.lines() {
@@ -443,8 +447,7 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
             );
         }
     }
-    // Each name is kept once: a word repeats across a file's doc comments.
-    let mut names: FxHashSet<String> = FxHashSet::default();
+    let mut names: Vec<String> = Vec::new();
     let mut lower = String::new();
     let mut joined = String::new();
     let mut rest = source;
@@ -486,7 +489,10 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
         }
         rest = &after[end.min(after.len())..];
     }
-    names.into_iter().collect()
+    // A word repeats across a file's doc comments, and a name is kept once.
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// The words of a doc comment's text, each with whether an `@` comes just
@@ -597,11 +603,8 @@ const RESERVED: [&str; 83] = [
     "yield",
 ];
 
-/// Adds `name` to `names`, allocating only when it is new.
-fn add_name(names: &mut FxHashSet<String>, name: &str) {
-    if !names.contains(name) {
-        names.insert(name.to_string());
-    }
+fn add_name(names: &mut Vec<String>, name: &str) {
+    names.push(name.to_string());
 }
 
 #[cfg(test)]

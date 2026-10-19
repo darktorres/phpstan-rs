@@ -41,7 +41,9 @@ use crate::{ext, ignore_errors};
 
 use super::configured_path;
 use super::file_cache;
-use super::lazy_context::{Constants, INCLUDE_MARK, LazyRefs, include_name, path_ends_with};
+use super::lazy_context::{
+    Constants, INCLUDE_ANY, INCLUDE_MARK, LazyRefs, include_name, path_ends_with,
+};
 use super::path_spelling;
 use super::source::FileSource;
 use super::walk::{Excluded, FileIndex, FinalFiles, Listed, Role, Root, Unstreamed, Walk, Walked};
@@ -1596,22 +1598,51 @@ impl Session {
             reached: Mutex::default(),
             read: Mutex::default(),
         };
-        // Each round follows the names the loaded files give, with the includes
-        // read against the constants they define. A round that reads a file
-        // gives the next one more names and constants; a round that reads none
-        // ends the load.
-        let mut seeds: Vec<String> = slots.iter().flatten().flat_map(class_names_read).collect();
-        loop {
-            seeds.extend(include_seeds(slots));
-            self.pool
-                .scope(|scope| reach.follow(scope, std::mem::take(&mut seeds)));
-            let read = std::mem::take(reach.read.get_mut().unwrap_or_else(PoisonError::into_inner));
-            if read.is_empty() {
-                break;
-            }
+        // An include whose path no literal ends may read any file, so every
+        // lazy file is read, and the reach has nothing to follow.
+        let unbounded = include_seeds(slots).iter().any(|name| name == INCLUDE_ANY);
+        if unbounded {
+            let read: Vec<(usize, Read)> = self.pool.install(|| {
+                reach
+                    .pending
+                    .par_iter()
+                    .map(|&at| {
+                        let read = workers.with(|worker| {
+                            self.read_indexed(
+                                project,
+                                combined_files[at],
+                                worker,
+                                true,
+                                index_use_sites,
+                            )
+                        });
+                        (at, read)
+                    })
+                    .collect()
+            });
             for (at, read) in read {
-                seeds.extend(class_names_read(&read));
                 slots[at] = Some(read);
+            }
+        } else {
+            // Otherwise each round follows the names the loaded files give, with
+            // the includes read against the constants they define. A round that
+            // reads a file gives the next one more names and constants; a round
+            // that reads none ends the load.
+            let mut seeds: Vec<String> =
+                slots.iter().flatten().flat_map(class_names_read).collect();
+            loop {
+                seeds.extend(include_seeds(slots));
+                self.pool
+                    .scope(|scope| reach.follow(scope, std::mem::take(&mut seeds)));
+                let read =
+                    std::mem::take(reach.read.get_mut().unwrap_or_else(PoisonError::into_inner));
+                if read.is_empty() {
+                    break;
+                }
+                for (at, read) in read {
+                    seeds.extend(class_names_read(&read));
+                    slots[at] = Some(read);
+                }
             }
         }
         for slot in slots.iter_mut() {

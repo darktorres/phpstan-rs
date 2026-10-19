@@ -130,6 +130,10 @@ impl LazyContext {
 /// `include_name`.
 pub(crate) const INCLUDE_MARK: char = '\u{1}';
 
+/// The lazy name of an include whose path no literal ends: it may read any
+/// file. It is the mark alone, which `include_name` gives for such a path.
+pub(crate) const INCLUDE_ANY: &str = "\u{1}";
+
 /// One part of an include's path, or of a constant's value, as the parse reads
 /// it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
