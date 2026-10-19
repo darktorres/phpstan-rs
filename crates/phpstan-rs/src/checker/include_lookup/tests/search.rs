@@ -389,6 +389,9 @@ fn a_backslash_separates_names_in_the_windows_world_and_is_part_of_a_name_in_the
     let project = Site::new().declaring(".").with_file("lib/a.php");
     for text in [".\\lib\\a.php", "lib\\a.php"] {
         assert!(project.found(World::Windows, text), "{text}");
+        // On Windows the host's own paths read a backslash as a separator, so
+        // the unix world's answer can only be checked on unix.
+        #[cfg(unix)]
         assert!(!project.found(World::Unix, text), "{text}");
     }
 }
@@ -463,15 +466,29 @@ mod on_windows {
     }
 
     #[test]
-    fn a_unix_path_names_a_machine_this_one_is_not() {
-        let project = Site::new();
-        assert!(project.found(World::Unix, "/proj/lib/a.php"));
+    fn a_rooted_unix_path_is_on_the_projects_drive() {
+        let present = Site::new().with_file("lib\\a.php");
+        assert!(present.found(World::Unix, "/proj/lib/a.php"));
+        let missing = Site::new();
+        assert!(!missing.found(World::Unix, "/proj/lib/a.php"));
+        assert!(missing.found(World::Unix, "/other/a.php"));
     }
 
     #[test]
     fn a_rooted_path_is_the_root_of_the_projects_drive() {
         let project = Site::new();
         assert!(project.found(World::Windows, "\\other\\a.php"));
+    }
+
+    #[test]
+    fn the_projects_own_places_are_judged_in_the_unix_world_too() {
+        let project = Site::new().with_file("lib\\a.php");
+        let place = |relative| {
+            let text = project.text(relative);
+            spell(World::Unix, World::Windows, project.root.to_str(), &text).unwrap()
+        };
+        assert!(project.found(World::Unix, &place("lib\\a.php")));
+        assert!(!project.found(World::Unix, &place("lib\\b.php")));
     }
 
     #[test]
@@ -488,6 +505,10 @@ mod on_windows {
             native(World::Windows, Anchor::Drive('D')),
             Some(PathBuf::from("D:\\a\\b"))
         );
-        assert_eq!(native(World::Unix, Anchor::Root), None);
+        assert_eq!(
+            native(World::Unix, Anchor::Root),
+            Some(PathBuf::from("C:\\a\\b"))
+        );
+        assert_eq!(native(World::Unix, Anchor::Drive('D')), None);
     }
 }

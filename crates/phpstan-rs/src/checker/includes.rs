@@ -2,6 +2,7 @@
 //! path resolves to known strings, none of which name an existing file.
 //! The strings come from `include_values`, once for each world a path is
 //! read in, and are looked up where a run can find them (`include_lookup`).
+//! A report names the string as the analysing machine's own world reads it.
 //! A path the file also tests with `file_exists()`/`is_file()`/
 //! `is_readable()` is left alone.
 
@@ -61,10 +62,10 @@ impl<'a> Checker<'a> {
             {
                 continue;
             }
+            // The value is named as the machine's own world reads it.
+            let shown = values[World::machine().index()].1;
             self.report(
-                format!(
-                    "Path in {construct}() \"{unix_text}\" is not a file or it does not exist."
-                ),
+                format!("Path in {construct}() \"{shown}\" is not a file or it does not exist."),
                 span,
                 0,
                 format!("{identifier_prefix}.fileNotFound"),

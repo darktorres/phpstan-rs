@@ -9,7 +9,7 @@
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
-use crate::checker::include_lookup::{GET_INCLUDE_PATH, LookupChanges, World, WorldValues};
+use crate::checker::include_lookup::{self, GET_INCLUDE_PATH, LookupChanges, World, WorldValues};
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
@@ -126,6 +126,17 @@ impl<'a> Checker<'a> {
             .and_then(|f| f.parent().map(Path::to_path_buf))
     }
 
+    /// `path`, a place of the project, as `world` spells it.
+    fn place_text(&self, path: &Path, world: World) -> Option<String> {
+        let root = self.root.as_deref().map(Path::to_string_lossy);
+        include_lookup::spell(
+            world,
+            World::machine(),
+            root.as_deref(),
+            &path.to_string_lossy(),
+        )
+    }
+
     /// Every string `e` can evaluate to in `world`, when all of them are
     /// known.
     pub(crate) fn resolve_include_paths(
@@ -189,11 +200,11 @@ impl<'a> Checker<'a> {
                 {
                     Some(vec![GET_INCLUDE_PATH.to_string()])
                 }
-                ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => Some(vec![
-                    self.current_dir_of_file()?.to_string_lossy().into_owned(),
-                ]),
+                ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => {
+                    Some(vec![self.place_text(&self.current_dir_of_file()?, world)?])
+                }
                 ExprKind::Name(n) if n.eq_ignore_ascii_case("__FILE__") => Some(vec![
-                    self.current_file_absolute()?.to_string_lossy().into_owned(),
+                    self.place_text(&self.current_file_absolute()?, world)?,
                 ]),
                 ExprKind::Binary(BinOp::Concat, l, r) => {
                     let lefts = self.resolve_paths_at(l, locals, depth, world)?;

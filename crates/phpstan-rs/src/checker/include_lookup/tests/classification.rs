@@ -177,3 +177,80 @@ fn the_separators_are_the_worlds() {
     assert_eq!(World::Windows.directory_separator(), '\\');
     assert_eq!(World::ALL[World::Windows.index()], World::Windows);
 }
+
+#[test]
+fn a_unix_machines_places_are_rooted_paths_in_either_world() {
+    for world in World::ALL {
+        assert_eq!(
+            spell(world, World::Unix, Some("/proj"), "/proj/src/a.php").as_deref(),
+            Some("/proj/src/a.php")
+        );
+    }
+}
+
+#[test]
+fn a_windows_machines_places_keep_their_spelling_in_the_windows_world() {
+    assert_eq!(
+        spell(
+            World::Windows,
+            World::Windows,
+            Some("C:\\proj"),
+            "C:\\proj\\src"
+        )
+        .as_deref(),
+        Some("C:\\proj\\src")
+    );
+}
+
+#[test]
+fn a_windows_machines_places_are_below_the_root_of_the_projects_drive_in_the_unix_world() {
+    let spelled = |root, text| spell(World::Unix, World::Windows, root, text);
+    for (text, expected) in [
+        ("C:\\proj\\src\\a.php", Some("/proj/src/a.php")),
+        ("c:\\proj\\src", Some("/proj/src")),
+        ("C:\\", Some("/")),
+        ("D:\\other\\a.php", None),
+        ("\\\\server\\share\\a.php", None),
+        ("C:a.php", None),
+        ("src\\a.php", None),
+    ] {
+        assert_eq!(
+            spelled(Some("C:\\proj"), text).as_deref(),
+            expected,
+            "{text}"
+        );
+    }
+    // Without a root there is no drive to compare with.
+    assert_eq!(
+        spelled(None, "D:\\other\\a.php").as_deref(),
+        Some("/other/a.php")
+    );
+}
+
+#[test]
+fn a_share_is_the_drive_of_the_places_below_it() {
+    let root = Some("\\\\server\\share\\proj");
+    let spelled = |text| spell(World::Unix, World::Windows, root, text);
+    assert_eq!(
+        spelled("\\\\server\\share\\proj\\a.php").as_deref(),
+        Some("/proj/a.php")
+    );
+    assert_eq!(spelled("\\\\server\\other\\proj\\a.php"), None);
+    assert_eq!(spelled("C:\\proj\\a.php"), None);
+}
+
+#[test]
+fn a_place_spelled_for_the_unix_world_reads_back_as_the_place() {
+    let text = spell(
+        World::Unix,
+        World::Windows,
+        Some("C:\\proj"),
+        "C:\\proj\\src\\a.php",
+    )
+    .unwrap();
+    assert_eq!(
+        classify(World::Unix, &text),
+        Target::Absolute(Anchor::Root, names(&["proj", "src", "a.php"]))
+    );
+    assert_eq!(World::Unix.dirname(&text, 1), "/proj/src");
+}

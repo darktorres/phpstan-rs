@@ -234,3 +234,42 @@ fn a_new_file_in_a_directory_scripts_already_run_from_re_checks_only_itself() {
         ["added.php"]
     );
 }
+
+#[test]
+fn a_report_names_the_path_as_the_machines_world_reads_it() {
+    use crate::checker::include_lookup::World;
+    let dir = TempDir::new("include_env_message");
+    dir.write(
+        "proj/main.php",
+        "<?php\nrequire __DIR__ . DIRECTORY_SEPARATOR . 'gone.php';\nrequire __DIR__ . '/gone.php';\n",
+    );
+    let project = loaded(&dir, "include_path = \".\"\n");
+    let root = resolved(&dir).join("proj");
+    let separator = World::machine().directory_separator();
+    assert_eq!(
+        missing_in(&project, &root.join("main.php")),
+        [
+            format!("{}{separator}gone.php", root.display()),
+            format!("{}/gone.php", root.display()),
+        ]
+    );
+}
+
+#[test]
+fn a_path_built_from_the_files_own_place_is_judged_whatever_the_include_path() {
+    let dir = TempDir::new("include_env_own_place");
+    dir.write(
+        "proj/main.php",
+        "<?php\nrequire __DIR__ . '/present.php';\nrequire __DIR__ . '/gone.php';\nrequire dirname(__FILE__) . '/gone.php';\n",
+    );
+    dir.write("proj/present.php", "<?php\n");
+    let project = loaded(&dir, "");
+    let root = resolved(&dir).join("proj");
+    assert_eq!(
+        missing_in(&project, &root.join("main.php")),
+        [
+            format!("{}/gone.php", root.display()),
+            format!("{}/gone.php", root.display()),
+        ]
+    );
+}

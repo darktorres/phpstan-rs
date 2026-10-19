@@ -235,7 +235,8 @@ fn render(
     for path in paths {
         // Spelled as reports spell a file, so a fixture's expectation reads
         // alike on every platform.
-        let relative = report_path(path.strip_prefix(base).unwrap_or(path));
+        let file = path.strip_prefix(base).unwrap_or(path);
+        let relative = report_path(file);
         for d in &results[path] {
             if !single_file {
                 write!(out, "{relative}:").unwrap();
@@ -250,11 +251,11 @@ fn render(
                 s.end.col,
                 d.identifier,
                 d.level,
-                one_line(&portable(&d.message, base)),
+                one_line(&portable(&d.message, base, file)),
             )
             .unwrap();
             for tip in &d.tips {
-                writeln!(out, "    tip: {}", one_line(&portable(tip, base))).unwrap();
+                writeln!(out, "    tip: {}", one_line(&portable(tip, base, file))).unwrap();
             }
             if let Some(fix) = &d.fix {
                 writeln!(
@@ -281,25 +282,37 @@ fn one_line(text: &str) -> String {
 }
 
 /// Messages that print absolute paths (e.g. an include's resolved path)
-/// name the fixture's directory as `<fixture>` and its ancestors as
-/// `<fixture>/..`, `<fixture>/../..`, so expectations don't depend on
-/// where the repository is checked out. A message spells a path as the
-/// project's canonical form does, and the harness may have spelled the
-/// fixture's directory otherwise (`tests/fixtures` joined with `\` on
-/// Windows, a link in the checkout's path), so both spellings are named.
-fn portable(text: &str, base: &Path) -> String {
+/// name the fixture's directory as `<fixture>`, its ancestors as
+/// `<fixture>/..`, `<fixture>/../..`, and the directories of the checked
+/// `file`, a path relative to the fixture, as `<fixture>/dir`. So
+/// expectations don't depend on where the repository is checked out, or on
+/// the separator the platform joins a directory's name with. A message
+/// spells a path as the project's canonical form does, and the harness may
+/// have spelled the fixture's directory otherwise (`tests/fixtures` joined
+/// with `\` on Windows, a link in the checkout's path), so both spellings
+/// are named.
+fn portable(text: &str, base: &Path, file: &Path) -> String {
     let canonical = composer::canonical::canonicalize(base).ok();
+    let below = file.parent().unwrap_or(Path::new(""));
     let mut out = text.to_string();
     for spelling in canonical.iter().map(PathBuf::as_path).chain([base]) {
-        out = name_fixture_directories(&out, spelling);
+        out = name_fixture_directories(&out, spelling, below);
     }
     out
 }
 
-/// `text` with `base` named `<fixture>` and its ancestors `<fixture>/..`,
-/// `<fixture>/../..`.
-fn name_fixture_directories(text: &str, base: &Path) -> String {
+/// `text` with `base` named `<fixture>`, its ancestors `<fixture>/..`,
+/// `<fixture>/../..`, and each directory of `below`, a path relative to
+/// `base`, `<fixture>/dir`.
+fn name_fixture_directories(text: &str, base: &Path, below: &Path) -> String {
     let mut out = text.to_string();
+    // Deepest first: a directory's text is part of the text of those below it.
+    let mut dir = Some(below);
+    while let Some(relative) = dir.filter(|dir| !dir.as_os_str().is_empty()) {
+        let spelled = base.join(relative).display().to_string();
+        out = out.replace(&spelled, &format!("<fixture>/{}", report_path(relative)));
+        dir = relative.parent();
+    }
     let mut placeholder = String::from("<fixture>");
     let mut dir = Some(base);
     while let Some(d) = dir {

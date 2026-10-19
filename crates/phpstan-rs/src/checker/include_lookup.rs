@@ -12,7 +12,10 @@
 //! The text of an include is read in two worlds, Unix's and Windows', and a
 //! value found in either is found. A world fixes what separates names, what
 //! makes a path absolute and which names are relative to the working
-//! directory. PHP looks a name up in this order:
+//! directory. The project's own paths are the analysing machine's, and each
+//! world spells the same place its own way (`spell`); a rooted path of either
+//! world is the root of the machine, or of the project's drive on Windows.
+//! PHP looks a name up in this order:
 //!
 //! - an absolute name is that file;
 //! - a name that starts with `./` or `../` is looked up in the working
@@ -254,7 +257,7 @@ fn entry_target(world: World, entry: &str) -> Target {
 
 /// The path on the analysing machine that `anchor` and `names` of `world`
 /// name, if the machine has one. `root` is the project's, which gives the
-/// current drive on Windows.
+/// current drive on Windows, where a rooted path of either world is on it.
 fn native_absolute(
     world: World,
     machine: World,
@@ -264,7 +267,7 @@ fn native_absolute(
 ) -> Option<PathBuf> {
     let mut path = match (machine, world, anchor) {
         (World::Unix, _, Anchor::Root) => PathBuf::from("/"),
-        (World::Windows, World::Windows, Anchor::Root) => match root?.components().next() {
+        (World::Windows, _, Anchor::Root) => match root?.components().next() {
             Some(Component::Prefix(prefix)) => {
                 PathBuf::from(format!("{}\\", prefix.as_os_str().to_string_lossy()))
             }
@@ -280,6 +283,39 @@ fn native_absolute(
     };
     path.extend(&names.0);
     Some(path)
+}
+
+/// The text of a place of the project in `world`: `__DIR__` and `__FILE__`
+/// are read in both worlds, and each spells the place its own way. `machine`
+/// is the world of the analysing machine; `root`, the project's root, and
+/// `text`, the place, are spelled as the machine spells them.
+///
+/// A Unix machine's path is a rooted path in either world. A Windows
+/// machine's is a drive and names, which the Unix world has no drive for: it
+/// takes the names below the root of the project's drive, as the Windows
+/// world takes a rooted path to be on that drive (`native_absolute`). A place
+/// on another drive has no spelling in it.
+pub(crate) fn spell(
+    world: World,
+    machine: World,
+    root: Option<&str>,
+    text: &str,
+) -> Option<String> {
+    if world == machine || machine == World::Unix {
+        return Some(text.to_string());
+    }
+    let Target::Absolute(anchor @ (Anchor::Drive(_) | Anchor::Share(_)), names) =
+        classify(machine, text)
+    else {
+        return None;
+    };
+    if let Some(root) = root {
+        match classify(machine, root) {
+            Target::Absolute(root_anchor, _) if root_anchor == anchor => {}
+            _ => return None,
+        }
+    }
+    Some(format!("/{}", names.0.join("/")))
 }
 
 /// `names` below `base`, as the file system takes them.
