@@ -32,7 +32,7 @@ pub fn parse_written_type(raw: &str) -> Type {
 }
 
 pub(crate) fn parse_written_type_unmemoized(raw: &str) -> Type {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let mut s = raw.trim();
         let nullable = s.starts_with('?');
         if nullable {
@@ -868,7 +868,7 @@ pub(crate) fn parse_type_atom_by_form(s: &str) -> Type {
 /// resolution resolved them.
 pub fn native_type(hint: &syntax::ast::TypeHint) -> Type {
     use syntax::ast::TypeHintKind;
-    syntax::stack::guard(|| match &hint.kind {
+    stack::guard(|| match &hint.kind {
         TypeHintKind::Keyword(kind, _) => keyword_type(*kind),
         TypeHintKind::Name(name) => Type::object(
             name.resolved_class().unwrap_or(&name.written).into(),

@@ -147,7 +147,7 @@ impl Relation<'_> {
     /// agree or give `Maybe`, an intersection needs one member's `Yes`,
     /// a template answers for its bound.
     fn answer(&self, ty: &Type, leaf: &mut dyn FnMut(&Type) -> TrinaryLogic) -> TrinaryLogic {
-        syntax::stack::guard(|| match ty.repr() {
+        stack::guard(|| match ty.repr() {
             Repr::Union(members) | Repr::BenevolentUnion(members) => {
                 let answers: Vec<TrinaryLogic> =
                     members.iter().map(|m| self.answer(m, leaf)).collect();

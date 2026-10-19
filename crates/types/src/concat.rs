@@ -18,7 +18,7 @@ impl Type {
     /// (the numeric-string propagation's own `$left->isInteger()`/
     /// `$right`-range checks, which run against the un-stringified operand).
     pub fn concat(&self, r: &Type, hierarchy: &dyn ClassHierarchy) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let as_string = |ty: &Type| ty.to_string_type(hierarchy).unwrap_or(Type::string());
             let l_str = as_string(self);
             let r_str = as_string(r);

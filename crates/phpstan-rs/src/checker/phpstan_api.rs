@@ -858,7 +858,7 @@ impl<'a> Walker<'a> {
 
 impl<'ast> Visitor<'ast> for Walker<'_> {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if let StmtKind::Namespace(ns) = &stmt.kind {
                 self.check_namespace_declaration(ns, stmt.span);
             }
@@ -873,7 +873,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     /// Each name-bearing reference kind is checked directly against
     /// `self.registry`'s `@api`/`@api-do-not-implement` state.
     fn visit_expr(&mut self, e: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &e.kind {
                 ExprKind::NewAnonymousClass(class) => {
                     walk_args(self, &class.args);

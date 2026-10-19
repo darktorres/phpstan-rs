@@ -12,6 +12,7 @@ name = "types"
 rustc-hash.workspace = true
 serde.workspace = true
 syntax.workspace = true
+stack.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

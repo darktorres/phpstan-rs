@@ -357,7 +357,7 @@ pub(crate) fn div_int_range(
     r_min: Option<i64>,
     r_max: Option<i64>,
 ) -> Type {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         // "Avoid division by zero when looking for the min and the max by
         // using the closest int" - the real source's own comment, verbatim.
         // Only these two local values are adjusted; the "invert on negative

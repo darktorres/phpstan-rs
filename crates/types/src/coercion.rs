@@ -20,7 +20,7 @@ impl Type {
     /// float literal truncated. A resource is legal (`(int) $fileHandle`
     /// is its id), an arbitrary object isn't.
     pub fn to_integer(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match self.repr() {
                 Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..) => Some(self.clone()),
                 Repr::True => Some(Type::int_literal(1)),
@@ -50,7 +50,7 @@ impl Type {
     /// value; otherwise as `to_integer`, with PHPStan's one entry narrower
     /// numeric-castable class list (no `CurlHandle`/`CurlMultiHandle`).
     pub fn to_float(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::Float | Repr::FloatLiteral(_) => Some(self.clone()),
             Repr::IntLiteral(n) => Some(Type::float_literal(*n as f64)),
             Repr::True => Some(Type::float_literal(1.0)),
@@ -81,7 +81,7 @@ impl Type {
         hierarchy: &dyn ClassHierarchy,
         non_numeric_throws: bool,
     ) -> Option<Type> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if self.is_array().yes() {
                 return None;
             }
@@ -119,7 +119,7 @@ impl Type {
     /// overload). A class the hierarchy doesn't know is left alone: stub
     /// coverage may simply not include it.
     pub fn to_string_type(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let decimal_int_string = || {
                 Type::new(Repr::Intersection(vec![
                     Type::string(),
@@ -200,7 +200,7 @@ impl Type {
     /// not known to be one may still be, so it is an int or that string
     /// (benevolently); a class name never is. Any other key type is kept.
     pub fn to_array_key(&self) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::FloatLiteral(f) => Type::int_literal(php_float_to_int(*f)),
             Repr::Float => Type::int(),
             Repr::True => Type::int_literal(1),
@@ -288,7 +288,7 @@ impl Type {
     /// a string's byte-wise complement as a string of the same length (so
     /// a non-empty one stays non-empty). Any other operand throws.
     pub fn to_bitwise_not(&self) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::IntRange(min, max) => Type::int_range(max.map(|m| !m), min.map(|m| !m)),
             Repr::IntLiteral(n) => Type::int_literal(!n),
             Repr::Int | Repr::Float => Type::int(),

@@ -52,7 +52,7 @@ fn write_callable_sig(f: &mut fmt::Formatter<'_>, keyword: &str, sig: &CallableS
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match self.repr() {
                 Repr::Mixed(_, None) => write!(f, "mixed"),
                 Repr::Mixed(_, Some(subtracted)) => {

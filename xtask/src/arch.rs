@@ -28,6 +28,7 @@ const LIBRARY_CRATES: &[&str] = &[
     "path-bytes",
     "stub-sources",
     "config",
+    "stack",
 ];
 const PRINT_DENY: &str =
     "#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]";

@@ -627,7 +627,7 @@ impl<'a> Checker<'a> {
 
 /// Every conditional type inside `ty`, outermost first.
 fn collect_conditionals(ty: &Type, out: &mut Vec<Type>) {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if ty.as_conditional().is_some() {
             out.push(ty.clone());
         }

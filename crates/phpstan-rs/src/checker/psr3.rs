@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
 
     fn is_risky_log_expr(&self, e: &Expr, locals: &Locals) -> bool {
         let e = e.peeled();
-        syntax::stack::guard(|| match &e.kind {
+        stack::guard(|| match &e.kind {
             ExprKind::Binary(BinOp::Concat, l, r) => {
                 self.is_risky_log_expr(l, locals) || self.is_risky_log_expr(r, locals)
             }

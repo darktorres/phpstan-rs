@@ -484,7 +484,7 @@ impl<'a> Checker<'a> {
     /// since the interface's declared generics are still a likely-correct
     /// answer in that case.
     pub(crate) fn iterable_element_type(&self, ty: &Type) -> Option<(Type, Type)> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = ty.union_members();
             if members.len() > 1 {
                 let mut keys = Vec::new();

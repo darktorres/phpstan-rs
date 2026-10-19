@@ -469,7 +469,7 @@ fn text_ends_with_suffix(path: &str, suffix: &str) -> bool {
 /// suffix needs to match a real file's path, never the constant's actual
 /// value.
 fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
-    syntax::stack::guard(|| match &expr.peeled().kind {
+    stack::guard(|| match &expr.peeled().kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Name(_) => Some(String::new()),
         ExprKind::Binary(BinOp::Concat, l, r) => {
@@ -707,7 +707,7 @@ fn handle_assignment_target(
 /// itself, `$name[] = ...` - nothing to report there, not a special
 /// case, `key.as_ref()` on `None` already falls through to `None`).
 fn root_variable_and_first_key(expr: &Expr) -> Option<(&Name, String)> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let ExprKind::Index(base, key) = &expr.peeled().kind else {
             return None;
         };
@@ -762,7 +762,7 @@ fn literal_string_key(expr: &Expr) -> Option<String> {
 /// registry: the types of calls, class constants and methods are looked up
 /// when the facts are resolved.
 fn static_value(expr: &Expr) -> StaticValue {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let expr = expr.peeled();
         match &expr.kind {
             ExprKind::New(callee, _args) => StaticValue::Known(match &callee.peeled().kind {

@@ -534,7 +534,7 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
 /// `HYDRATE_OBJECT` computation, rather than duplicating every select-
 /// item-kind match arm a second time for the array-mode case.
 fn to_array_mode(checker: &Checker, ty: Type) -> Type {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if let Some((class, _)) = ty.as_object()
             && entity_info(checker, class).is_some()
         {

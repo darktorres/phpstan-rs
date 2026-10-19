@@ -25,7 +25,7 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         prop: &str,
     ) -> Option<(Name, &'a PropertyReflection)> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = base_ty.union_members();
             if members.len() > 1 {
                 return members
@@ -59,7 +59,7 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         method: &str,
     ) -> Option<(Name, &'a FunctionReflection)> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = base_ty.union_members();
             if members.len() > 1 {
                 return members
@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         method: &str,
     ) -> (Option<&'a FunctionReflection>, Option<String>) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = base_ty.union_members();
             if members.len() > 1 {
                 return members
@@ -156,7 +156,7 @@ impl<'a> Checker<'a> {
     /// `Throwable`, even though the real, unprefixed interface genuinely
     /// does.
     pub(crate) fn thrown_value_not_throwable(&self, ty: &Type) -> Option<String> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = ty.union_members();
             if members.len() > 1 {
                 return members
@@ -196,7 +196,7 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         prop: &str,
     ) -> Option<(String, Vec<Type>, Name, PropertyReflection)> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = base_ty.union_members();
             if members.len() > 1 {
                 return members
@@ -256,7 +256,7 @@ impl<'a> Checker<'a> {
         Name,
         std::borrow::Cow<'a, FunctionReflection>,
     )> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = base_ty.union_members();
             if members.len() > 1 {
                 return members
@@ -392,7 +392,7 @@ impl<'a> Checker<'a> {
 
     /// `property_access_type` once the property may exist.
     fn declared_property_type(&self, base_ty: &Type, prop: &str) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             // An intersection value is every member at once, so the first
             // member whose declaration resolves the property names its type -
             // searched in reverse, since `Relation::narrow_to_instance` puts the
@@ -553,7 +553,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if let Some((class, type_args)) = recv_ty.as_object() {
                 return match self.class_argument_return(class, method, args, locals) {
                     Some(ty) => ty,

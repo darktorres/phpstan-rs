@@ -87,7 +87,7 @@ impl<'ast> Visitor<'ast> for Promotions<'_, '_> {
     }
 
     fn visit_expr(&mut self, e: &'ast Expr) {
-        syntax::stack::guard(|| match &e.kind {
+        stack::guard(|| match &e.kind {
             ExprKind::Closure(closure) => {
                 let syntax::ast::ClosureExpr {
                     params,

@@ -1243,6 +1243,7 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("path_bytes", false),
             ("stub_sources", false),
             ("config", false),
+            ("stack", false),
         ],
     ),
     (
@@ -1258,6 +1259,7 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("path_bytes", false),
             ("stub_sources", false),
             ("config", false),
+            ("stack", false),
         ],
     ),
     (
@@ -1269,6 +1271,7 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("path_bytes", false),
             ("stub_sources", false),
             ("config", false),
+            ("stack", false),
         ],
     ),
     (
@@ -1284,6 +1287,7 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("path_bytes", false),
             ("stub_sources", true),
             ("config", false),
+            ("stack", false),
         ],
     ),
 ];

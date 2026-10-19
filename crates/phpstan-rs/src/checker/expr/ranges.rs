@@ -23,7 +23,7 @@ use types::{self, Type};
 /// matching this project's own "favor false negatives" precedent.
 pub(crate) fn expr_reads_a_property(e: &Expr) -> bool {
     let e = e.peeled();
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..)
         | ExprKind::DynamicPropertyAccess(..)
         | ExprKind::ClassConstFetch(..)

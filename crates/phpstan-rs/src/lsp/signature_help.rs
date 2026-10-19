@@ -165,7 +165,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &expr.kind {
                 ExprKind::Call(callee, args) => {
                     let target = match &callee.kind {

@@ -950,7 +950,7 @@ mod reference {
             if self.anything {
                 return;
             }
-            syntax::stack::guard(|| {
+            stack::guard(|| {
                 match &stmt.kind {
                     StmtKind::Unset(targets) => {
                         for target in targets {
@@ -978,7 +978,7 @@ mod reference {
             if self.anything {
                 return;
             }
-            syntax::stack::guard(|| {
+            stack::guard(|| {
                 let registry = self.registry;
                 match &e.kind {
                     ExprKind::Assign(lhs, _) | ExprKind::CompoundAssign(_, lhs, _) => {

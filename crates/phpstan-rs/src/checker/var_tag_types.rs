@@ -24,7 +24,7 @@ enum ValueShape {
 
 fn value_shape(e: &Expr) -> ValueShape {
     let e = e.peeled();
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::Literal(_) | ExprKind::Interpolated(_) | ExprKind::Name(_) => ValueShape::Literal,
         ExprKind::ArrayLiteral(items) => ValueShape::ArrayLiteral {
             empty: items.is_empty(),
@@ -95,7 +95,7 @@ impl<'a> Checker<'a> {
     /// PHPDoc - or `mixed` when it isn't known. Never narrower than the
     /// real native type, so a check against it can only miss.
     pub(crate) fn native_expr_type(&self, e: &Expr, locals: &Locals) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &e.kind {
                 ExprKind::Literal(_) => self.infer_expr(e, locals),
                 ExprKind::Interpolated(_) => Type::string(),
@@ -563,7 +563,7 @@ impl<'a> Checker<'a> {
         candidates: usize,
         out: &mut Vec<(Type, Described)>,
     ) {
-        syntax::stack::guard(|| match &target.kind {
+        stack::guard(|| match &target.kind {
             ExprKind::Variable(name) => {
                 if let Some(tag) = tag_for(name, candidates) {
                     out.push((tag.clone(), described));
@@ -699,7 +699,7 @@ impl<'a> Checker<'a> {
 
     /// `isValidSuperType` (the default, non-strict widening check).
     fn is_valid_var_tag_super_type(&self, ty: &Type, tag: &Type, depth: usize) -> bool {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if ty.is_mixed() {
                 return true;
             }

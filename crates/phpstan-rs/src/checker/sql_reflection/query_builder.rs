@@ -266,7 +266,7 @@ fn combine_predicate_parts(parts: &[(bool, String)]) -> Option<String> {
 
 fn looks_like_dbal_query_builder_chain(e: &Expr) -> bool {
     let e = e.peeled();
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
         ExprKind::MethodCall(inner, _, _, _) => looks_like_dbal_query_builder_chain(inner),
         _ => false,
@@ -622,7 +622,7 @@ impl<'a> Checker<'a> {
 }
 
 fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<String> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if let Some(s) = literal_string_value(expr) {
             return Some(s.into_owned());
         }

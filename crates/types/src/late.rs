@@ -21,7 +21,7 @@ impl Type {
     /// reference answered by `consts`, and each late type over them
     /// settled.
     pub fn resolve_class_references(&self, consts: &dyn ClassConstants) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             // An enum's case values need `consts`; any other target settles
             // like `key-of` does, a template staying until a call binds it.
             Repr::ValueOf(target) => {
@@ -42,7 +42,7 @@ impl Type {
     /// This type with each class constant reference replaced by `f`'s
     /// answer for its class and name pattern, kept where `f` gives none.
     pub fn map_class_constants(&self, f: &mut dyn FnMut(&Type, &str) -> Option<Type>) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::ClassConstant { class, pattern } => {
                 f(class, pattern).unwrap_or_else(|| self.clone())
             }
@@ -92,7 +92,7 @@ pub(crate) fn value_of(ty: &Type) -> Option<Type> {
 /// type `base` holds at `key`. A shape without the key, or a non-array
 /// `base`, gives `Mixed`; `None` when `base` isn't known yet.
 pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
-    syntax::stack::guard(|| match base.repr() {
+    stack::guard(|| match base.repr() {
         // A key the shape doesn't list is its unsealed tail's.
         Repr::ArrayShape(shape) | Repr::ObjectShape(shape) => Some(
             ShapeKey::from_type(key)
@@ -164,7 +164,7 @@ impl Type {
 
 /// A template's bound, recursively (`T of U`, `U of array`).
 pub(crate) fn upper_bound(ty: &Type) -> Type {
-    syntax::stack::guard(|| match ty.repr() {
+    stack::guard(|| match ty.repr() {
         Repr::TemplateParam(tp) => upper_bound(&tp.bound),
         _ => ty.clone(),
     })

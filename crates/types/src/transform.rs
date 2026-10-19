@@ -15,7 +15,7 @@ impl Type {
         if self.0.flags() & crate::HAS_STATIC == 0 {
             return self.clone();
         }
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::StaticRef(args) => Type::object(
                 class.into(),
                 args.iter().map(|a| a.bind_static(class)).collect(),
@@ -35,7 +35,7 @@ impl Type {
         if self.0.flags() & crate::HAS_SELF == 0 {
             return self.clone();
         }
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::SelfRef(args) => Type::object(
                 class.into(),
                 args.iter().map(|a| a.bind_self(class)).collect(),
@@ -49,7 +49,7 @@ impl Type {
         if self.0.flags() & crate::HAS_PARENT == 0 {
             return self.clone();
         }
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::ParentRef => Type::object(class.into(), Vec::new()),
             _ => self.map_children(&mut |t| t.bind_parent(class)),
         })
@@ -62,7 +62,7 @@ impl Type {
         if self.0.flags() & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
             return self.clone();
         }
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if let Repr::Object(name, _) = self.repr()
                 && let Some(replacement) = replace(name)
             {
@@ -98,7 +98,7 @@ impl Type {
         if self.0.flags() & crate::HAS_OBJECT == 0 && crate::shortcuts_enabled() {
             return self.clone();
         }
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::TemplateParam(_) => self.clone(),
             Repr::Object(name, args) => Type::object(
                 rename(name),
@@ -163,7 +163,7 @@ impl Type {
     }
 
     fn step(&self, by: i64) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::Null if by > 0 => Type::int_literal(1),
             // Stepping past `PHP_INT_MAX` or `PHP_INT_MIN` gives a float.
             Repr::IntLiteral(n) => match n.checked_add(by) {
@@ -227,7 +227,7 @@ impl Type {
     /// array's, and each shape field's and unsealed tail's, in union and
     /// intersection members too. Other types are left as they are.
     pub fn map_array_values(&self, f: &mut dyn FnMut(&Type) -> Type) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), f(value))),
             Repr::ArrayShape(shape) => Type::array_shape(shape.map_types(&mut |t| f(t))),
             Repr::Union(_) | Repr::BenevolentUnion(_) | Repr::Intersection(_) => {
@@ -241,7 +241,7 @@ impl Type {
     /// `value`, in union and intersection members too; an array shape
     /// keeps its fields.
     pub fn with_general_array_value(&self, value: &Type) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::Array(key, _) => Type::new(Repr::Array(key.clone(), value.clone())),
             Repr::Union(_) | Repr::BenevolentUnion(_) | Repr::Intersection(_) => {
                 self.map_children(&mut |m| m.with_general_array_value(value))
@@ -256,7 +256,7 @@ impl Type {
     /// change may have lost elements, so is neither. Other types are left
     /// as they are.
     pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::Array(key, value) => Type::new(Repr::Array(key.clone(), keep(value))),
             Repr::ArrayShape(shape) => Type::array_shape(Shape::from_parts(
                 shape

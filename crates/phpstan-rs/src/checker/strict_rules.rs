@@ -334,7 +334,7 @@ impl<'a> Checker<'a> {
     }
 
     fn is_comparable(&self, ty: &Type) -> bool {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if self.contains_only(
                 ty,
                 &[
@@ -358,7 +358,7 @@ impl<'a> Checker<'a> {
     }
 
     fn is_comparable_together(&self, left: &Type, right: &Type) -> bool {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let number = Type::object(("BcMath\\Number".to_string()).into(), Vec::new());
             let date = Type::object("DateTimeInterface".into(), Vec::new());
             if self.contains_only(left, &[number.clone(), Type::int()])
@@ -812,7 +812,7 @@ impl<'a> Checker<'a> {
 /// The plain variables `target` binds (recursing into `[...]`/`list()`
 /// destructuring) that `locals` already defines.
 fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::span::Span)> {
-    syntax::stack::guard(|| match &target.kind {
+    stack::guard(|| match &target.kind {
         ExprKind::Variable(name) if locals.contains_var(name) => {
             vec![(name.to_string(), target.span)]
         }
@@ -948,7 +948,7 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
 /// The variables an assignment target binds: a plain variable, the root
 /// of an offset chain, or each element of a destructuring.
 fn bind_targets(target: &Expr, loops: &[syntax::span::Span], out: &mut Vec<AssignedVariable>) {
-    syntax::stack::guard(|| match &target.kind {
+    stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => out.push(AssignedVariable {
             name: name.clone(),
             span: target.span,

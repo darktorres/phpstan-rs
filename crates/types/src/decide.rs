@@ -209,7 +209,7 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 // and no further `return` as "should never return, but a return
 // statement was reached."
 fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if matches!(native_ty.repr(), Repr::Void) && !matches!(m.repr(), Repr::Void | Repr::Never) {
             return false;
         }

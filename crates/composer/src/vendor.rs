@@ -536,7 +536,7 @@ enum Head {
 impl Head {
     /// The head `expr` spells, or `None` when it spells none of these.
     fn of(expr: &Expr) -> Option<Head> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let expr = expr.peeled();
             Some(match &expr.kind {
                 ExprKind::Literal(Literal::String(text)) => {
@@ -705,7 +705,7 @@ impl Spelled {
     /// a flat two-operand shape. `None` when `expr` is not such a path; the
     /// pieces appended before that are then not used.
     fn append(&mut self, expr: &Expr) -> Option<()> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let expr = expr.peeled();
             match &expr.kind {
                 ExprKind::Literal(Literal::String(s)) => self.append_text(s.as_bytes())?,

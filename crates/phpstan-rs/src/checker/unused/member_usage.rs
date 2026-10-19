@@ -136,7 +136,7 @@ impl<'ast> Visitor<'ast> for Members<'_> {
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let (fqn, usage) = (self.fqn, &mut *self.usage);
             match &expr.kind {
                 // A pure write target - `$this->x = ...` - is recorded as a

@@ -43,7 +43,7 @@ impl Parser<'_> {
     // parens here (no `((A&B)|C)&D`), so this doesn't need to recurse into
     // a further union inside the parens - just a run of `&`-joined atoms.
     pub(crate) fn parse_type_atom(&mut self) -> Result<TypeHint, ParseError> {
-        crate::stack::guard(|| {
+        stack::guard(|| {
             let start = self.current_pos();
             if self.eat(&Token::LParen) {
                 let mut members = vec![self.parse_type_atom()?];

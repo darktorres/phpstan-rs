@@ -88,7 +88,7 @@ pub(super) fn nullsafe_receiver(e: &Expr) -> Option<&Expr> {
 /// correlation, `match`-arm correlation (the genuinely large part of
 /// real PHPStan's own mechanism this project declines to build).
 fn condition_alias_shape(rhs: &Expr) -> bool {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         match &rhs.kind {
             ExprKind::Instanceof(..)
             // `Lt`/`Gt`/`LtEq`/`GtEq` alongside the equality-family
@@ -587,7 +587,7 @@ fn record_implied_facts(
 /// positive" precedent throughout `narrowing.rs`, not a false
 /// conclusion.
 fn condition_alias_targets(rhs: &Expr, locals: &Locals) -> Option<Vec<LocalKey>> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         match &rhs.kind {
             ExprKind::Instanceof(inner, _) => Some(vec![locals.key_of(inner)?]),
             // `condition_alias_shape`'s own identical comparison-operator
@@ -660,7 +660,7 @@ impl<'a> Checker<'a> {
     /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
     /// anything else leaves `locals` untouched rather than guess.
     pub(crate) fn apply_narrowing(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
-        syntax::stack::guard(|| self.apply_narrowing_unguarded(cond, locals, branch_true))
+        stack::guard(|| self.apply_narrowing_unguarded(cond, locals, branch_true))
     }
 
     fn apply_narrowing_unguarded(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {

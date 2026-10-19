@@ -74,7 +74,7 @@ impl<'ast> Visitor<'ast> for Collector {
     }
 
     fn visit_expr(&mut self, e: &'ast Expr) {
-        syntax::stack::guard(|| match &e.kind {
+        stack::guard(|| match &e.kind {
             ExprKind::Name(name)
                 if self.in_closure
                     && ["__FUNCTION__", "__METHOD__"]

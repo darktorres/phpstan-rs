@@ -907,7 +907,7 @@ pub(crate) fn call_arg_param_name_hints(
 /// literal). `None` when the leaf isn't a literal at all (a variable, a
 /// function call) - don't guess.
 fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let e = e.peeled();
         if let ExprKind::Binary(BinOp::Concat, l, _) = &e.kind {
             return concat_leftmost_delimiter(l);
@@ -921,7 +921,7 @@ fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
 /// left-only descent) collecting each `preg_quote(...)` call's own
 /// argument list found anywhere in it.
 fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let e = e.peeled();
         match &e.kind {
             ExprKind::Binary(BinOp::Concat, l, r) => {
@@ -952,7 +952,7 @@ fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
 /// location, which is exactly what passing an argument by reference
 /// needs.
 pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
-    syntax::stack::guard(|| match &expr.peeled().kind {
+    stack::guard(|| match &expr.peeled().kind {
         ExprKind::PropertyAccess(base, _, nullsafe) => {
             nullsafe.is_nullsafe() || contains_nullsafe_access(base)
         }

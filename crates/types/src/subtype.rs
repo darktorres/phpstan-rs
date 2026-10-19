@@ -123,7 +123,7 @@ impl Relation<'_> {
     /// `sub` provably is a `sup`, for the pairs `is_super_type_of` doesn't
     /// answer itself first.
     pub(crate) fn proves_super_type(&self, sup: &Type, sub: &Type) -> bool {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match (sub.repr(), sup.repr()) {
                 // A shaped callable is always compatible with a bare marker.
                 (Repr::Callable(Some(_)), Repr::Callable(None)) => true,

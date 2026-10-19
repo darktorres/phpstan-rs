@@ -15,7 +15,7 @@ hashbrown.workspace = true
 memchr.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
-stacker.workspace = true
+stack.workspace = true
 
 [features]
 # `arbitrary::Arbitrary` for tokens, for the token-stream fuzz target.

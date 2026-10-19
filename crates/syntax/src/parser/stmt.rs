@@ -8,7 +8,7 @@ impl Parser<'_> {
     // ---- statements ----
 
     pub(crate) fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
-        crate::stack::guard(|| self.parse_statement_unguarded())
+        stack::guard(|| self.parse_statement_unguarded())
     }
 
     fn parse_statement_unguarded(&mut self) -> Result<Stmt, ParseError> {
@@ -488,7 +488,7 @@ impl Parser<'_> {
 /// doc comment for why only these three shapes matter.
 fn const_fold_level(e: &Expr) -> Option<i64> {
     let e = e.peeled();
-    crate::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
         ExprKind::Unary(UnaryOp::Neg, inner) => const_fold_level(inner).map(|n| -n),
         _ => None,

@@ -21,7 +21,7 @@ impl Relation<'_> {
     /// an offset or accessory a shape can hold is applied to it, and
     /// members sharing no value make `never`.
     pub fn intersect(&self, members: Vec<Type>) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let mut flat: Vec<Type> = Vec::new();
             for member in members {
                 match member.into_repr() {

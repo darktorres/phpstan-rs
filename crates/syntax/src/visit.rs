@@ -106,7 +106,7 @@ pub fn walk_stmts<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmts: &'ast [Stmt
 }
 
 pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
-    crate::stack::guard(|| match &stmt.kind {
+    stack::guard(|| match &stmt.kind {
         StmtKind::InlineHtml(_)
         | StmtKind::Break(_)
         | StmtKind::Continue(_)
@@ -240,7 +240,7 @@ pub fn walk_args<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, args: &'ast [Arg]) 
 }
 
 pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
-    crate::stack::guard(|| match &expr.kind {
+    stack::guard(|| match &expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) => {}
         ExprKind::Name(name) => v.visit_name(name),
         ExprKind::Isset(operands) => {
@@ -517,7 +517,7 @@ pub fn walk_enum_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast EnumC
 
 /// A type hint's class names, each through `visit_name`.
 pub fn walk_type_hint<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, hint: &'ast TypeHint) {
-    crate::stack::guard(|| match &hint.kind {
+    stack::guard(|| match &hint.kind {
         TypeHintKind::Keyword(..) => {}
         TypeHintKind::Name(name) => v.visit_name(name),
         TypeHintKind::Nullable(inner) => v.visit_type_hint(inner),
@@ -848,7 +848,7 @@ pub fn walk_stmts_mut<V: VisitorMut + ?Sized>(v: &mut V, stmts: &mut [Stmt]) {
 }
 
 pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
-    crate::stack::guard(|| match &mut stmt.kind {
+    stack::guard(|| match &mut stmt.kind {
         StmtKind::InlineHtml(_)
         | StmtKind::Break(_)
         | StmtKind::Continue(_)
@@ -984,7 +984,7 @@ fn walk_args_mut<V: VisitorMut + ?Sized>(v: &mut V, args: &mut [Arg]) {
 }
 
 pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
-    crate::stack::guard(|| match &mut expr.kind {
+    stack::guard(|| match &mut expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => {}
         ExprKind::Isset(operands) => {
             for operand in operands {

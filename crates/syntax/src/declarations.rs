@@ -212,7 +212,7 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Visitor<'a>
     for Declarations<'a, '_, F>
 {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        crate::stack::guard(|| match &stmt.kind {
+        stack::guard(|| match &stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => self.ctx.add_uses(imports),
             StmtKind::ClassDecl(c) => {

@@ -50,7 +50,7 @@ impl Native {
 /// Collects `ty`'s native atoms; `false` when some part has no native
 /// spelling.
 fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         match ty.repr() {
             Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..) => out.add("int"),
             Repr::Float | Repr::FloatLiteral(_) => out.add("float"),

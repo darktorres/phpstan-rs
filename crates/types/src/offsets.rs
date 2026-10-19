@@ -12,7 +12,7 @@ impl Type {
     /// PHPStan's `hasOffsetValueType()`: whether this array surely has
     /// (`Yes`), surely lacks (`No`), or may have the offset `offset`.
     pub fn has_offset_value_type(&self, offset: &Type) -> TrinaryLogic {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::ArrayShape(shape) => {
                 if !shape.is_sealed() {
                     return TrinaryLogic::Maybe;
@@ -283,7 +283,7 @@ impl Type {
     /// reads `null` as PHP does; any other member it can't read makes the
     /// whole read `None`.
     pub fn offset_value_type(&self, key: Option<&ShapeKey>) -> Option<Type> {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::Array(_, value) => Some((*value).clone()),
             Repr::ArrayShape(shape) => match key {
                 Some(key) => match shape.field(key) {
@@ -343,7 +343,7 @@ impl Type {
         in_range: bool,
         track_literal_key: bool,
     ) -> Option<Type> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match self.repr() {
                 // `null` becomes an array on its first write.
                 Repr::Null => Type::array_shape(Shape::sealed(Vec::new())).set_offset_value_type(
@@ -575,7 +575,7 @@ impl Type {
     /// surely non-empty, a list (its keys stay non-negative), or sure of
     /// the offsets the key could name. Anything else is unchanged.
     pub fn unset_offset(&self, offset: &Type) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let key = offset.to_array_key();
             let literal_keys: Option<Vec<ShapeKey>> = {
                 let finite = key.finite_types();

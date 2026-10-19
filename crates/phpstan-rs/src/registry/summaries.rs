@@ -218,7 +218,7 @@ impl AssignedProperties {
 /// The class a `new` names, at the end of a chain of assignments
 /// (`$a = $b->p = new C`).
 fn new_instance_class(e: &Expr) -> Option<Name> {
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::New(callee, _) => {
             let ExprKind::Name(name) = &callee.kind else {
                 return None;
@@ -357,7 +357,7 @@ fn own_or_other(object: &Expr) -> PropertyOf {
 /// `$obj->prop = ...`/`unset($obj->prop)`: a write to a property of any
 /// object, through any depth of array-index nesting.
 fn property_write_target(e: &Expr) -> bool {
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::Index(base, _) => property_write_target(base),
         _ => false,
@@ -392,7 +392,7 @@ impl<'ast> Visitor<'ast> for Summarizer {
     }
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let impure = match &stmt.kind {
                 StmtKind::Echo(_)
                 | StmtKind::Throw(_)
@@ -437,7 +437,7 @@ impl<'ast> Visitor<'ast> for Summarizer {
     }
 
     fn visit_expr(&mut self, e: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let impure = match &e.kind {
                 // Any static property access at all, even a read of shared
                 // static state.

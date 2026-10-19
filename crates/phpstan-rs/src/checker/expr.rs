@@ -325,7 +325,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_expr_cached(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
                 self.check_expr_impl(e, locals, label)
             });
@@ -4521,7 +4521,7 @@ impl<'a> Checker<'a> {
         answer: impl FnOnce() -> Type,
     ) -> Type {
         if e.id == NodeId::SYNTHETIC || self.infer_cache.borrow().is_none() {
-            return syntax::stack::guard(answer);
+            return stack::guard(answer);
         }
         let addr = std::ptr::from_ref(e) as usize;
         let version = locals.version();
@@ -4533,7 +4533,7 @@ impl<'a> Checker<'a> {
         {
             return ty.clone();
         }
-        let ty = syntax::stack::guard(answer);
+        let ty = stack::guard(answer);
         if let Some(cache) = self.infer_cache.borrow_mut().as_mut() {
             cache.insert(addr, e.id, version, question, ty.clone());
         }
@@ -6550,7 +6550,7 @@ impl<'a> Checker<'a> {
     /// fire for that narrower shape, rather than report something
     /// unproven.
     pub(crate) fn expand_enum_cases(&self, ty: &Type) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = ty.union_members();
             if members.len() > 1 {
                 let expanded: Vec<Type> = members
@@ -6602,7 +6602,7 @@ impl<'a> Checker<'a> {
 /// further bugs rather than fixing anything.
 pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
     let base = base.peeled();
-    syntax::stack::guard(|| match &base.kind {
+    stack::guard(|| match &base.kind {
         ExprKind::PropertyAccess(inner, _, operator)
         | ExprKind::MethodCall(inner, _, _, operator)
         | ExprKind::DynamicPropertyAccess(inner, _, operator)

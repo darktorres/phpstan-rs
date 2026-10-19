@@ -73,7 +73,7 @@ impl Parser<'_> {
     /// by `bp`'s levels. One stack guard for each expression nested in
     /// another, where each operand used to pass three.
     pub(crate) fn parse_expr_bp(&mut self, min: u8) -> Result<Expr, ParseError> {
-        crate::stack::guard(|| self.parse_expr_bp_inner(min))
+        stack::guard(|| self.parse_expr_bp_inner(min))
     }
 
     fn parse_expr_bp_inner(&mut self, min: u8) -> Result<Expr, ParseError> {

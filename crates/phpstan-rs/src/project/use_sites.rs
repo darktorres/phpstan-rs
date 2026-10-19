@@ -237,7 +237,7 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &expr.kind {
                 // The callee's name is recorded here, as a function or a
                 // class; only the arguments are walked.

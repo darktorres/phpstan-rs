@@ -748,7 +748,7 @@ impl VisitorMut for Resolver {
     }
 
     fn visit_type_hint(&mut self, hint: &mut TypeHint) {
-        crate::stack::guard(|| match &mut hint.kind {
+        stack::guard(|| match &mut hint.kind {
             TypeHintKind::Keyword(..) => {}
             TypeHintKind::Name(name) => self.class(name),
             TypeHintKind::Nullable(inner) => self.visit_type_hint(inner),

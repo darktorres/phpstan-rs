@@ -27,7 +27,7 @@ fn attribute_target_constant_value(name: &str) -> Option<u32> {
 /// "don't know, don't guess wrong," so an unusual-but-legal flags
 /// expression can never manufacture a false `attribute.target` finding.
 fn eval_attribute_flags_expr(e: &Expr) -> u32 {
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::ClassConstFetch(_, member) => {
             attribute_target_constant_value(member).unwrap_or(ATTRIBUTE_TARGET_ALL)
         }

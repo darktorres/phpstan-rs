@@ -135,7 +135,7 @@ fn is_this(e: &Expr) -> bool {
 /// literal condition, `return`, `throw`, `exit`, `break`, `continue`.
 /// `labels` are the labels the `goto`s of the body land on.
 fn completion_of(stmt: &Stmt, labels: &[GotoLabel]) -> Completion {
-    syntax::stack::guard(|| match &stmt.kind {
+    stack::guard(|| match &stmt.kind {
         StmtKind::Return(_) | StmtKind::Throw(_) => Completion::EXITS,
         StmtKind::Break(level) => Completion::break_(level.unwrap_or(1)),
         StmtKind::Continue(level) => Completion::continue_(level.unwrap_or(1)),
@@ -250,7 +250,7 @@ fn push_events(out: &mut Vec<Flow>, events: Vec<Event>) {
 }
 
 fn flow_of_stmt(stmt: &Stmt, labels: &[GotoLabel], out: &mut Vec<Flow>) {
-    syntax::stack::guard(|| match &stmt.kind {
+    stack::guard(|| match &stmt.kind {
         StmtKind::Expression(e) | StmtKind::Throw(e) => push_events(out, events_of_each([e])),
         StmtKind::Return(Some(e)) => push_events(out, events_of_each([e])),
         StmtKind::Echo(exprs) => push_events(out, events_of_each(exprs)),
@@ -410,7 +410,7 @@ fn flow_of_stmt(stmt: &Stmt, labels: &[GotoLabel], out: &mut Vec<Flow>) {
 
 /// The events of evaluating `e`, in order.
 fn events_of(e: &Expr, out: &mut Vec<Event>) {
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(base, name, _) => {
             events_of(base, out);
             if is_this(base) {
@@ -491,7 +491,7 @@ fn events_of(e: &Expr, out: &mut Vec<Event>) {
 /// is `$this` or a chain of calls on it: each must return the object for the
 /// chain to still be it.
 fn this_chain(recv: &Expr) -> Option<Vec<Name>> {
-    syntax::stack::guard(|| match &recv.kind {
+    stack::guard(|| match &recv.kind {
         ExprKind::Variable(v) if **v == *"this" => Some(Vec::new()),
         ExprKind::MethodCall(inner, name, _, _) => {
             let mut chain = this_chain(inner)?;
@@ -506,7 +506,7 @@ fn this_chain(recv: &Expr) -> Option<Vec<Name>> {
 /// a list assigns each of its targets, and its keys are read; anything else
 /// is read as an expression.
 fn assignment_events(lhs: &Expr, out: &mut Vec<Event>) {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if let ExprKind::PropertyAccess(base, name, _) = &lhs.kind
             && is_this(base)
         {
@@ -533,7 +533,7 @@ fn assignment_events(lhs: &Expr, out: &mut Vec<Event>) {
 /// found anywhere in the chain being *tested*, however deep. An index or
 /// name expression embedded in the chain is read as any expression is.
 fn quiet_probe_events(e: &Expr, out: &mut Vec<Event>) {
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(base, _, _) => quiet_probe_events(base, out),
         ExprKind::DynamicPropertyAccess(base, name_expr, _) => {
             quiet_probe_events(base, out);

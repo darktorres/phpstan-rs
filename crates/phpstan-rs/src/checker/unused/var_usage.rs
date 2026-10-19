@@ -76,7 +76,7 @@ impl<'ast> Visitor<'ast> for Vars {
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &expr.kind {
                 ExprKind::Variable(name) => {
                     if **name != *"this" {
@@ -132,7 +132,7 @@ impl<'ast> Visitor<'ast> for Vars {
 /// same blanket "everything is used" fallback as `func_get_args()`/
 /// `get_defined_vars()` rather than risk a false "unused" report.
 fn collect_compact_names(e: &Expr, names: &mut NameSet, escaped: &mut bool) {
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
             names.insert(Name::from(&*s.to_str_lossy()));
         }

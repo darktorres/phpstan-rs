@@ -1599,7 +1599,7 @@ fn bind_class_const_self_at(
     own_consts: &OrderedNameMap<ConstantReflection>,
     depth: usize,
 ) -> Type {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         const MAX_DEPTH: usize = 16;
         ty.map_class_constants(&mut |owner, pattern| {
             let names_self = owner.is_self_reference()
@@ -2059,7 +2059,7 @@ fn mentions_constant_name(ty: &Type, registry: &Registry) -> bool {
     if !ty.has_constant_looking_name() {
         return false;
     }
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if let Some((name, args)) = ty.as_object()
             && args.is_empty()
             && constant_named_value(name, registry).is_some()
@@ -2074,7 +2074,7 @@ fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool
     if !ty.has_constant_looking_name() {
         return ty.clone();
     }
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if let Some((name, args)) = ty.as_object()
             && args.is_empty()
             && let Some(value) = constant_named_type(name, registry)

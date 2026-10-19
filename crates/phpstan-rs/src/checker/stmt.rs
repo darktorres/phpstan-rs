@@ -284,7 +284,7 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) -> Completion {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if self.settings.shipmonk.check_enum_exhaustiveness {
                 self.check_strict_statement_idioms(stmt, locals);
             }
@@ -1379,7 +1379,7 @@ impl<'a> Checker<'a> {
         label: &str,
         is_elseif: bool,
     ) -> Completion {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let [(cond, then_branch), rest @ ..] = branches else {
                 return Completion::FALLS_THROUGH;
             };
@@ -1700,7 +1700,7 @@ fn static_variable_type(initializer: &Type) -> Type {
 /// The plain variables an assignment target writes: `$x`, or each of a
 /// `[$a, $b]`/`list($a, $b)` destructuring's.
 pub(super) fn assigned_variable_names(target: &Expr) -> Vec<String> {
-    syntax::stack::guard(|| match &target.kind {
+    stack::guard(|| match &target.kind {
         ExprKind::Variable(v) => vec![v.to_string()],
         ExprKind::Destructure(items, _) => items
             .iter()

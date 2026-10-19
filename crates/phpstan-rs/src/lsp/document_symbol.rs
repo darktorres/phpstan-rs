@@ -11,7 +11,7 @@ use syntax::span::Span;
 use super::protocol::Positions;
 
 pub(super) fn document_symbols(stmts: &[Stmt], index: Positions<'_>) -> Vec<DocumentSymbol> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let mut symbols = Vec::new();
         for stmt in stmts {
             match &stmt.kind {

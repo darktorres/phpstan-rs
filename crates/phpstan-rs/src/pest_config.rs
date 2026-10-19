@@ -184,7 +184,7 @@ fn collect_hook_closure_properties(expr: &Expr, props: &mut FxHashSet<String>) {
 /// arguments, or `None` if the chain doesn't bottom out in a real
 /// `uses(...)` call.
 fn walk_uses_chain<'e>(expr: &'e Expr, hook_props: &mut FxHashSet<String>) -> Option<&'e [Arg]> {
-    syntax::stack::guard(|| match &expr.peeled().kind {
+    stack::guard(|| match &expr.peeled().kind {
         ExprKind::Call(callee, args) => {
             let ExprKind::Name(name) = &callee.kind else {
                 return None;

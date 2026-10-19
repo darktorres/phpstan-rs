@@ -2417,7 +2417,7 @@ fn is_var_named(e: &Expr, name: &str) -> bool {
 /// either, since real `compact()` combines every argument into one flat
 /// result.
 fn compact_argument_names(e: &Expr) -> Option<Vec<String>> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if let Some(name) = literal_string_value(e) {
             return Some(vec![name.into_owned()]);
         }
@@ -2707,7 +2707,7 @@ fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
 /// of them" for whatever it does recognize.
 pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
     let e = e.peeled();
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == target,
         ExprKind::Binary(BinOp::BitOr, l, r) => {
             contains_flag_name(l, target) || contains_flag_name(r, target)
@@ -2723,7 +2723,7 @@ pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
 /// `contains_flag_name` itself, which stays a narrow bitwise-or-chain
 /// scan for its unrelated call sites.
 fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if contains_flag_name(e, target) {
             return true;
         }
@@ -2763,7 +2763,7 @@ fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) ->
 /// a leading-backslash global name (`\JSON_THROW_ON_ERROR`) too.
 fn contains_json_throw_on_error(e: &Expr) -> bool {
     let e = e.peeled();
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == "JSON_THROW_ON_ERROR",
         ExprKind::Binary(BinOp::BitOr, l, r) => {
             contains_json_throw_on_error(l) || contains_json_throw_on_error(r)

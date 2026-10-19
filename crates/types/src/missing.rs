@@ -71,7 +71,7 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
 /// generic arguments at all), which real PHPStan still flags exactly as
 /// before.
 fn collect_iterable_missing_value_types(ty: &Type, out: &mut Vec<String>) {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let mut missing = |desc: String| out.push(desc);
         match ty.repr() {
             Repr::TemplateParam(_) => return,
@@ -131,7 +131,7 @@ fn collect_iterable_missing_value_types(ty: &Type, out: &mut Vec<String>) {
 /// `callable` is `Repr::Callable(None)`; a bare `Closure` is a plain
 /// class reference. Each finding is the type's own display text.
 fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         match ty.repr() {
             Repr::TemplateParam(_) => return,
             Repr::Callable(None) => return out.push(ty.to_string()),
@@ -162,7 +162,7 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
 /// Every class `ty` names with no generic arguments, at any depth but
 /// inside a template.
 fn collect_bare_object_class_names<'a>(ty: &'a Type, out: &mut Vec<&'a crate::Name>) {
-    syntax::stack::guard(|| match ty.repr() {
+    stack::guard(|| match ty.repr() {
         Repr::TemplateParam(_) => {}
         Repr::Object(name, args) if args.is_empty() => {
             if !out.contains(&name) {

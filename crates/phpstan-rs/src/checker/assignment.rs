@@ -12,7 +12,7 @@ use types::{Shape, ShapeKey, Type};
 /// all (see `ExprKind::DynamicPropertyAccess`'s own doc comment), a
 /// real, disclosed gap matching how rare it is in practice.
 pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
-    syntax::stack::guard(|| match &expr.peeled().kind {
+    stack::guard(|| match &expr.peeled().kind {
         ExprKind::PropertyAccess(base, _, nullsafe) => {
             nullsafe.is_nullsafe() || contains_nullsafe(base)
         }
@@ -44,7 +44,7 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
 /// while `DynamicMethodCall`/`MethodCall` deliberately don't get one,
 /// since neither is ever a valid assignment target in real PHP either.
 pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
-    syntax::stack::guard(|| match &expr.peeled().kind {
+    stack::guard(|| match &expr.peeled().kind {
         ExprKind::Variable(_)
         | ExprKind::PropertyAccess(..)
         | ExprKind::DynamicPropertyAccess(..)
@@ -149,7 +149,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
     ) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &target.kind {
                 ExprKind::Variable(_) => {}
                 ExprKind::Destructure(items, _) => {
@@ -240,7 +240,7 @@ impl<'a> Checker<'a> {
     /// destructured array shape source still checks each element
     /// against its own real per-slot type, not a blanket `Mixed`.
     pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &Expr, ty: &Type) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let ExprKind::Destructure(items, _) = &lhs.kind else {
                 return;
             };
@@ -291,7 +291,7 @@ impl<'a> Checker<'a> {
     /// $arr;`, nested `[[$a, $b], $c] = $nested;`): each element target
     /// gets the value at its key.
     pub(crate) fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             // Keep any existing `key_of` entry for this exact
             // property-chain/literal-index-chain expression in sync with a
             // real assignment - `apply_narrowing`'s synthetic key format is
@@ -639,7 +639,7 @@ impl<'a> Checker<'a> {
     /// may be absent or holds `null`, PHP creates a fresh array, so the
     /// container includes `array{}` there.
     fn nested_write_container_type(&self, e: &Expr, locals: &Locals) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let ExprKind::Index(inner, idx) = &e.kind else {
                 return self.infer_expr(e, locals);
             };
@@ -711,7 +711,7 @@ impl<'a> Checker<'a> {
         container: &Type,
         locals: &Locals,
     ) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             for (position, item) in items.iter().enumerate() {
                 let Some(target) = &item.target else {
                     continue;
@@ -870,7 +870,7 @@ pub(crate) fn unassigned_variable_type(name: &str) -> Type {
 /// variable-subscript entry (`$r[$k]`) currently reads. Drops every
 /// such entry at each level of `lhs`'s index chain.
 fn purge_aliased_index_entries(lhs: &Expr, locals: &mut Locals) {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let ExprKind::Index(base, Some(idx)) = &lhs.kind else {
             if let ExprKind::Index(base, None) = &lhs.kind {
                 purge_aliased_index_entries(base, locals);

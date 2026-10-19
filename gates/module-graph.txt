@@ -8,45 +8,46 @@
 # show up as listed edges until they move.
 
 # crate <name> <dependencies...>
-crate syntax
-crate types syntax
+crate syntax stack
+crate types syntax stack
 crate stub-sources
 crate phpdoc syntax types
 crate sql
 crate diagnostics syntax
 crate path-bytes
-crate composer syntax path-bytes
+crate stack
+crate composer syntax path-bytes stack
 crate config syntax diagnostics
-crate reflection syntax path-bytes types phpdoc stub-sources composer config diagnostics
-crate analyser syntax path-bytes types phpdoc stub-sources config diagnostics reflection
-crate builtins syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser
-crate rules syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins
-crate ext-strict-rules syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-deprecation-rules syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-doctrine syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-sql syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-phpunit syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-codeception syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-mockery syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-nette-tester syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-pest syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-mockstan syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-disallowed-calls syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-shipmonk syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-type-perfect syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-voku syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-sidz syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-slam syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-psr3 syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-language-extensions syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate ext-extras syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql
-crate project syntax path-bytes types phpdoc stub-sources composer config diagnostics reflection analyser
-crate testing syntax path-bytes types phpdoc stub-sources composer config diagnostics reflection analyser project
-crate app syntax path-bytes types phpdoc stub-sources sql composer config diagnostics reflection analyser builtins rules ext-strict-rules ext-deprecation-rules ext-doctrine ext-sql ext-phpunit ext-codeception ext-mockery ext-nette-tester ext-pest ext-mockstan ext-disallowed-calls ext-shipmonk ext-type-perfect ext-voku ext-sidz ext-slam ext-psr3 ext-language-extensions ext-extras project
-crate lsp syntax path-bytes types phpdoc stub-sources composer config diagnostics reflection analyser project
-crate bin syntax path-bytes types phpdoc stub-sources sql composer config diagnostics reflection analyser builtins rules ext-strict-rules ext-deprecation-rules ext-doctrine ext-sql ext-phpunit ext-codeception ext-mockery ext-nette-tester ext-pest ext-mockstan ext-disallowed-calls ext-shipmonk ext-type-perfect ext-voku ext-sidz ext-slam ext-psr3 ext-language-extensions ext-extras project testing app lsp
+crate reflection syntax path-bytes types phpdoc stub-sources composer config diagnostics stack
+crate analyser syntax path-bytes types phpdoc stub-sources config diagnostics reflection stack
+crate builtins syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser stack
+crate rules syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins stack
+crate ext-strict-rules syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-deprecation-rules syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-doctrine syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-sql syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-phpunit syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-codeception syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-mockery syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-nette-tester syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-pest syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-mockstan syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-disallowed-calls syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-shipmonk syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-type-perfect syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-voku syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-sidz syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-slam syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-psr3 syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-language-extensions syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate ext-extras syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser builtins rules sql stack
+crate project syntax path-bytes types phpdoc stub-sources composer config diagnostics reflection analyser stack
+crate testing syntax path-bytes types phpdoc stub-sources composer config diagnostics reflection analyser project stack
+crate app syntax path-bytes types phpdoc stub-sources sql composer config diagnostics reflection analyser builtins rules ext-strict-rules ext-deprecation-rules ext-doctrine ext-sql ext-phpunit ext-codeception ext-mockery ext-nette-tester ext-pest ext-mockstan ext-disallowed-calls ext-shipmonk ext-type-perfect ext-voku ext-sidz ext-slam ext-psr3 ext-language-extensions ext-extras project stack
+crate lsp syntax path-bytes types phpdoc stub-sources composer config diagnostics reflection analyser project stack
+crate bin syntax path-bytes types phpdoc stub-sources sql composer config diagnostics reflection analyser builtins rules ext-strict-rules ext-deprecation-rules ext-doctrine ext-sql ext-phpunit ext-codeception ext-mockery ext-nette-tester ext-pest ext-mockstan ext-disallowed-calls ext-shipmonk ext-type-perfect ext-voku ext-sidz ext-slam ext-psr3 ext-language-extensions ext-extras project testing app lsp stack
 # The library root only declares modules and re-exports.
-crate root syntax path-bytes types phpdoc stub-sources sql composer config diagnostics reflection analyser builtins rules ext-strict-rules ext-deprecation-rules ext-doctrine ext-sql ext-phpunit ext-codeception ext-mockery ext-nette-tester ext-pest ext-mockstan ext-disallowed-calls ext-shipmonk ext-type-perfect ext-voku ext-sidz ext-slam ext-psr3 ext-language-extensions ext-extras project testing app lsp bin
+crate root syntax path-bytes types phpdoc stub-sources sql composer config diagnostics reflection analyser builtins rules ext-strict-rules ext-deprecation-rules ext-doctrine ext-sql ext-phpunit ext-codeception ext-mockery ext-nette-tester ext-pest ext-mockstan ext-disallowed-calls ext-shipmonk ext-type-perfect ext-voku ext-sidz ext-slam ext-psr3 ext-language-extensions ext-extras project testing app lsp bin stack
 
 # module <path> <crate>
 module crate root
@@ -61,6 +62,7 @@ extern sql sql
 extern diagnostics diagnostics
 extern composer composer
 extern path_bytes path-bytes
+extern stack stack
 extern stub_sources stub-sources
 extern config config
 

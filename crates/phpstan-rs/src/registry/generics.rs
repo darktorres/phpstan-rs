@@ -60,7 +60,7 @@ impl Registry {
         target: &str,
         seen: &mut FxHashSet<String>,
     ) -> Option<FxHashMap<String, Type>> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if !seen.insert(class.to_string()) {
                 return None;
             }

@@ -177,7 +177,7 @@ impl<'a> Checker<'a> {
         depth: usize,
         world: World,
     ) -> Option<Vec<String>> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if let Some(init) = self.file_constant_initializer(e) {
                 return (depth < MAX_CONSTANT_DEPTH)
                     .then(|| self.resolve_paths_at(init, &self.new_locals(), depth + 1, world))
@@ -301,7 +301,7 @@ pub(crate) struct IncludeCalls<'o>(pub(crate) &'o mut dyn FnMut(IncludeCall));
 
 impl<'ast> Visitor<'ast> for IncludeCalls<'_> {
     fn visit_expr(&mut self, e: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if let ExprKind::Call(callee, args) = &e.kind
                 && let Some(name) = callee_name(callee)
             {

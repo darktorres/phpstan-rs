@@ -248,7 +248,7 @@ impl Type {
 
     /// `f` on this type and every type nested in it, outermost first.
     fn walk_nested<'a>(&'a self, f: &mut impl FnMut(&'a Type)) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             f(self);
             self.for_each_child(&mut |t| t.walk_nested(f));
         })
@@ -471,7 +471,7 @@ impl Type {
     /// PHPStan's `getFiniteTypes()`: the values this type can only be, one
     /// type each, when there are few enough to list; none otherwise.
     pub fn finite_types(&self) -> Vec<Type> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             const LIMIT: i64 = 256;
             match self.repr() {
                 Repr::IntLiteral(_)
@@ -668,7 +668,7 @@ impl Type {
     /// of its generalized keys and values (still a list, still non-empty,
     /// when it was), and a union's members each.
     pub fn generalize(&self) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::IntLiteral(_) | Repr::IntRange(..) => Type::int(),
             Repr::StringLiteral(_) => Type::string(),
             Repr::FloatLiteral(_) => Type::float(),
@@ -878,7 +878,7 @@ impl Type {
             AccessoryKind::DecimalIntegerString => Some(AccessoryKind::NumericString),
             _ => None,
         };
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::String => crate::intersect_types(vec![Type::string(), Type::accessory(kind)]),
             Repr::StringLiteral(_) => {
                 let refined = Type::string().with_string_accessory(kind);
@@ -989,7 +989,7 @@ impl Type {
     /// PHPStan's `getIterableValueType()` for a type every value of which
     /// is an array; `None` otherwise. `array{}` holds no value (`never`).
     pub fn array_value_type(&self) -> Option<Type> {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::Array(_, value) => Some((*value).clone()),
             Repr::ArrayShape(shape) => Some(shape.value_type()),
             Repr::Intersection(members) => members.iter().find_map(Type::array_value_type),
@@ -1007,7 +1007,7 @@ impl Type {
     /// PHPStan's `getIterableKeyType()` for a type every value of which
     /// is an array; `None` otherwise. `array{}` holds no key (`never`).
     pub fn array_key_type(&self) -> Option<Type> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match self.repr() {
                 Repr::Array(key, _) => Some(read_key((*key).clone())),
                 Repr::ArrayShape(shape) => Some(read_key(shape.key_type())),
@@ -1108,7 +1108,7 @@ impl Type {
     /// PHPStan's `toBoolean()`: `true` when every value is truthy, `false`
     /// when every value is falsy, `bool` otherwise.
     pub fn to_boolean(&self) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::True => Type::bool_literal(true),
             Repr::False | Repr::Null | Repr::Void => Type::bool_literal(false),
             Repr::IntLiteral(n) => Type::bool_literal(*n != 0),

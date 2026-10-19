@@ -136,7 +136,7 @@ fn parse_native_type(text: &str, at: Span) -> Option<TypeHint> {
 }
 
 fn set_spans(hint: &mut TypeHint, at: Span) {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         hint.span = at;
         match &mut hint.kind {
             TypeHintKind::Keyword(..) | TypeHintKind::Name(_) => {}

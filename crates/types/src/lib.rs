@@ -347,7 +347,7 @@ impl Type {
 impl Drop for Node {
     fn drop(&mut self) {
         let repr = std::mem::replace(&mut self.repr, Repr::Never);
-        syntax::stack::guard(|| drop(repr));
+        stack::guard(|| drop(repr));
     }
 }
 
@@ -355,19 +355,19 @@ impl Drop for Node {
 /// interned type again.
 impl serde::Serialize for Type {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        syntax::stack::guard(|| self.repr().serialize(serializer))
+        stack::guard(|| self.repr().serialize(serializer))
     }
 }
 
 impl<'de> serde::Deserialize<'de> for Type {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Type, D::Error> {
-        syntax::stack::guard(|| Repr::deserialize(deserializer).map(Type::new))
+        stack::guard(|| Repr::deserialize(deserializer).map(Type::new))
     }
 }
 
 impl std::fmt::Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        syntax::stack::guard(|| self.repr().fmt(f))
+        stack::guard(|| self.repr().fmt(f))
     }
 }
 
@@ -601,8 +601,7 @@ fn same_members(a: &[Type], b: &[Type]) -> bool {
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
-            || (self.0.hash == other.0.hash
-                && syntax::stack::guard(|| repr_eq(self.repr(), other.repr())))
+            || (self.0.hash == other.0.hash && stack::guard(|| repr_eq(self.repr(), other.repr())))
     }
 }
 

@@ -225,7 +225,7 @@ fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut 
 }
 
 fn is_new_self_instance(e: &Expr, class_name: &str) -> bool {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         match &e.kind {
             ExprKind::New(callee, _) => {
                 let ExprKind::Name(name) = &callee.kind else {

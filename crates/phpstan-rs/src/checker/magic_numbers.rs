@@ -35,7 +35,7 @@ impl<'a> Checker<'a> {
 
     fn numeric_literal_value(&self, e: &Expr) -> Option<f64> {
         let e = e.peeled();
-        syntax::stack::guard(|| match &e.kind {
+        stack::guard(|| match &e.kind {
             ExprKind::Literal(Literal::Int(i)) => Some(*i as f64),
             ExprKind::Literal(Literal::Float(f)) => Some(*f),
             ExprKind::Literal(Literal::String(s))

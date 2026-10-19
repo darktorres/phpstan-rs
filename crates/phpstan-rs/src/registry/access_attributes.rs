@@ -50,7 +50,7 @@ fn library_attribute(resolved: &str) -> Option<&str> {
 }
 
 fn class_names(args: &[Expr], out: &mut Vec<Name>) {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         for arg in args {
             match &arg.kind {
                 ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {

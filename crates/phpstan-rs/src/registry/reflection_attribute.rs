@@ -109,7 +109,7 @@ fn argument(arg: &Arg) -> AttributeArgument {
 
 fn value(expr: &Expr) -> AttributeValue {
     let expr = expr.peeled();
-    syntax::stack::guard(|| match &expr.kind {
+    stack::guard(|| match &expr.kind {
         ExprKind::Literal(Literal::Null) => AttributeValue::Null,
         ExprKind::Literal(Literal::Bool(b)) => AttributeValue::Bool(*b),
         ExprKind::Literal(Literal::Int(i)) => AttributeValue::Int(*i),

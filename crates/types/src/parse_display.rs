@@ -22,7 +22,7 @@ pub fn try_parse_displayed(s: &str) -> Option<Type> {
 /// `resolve` is asked for each bare name first (a template in scope),
 /// and a name it doesn't know is a class.
 pub fn try_parse_displayed_with(s: &str, resolve: &dyn Fn(&str) -> Option<Type>) -> Option<Type> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         let tokens = tokenize(s)?;
         let mut parser = Parser {
             tokens,

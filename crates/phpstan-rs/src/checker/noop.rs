@@ -33,7 +33,7 @@ enum Effects {
 }
 
 fn is_local_assign_target(target: &Expr) -> bool {
-    syntax::stack::guard(|| match &target.kind {
+    stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => name.as_ref() != "this",
         ExprKind::Destructure(items, _) => items.iter().all(|item| {
             item.key

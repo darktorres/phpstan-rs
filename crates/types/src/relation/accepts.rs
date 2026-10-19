@@ -27,7 +27,7 @@ impl Relation<'_> {
     /// class hierarchy for `Object` types; every other case defers to
     /// `Relation::is_super_type_of`, which has no notion of class context.
     pub(crate) fn accepts_type(&self, sub: &Type, sup: &Type) -> bool {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match (sub.repr(), sup.repr()) {
                 (Repr::Error, _) | (_, Repr::Error) => true,
                 // No value to reject.
@@ -504,7 +504,7 @@ impl Relation<'_> {
     }
 
     fn rule_level_accepts_rec(&self, sub: &Type, sup: &Type, level: u8) -> bool {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             // Real PHPStan's own `checkBenevolentUnionTypes` (`RuleLevelHelper::
             // transformAcceptedType`) runs first, unconditionally, independent
             // of level - mirrored here ahead of both fast paths below, which

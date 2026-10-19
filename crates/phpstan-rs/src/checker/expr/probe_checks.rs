@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
     ) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             // Every arm here is consumed only for its side effects - neither
             // `??` nor `??=` (its only two call sites) depend on the
             // quiet-checked left side's own type, so the exact value
@@ -184,7 +184,7 @@ impl<'a> Checker<'a> {
         identifier_prefix: &str,
         operator_description: &str,
     ) -> Option<Type> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &e.kind {
                 ExprKind::Variable(name) => {
                     if is_superglobal(name)
@@ -667,7 +667,7 @@ impl<'a> Checker<'a> {
 /// written in advance of knowing this gap existed.
 fn expr_reads_a_mutable_property(e: &Expr) -> bool {
     let e = e.peeled();
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::StaticPropertyFetch(..) => true,
         ExprKind::Call(callee, args) => {

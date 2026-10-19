@@ -359,7 +359,7 @@ impl<'a> Checker<'a> {
         ty: &Type,
         has_member: impl Fn(&str) -> bool + Copy,
     ) -> bool {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let members = ty.union_members();
             if members.len() > 1 {
                 return members

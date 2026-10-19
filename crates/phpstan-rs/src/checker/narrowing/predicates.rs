@@ -23,7 +23,7 @@ use types::Type;
 /// (`int|null`), not the coalesce result's already-narrower one.
 pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
     let e = e.peeled();
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
             if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
         {
@@ -177,7 +177,7 @@ impl<'a> Checker<'a> {
         cond: &'e Expr,
         locals: &Locals,
     ) -> Option<(LocalKey, Type, &'e Expr)> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let cond = cond.peeled();
             match &cond.kind {
                 ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
@@ -247,7 +247,7 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Option<(LocalKey, Type, &'e Expr)> {
         let cond = cond.peeled();
-        syntax::stack::guard(|| match &cond.kind {
+        stack::guard(|| match &cond.kind {
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
                 let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
                 let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;

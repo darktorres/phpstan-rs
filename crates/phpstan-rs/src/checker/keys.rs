@@ -316,7 +316,7 @@ impl KeyTable {
     }
 
     fn resolve(&mut self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let e = e.peeled();
             match &e.kind {
                 ExprKind::Variable(name) => Some(self.var(name)),
@@ -363,7 +363,7 @@ impl KeyTable {
     }
 
     fn find_expr(&self, e: &Expr, class: Option<&Name>) -> Option<LocalKey> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let e = e.peeled();
             match &e.kind {
                 ExprKind::Variable(name) => self.find_var(name),

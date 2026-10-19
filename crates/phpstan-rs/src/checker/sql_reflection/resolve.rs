@@ -211,7 +211,7 @@ fn resolve_pure_ast(sql: &str, driver: Option<SqlDriver>) -> Option<Type> {
 /// "spans aren't a substitute for knowing the real shape" lesson this
 /// module already learned once for `normalize_placeholders_for_driver`.
 fn pure_ast_expr(expr: &Expr, driver: Option<SqlDriver>) -> Option<(String, Type)> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         match expr {
             Expr::Value(v) => Some((
                 literal_name(&v.value)?,
@@ -474,7 +474,7 @@ fn resolve_select_from_static_schema(
     select: &Select,
     ctes: &FxHashMap<String, Vec<TypedColumn>>,
 ) -> Option<Vec<(String, Type, bool)>> {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         if select.from.len() != 1 || !select.from[0].joins.is_empty() {
             return None;
         }

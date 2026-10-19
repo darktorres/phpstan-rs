@@ -404,7 +404,7 @@ impl<'a> Walker<'a> {
     /// index write target as a foreach binding isn't valid PHP at all)
     /// falls back to an ordinary read-walk.
     fn bind_var(&mut self, e: &Expr) {
-        syntax::stack::guard(|| match &e.kind {
+        stack::guard(|| match &e.kind {
             ExprKind::Variable(name) => self.record_var_self(e.span, name),
             ExprKind::Destructure(items, _) => {
                 for item in items {
@@ -423,7 +423,7 @@ impl<'a> Walker<'a> {
 
 impl<'ast> Visitor<'ast> for Walker<'_> {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        syntax::stack::guard(|| match &stmt.kind {
+        stack::guard(|| match &stmt.kind {
             StmtKind::Foreach {
                 subject,
                 key,
@@ -563,7 +563,7 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &expr.kind {
                 ExprKind::NewAnonymousClass(class) => {
                     walk_args(self, &class.args);

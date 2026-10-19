@@ -97,7 +97,7 @@ impl Relation<'_> {
     /// `is_super_type_of` read off the two types' forms, without the
     /// shortcuts that answer before it.
     pub(crate) fn is_super_type_of_by_form(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match (sup.repr(), sub.repr()) {
                 (Repr::Error, _) => TrinaryLogic::Yes,
                 (_, Repr::Error) => self.is_super_type_of(sup, &Type::mixed()),
@@ -556,7 +556,7 @@ fn accessories_contradict(a: &AccessoryKind, b: &AccessoryKind) -> bool {
 /// types of different scalar families (`string`/`int`, `array`/`object`).
 /// Anything else is not proven disjoint.
 fn scalars_disjoint(a: &Type, b: &Type) -> bool {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         match (a.repr(), b.repr()) {
             (Repr::Union(members) | Repr::BenevolentUnion(members), _) => {
                 members.iter().all(|m| scalars_disjoint(m, b))

@@ -499,7 +499,7 @@ fn infer_const_type_with(
     value: &syntax::ast::Expr,
     class_const_ref: &dyn Fn(&syntax::ast::QualifiedName, &str) -> Option<Type>,
 ) -> Type {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         use syntax::ast::Literal;
         let value = value.peeled();
         match &value.kind {

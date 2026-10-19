@@ -490,7 +490,7 @@ impl<'ast> Visitor<'ast> for Disqualifier<'_> {
         if self.found {
             return;
         }
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             self.found = match &stmt.kind {
                 // `echo`/`die`/`exit`/`print` are `betweenPhpTags`'s own
                 // "output" siblings - real PHPStan's own separate `echo`
@@ -522,7 +522,7 @@ impl<'ast> Visitor<'ast> for Disqualifier<'_> {
         if self.found {
             return;
         }
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let (class, registry) = (self.declaring_class, self.registry);
             let disqualifies = match &e.kind {
                 // Any static property access at all - real PHPStan's own
@@ -607,7 +607,7 @@ impl<'ast> Visitor<'ast> for Disqualifier<'_> {
 /// assignment target is written as a bare `PropertyAccess` or an
 /// `Index` chain ending in one.
 fn property_write_target(e: &Expr) -> bool {
-    syntax::stack::guard(|| match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::Index(base, _) => property_write_target(base),
         _ => false,
@@ -881,7 +881,7 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &stmt.kind {
                 StmtKind::Echo(_) => self.push(stmt.span, "echo", "echo", true),
                 StmtKind::Global(_) => self.push(stmt.span, "global", "global variable", true),
@@ -904,7 +904,7 @@ impl<'ast> Visitor<'ast> for ImpurePoints<'_> {
     }
 
     fn visit_expr(&mut self, e: &'ast Expr) {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match &e.kind {
                 // Only a static property read is mutable shared state; a
                 // class constant or enum case is immutable (real PHPStan's

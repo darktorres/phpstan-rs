@@ -159,7 +159,7 @@ impl Type {
     }
 
     fn without_uncached(&self, excluded: &Type) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             // `mixed` without a type is `mixed~type`: what it can't be is
             // remembered (`isset($x)` leaves `mixed~null`).
             if let Repr::Mixed(explicit, lacks) = self.repr()
@@ -301,7 +301,7 @@ impl Type {
     /// (`non-empty-array`, `list`, `hasOffset(k)`), one it rules out
     /// dropped; the rest kept as they are.
     fn refine_arrays(&self, refinement: &Type) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             let kept: Vec<Type> = self
                 .union_members()
                 .iter()
@@ -359,7 +359,7 @@ impl Type {
     /// has it when present. Recurses through `Union`; anything else is left
     /// untouched.
     pub fn with_key_presence(&self, key: &ShapeKey, present: bool) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match self.repr() {
                 Repr::ArrayShape(shape) => match shape.field(key) {
                     Some(field) if !field.optional => {
@@ -432,7 +432,7 @@ impl Type {
     /// has it present and non-null. `key` is `None` for a non-literal
     /// subscript, which still proves an array non-empty.
     pub fn to_isset_container(&self, key: Option<&ShapeKey>) -> Type {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             match self.repr() {
                 Repr::ArrayShape(_) | Repr::Array(..) | Repr::Intersection(_)
                     if key.is_none() && self.is_array().yes() =>

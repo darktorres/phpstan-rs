@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
     /// (`Some(false)`), or only sometimes (`None`) an instance of the
     /// registered class-like `target`.
     fn instanceof_verdict(&self, ty: &Type, target: &str) -> Option<bool> {
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if ty.is_never() {
                 return None;
             }

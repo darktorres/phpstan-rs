@@ -1674,6 +1674,7 @@ dependencies = [
  "phpstan-rs-path-bytes",
  "phpstan-rs-phpdoc",
  "phpstan-rs-sql",
+ "phpstan-rs-stack",
  "phpstan-rs-stub-sources",
  "phpstan-rs-syntax",
  "phpstan-rs-types",
@@ -1700,6 +1701,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "junction",
  "phpstan-rs-path-bytes",
+ "phpstan-rs-stack",
  "phpstan-rs-syntax",
  "rustc-hash",
  "serde",
@@ -1763,6 +1765,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "phpstan-rs-stack"
+version = "0.1.0"
+dependencies = [
+ "stacker",
+]
+
+[[package]]
 name = "phpstan-rs-stub-sources"
 version = "0.1.0"
 
@@ -1775,16 +1784,17 @@ dependencies = [
  "hashbrown 0.17.1",
  "hotpath",
  "memchr",
+ "phpstan-rs-stack",
  "rustc-hash",
  "serde",
  "serde_json",
- "stacker",
 ]
 
 [[package]]
 name = "phpstan-rs-types"
 version = "0.1.0"
 dependencies = [
+ "phpstan-rs-stack",
  "phpstan-rs-syntax",
  "proptest",
  "rustc-hash",

@@ -23,7 +23,7 @@ impl Relation<'_> {
         if !param.references_template() {
             return;
         }
-        syntax::stack::guard(|| {
+        stack::guard(|| {
             if matches!(arg.repr(), Repr::Never) {
                 return;
             }
@@ -213,7 +213,7 @@ impl Type {
         arg_ty: &Type,
         resolve_class: &impl Fn(&str) -> Option<String>,
     ) -> Type {
-        syntax::stack::guard(|| match (self.repr(), arg_ty.repr()) {
+        stack::guard(|| match (self.repr(), arg_ty.repr()) {
             (Repr::ClassString(_), Repr::StringLiteral(s)) => {
                 match s.as_str().and_then(&resolve_class) {
                     Some(canonical) => {
@@ -354,7 +354,7 @@ impl Type {
         &self,
         replace: &mut dyn FnMut(&TemplateParam) -> Option<Type>,
     ) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::TemplateParam(tp) => replace(tp).unwrap_or_else(|| self.clone()),
             _ => super::late::settle(self.map_children(&mut |t| t.replace_templates(replace))),
         })
@@ -448,7 +448,7 @@ pub(crate) fn substitute_with(
     {
         return ty.clone();
     }
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         match ty.repr() {
             Repr::TemplateParam(tp) if !substituted(tp) => ty.clone(),
             Repr::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {

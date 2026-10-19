@@ -1207,7 +1207,7 @@ impl Scanner {
         let result = if self.depth > MAX_GROUP_DEPTH {
             None
         } else {
-            syntax::stack::guard(|| self.scan_group_inner())
+            stack::guard(|| self.scan_group_inner())
         };
         self.depth -= 1;
         result

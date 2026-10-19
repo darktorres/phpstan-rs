@@ -205,7 +205,7 @@ fn write_static_target(out: &mut String, target: &StaticTarget) {
 }
 
 fn write_expr(out: &mut String, e: &Expr) {
-    crate::stack::guard(|| write_expr_unguarded(out, e));
+    stack::guard(|| write_expr_unguarded(out, e));
 }
 
 fn write_expr_unguarded(out: &mut String, e: &Expr) {

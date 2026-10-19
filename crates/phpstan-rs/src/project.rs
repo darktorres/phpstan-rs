@@ -366,7 +366,7 @@ pub struct Project {
 }
 
 /// The stack each checking thread starts with. Deep walks grow their stack
-/// on demand (`syntax::stack`), so this only spares ordinary code those
+/// on demand (`stack`), so this only spares ordinary code those
 /// growths.
 pub const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
 

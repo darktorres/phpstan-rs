@@ -107,7 +107,7 @@ fn union_types_impl(a: Type, b: Type, hierarchy: Option<&dyn ClassHierarchy>) ->
 /// union operand and every other operand, in order of first occurrence,
 /// then each rule over all of them once.
 fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>) -> Type {
-    syntax::stack::guard(|| {
+    stack::guard(|| {
         // `never` has no values to add.
         let mut operands: Vec<Type> = operands
             .into_iter()

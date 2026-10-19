@@ -10,7 +10,7 @@ impl Type {
     /// members, callable parameters and return, conditional branches);
     /// a leaf is returned unchanged. `f` decides whether to recurse.
     pub fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
-        syntax::stack::guard(|| match self.repr() {
+        stack::guard(|| match self.repr() {
             Repr::Array(k, v) => {
                 let (nk, nv) = (f(k), f(v));
                 if same(&nk, k) && same(&nv, v) {
@@ -168,7 +168,7 @@ impl Type {
 
 /// `Type::for_each_child` for a representation not yet a type.
 pub(crate) fn for_each_repr_child<'t>(repr: &'t Repr, f: &mut impl FnMut(&'t Type)) {
-    syntax::stack::guard(|| match repr {
+    stack::guard(|| match repr {
         Repr::Array(k, v) => {
             f(k);
             f(v);

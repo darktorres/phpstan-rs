@@ -101,7 +101,7 @@ fn main() {
 /// Runs `body` on a thread with the stack every checking thread has
 /// (`WORKER_STACK_SIZE`), and waits for it. The system chooses the main
 /// thread's stack, and it can be small: Windows gives it 1 MiB, which the
-/// stack guard's red zone (`syntax::stack`) fills by itself, and Unix gives it
+/// stack guard's red zone (`stack`) fills by itself, and Unix gives it
 /// `ulimit -s`. A panic of `body` is raised again here, so the process ends
 /// as it would have if `body` had run on this thread.
 fn on_worker_stack<R: Send>(body: impl FnOnce() -> R + Send) -> R {
