@@ -414,12 +414,13 @@ fn push_path_parts(expr: &Expr, parts: &mut Vec<PathPart>) {
     }
 }
 
-/// The class names a file's doc comments name, found in their text: every
-/// word of a doc comment, resolved against the file's namespace and imports
-/// as a class name is, each candidate kept. Over-approximates: a word that
-/// is no class name adds only a candidate that names no file. A PHPDoc type
-/// is a reference the checker resolves, so the lazy context lookup follows
-/// it too.
+/// The class names a file's doc comments name, found in their text: each word
+/// of a doc comment, resolved against the file's namespace and imports as a
+/// class name is, each candidate kept. A PHPDoc type is a reference the checker
+/// resolves, so the lazy context lookup follows it too. Two kinds of word name
+/// no class and are left out: a tag, the word after an `@`, and a PHP reserved
+/// word, which no class is named by. A word with a namespace is kept whole,
+/// since a namespace segment may be a reserved word.
 pub(crate) fn doc_names(source: &str) -> Vec<String> {
     let mut namespace = String::new();
     let mut uses: FxHashMap<String, String> = FxHashMap::default();
@@ -450,9 +451,7 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
     while let Some(start) = rest.find("/**") {
         let after = &rest[start + 3..];
         let end = after.find("*/").unwrap_or(after.len());
-        for word in
-            after[..end].split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '\\'))
-        {
+        for (word, tag) in doc_words(&after[..end]) {
             let word = word.trim_matches('\\');
             if word.is_empty() || !word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
                 continue;
@@ -460,6 +459,9 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
             lower.clear();
             lower.push_str(word);
             lower.make_ascii_lowercase();
+            if !lower.contains('\\') && (tag || RESERVED.contains(&lower.as_str())) {
+                continue;
+            }
             let head = lower.split('\\').next().unwrap_or(&lower);
             if let Some(target) = uses.get(head) {
                 match lower.split_once('\\') {
@@ -487,6 +489,114 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
     names.into_iter().collect()
 }
 
+/// The words of a doc comment's text, each with whether an `@` comes just
+/// before it.
+fn doc_words(text: &str) -> Vec<(&str, bool)> {
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\';
+    let bytes = text.as_bytes();
+    let mut words = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        if !is_word(bytes[at]) {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < bytes.len() && is_word(bytes[at]) {
+            at += 1;
+        }
+        words.push((&text[start..at], start > 0 && bytes[start - 1] == b'@'));
+    }
+    words
+}
+
+/// The words PHP 8 reserves, which no class is named by. Lowercase.
+const RESERVED: [&str; 83] = [
+    "abstract",
+    "and",
+    "array",
+    "as",
+    "bool",
+    "break",
+    "callable",
+    "case",
+    "catch",
+    "class",
+    "clone",
+    "const",
+    "continue",
+    "declare",
+    "default",
+    "die",
+    "do",
+    "echo",
+    "else",
+    "elseif",
+    "empty",
+    "enddeclare",
+    "endfor",
+    "endforeach",
+    "endif",
+    "endswitch",
+    "endwhile",
+    "eval",
+    "exit",
+    "extends",
+    "false",
+    "final",
+    "finally",
+    "float",
+    "fn",
+    "for",
+    "foreach",
+    "function",
+    "global",
+    "goto",
+    "if",
+    "implements",
+    "include",
+    "include_once",
+    "instanceof",
+    "insteadof",
+    "int",
+    "interface",
+    "isset",
+    "iterable",
+    "list",
+    "match",
+    "mixed",
+    "namespace",
+    "never",
+    "new",
+    "null",
+    "object",
+    "or",
+    "parent",
+    "print",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "require",
+    "require_once",
+    "return",
+    "self",
+    "static",
+    "string",
+    "switch",
+    "throw",
+    "trait",
+    "true",
+    "try",
+    "unset",
+    "use",
+    "var",
+    "void",
+    "while",
+    "xor",
+    "yield",
+];
+
 /// Adds `name` to `names`, allocating only when it is new.
 fn add_name(names: &mut FxHashSet<String>, name: &str) {
     if !names.contains(name) {
@@ -508,11 +618,30 @@ mod tests {
             [
                 "app\\model\\helper",
                 "app\\model\\t",
-                "app\\model\\var",
                 "helper",
                 "lib\\thing",
                 "t",
-                "var",
+            ]
+        );
+    }
+
+    #[test]
+    fn doc_names_leave_out_tags_and_reserved_words_but_not_namespaced_ones() {
+        let source =
+            "<?php\nnamespace App\\Model;\n/** Describes array and Foo\\Class, see @param Bar */\n";
+        let mut names = doc_names(source);
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "app\\model\\bar",
+                "app\\model\\describes",
+                "app\\model\\foo\\class",
+                "app\\model\\see",
+                "bar",
+                "describes",
+                "foo\\class",
+                "see",
             ]
         );
     }
