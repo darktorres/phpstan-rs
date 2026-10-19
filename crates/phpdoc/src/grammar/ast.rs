@@ -190,6 +190,102 @@ pub enum TypeNode {
     Error,
 }
 
+/// Drops the children inside the recursion guard, so a deeply nested type
+/// drops on any stack: the derived drop glue recurses through every child
+/// with no stack check.
+impl Drop for TypeNode {
+    fn drop(&mut self) {
+        let mut children = Vec::new();
+        self.detach_children(&mut children);
+        if !children.is_empty() {
+            stack::guard(|| drop(children));
+        }
+    }
+}
+
+impl TypeNode {
+    /// Moves every direct child out of `self`, leaving `Error` in its place,
+    /// so that `self` drops as a leaf.
+    fn detach_children(&mut self, out: &mut Vec<TypeNode>) {
+        match self {
+            TypeNode::Nullable(inner)
+            | TypeNode::VarianceArg(_, inner)
+            | TypeNode::ArrayOf(inner)
+            | TypeNode::Paren(inner) => detach_boxed(inner, out),
+            TypeNode::Union(items)
+            | TypeNode::Intersection(items)
+            | TypeNode::Generic(_, items) => out.append(items),
+            TypeNode::OffsetAccess(base, offset) => {
+                detach_boxed(base, out);
+                detach_boxed(offset, out);
+            }
+            TypeNode::ArrayShape {
+                fields,
+                unsealed_type,
+                ..
+            } => {
+                out.extend(
+                    fields
+                        .iter_mut()
+                        .map(|field| std::mem::replace(&mut field.ty, TypeNode::Error)),
+                );
+                if let Some((key, value)) = unsealed_type.take() {
+                    out.extend(key.map(|key| *key));
+                    out.push(*value);
+                }
+            }
+            TypeNode::Callable {
+                templates,
+                params,
+                return_type,
+                ..
+            } => {
+                for template in templates.iter_mut() {
+                    out.extend(
+                        [
+                            template.bound.take(),
+                            template.lower.take(),
+                            template.default.take(),
+                        ]
+                        .into_iter()
+                        .flatten(),
+                    );
+                }
+                out.extend(
+                    params
+                        .iter_mut()
+                        .map(|param| std::mem::replace(&mut param.ty, TypeNode::Error)),
+                );
+                if let Some(return_type) = return_type.take() {
+                    out.push(*return_type);
+                }
+            }
+            TypeNode::Conditional {
+                target,
+                if_true,
+                if_false,
+                ..
+            } => {
+                detach_boxed(target, out);
+                detach_boxed(if_true, out);
+                detach_boxed(if_false, out);
+            }
+            TypeNode::Identifier(_)
+            | TypeNode::Wildcard
+            | TypeNode::IntRange(..)
+            | TypeNode::IntLiteral(_)
+            | TypeNode::FloatLiteral(_)
+            | TypeNode::StringLiteral(_)
+            | TypeNode::ConstFetch { .. }
+            | TypeNode::Error => {}
+        }
+    }
+}
+
+fn detach_boxed(child: &mut Box<TypeNode>, out: &mut Vec<TypeNode>) {
+    out.push(std::mem::replace(&mut **child, TypeNode::Error));
+}
+
 impl TypeNode {
     /// See `TypeNode::Paren`'s own doc comment.
     pub fn unwrap_paren(&self) -> &TypeNode {

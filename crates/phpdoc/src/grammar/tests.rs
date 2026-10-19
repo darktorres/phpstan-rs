@@ -21,7 +21,7 @@ fn type_of(raw: &str) -> TypeNode {
 fn a_simple_param_parses() {
     let tag = only_tag("/** @param int $x */");
     assert_eq!(tag.name, "param");
-    match tag.value {
+    match &tag.value {
         PhpDocTagValue::TypedVar {
             ty: Some(TypeNode::Identifier(n)),
             variable: Some(v),
@@ -53,7 +53,7 @@ fn a_by_ref_variadic_param_parses() {
 #[test]
 fn a_genuine_intersection_type_in_param_position_is_not_mistaken_for_by_ref() {
     let tag = only_tag("/** @param Foo&Bar $x */");
-    match tag.value {
+    match &tag.value {
         PhpDocTagValue::TypedVar {
             ty: Some(TypeNode::Intersection(members)),
             variable: Some(v),
@@ -61,7 +61,7 @@ fn a_genuine_intersection_type_in_param_position_is_not_mistaken_for_by_ref() {
             ..
         } => {
             assert_eq!(
-                members,
+                *members,
                 vec![
                     TypeNode::Identifier("Foo".to_string()),
                     TypeNode::Identifier("Bar".to_string()),
@@ -89,7 +89,7 @@ fn a_typeless_var_tag_parses() {
 #[test]
 fn a_nullable_union_type_parses() {
     let ty = type_of("/** @return ?int|string */");
-    match ty {
+    match &ty {
         TypeNode::Union(members) => {
             assert!(
                 matches!(&members[0], TypeNode::Nullable(inner) if **inner == TypeNode::Identifier("int".to_string()))
@@ -165,7 +165,7 @@ fn a_repeated_array_suffix_parses() {
 #[test]
 fn an_array_shape_parses_keyed_and_optional_fields() {
     let ty = type_of("/** @return array{name: string, age?: int} */");
-    match ty {
+    match &ty {
         TypeNode::ArrayShape {
             keyword,
             fields,
@@ -191,7 +191,7 @@ fn an_array_shape_parses_keyed_and_optional_fields() {
 #[test]
 fn an_unsealed_array_shape_parses() {
     let ty = type_of("/** @return array{name: string, ...} */");
-    match ty {
+    match &ty {
         TypeNode::ArrayShape { sealed, fields, .. } => {
             assert!(!sealed);
             assert_eq!(fields.len(), 1);
@@ -204,7 +204,7 @@ fn an_unsealed_array_shape_parses() {
 fn an_unsealed_array_shape_takes_a_key_and_value_type() {
     let node = parse("/** @return array{a: int, ...<string, mixed>} */");
     assert!(node.errors.is_empty(), "got: {node:?}");
-    match type_of("/** @return array{a: int, ...<string, mixed>} */") {
+    match &type_of("/** @return array{a: int, ...<string, mixed>} */") {
         TypeNode::ArrayShape {
             sealed,
             fields,
@@ -213,8 +213,8 @@ fn an_unsealed_array_shape_takes_a_key_and_value_type() {
         } => {
             assert!(!sealed);
             assert_eq!(fields.len(), 1);
-            assert_eq!(*key, TypeNode::Identifier("string".to_string()));
-            assert_eq!(*value, TypeNode::Identifier("mixed".to_string()));
+            assert_eq!(**key, TypeNode::Identifier("string".to_string()));
+            assert_eq!(**value, TypeNode::Identifier("mixed".to_string()));
         }
         other => panic!("got: {other:?}"),
     }
@@ -256,7 +256,7 @@ fn an_object_shape_needs_keys_and_has_no_unsealed_tail() {
 #[test]
 fn a_positional_array_shape_parses() {
     let ty = type_of("/** @return array{int, string} */");
-    match ty {
+    match &ty {
         TypeNode::ArrayShape { fields, .. } => {
             assert_eq!(fields.len(), 2);
             assert!(fields[0].key.is_none());
@@ -269,7 +269,7 @@ fn a_positional_array_shape_parses() {
 #[test]
 fn a_callable_signature_parses() {
     let ty = type_of("/** @return callable(int, string=, bool...): void */");
-    match ty {
+    match &ty {
         TypeNode::Callable {
             keyword,
             params,
@@ -281,7 +281,7 @@ fn a_callable_signature_parses() {
             assert!(!params[0].optional && !params[0].variadic);
             assert!(params[1].optional);
             assert!(params[2].variadic);
-            assert_eq!(*ret, TypeNode::Identifier("void".to_string()));
+            assert_eq!(**ret, TypeNode::Identifier("void".to_string()));
         }
         other => panic!("got: {other:?}"),
     }
@@ -296,7 +296,7 @@ fn a_callable_signature_with_named_parameters_still_parses_its_whole_shape() {
     let ty = type_of(
         "/** @return callable(Node $firstNode, Node $secondNode): bool|class-string<Node> */",
     );
-    match ty {
+    match &ty {
         TypeNode::Callable {
             params,
             return_type: Some(ret),
@@ -304,7 +304,7 @@ fn a_callable_signature_with_named_parameters_still_parses_its_whole_shape() {
         } => {
             assert_eq!(params.len(), 2);
             assert_eq!(
-                *ret,
+                **ret,
                 TypeNode::Union(vec![
                     TypeNode::Identifier("bool".to_string()),
                     TypeNode::Generic(
@@ -321,7 +321,7 @@ fn a_callable_signature_with_named_parameters_still_parses_its_whole_shape() {
 #[test]
 fn a_closure_signature_parses() {
     let ty = type_of("/** @return Closure(int): string */");
-    assert!(matches!(ty, TypeNode::Callable { keyword, .. } if keyword == "Closure"));
+    assert!(matches!(&ty, TypeNode::Callable { keyword, .. } if keyword == "Closure"));
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn a_const_fetch_type_parses() {
 #[test]
 fn a_conditional_type_parses() {
     let ty = type_of("/** @return ($x is int ? true : false) */");
-    match ty {
+    match &ty {
         TypeNode::Conditional {
             subject,
             negated,
@@ -377,9 +377,9 @@ fn a_conditional_type_parses() {
         } => {
             assert_eq!(subject, "$x");
             assert!(!negated);
-            assert_eq!(*target, TypeNode::Identifier("int".to_string()));
-            assert_eq!(*if_true, TypeNode::Identifier("true".to_string()));
-            assert_eq!(*if_false, TypeNode::Identifier("false".to_string()));
+            assert_eq!(**target, TypeNode::Identifier("int".to_string()));
+            assert_eq!(**if_true, TypeNode::Identifier("true".to_string()));
+            assert_eq!(**if_false, TypeNode::Identifier("false".to_string()));
         }
         other => panic!("got: {other:?}"),
     }
@@ -423,12 +423,12 @@ fn a_template_tag_with_bound_and_default_parses() {
 #[test]
 fn an_extends_tag_parses_its_generic_argument() {
     let tag = only_tag("/** @extends Base<Foo> */");
-    match tag.value {
+    match &tag.value {
         PhpDocTagValue::ExtendsLike {
             ty: TypeNode::Generic(name, args),
         } => {
             assert_eq!(name, "Base");
-            assert_eq!(args, vec![TypeNode::Identifier("Foo".to_string())]);
+            assert_eq!(*args, vec![TypeNode::Identifier("Foo".to_string())]);
         }
         other => panic!("got: {other:?}"),
     }
@@ -608,7 +608,7 @@ fn a_fully_qualified_closure_type_still_parses_its_own_signature() {
     // return type - a leading `\` before `Closure` must not defeat the
     // callable-keyword check.
     let ty = type_of("/** @return \\Closure(): int */");
-    assert!(matches!(ty, TypeNode::Callable { keyword, .. } if keyword == "\\Closure"));
+    assert!(matches!(&ty, TypeNode::Callable { keyword, .. } if keyword == "\\Closure"));
 }
 
 #[test]
@@ -616,7 +616,7 @@ fn a_bare_wildcard_suffix_with_no_class_scope_keeps_its_star() {
     // Real text from symfony/console's own
     // `SignalableCommandInterface::getSubscribedSignals()`.
     let ty = type_of("/** @return list<\\SIG*> */");
-    match ty {
+    match &ty {
         TypeNode::Generic(name, args) if name == "list" => {
             assert_eq!(args[0], TypeNode::Identifier("\\SIG*".to_string()));
         }
@@ -641,7 +641,7 @@ fn a_psalm_negated_type_degrades_to_its_wrapped_type() {
     // real PHPStan grammar; not worth its own node, but also not a real
     // parse error the way genuinely malformed syntax is.
     let ty = type_of("/** @return iterable<!empty|null> */");
-    match ty {
+    match &ty {
         TypeNode::Generic(name, args) if name == "iterable" => match &args[0] {
             TypeNode::Union(members) => {
                 assert_eq!(members[0], TypeNode::Identifier("empty".to_string()));
@@ -863,4 +863,40 @@ fn a_doc_comment_parses_to_the_same_tags_whatever_its_line_breaks() {
     for (line_break, raw) in written_three_ways(lf) {
         assert_eq!(parse(&raw), expected, "{line_break:?}");
     }
+}
+
+/// Parses a `@var` tag holding `ty` on a thread with a small stack; the
+/// parsed tree is dropped there too.
+fn parse_on_small_stack(ty: String) {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            let node = parse(&format!("@var {ty}"));
+            // Matched without formatting the tree: a failure would print it.
+            let typed = matches!(
+                node.tags.first().map(|tag| &tag.value),
+                Some(PhpDocTagValue::TypedVar { ty: Some(_), .. })
+            );
+            assert!(typed, "the tag is not a typed variable");
+            drop(node);
+        })
+        .expect("the thread spawns")
+        .join()
+        .expect("the parse does not overflow");
+}
+
+#[test]
+fn a_deeply_nested_array_type_parses_and_drops_on_a_small_stack() {
+    const DEPTH: usize = 100_000;
+    parse_on_small_stack(format!(
+        "{}int{}",
+        "array<".repeat(DEPTH),
+        ">".repeat(DEPTH)
+    ));
+}
+
+#[test]
+fn a_long_union_chain_parses_and_drops_on_a_small_stack() {
+    const DEPTH: usize = 100_000;
+    parse_on_small_stack(format!("int{}", "|string".repeat(DEPTH)));
 }
