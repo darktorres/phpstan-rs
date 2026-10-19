@@ -79,14 +79,19 @@ impl VendorPath {
 #[repr(u8)]
 pub enum Reading {
     /// `autoload_static.php`: a class whose static `classMap` and `files`
-    /// list files and whose `prefixDirsPsr4` lists directories.
+    /// list files, whose `prefixDirsPsr4` lists directories and whose
+    /// `prefixesPsr0` lists them by first letter.
     StaticClass,
-    /// A file that returns an array of files: `autoload_classmap.php` and
-    /// `autoload_files.php`.
+    /// `autoload_classmap.php`: an array of class names to files.
+    Classmap,
+    /// `autoload_files.php`: an array of files.
     Files,
-    /// A file that returns an array of arrays of directories:
-    /// `autoload_psr4.php` and `autoload_namespaces.php`.
-    Dirs,
+    /// `autoload_psr4.php`: an array of namespace prefixes to arrays of
+    /// directories.
+    Psr4,
+    /// `autoload_namespaces.php`: an array of PSR-0 prefixes to arrays of
+    /// directories.
+    Psr0,
 }
 
 /// Keeps what reading a generated autoload file gives, by the file's bytes
@@ -234,10 +239,10 @@ impl Drop for OutsideSetter {
 /// The older separate generated files, each with its reading, in the order
 /// their entries are taken.
 const SEPARATE_FILES: [(&str, Reading); 4] = [
-    ("autoload_classmap.php", Reading::Files),
+    ("autoload_classmap.php", Reading::Classmap),
     ("autoload_files.php", Reading::Files),
-    ("autoload_psr4.php", Reading::Dirs),
-    ("autoload_namespaces.php", Reading::Dirs),
+    ("autoload_psr4.php", Reading::Psr4),
+    ("autoload_namespaces.php", Reading::Psr0),
 ];
 
 fn discover_inner(
@@ -334,6 +339,12 @@ pub struct GeneratedEntries {
     files: Spelled,
     /// The directories to load: PSR-4 and PSR-0 entries.
     dirs: Spelled,
+    /// The classmap's entries, each class name with the file it maps to.
+    classes: Keyed,
+    /// The PSR-4 entries, each namespace prefix with its directories.
+    psr4: Keyed,
+    /// The PSR-0 entries, each class name prefix with its directories.
+    psr0: Keyed,
 }
 
 impl GeneratedEntries {
@@ -352,16 +363,136 @@ impl GeneratedEntries {
                         continue;
                     };
                     match prop.name.as_ref() {
-                        "classMap" | "files" => entries.files.push_items(default),
-                        "prefixDirsPsr4" => entries.dirs.push_nested_items(default),
+                        "classMap" => {
+                            entries.files.push_items(default);
+                            entries.classes.push(default, false);
+                        }
+                        "files" => entries.files.push_items(default),
+                        "prefixDirsPsr4" => {
+                            entries.dirs.push_nested_items(default);
+                            entries.psr4.push(default, true);
+                        }
+                        "prefixesPsr0" => {
+                            let ExprKind::ArrayLiteral(letters) = &default.kind else {
+                                continue;
+                            };
+                            for letter in letters {
+                                entries.psr0.push(&letter.value, true);
+                            }
+                        }
                         _ => {}
                     }
                 }
             }
+            Reading::Classmap => {
+                let array = top_level_array(stmts)?;
+                entries.files.push_items(array);
+                entries.classes.push(array, false);
+            }
             Reading::Files => entries.files.push_items(top_level_array(stmts)?),
-            Reading::Dirs => entries.dirs.push_nested_items(top_level_array(stmts)?),
+            Reading::Psr4 => {
+                let array = top_level_array(stmts)?;
+                entries.dirs.push_nested_items(array);
+                entries.psr4.push(array, true);
+            }
+            Reading::Psr0 => {
+                let array = top_level_array(stmts)?;
+                entries.dirs.push_nested_items(array);
+                entries.psr0.push(array, true);
+            }
         }
         Some(entries)
+    }
+
+    /// Each class of the classmap with the file it maps to, spelled from the
+    /// given directories.
+    pub fn classes(
+        &self,
+        generated_dir: &Path,
+        vendor_dir: &Path,
+        base_dir: &Path,
+    ) -> Vec<(String, Vec<PathBuf>)> {
+        self.classes.paths(generated_dir, vendor_dir, base_dir)
+    }
+
+    /// Each PSR-4 namespace prefix with its directories, spelled from the
+    /// given directories.
+    pub fn psr4(
+        &self,
+        generated_dir: &Path,
+        vendor_dir: &Path,
+        base_dir: &Path,
+    ) -> Vec<(String, Vec<PathBuf>)> {
+        self.psr4.paths(generated_dir, vendor_dir, base_dir)
+    }
+
+    /// Each PSR-0 class name prefix with its directories, spelled from the
+    /// given directories.
+    pub fn psr0(
+        &self,
+        generated_dir: &Path,
+        vendor_dir: &Path,
+        base_dir: &Path,
+    ) -> Vec<(String, Vec<PathBuf>)> {
+        self.psr0.paths(generated_dir, vendor_dir, base_dir)
+    }
+}
+
+/// Paths under the keys a generated file gives them: a class name, or a
+/// namespace prefix. A key is kept whatever its paths spell to, since the
+/// key alone says what the file maps.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct Keyed(Vec<(String, Spelled)>);
+
+impl Keyed {
+    /// Appends each entry of `array` that has a string key: the path its
+    /// value spells, or with `dirs`, the paths of the array its value is.
+    fn push(&mut self, array: &Expr, dirs: bool) {
+        let ExprKind::ArrayLiteral(items) = &array.kind else {
+            return;
+        };
+        for item in items {
+            let Some(key) = item.key.as_ref().and_then(key_of) else {
+                continue;
+            };
+            let mut paths = Spelled::default();
+            if dirs {
+                paths.push_items(&item.value);
+            } else {
+                paths.push(&item.value);
+            }
+            self.0.push((key, paths));
+        }
+    }
+
+    /// Each key with the paths it names, spelled from the directories given.
+    fn paths(
+        &self,
+        generated_dir: &Path,
+        vendor_dir: &Path,
+        base_dir: &Path,
+    ) -> Vec<(String, Vec<PathBuf>)> {
+        self.0
+            .iter()
+            .map(|(key, spelled)| {
+                let mut paths = Vec::new();
+                spelled.each(generated_dir, vendor_dir, base_dir, |raw| {
+                    paths.extend(path_of(raw).map(Path::to_path_buf));
+                });
+                (key.clone(), paths)
+            })
+            .collect()
+    }
+}
+
+/// The text of a key a generated file gives as a string; `None` for any
+/// other key, such as the index an array of a list gives.
+fn key_of(expr: &Expr) -> Option<String> {
+    match &expr.peeled().kind {
+        ExprKind::Literal(Literal::String(text)) => {
+            Some(String::from_utf8_lossy(text.as_bytes()).into_owned())
+        }
+        _ => None,
     }
 }
 

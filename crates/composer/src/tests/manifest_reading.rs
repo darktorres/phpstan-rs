@@ -496,3 +496,31 @@ fn the_lines_a_manifest_reports_are_the_same_whatever_the_line_break() {
         );
     }
 }
+
+#[test]
+fn psr0_prefixes_keep_their_class_prefix_as_written_with_their_directories() {
+    let dir = TempDir::new("manifest_psr0");
+    dir.write(
+        "composer.json",
+        r#"{"autoload": {"psr-0": {"Vendor_Pkg_": "src/", "Root\\": ["lib", "extra"]}}}"#,
+    );
+    let root = canonicalize(dir.path()).unwrap();
+    let manifest = ComposerManifest::load(
+        &root.join("composer.json"),
+        &root,
+        &root,
+        Some(&root.join("vendor")),
+        &DirListings::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        manifest.autoload.psr0,
+        vec![
+            (
+                "Root\\".to_string(),
+                vec![root.join("lib"), root.join("extra")]
+            ),
+            ("Vendor_Pkg_".to_string(), vec![root.join("src")]),
+        ]
+    );
+}

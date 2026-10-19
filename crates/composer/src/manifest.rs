@@ -33,6 +33,10 @@ pub struct Located<T> {
 pub struct Autoload {
     /// `(namespace prefix with trailing \, directories)`.
     pub psr4: Vec<(String, Vec<PathBuf>)>,
+    /// `(class name prefix, directories)`, as written: PSR-0 reads an
+    /// underscore in the class name as a directory separator when it looks
+    /// a class up, which is not done here.
+    pub psr0: Vec<(String, Vec<PathBuf>)>,
     pub classmap: Vec<PathBuf>,
     pub files: Vec<PathBuf>,
     /// `exclude-from-classmap` paths (also excluded from PSR-4 scanning).
@@ -47,14 +51,18 @@ impl Autoload {
         let paths = |raw: &RawValue| -> Vec<PathBuf> {
             strings(raw).iter().map(|s| root.join(s)).collect()
         };
-        let psr4 = section
-            .read::<Members>("psr-4")
-            .map(|map| {
-                map.iter()
-                    .map(|(prefix, dirs)| (prefix.to_string(), paths(dirs)))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let prefixes = |name: &str| -> Vec<(String, Vec<PathBuf>)> {
+            section
+                .read::<Members>(name)
+                .map(|map| {
+                    map.iter()
+                        .map(|(prefix, dirs)| (prefix.to_string(), paths(dirs)))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let psr4 = prefixes("psr-4");
+        let psr0 = prefixes("psr-0");
         let excluded = section
             .raw("exclude-from-classmap")
             .map(strings)
@@ -64,6 +72,7 @@ impl Autoload {
             .collect();
         Autoload {
             psr4,
+            psr0,
             classmap: section.raw("classmap").map(paths).unwrap_or_default(),
             files: section.raw("files").map(paths).unwrap_or_default(),
             excluded,

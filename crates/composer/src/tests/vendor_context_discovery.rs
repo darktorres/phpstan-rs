@@ -642,7 +642,7 @@ return array(
         .iter()
         .map(|(reading, ..)| *reading)
         .collect();
-    assert_eq!(readings, [Reading::Files, Reading::Dirs]);
+    assert_eq!(readings, [Reading::Classmap, Reading::Psr4]);
 }
 
 /// A project whose classmap lists `entries`, each a path below

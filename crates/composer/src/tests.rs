@@ -1,3 +1,4 @@
+mod autoload_maps;
 mod canonical;
 mod dir_listings;
 mod hashed_path;
