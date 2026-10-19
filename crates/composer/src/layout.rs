@@ -26,6 +26,12 @@ use crate::manifest;
 /// The value of an environment variable, `None` when it is not set.
 pub type Variables<'a> = &'a (dyn Fn(&OsStr) -> Option<OsString> + Sync);
 
+/// The environment that sets no variable, for a load whose answer must not
+/// depend on the process's environment.
+pub fn no_variables(_: &OsStr) -> Option<OsString> {
+    None
+}
+
 /// The keys Composer derives from the user's own directories. A reference to
 /// one of them is not resolved, since those directories are not modelled, and
 /// the candidate that holds it is left out.

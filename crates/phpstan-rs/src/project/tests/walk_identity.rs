@@ -675,9 +675,14 @@ fn a_listed_file_carries_the_package_that_owns_its_directory() {
     link_file("../vendor/acme/lib/src/A.php", base.join("src/Linked.php"));
     link_file("nowhere.php", base.join("src/Dangling.php"));
     let packages = composer::PackageIndex::new(
-        composer::manifest::ComposerManifest::load(&base, &base)
-            .into_iter()
-            .collect(),
+        composer::manifest::ComposerManifest::load(
+            &base.join("composer.json"),
+            &base,
+            &base,
+            Some(&base.join("vendor")),
+        )
+        .into_iter()
+        .collect(),
     );
 
     let mut walk = Walk::new(Arc::default(), &packages);
@@ -1050,7 +1055,7 @@ return array(
     );
 
     let listings = Arc::new(DirListings::default());
-    let found = composer::vendor::discover_vendor_context(&base, &listings, None);
+    let found = composer::vendor::discover_vendor_context(&base.join("vendor"), &listings, None);
     let resolved_ones = |paths: &[VendorPath]| {
         paths
             .iter()

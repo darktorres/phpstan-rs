@@ -158,7 +158,7 @@ return array(
     );
 
     let listings = DirListings::default();
-    crate::vendor::discover_vendor_context(dir.path(), &listings, None);
+    crate::vendor::discover_vendor_context(&dir.path().join("vendor"), &listings, None);
     let src = HashedPath::new(canonicalize(&dir.path().join("vendor/acme/lib/src")).unwrap());
     // The discovery has read `src`, so its listing is kept after the file goes.
     std::fs::remove_file(src.as_path().join("Bar.php")).unwrap();

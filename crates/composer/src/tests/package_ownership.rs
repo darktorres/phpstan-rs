@@ -13,10 +13,16 @@ use std::sync::Arc;
 fn index(dir: &TempDir) -> PackageIndex {
     let root = canonicalize(dir.path()).unwrap();
     PackageIndex::new(
-        PackageContext::load(&root, &root, &Arc::default(), None)
-            .manifest
-            .into_iter()
-            .collect(),
+        PackageContext::load(
+            &root,
+            &root,
+            &Arc::default(),
+            &crate::layout::no_variables,
+            None,
+        )
+        .manifest
+        .into_iter()
+        .collect(),
     )
 }
 

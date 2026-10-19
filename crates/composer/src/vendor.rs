@@ -99,21 +99,19 @@ pub trait GeneratedCache: Send + Sync {
     fn store(&self, reading: Reading, bytes: &[u8], entries: &GeneratedEntries);
 }
 
-/// Discovers `vendor/` context for the Composer project rooted at
-/// `project_dir`, or an empty `VendorContext` if `project_dir` isn't a
-/// Composer project (no `composer.json`) or hasn't been installed yet (no
-/// `vendor/composer/`). The directories it reads are read through `listings`,
-/// which the walk of the same load shares, and what the generated files list
-/// is kept in `cache`, when there is one.
+/// Discovers the vendor context of the Composer project whose installed vendor
+/// directory is `vendor_dir`, or an empty `VendorContext` if that directory
+/// has no `composer/` (Composer has not installed there). The caller names the
+/// directory (the project's `vendor_location`), so the project's own
+/// `vendor-dir` setting is what is read. The directories it reads are read
+/// through `listings`, which the walk of the same load shares, and what the
+/// generated files list is kept in `cache`, when there is one.
 pub fn discover_vendor_context(
-    project_dir: &Path,
+    vendor_dir: &Path,
     listings: &DirListings,
     cache: Option<&dyn GeneratedCache>,
 ) -> VendorContext {
-    if !project_dir.join("composer.json").is_file() {
-        return VendorContext::default();
-    }
-    let composer_dir = project_dir.join("vendor").join("composer");
+    let composer_dir = vendor_dir.join("composer");
     if !composer_dir.is_dir() {
         return VendorContext::default();
     }

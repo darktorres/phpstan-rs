@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dir_listings::DirListings;
+use layout::{Layout, Variables};
 use manifest::ComposerManifest;
 use vendor::{GeneratedCache, VendorContext};
 
@@ -47,16 +48,21 @@ struct PendingVendorInner {
 }
 
 impl PendingVendor {
-    /// Starts discovering the vendor context of the project at `root`, reading
-    /// its directories through `listings` and keeping what the generated
-    /// files list in `cache`.
+    /// Starts discovering the vendor context in `installed`, the vendor
+    /// directory Composer built, reading its directories through `listings`
+    /// and keeping what the generated files list in `cache`. Without an
+    /// installed directory there is no context, and no thread is started.
     pub fn spawn(
-        root: PathBuf,
+        installed: Option<PathBuf>,
         listings: Arc<DirListings>,
         cache: Option<&'static dyn GeneratedCache>,
     ) -> PendingVendor {
-        let thread =
-            std::thread::spawn(move || vendor::discover_vendor_context(&root, &listings, cache));
+        let Some(installed) = installed else {
+            return PendingVendor::from(VendorContext::default());
+        };
+        let thread = std::thread::spawn(move || {
+            vendor::discover_vendor_context(&installed, &listings, cache)
+        });
         PendingVendor(Arc::new(PendingVendorInner {
             found: OnceLock::new(),
             thread: Mutex::new(Some(thread)),
@@ -103,17 +109,27 @@ impl std::fmt::Debug for PendingVendor {
 impl PackageContext {
     /// Reads the project at `root`, which is canonical. `spelled_root` is
     /// the root as analysed paths spell it, which the manifest's own paths
-    /// follow. The vendor context is discovered through `listings`, with what
-    /// the generated files list kept in `cache`.
+    /// follow. The manifest and the vendor directory are the ones Composer
+    /// resolves for the environment `variables`, and the vendor context is
+    /// discovered through `listings`, with what the generated files list kept
+    /// in `cache`.
     pub fn load(
         root: &Path,
         spelled_root: &Path,
         listings: &Arc<DirListings>,
+        variables: Variables<'_>,
         cache: Option<&'static dyn GeneratedCache>,
     ) -> PackageContext {
+        let layout = Layout::new(listings, variables);
+        let installed = layout.installed_dir(root);
         PackageContext {
-            manifest: ComposerManifest::load(spelled_root, root),
-            vendor: PendingVendor::spawn(root.to_path_buf(), Arc::clone(listings), cache),
+            manifest: ComposerManifest::load(
+                &layout.manifest_path(spelled_root),
+                spelled_root,
+                root,
+                installed.as_deref(),
+            ),
+            vendor: PendingVendor::spawn(installed, Arc::clone(listings), cache),
         }
     }
 

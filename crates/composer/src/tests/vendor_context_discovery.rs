@@ -25,7 +25,7 @@ fn paths(listed: &[VendorPath]) -> Vec<PathBuf> {
 fn no_composer_json_means_no_context() {
     let dir = TempDir::new("no_composer_json");
     assert_eq!(
-        discover_vendor_context(dir.path(), &DirListings::default(), None),
+        discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None),
         VendorContext::default()
     );
 }
@@ -35,7 +35,7 @@ fn composer_json_without_installed_vendor_means_no_context() {
     let dir = TempDir::new("no_vendor");
     dir.write("composer.json", "{}");
     assert_eq!(
-        discover_vendor_context(dir.path(), &DirListings::default(), None),
+        discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None),
         VendorContext::default()
     );
 }
@@ -67,7 +67,7 @@ return array(
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     let foo = canonicalize(&dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
     let src_dir = canonicalize(&dir.path().join("vendor/acme/lib/src")).unwrap();
     // Both are entries of listed directories that are not links, so the walk
@@ -103,7 +103,7 @@ return array();
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     let class_loader = canonicalize(&dir.path().join("vendor/composer/ClassLoader.php")).unwrap();
     assert!(
         ctx.files
@@ -164,7 +164,7 @@ class ComposerStaticInitTest
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     let foo = canonicalize(&dir.path().join("vendor/acme/lib/Foo.php")).unwrap();
     let other = canonicalize(&dir.path().join("vendor/acme/other/Other.php")).unwrap();
     let acme_dir = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
@@ -232,7 +232,7 @@ return array(
     );
     dir.write("src/App.php", "<?php class App {}");
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     assert_eq!(ctx.dirs.len(), 1, "{:?}", ctx.dirs);
     // Kept as written, so the walk resolves it.
     assert!(
@@ -278,7 +278,7 @@ return array(
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     let lib = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
     // The directory loads `Bar.php`. `Foo.php` lies beside the directory, and
     // `helpers.inc` is not PHP, so the walk does not take it: both stay.
@@ -327,7 +327,7 @@ return array(
     let hidden = dir.path().join("vendor/acme/lib/src/hidden");
     std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o111)).unwrap();
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     // A root reads any directory, and then the walk lists the file, so the
     // file is left out exactly when its directory can be read. The mode is
     // restored before any assertion can fail, so the directory is removed.
@@ -414,7 +414,7 @@ return array(
 "#,
     );
 
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     let mut kept: Vec<&str> = ctx
         .files
         .iter()
@@ -554,7 +554,7 @@ fn a_generated_files_entries_are_kept_by_its_bytes_and_resolved_each_time() {
     dir.write("vendor/acme/other/Other.php", "<?php class Other {}");
     dir.write("vendor/composer/autoload_static.php", STATIC_FILE);
     let discover = |cache: Option<&dyn GeneratedCache>| {
-        discover_vendor_context(dir.path(), &DirListings::default(), cache)
+        discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), cache)
     };
     let uncached = discover(None);
     assert_eq!(paths(&uncached.files).len(), 2, "{:?}", uncached.files);
@@ -621,12 +621,17 @@ return array(
 );
 "#,
     );
-    let uncached = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let uncached =
+        discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     assert_eq!(paths(&uncached.files).len(), 1, "{:?}", uncached.files);
     assert_eq!(paths(&uncached.dirs).len(), 1, "{:?}", uncached.dirs);
     let kept = Kept::default();
     for counts in [(0, 2), (2, 2)] {
-        let found = discover_vendor_context(dir.path(), &DirListings::default(), Some(&kept));
+        let found = discover_vendor_context(
+            &dir.path().join("vendor"),
+            &DirListings::default(),
+            Some(&kept),
+        );
         assert_eq!(found, uncached);
         assert_eq!(kept.counts(), counts);
     }
@@ -685,7 +690,7 @@ fn a_file_the_listing_lacks_is_found_when_the_system_has_it() {
 
     // `Late.php` is a miss of the listing that the system settles, and
     // `Gone.php` is a miss that it settles the other way.
-    let ctx = discover_vendor_context(dir.path(), &table, None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &table, None);
     assert_eq!(
         paths(&ctx.files),
         [lib.join("Foo.php"), lib.join("Late.php")]
@@ -696,7 +701,7 @@ fn a_file_the_listing_lacks_is_found_when_the_system_has_it() {
 fn a_spelling_whose_case_differs_names_the_file_where_the_directory_folds_case() {
     let dir = project_listing("case_of_the_name", &["/acme/lib/foo.php"]);
     let lib = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     // The file is named in the spelling the disk has, where the disk takes
     // the other spelling for it.
     let expected: Vec<PathBuf> = if folds_case(&dir) {
@@ -711,7 +716,7 @@ fn a_spelling_whose_case_differs_names_the_file_where_the_directory_folds_case()
 fn a_directory_whose_case_differs_names_the_file_where_the_directory_folds_case() {
     let dir = project_listing("case_of_the_directory", &["/ACME/Lib/Foo.php"]);
     let lib = canonicalize(&dir.path().join("vendor/acme/lib")).unwrap();
-    let ctx = discover_vendor_context(dir.path(), &DirListings::default(), None);
+    let ctx = discover_vendor_context(&dir.path().join("vendor"), &DirListings::default(), None);
     let folds = std::fs::symlink_metadata(dir.path().join("vendor/ACME/Lib/Foo.php")).is_ok();
     let expected: Vec<PathBuf> = if folds {
         vec![lib.join("Foo.php")]

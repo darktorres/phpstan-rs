@@ -16,7 +16,12 @@ fn load(label: &str, composer: &str, installed: Option<&str>) -> Option<Composer
         dir.write("vendor/composer/installed.json", installed);
     }
     let root = canonicalize(dir.path()).unwrap();
-    ComposerManifest::load(&root, &root)
+    ComposerManifest::load(
+        &root.join("composer.json"),
+        &root,
+        &root,
+        Some(&root.join("vendor")),
+    )
 }
 
 /// The package names of a list of requirements.

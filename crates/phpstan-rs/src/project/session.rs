@@ -8,6 +8,7 @@
 
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
+use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
@@ -17,6 +18,7 @@ use rayon::prelude::*;
 
 use composer::dir_listings::DirListings;
 use composer::hashed_path::HashedPath;
+use composer::layout::Layout;
 use composer::vendor::VendorPath;
 use config::ConfigFile;
 use serde::Deserialize;
@@ -580,7 +582,7 @@ pub(crate) fn declared_php_versions(
     })
 }
 
-fn composer_roots(dirs: &[PathBuf], root: &Path) -> Vec<PathBuf> {
+fn composer_roots(dirs: &[PathBuf], root: &Path, layout: &Layout<'_>) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for dir in dirs {
         let start =
@@ -592,7 +594,7 @@ fn composer_roots(dirs: &[PathBuf], root: &Path) -> Vec<PathBuf> {
         };
         let found = start
             .ancestors()
-            .find(|a| a.join("composer.json").is_file())
+            .find(|a| layout.has_manifest(a))
             .map(Path::to_path_buf)
             .unwrap_or_else(|| root.to_path_buf());
         if !roots.contains(&found) {
@@ -875,15 +877,22 @@ impl Session {
         // The `vendor` directory of each Composer project: a tree the project
         // reads where `composer install` has built it, and a directory a
         // deployment builds where it has not.
-        let composer_roots = composer_roots(&dirs, &absolute_root);
+        // The environment is read once, and every Composer answer of this
+        // resolve reads that copy.
+        let environment: FxHashMap<OsString, OsString> = std::env::vars_os().collect();
+        let variables = |name: &OsStr| environment.get(name).cloned();
+        let layout = Layout::new(&dir_listings, &variables);
+        let composer_roots = composer_roots(&dirs, &absolute_root, &layout);
         let mut vendor_trees: Vec<PathBuf> = Vec::new();
         let mut unbuilt: Vec<PathBuf> = Vec::new();
         for composer_root in &composer_roots {
-            let vendor = composer_root.join("vendor");
-            if vendor.is_dir() {
-                vendor_trees.push(vendor);
-            } else if composer_root.join("composer.json").is_file() {
-                unbuilt.push(vendor);
+            let location = layout.vendor_location(composer_root);
+            match &location.installed {
+                Some(installed) => vendor_trees.push(installed.clone()),
+                None if layout.has_manifest(composer_root) => {
+                    unbuilt.push(location.resolved.clone());
+                }
+                None => {}
             }
         }
         if !no_composer {
@@ -894,6 +903,7 @@ impl Session {
                     &composer_root,
                     &composer_root,
                     &dir_listings,
+                    &variables,
                     Some(&file_cache::GENERATED),
                 );
                 if composer_root == absolute_root {

@@ -126,18 +126,24 @@ pub struct ComposerManifest {
 }
 
 impl ComposerManifest {
-    /// Reads `root/composer.json` (and `root/vendor/composer/installed.json`
-    /// when present); `None` without a readable, parseable composer.json.
-    /// `absolute_root` is `root` canonicalized.
-    pub fn load(root: &Path, absolute_root: &Path) -> Option<ComposerManifest> {
-        let path = root.join("composer.json");
-        let text = std::fs::read_to_string(&path).ok()?;
+    /// Reads the manifest at `path`, which is `root`'s (the file its
+    /// `COMPOSER` setting names, or `composer.json`), and the packages that
+    /// `installed`'s `composer/installed.json` lists when `installed` is the
+    /// vendor directory Composer built; `None` without a readable, parseable
+    /// manifest. `absolute_root` is `root` canonicalized.
+    pub fn load(
+        path: &Path,
+        root: &Path,
+        absolute_root: &Path,
+        installed: Option<&Path>,
+    ) -> Option<ComposerManifest> {
+        let text = std::fs::read_to_string(path).ok()?;
         let json: Members = parse_document(&text)?;
         let lines = LineFinder::new(&text);
         let mut manifest = ComposerManifest {
             root: root.to_path_buf(),
             absolute_root: absolute_root.to_path_buf(),
-            path,
+            path: path.to_path_buf(),
             name: json.read("name"),
             ..ComposerManifest::default()
         };
@@ -203,7 +209,7 @@ impl ComposerManifest {
             }
         }
         manifest.include_path = include_directories(absolute_root, json.raw("include-path"));
-        manifest.installed = read_installed(absolute_root);
+        manifest.installed = read_installed(installed);
         Some(manifest)
     }
 
@@ -296,8 +302,11 @@ impl ComposerManifest {
     }
 }
 
-fn read_installed(absolute_root: &Path) -> Vec<InstalledPackage> {
-    let composer_dir = absolute_root.join("vendor").join("composer");
+fn read_installed(installed: Option<&Path>) -> Vec<InstalledPackage> {
+    let Some(installed_dir) = installed else {
+        return Vec::new();
+    };
+    let composer_dir = installed_dir.join("composer");
     let Ok(text) = std::fs::read_to_string(composer_dir.join("installed.json")) else {
         return Vec::new();
     };
@@ -308,7 +317,7 @@ fn read_installed(absolute_root: &Path) -> Vec<InstalledPackage> {
         .iter()
         .filter_map(|package| {
             let name: String = package.read("name")?;
-            let vendor_dir = resolve(&absolute_root.join("vendor").join(&name));
+            let vendor_dir = resolve(&installed_dir.join(&name));
             let install_dir = package
                 .read::<String>("install-path")
                 .map(|rel| composer_dir.join(rel))
@@ -714,7 +723,13 @@ mod tests {
         std::fs::write(root.join("packages/b/src/B.php"), "<?php").unwrap();
 
         let root = canonical::canonicalize(&root).unwrap();
-        let manifest = ComposerManifest::load(&root, &root).unwrap();
+        let manifest = ComposerManifest::load(
+            &root.join("composer.json"),
+            &root,
+            &root,
+            Some(&root.join("vendor")),
+        )
+        .unwrap();
         let names: Vec<&str> = manifest
             .path_repository_packages()
             .iter()
