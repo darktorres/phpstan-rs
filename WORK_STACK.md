@@ -196,17 +196,6 @@ area, which is not the order of work.
 later item waits for that need. The READY rows, item by item:
 
 - Item 0: none. Its open rows (VAL-1) are the final validation, after item 19.
-- Item 2: LOAD-2.2's last part is READY. LOAD-2.3 to 2.8 are in: `07595369`,
-  `8590ff55`, `c1db8372`, `c7ff651c`, `2cd13c8e`, `47adfd19` and `df804239`
-  (LOAD-2.4). LOAD-2.2's walk is in (`85a4ecad`). Its last part replaces the name
-  floor (`path_under_excluded_dir` and `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`) for the
-  editor's degrade root (no `paths`), for a file under no configured root, and for
-  a never-seen path. The user decided it on 2026-10-17 (the items 1 to 3 fixes
-  plan's decision 7): Composer's vendor directory is skipped by its resolved path,
-  so a `vendor/` outside Composer is walked, and the `.git` and `node_modules` names
-  stay until `exclude_paths` (the ledger's LOAD-7.8) exists, when the function and
-  the constant go. The Piwigo gate and the measurements of item 2's rows (wall
-  time, instructions) have not run.
 - Item 3: LOAD-3.2 is in (`001bd4f2`), LOAD-3.4 (`845efaab`) and LOAD-3.6
   (`11f03ec9`). 3.1 waits on REG-16.4, level 2. 3.3's load part is in, as the items 1
   to 3 fixes' R11 (`a5a4d85f`), and its `update_file` part waits on 3.1. 3.5 waits on SYN-1.2, which is item 9's.
@@ -215,8 +204,9 @@ later item waits for that need. The READY rows, item by item:
   LOAD-4.5 (`e9b253b4`, `4e443227`) are in; their need, LOAD-2.5, is in (`8590ff55`).
   LOAD-4.7 is blocked by PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2 (both READY,
   not started); its reverse-index part goes with REG-16.4.
-- Item 8: REG-14.4 and 14.5 (14.1 waits on PROD-5.8, 14.3 on REG-8.3).
-- Item 9: SYN-1.1 and 1.2, then 1.3, 1.4, 1.5, 1.7 and 1.8.
+- Item 8: 14.1 waits on PROD-5.8, 14.3 on REG-8.3. REG-14.4 is in (`8739437e`);
+  REG-14.5 is folded into REG-7.5.
+- Item 9: SYN-1.2, then 1.3, 1.4, 1.5, 1.7 and 1.8. SYN-1.1 is in (`2f9b1281`).
 - Item 11: SYN-3.1, 3.2 and 3.3 (LOAD-1.4 is in), then 3.4.
 - Item 12: SYN-4.2, 4.4, 4.5, 4.6, 4.8, 4.9 and 4.10.
 - Item 13: PROD-5.2, 5.3, 5.5, 5.6, and PROD-5.8 (decision 2).
@@ -225,15 +215,14 @@ later item waits for that need. The READY rows, item by item:
 - Item 16: NAME-2.1, 2.2 and 2.3.
 - Item 18: CHECK-6.1, 6.2, 6.4 to 6.6, 6.8 to 6.12, and 6.16 to 6.18. CHECK-4.1 is
   built with CHECK-6.10.
-- Item 19: LOAD-5.4.
+- Item 19: none ready. LOAD-5.4 is in (`a5ab84c4`).
 
 Items 4, 6, 7, 10 and 17 have no READY row in level 8. Item 4's two are C4 rows
 (level 2). Items 6 and 7 wait on level 2 and the C5 rows. Item 10 (SYN-2) waits
 on SYN-1 (item 9). Item 17 (CACHE-13) waits on LOAD-1.4 and on REG-16.4 (level 2).
 
 Outside the items, with no item number, CACHE-8 and CHECK-4.2 (off drill), TYPE-5
-and CHECK-9 (decisions 8 and 9), and LOAD-9 (the installed packages' resolutions,
-which the items 1 to 3 fixes' R14 found) are READY now.
+and CHECK-9 (decisions 8 and 9) are READY now.
 
 The off-run rows still open:
 
@@ -262,20 +251,19 @@ The off-run rows still open:
 
 ### 9. The batch after the cross-platform fixes — `~/.claude/plans/another-session-is-finishing-majestic-comet.md`
 
-Designed in plan mode on 2026-10-18 and 2026-10-19; nothing in it is built. Until the
-user says go it stays in that file. At the go its parts become four documents at the
-repository root: `POST_LEVEL_9_PLAN.md` (Parts A, C, D, E, F, G5, I2 to I5, K, L),
-`FLAT_TREE_PLAN.md` (B, G1 to G4, I1), `ENGINE_PLAN.md` (H, J) and
+Designed in plan mode on 2026-10-18 and 2026-10-19; its four documents are at the
+repository root (`4837b369`): `POST_LEVEL_9_PLAN.md` (Parts A, C, D, E, F, G5, I2 to
+I5, K, L), `FLAT_TREE_PLAN.md` (B, G1 to G4, I1), `ENGINE_PLAN.md` (H, J) and
 `PLAN_REVIEW_LEDGER.md` (M). The ledger and stack edits its Part N lists follow.
 
 Start condition, as read on 2026-10-19: the cross-platform fixes are finished
 (`a83b1675`), this file has no other level 9, `git status` is clean, and no build or
 profile runs.
 
-Order once started, as the plan sets it:
+Order, as the plan sets it:
 
-1. Part A's rows: LOAD-2.2's last part (A1), LOAD-9 (A2), REG-14.4 (A3), SYN-1.1 (A5),
-   LOAD-5.4 (A5a) and the composer follow-ups (A7, A8), then one validation (A6).
+1. Part A's rows: built, as the ledger's rows record (A1, A2, A3, A5, A5a, A7 and A8,
+   with COMP-7 and COMP-8). The one validation (A6) runs after the build.
 2. Batch 0: the oracle tools and the baseline, the seven fixes the crate split puts
    first, and the findings that change a dump. Then item 9, the flat tree, steps 0 to
    3, with spike S-12 before step 2.
@@ -285,8 +273,8 @@ Order once started, as the plan sets it:
 Spikes S-1 to S-12 (Part H5) run before the designs they settle. Level 8's list is not
 reordered until the go.
 
-Open: the user has not said go. The plan's Part E header says which answers are
-ruled, and that note is not confirmed.
+The user asked for Part A on 2026-10-19 and nothing else. Part B onward waits for
+the go.
 
 Leftovers from plan mode, to delete when it ends: the helper scripts, backups and
 probes in the scratchpad (`/tmp/claude-1000/-home-torres-projects-phpstan-rs/0fdc40b5-accc-4267-853a-f5ef8f30c07c/scratchpad`),
