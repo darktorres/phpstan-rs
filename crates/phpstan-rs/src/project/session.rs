@@ -626,6 +626,30 @@ pub(crate) fn declared_php_versions(
     })
 }
 
+/// The nested Composer projects below a degrade root: the directories below
+/// `root` that hold a `composer.json`, found by the walk's own child decision
+/// before any file is listed (`Walk::manifest_dirs`).
+fn nested_manifest_dirs(
+    root: &Path,
+    listings: &Arc<DirListings>,
+    environment: &Environment,
+    case: CaseRule,
+    seeds: &[PathBuf],
+) -> Vec<PathBuf> {
+    let packages = composer::PackageIndex::default();
+    let seeds: Arc<[PathBuf]> = Arc::from(seeds);
+    with_composer_test(listings, environment, |composer| {
+        Walk::new(Arc::clone(listings), &packages)
+            .with_path_case(case)
+            .with_composer(composer)
+            .with_seeds(seeds)
+            .manifest_dirs(
+                root,
+                Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case).leaving_out_composer(),
+            )
+    })
+}
+
 fn composer_roots(dirs: &[PathBuf], root: &Path, layout: &Layout<'_>) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for dir in dirs {
@@ -988,6 +1012,90 @@ impl Session {
                 scan_dirs.retain(|d| !is_promoted(d));
                 scan_files.retain(|f| !is_promoted(f));
                 dirs.extend(promoted.iter().cloned());
+            }
+            // The nested Composer projects of a degrade root: found before the
+            // walk, so their roots, owners and contexts are known when it starts.
+            if !excluded_dir_names.is_empty() {
+                let mut known_seeds = seeds.clone();
+                known_seeds.sort();
+                known_seeds.dedup();
+                let known_installs: Vec<PathBuf> = composer_manifests
+                    .iter()
+                    .flat_map(|manifest: &composer::manifest::ComposerManifest| {
+                        manifest.installed.iter().map(|p| p.install_dir.clone())
+                    })
+                    .collect();
+                let candidates: Vec<PathBuf> = nested_manifest_dirs(
+                    &absolute_root,
+                    &dir_listings,
+                    &environment,
+                    path_case,
+                    &known_seeds,
+                )
+                .into_iter()
+                .filter(|dir| {
+                    !promoted.iter().any(|p| dir.starts_with(p)) && !known_installs.contains(dir)
+                })
+                .collect();
+                let loaded: Vec<composer::PackageContext> = candidates
+                    .par_iter()
+                    .map(|dir| {
+                        composer::PackageContext::load(
+                            dir,
+                            dir,
+                            &dir_listings,
+                            &variables,
+                            Some(&file_cache::GENERATED),
+                        )
+                    })
+                    .collect();
+                // A manifest that does not parse is no root.
+                let mut nested: Vec<(PathBuf, Option<PathBuf>, composer::PackageContext)> =
+                    candidates
+                        .into_iter()
+                        .zip(loaded)
+                        .filter(|(_, package)| package.manifest.is_some())
+                        .map(|(dir, package)| {
+                            let installed = layout.vendor_location(&dir).installed.clone();
+                            (dir, installed, package)
+                        })
+                        .collect();
+                // A package a nested project installed elsewhere is that package's
+                // own code, not a project, and so is what lies below it.
+                let elsewhere: Vec<PathBuf> = nested
+                    .iter()
+                    .filter_map(|(_, installed, package)| {
+                        let (manifest, vendor) = (package.manifest.as_ref()?, installed.as_ref()?);
+                        Some(manifest.installed_elsewhere(vendor))
+                    })
+                    .flatten()
+                    .filter(|dir| dir.starts_with(&absolute_root) && *dir != absolute_root)
+                    .collect();
+                nested.retain(|(dir, _, _)| !elsewhere.iter().any(|seed| dir.starts_with(seed)));
+                for (dir, installed, package) in nested {
+                    if let (Some(manifest), Some(vendor)) = (&package.manifest, &installed) {
+                        seeds.extend(manifest.installed_elsewhere(vendor).into_iter().filter(
+                            |dir| dir.starts_with(&absolute_root) && *dir != absolute_root,
+                        ));
+                    }
+                    let location = layout.vendor_location(&dir);
+                    match &location.installed {
+                        Some(installed) => vendor_trees.push(installed.clone()),
+                        None => unbuilt.push(location.resolved.clone()),
+                    }
+                    phpstan_api_check_enabled |= package.requires_phpstan();
+                    vendors.push(package.vendor.clone());
+                    if let Some(manifest) = package.manifest {
+                        let repositories: Vec<PathBuf> = manifest
+                            .path_repository_packages()
+                            .into_iter()
+                            .map(|p| p.vendor_dir.clone())
+                            .collect();
+                        dirs.extend(repositories.iter().cloned());
+                        promoted.extend(repositories);
+                        composer_manifests.push(manifest);
+                    }
+                }
             }
         }
 

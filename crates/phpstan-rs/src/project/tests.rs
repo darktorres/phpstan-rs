@@ -21,6 +21,7 @@ mod inline_ignore_comments;
 mod installer_paths;
 mod load_cache;
 mod load_text;
+mod nested_composer;
 pub(super) mod panic_injection;
 mod path_places;
 mod path_spelling;

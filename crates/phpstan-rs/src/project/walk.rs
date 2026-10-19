@@ -1052,6 +1052,62 @@ impl<'a, 'p> Walk<'a, 'p> {
                     .any(|ancestor| is_seed(&self.seeds, self.path_case, ancestor)))
     }
 
+    /// The directories below `root` that hold a `composer.json` file: the
+    /// nested Composer projects of a degrade root, found before the walk so
+    /// that their roots are known when it starts. The directories are those the
+    /// walk enters: `excluded` leaves out the names it does, and the directories
+    /// `leaves_out_dir` leaves out (Composer's, and the seeds) are left out as
+    /// the walk leaves them; a link is followed once, to a target below `root`.
+    /// Sorted.
+    pub(crate) fn manifest_dirs(&self, root: &Path, excluded: Excluded<'_>) -> Vec<PathBuf> {
+        let root = HashedPath::new(root.to_path_buf());
+        let mut visited = rustc_hash::FxHashSet::<PathBuf>::default();
+        visited.insert(root.as_path().to_path_buf());
+        let mut pending = vec![root.clone()];
+        let mut found = Vec::new();
+        while let Some(dir) = pending.pop() {
+            let Some(listing) = self.listings.listing(&dir) else {
+                continue;
+            };
+            let has_manifest = listing.entries.iter().any(|entry| {
+                entry.name.as_os_str() == "composer.json"
+                    && entry.kind.is_some_and(|kind| !kind.is_dir())
+            });
+            if has_manifest && dir.as_path() != root.as_path() {
+                found.push(dir.as_path().to_path_buf());
+            }
+            for entry in &listing.entries {
+                // An entry whose type cannot be read is not entered, as the walk does.
+                let Some(file_type) = entry.kind else {
+                    continue;
+                };
+                let name = entry.name.as_os_str();
+                if excluded.excludes(name) {
+                    continue;
+                }
+                let child = dir.child(name);
+                if file_type.is_symlink() {
+                    let Ok(target) = composer::canonical::canonicalize(child.as_path()) else {
+                        continue;
+                    };
+                    if target.starts_with(root.as_path())
+                        && !self.leaves_out_link(excluded, &target)
+                        && visited.insert(target.clone())
+                    {
+                        pending.push(HashedPath::new(target));
+                    }
+                } else if file_type.is_dir()
+                    && !self.leaves_out_dir(excluded, child.as_path())
+                    && visited.insert(child.as_path().to_path_buf())
+                {
+                    pending.push(child);
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
     /// Adds `path` as a root, walked by `finish`. A directory is walked; a file
     /// is listed when it is PHP. The names in `excluded` apply below the root:
     /// the walk does not enter a directory of such a name, nor follow a link of
