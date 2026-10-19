@@ -50,6 +50,16 @@ pub struct VendorContext {
     pub files: Vec<VendorPath>,
     /// Directories to recursively load (PSR-4 base dirs).
     pub dirs: Vec<VendorPath>,
+    /// The classmap: each class name, lowercased and without a leading `\`,
+    /// with the file it maps to. Every entry is kept, including those whose
+    /// file the walk of `dirs` lists.
+    pub classes: Vec<(String, VendorPath)>,
+    /// The PSR-4 prefixes: each namespace prefix, lowercased and ending in `\`,
+    /// with one of its base directories, in the order Composer lists them.
+    pub prefixes: Vec<(String, VendorPath)>,
+    /// The files that Composer's bootstrap loads whatever class is asked for:
+    /// the `files` entries and the loader class.
+    pub eager: Vec<VendorPath>,
 }
 
 impl VendorContext {
@@ -57,6 +67,9 @@ impl VendorContext {
     pub fn extend_with(&mut self, other: &VendorContext) {
         self.files.extend(other.files.iter().cloned());
         self.dirs.extend(other.dirs.iter().cloned());
+        self.classes.extend(other.classes.iter().cloned());
+        self.prefixes.extend(other.prefixes.iter().cloned());
+        self.eager.extend(other.eager.iter().cloned());
     }
 }
 
@@ -277,8 +290,30 @@ fn discover_inner(
     let mut entries = Entries::default();
     for generated in &generated {
         let dirs = generated.heads.dirs(composer_dir, vendor_dir, base_dir);
-        resolver.collect(&generated.files, &dirs, &mut entries.files);
+        resolver.collect(&generated.files, &dirs, &mut entries.eager);
         resolver.collect(&generated.dirs, &dirs, &mut entries.dirs);
+        for (name, paths) in generated.classes.paths(composer_dir, &dirs) {
+            let name = lowercased_name(&name);
+            for path in &paths {
+                if let Some(found) = resolver
+                    .locate(path)
+                    .or_else(|| resolver.installed_elsewhere(path))
+                {
+                    entries.classes.push((name.clone(), found));
+                }
+            }
+        }
+        for (prefix, paths) in generated.psr4.paths(composer_dir, &dirs) {
+            let prefix = lowercased_name(&prefix);
+            for path in &paths {
+                if let Some(found) = resolver
+                    .locate(path)
+                    .or_else(|| resolver.installed_elsewhere(path))
+                {
+                    entries.prefixes.push((prefix.clone(), found));
+                }
+            }
+        }
     }
     // Composer's own bootstrap loader class - unlike every other file
     // this function discovers, it's never listed in any of the generated
@@ -295,6 +330,12 @@ fn discover_inner(
             None => found.path.as_path().is_file(),
         });
     entries
+}
+
+/// A class or namespace name as the classmap and the lookup compare it: ASCII
+/// lowercased (PHP class names fold case), without a leading `\`.
+fn lowercased_name(name: &str) -> String {
+    name.trim_start_matches('\\').to_ascii_lowercase()
 }
 
 /// What the generated file at `path` lists, read as `reading` says: from
@@ -344,7 +385,7 @@ fn top_level_array(stmts: &[Stmt]) -> Option<&Expr> {
 /// gives, which depends on its bytes alone.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedEntries {
-    /// The files to load: classmap and files entries.
+    /// The files Composer loads whatever class is asked for: the `files` entries.
     files: Spelled,
     /// The directories to load: PSR-4 and PSR-0 entries.
     dirs: Spelled,
@@ -377,10 +418,7 @@ impl GeneratedEntries {
                         continue;
                     };
                     match prop.name.as_ref() {
-                        "classMap" => {
-                            entries.files.push_items(default);
-                            entries.classes.push(default, false);
-                        }
+                        "classMap" => entries.classes.push(default, false),
                         "files" => entries.files.push_items(default),
                         "prefixDirsPsr4" => {
                             entries.dirs.push_nested_items(default);
@@ -400,7 +438,6 @@ impl GeneratedEntries {
             }
             Reading::Classmap => {
                 let array = top_level_array(stmts)?;
-                entries.files.push_items(array);
                 entries.classes.push(array, false);
             }
             Reading::Files => entries.files.push_items(top_level_array(stmts)?),
@@ -803,8 +840,13 @@ impl<'de> serde::Deserialize<'de> for Bytes {
 /// and Composer's own loader class.
 #[derive(Default)]
 struct Entries {
-    files: Vec<Located>,
+    /// The eager files: the `files` entries.
+    eager: Vec<Located>,
     dirs: Vec<Located>,
+    /// The classmap's entries, each lowercased class name with its file.
+    classes: Vec<(String, Located)>,
+    /// The PSR-4 entries, each lowercased prefix with one of its directories.
+    prefixes: Vec<(String, Located)>,
     class_loader: Option<Located>,
 }
 
@@ -815,10 +857,20 @@ impl Entries {
     /// the walk's output does not depend on the order of its roots.
     fn into_context(mut self, table: &DirListings) -> VendorContext {
         keep_first(&mut self.dirs);
-        drop_files_under_dirs(&mut self.files, &self.dirs, table);
-        keep_first(&mut self.files);
-        let mut files: Vec<VendorPath> = self
-            .files
+        let eager: Vec<VendorPath> = self
+            .eager
+            .iter()
+            .cloned()
+            .chain(self.class_loader.clone())
+            .map(|file| file.into_vendor_path(FileType::is_file))
+            .collect();
+        // The classmap files are listed too, so that the walk lists them as
+        // the context they are; those under a listed directory are listed by it.
+        let mut listed: Vec<Located> = self.eager;
+        listed.extend(self.classes.iter().map(|(_, file)| file.clone()));
+        drop_files_under_dirs(&mut listed, &self.dirs, table);
+        keep_first(&mut listed);
+        let mut files: Vec<VendorPath> = listed
             .into_iter()
             .map(|file| file.into_vendor_path(FileType::is_file))
             .collect();
@@ -833,12 +885,24 @@ impl Entries {
                 .into_iter()
                 .map(|dir| dir.into_vendor_path(FileType::is_dir))
                 .collect(),
+            classes: self
+                .classes
+                .into_iter()
+                .map(|(name, file)| (name, file.into_vendor_path(FileType::is_file)))
+                .collect(),
+            prefixes: self
+                .prefixes
+                .into_iter()
+                .map(|(prefix, dir)| (prefix, dir.into_vendor_path(FileType::is_dir)))
+                .collect(),
+            eager,
         }
     }
 }
 
 /// A path the resolver found, with its kind when its directory's listing
 /// gives the entry as no link, which makes the path resolved.
+#[derive(Clone)]
 struct Located {
     path: HashedPath,
     kind: Option<FileType>,

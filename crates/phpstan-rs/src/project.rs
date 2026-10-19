@@ -48,6 +48,7 @@ mod file_cache;
 mod file_declarations;
 mod file_table;
 mod file_tables;
+mod lazy_context;
 mod mock_hygiene;
 mod path_spelling;
 pub mod session;
@@ -74,6 +75,13 @@ struct AffectedWalk {
 #[derive(Default)]
 struct StubFileSet {
     words: Vec<u64>,
+}
+
+/// Whether context files are read by name, as the autoloader reads them, rather
+/// than all at once. Set by `PHPSTAN_RS_LAZY_CONTEXT=1`.
+pub(crate) fn lazy_context_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("PHPSTAN_RS_LAZY_CONTEXT").is_ok_and(|v| v == "1"))
 }
 
 impl StubFileSet {
@@ -1147,6 +1155,7 @@ impl Project {
             facts,
             line_index,
             class_fn_refs: _,
+            lazy_names: _,
             owner,
         } = parsed;
         let FileText {
@@ -2089,6 +2098,7 @@ impl Project {
             facts,
             line_index,
             class_fn_refs: _,
+            lazy_names: _,
             owner: _,
         } = parsed;
         let ast = ast.expect("a parse keeps its tree");
@@ -3342,6 +3352,9 @@ pub struct ParsedFile {
     // The file's class and function use sites, indexed alongside the parse
     // (`Project::index_use_sites`); `insert_file_tables` takes them.
     class_fn_refs: Option<Vec<(Span, use_sites::RefTarget)>>,
+    // The class names the file names, for the lazy context lookup (set only
+    // with `lazy_context_enabled`).
+    lazy_names: Vec<String>,
     // The composer package that owns the file, as the walk that listed it
     // found it; `insert_numbered_file` finds it itself when no walk did.
     owner: Option<Option<composer::PackageOwner>>,
@@ -3461,6 +3474,7 @@ pub fn parse_file_with_names<'a>(
         facts,
         line_index,
         class_fn_refs: None,
+        lazy_names: Vec::new(),
         owner: None,
     };
     // A file that skipped bodies gives what the whole of it gives, but for
