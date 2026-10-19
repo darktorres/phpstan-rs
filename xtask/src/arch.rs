@@ -77,12 +77,19 @@ pub(crate) fn is_engine_source(root: &Path, path: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(root.join("crates/phpstan-rs/src")) else {
         return false;
     };
-    let rel = rel.to_string_lossy();
-    let exempt = ["project/session.rs", "main.rs", "main/", "lsp.rs", "lsp/"];
-    !exempt.iter().any(|e| rel.starts_with(e))
-        && !rel
-            .split('/')
-            .any(|part| part == "tests" || part == "tests.rs")
+    let names: Vec<_> = rel
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect();
+    let names: Vec<&str> = names.iter().map(AsRef::as_ref).collect();
+    let exempt = matches!(
+        names.as_slice(),
+        ["project", "session.rs"] | ["main.rs"] | ["lsp.rs"] | ["main" | "lsp", ..]
+    );
+    !exempt
+        && !names
+            .iter()
+            .any(|name| matches!(*name, "tests" | "tests.rs"))
 }
 
 pub(crate) struct Finder {

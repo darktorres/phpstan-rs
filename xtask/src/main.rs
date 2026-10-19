@@ -6,7 +6,7 @@
 //! (or, when the parent has none, the nearest ancestor that has them):
 //! every artifact must be byte-identical unless HEAD's own commit adds
 //! `gates/approved/<slug>/<artifact>.diff` holding exactly the expected
-//! `diff -u` output.
+//! unified diff.
 //!
 //! The corpus is the frozen Piwigo checkout at `$PHPSTAN_RS_CORPUS`
 //! (default `/home/torres/piwigo17-frozen`).
@@ -810,9 +810,9 @@ fn determinism_check(full: bool, timings: &mut Timings) -> Result<(), String> {
         let (runner_stdout, runner_stderr) = (read("emission.json")?, read("emission.err")?);
         if stdout != runner_stdout || stderr != runner_stderr {
             let diff = if stdout != runner_stdout {
-                unified_diff(runner_stdout.as_bytes(), stdout.as_bytes())?
+                unified_diff(runner_stdout.as_bytes(), stdout.as_bytes())
             } else {
-                unified_diff(runner_stderr.as_bytes(), stderr.as_bytes())?
+                unified_diff(runner_stderr.as_bytes(), stderr.as_bytes())
             };
             let shown: String = diff.lines().take(40).collect::<Vec<_>>().join("\n");
             return Err(format!(
@@ -929,19 +929,14 @@ fn read_snapshot(artifact: &str, hash: &str, ext: &str) -> Result<Option<Vec<u8>
     std::fs::read(&path).map(Some).map_err(|e| e.to_string())
 }
 
-fn unified_diff(old: &[u8], new: &[u8]) -> Result<String, String> {
-    let dir = gate_dir().join(".diff");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let (a, b) = (dir.join("old"), dir.join("new"));
-    std::fs::write(&a, old).map_err(|e| e.to_string())?;
-    std::fs::write(&b, new).map_err(|e| e.to_string())?;
-    let out = Command::new("diff")
-        .args(["-u", "--label", "old", "--label", "new"])
-        .arg(&a)
-        .arg(&b)
-        .output()
-        .map_err(|e| e.to_string())?;
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+/// The unified diff from `old` to `new`, labelled `old` and `new`.
+fn unified_diff(old: &[u8], new: &[u8]) -> String {
+    let (old, new) = (String::from_utf8_lossy(old), String::from_utf8_lossy(new));
+    similar::TextDiff::from_lines(old.as_ref(), new.as_ref())
+        .unified_diff()
+        .context_radius(3)
+        .header("old", "new")
+        .to_string()
 }
 
 /// Every artifact `compare` checks, with its file extension.
@@ -1001,7 +996,7 @@ fn compare(args: &[String]) -> Result<(), String> {
         if old == new {
             continue;
         }
-        let diff = unified_diff(&old, &new)?;
+        let diff = unified_diff(&old, &new);
         match approved_delta(artifact)? {
             Some(approved) if approved == diff => {
                 eprintln!("{artifact}: approved delta matches");
@@ -1056,7 +1051,7 @@ fn approve(args: &[String]) -> Result<(), String> {
         if old != new {
             write(
                 &dir.join(format!("{artifact}.diff")),
-                unified_diff(&old, &new)?.as_bytes(),
+                unified_diff(&old, &new).as_bytes(),
             )?;
             written += 1;
         }
@@ -1118,29 +1113,17 @@ fn perf() -> Result<(), String> {
         .arg("--export-json")
         .arg(&json)
         .arg(&command))?;
-    let rss = Command::new("/usr/bin/time")
-        .current_dir(corpus_dir())
-        .args(["-f", "%M"])
-        .arg(release_binary())
-        .args([
-            "check-project",
-            "--config",
-            "phpstan-rs.toml",
-            "--format",
-            "json",
-        ])
-        .stdout(Stdio::null())
-        .output()
-        .map_err(|e| e.to_string())?;
-    let rss_kb = String::from_utf8_lossy(&rss.stderr)
-        .lines()
-        .last()
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    write(&dir.join(format!("{hash}.rss")), rss_kb.as_bytes())?;
+    let rss_kb = peak_rss_kb()?;
+    if let Some(kb) = rss_kb {
+        write(&dir.join(format!("{hash}.rss")), kb.to_string().as_bytes())?;
+    }
     let (mean, stddev) = hyperfine_stats(&json)?;
-    eprintln!("{hash}: mean {mean:.2}s ± {stddev:.2}s, peak RSS {rss_kb} KB");
+    match rss_kb {
+        Some(kb) => eprintln!("{hash}: mean {mean:.2}s ± {stddev:.2}s, peak RSS {kb} KB"),
+        None => eprintln!(
+            "{hash}: mean {mean:.2}s ± {stddev:.2}s, no peak RSS: this platform's `time` reports none"
+        ),
+    }
     // Timing needs a quiet machine, so not every commit has a
     // measurement: compare against the nearest ancestor that does.
     let Some(parent) = nearest_ancestor_with(&dir, "hyperfine.json")? else {
@@ -1156,17 +1139,63 @@ fn perf() -> Result<(), String> {
                 "wall time regressed: {mean:.2}s > {limit:.2}s ({parent}: {old_mean:.2}s ± {old_stddev:.2}s)"
             ));
         }
-        if let Ok(old_rss) = std::fs::read_to_string(dir.join(format!("{parent}.rss"))) {
-            let (old, new) = (
-                old_rss.trim().parse::<f64>().unwrap_or(f64::MAX),
-                rss_kb.parse::<f64>().unwrap_or(0.0),
-            );
-            if new > old * 1.02 {
+        if let (Some(new), Ok(old_rss)) = (
+            rss_kb,
+            std::fs::read_to_string(dir.join(format!("{parent}.rss"))),
+        ) {
+            let old = old_rss.trim().parse::<f64>().unwrap_or(f64::MAX);
+            if new as f64 > old * 1.02 {
                 return Err(format!("peak RSS regressed: {new} KB > {old} KB + 2%"));
             }
         }
     }
     Ok(())
+}
+
+/// The peak resident set size, in KB, of one run of the release binary over
+/// the corpus, as the platform's `time` reports it: GNU `time -f %M` on
+/// Linux, in KB, and BSD `time -l` on macOS, in bytes. `None` where there is
+/// no such reading, as on Windows.
+fn peak_rss_kb() -> Result<Option<u64>, String> {
+    let flags: &[&str] = if cfg!(target_os = "linux") {
+        &["-f", "%M"]
+    } else if cfg!(target_os = "macos") {
+        &["-l"]
+    } else {
+        return Ok(None);
+    };
+    let run = Command::new("/usr/bin/time")
+        .current_dir(corpus_dir())
+        .args(flags)
+        .arg(release_binary())
+        .args([
+            "check-project",
+            "--config",
+            "phpstan-rs.toml",
+            "--format",
+            "json",
+        ])
+        .stdout(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    let report = String::from_utf8_lossy(&run.stderr);
+    parse_peak_rss(&report, cfg!(target_os = "macos"))
+        .map(Some)
+        .ok_or_else(|| format!("no peak RSS in the output of `time`:\n{report}"))
+}
+
+/// The peak RSS in KB that `time` wrote: its last line, a number of KB, for
+/// GNU `time -f %M`; for BSD `time -l`, the bytes on the line that names the
+/// maximum resident set size.
+fn parse_peak_rss(report: &str, bsd: bool) -> Option<u64> {
+    if bsd {
+        let line = report
+            .lines()
+            .find(|line| line.trim_end().ends_with("maximum resident set size"))?;
+        let bytes: u64 = line.split_whitespace().next()?.parse().ok()?;
+        return Some(bytes / 1024);
+    }
+    report.lines().last()?.trim().parse().ok()
 }
 
 /// The nearest proper ancestor of HEAD with `<hash>.<ext>` in `dir`.
@@ -1259,6 +1288,16 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
     ),
 ];
 
+/// Sets the modification time of `path` to now, which is what makes cargo
+/// build what depends on it again.
+fn touch(path: &Path) -> Result<(), String> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|file| file.set_modified(std::time::SystemTime::now()))
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
 fn buildtime() -> Result<(), String> {
     require_clean_tree()?;
     let hash = head_hash()?;
@@ -1267,7 +1306,7 @@ fn buildtime() -> Result<(), String> {
     let mut report = String::new();
     let mut violations = Vec::new();
     for (scenario, file, expected) in BUILD_SCENARIOS {
-        run(Command::new("touch").arg(root().join(file)))?;
+        touch(&root().join(file))?;
         let started = Instant::now();
         let rebuilt = rebuilt_workspace_crates(cargo().args([
             "build",
@@ -1295,7 +1334,7 @@ fn buildtime() -> Result<(), String> {
                 ));
             }
         }
-        run(Command::new("touch").arg(root().join(file)))?;
+        touch(&root().join(file))?;
         let started = Instant::now();
         run(cargo().args(["test", "--workspace", "--no-run", "--quiet"]))?;
         let secs = started.elapsed().as_secs_f64();
