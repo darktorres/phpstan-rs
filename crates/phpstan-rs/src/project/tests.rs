@@ -17,6 +17,7 @@ mod fused_declarations;
 mod include_environment;
 mod incremental_updates;
 mod inline_ignore_comments;
+mod installer_paths;
 mod load_cache;
 mod load_text;
 pub(super) mod panic_injection;

@@ -1969,6 +1969,7 @@ impl Project {
                 self.absolute_root(),
                 self.settings.path_case,
                 composer,
+                &[],
             )
         }) == walk::Role::Analysed;
         self.update_file_as(path, source, analysed, false, should_abort)
@@ -3535,14 +3536,17 @@ pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &[".git", "node_modules"];
 
 /// `true` if a directory below `root` (every ancestor of `path` when `root` is
 /// `None`, or does not hold `path`) is one of the `excluded` names, or is
-/// Composer's where `excluded` leaves those out and `composer` says so. The
-/// names are compared with the case rule of `excluded`. A pure check of the
-/// path, with the filesystem only where `composer` reads it.
+/// Composer's where `excluded` leaves those out and `composer` says so or it
+/// is one of `seeds` (the directories of packages Composer installed outside
+/// their vendor directory). The names and the seeds are compared with the
+/// case rule of `excluded`. A pure check of the path, with the filesystem only
+/// where `composer` reads it.
 pub(crate) fn path_under_excluded_dir(
     path: &Path,
     root: Option<&Path>,
     excluded: walk::Excluded<'_>,
     composer: &dyn Fn(&Path) -> bool,
+    seeds: &[PathBuf],
 ) -> bool {
     let root = root.filter(|root| path.starts_with(root));
     path.ancestors()
@@ -3550,7 +3554,8 @@ pub(crate) fn path_under_excluded_dir(
         .take_while(|dir| root.is_none_or(|root| *dir != root && dir.starts_with(root)))
         .any(|dir| {
             dir.file_name().is_some_and(|name| excluded.excludes(name))
-                || (excluded.leaves_out_composer() && composer(dir))
+                || (excluded.leaves_out_composer()
+                    && (composer(dir) || walk::is_seed(seeds, excluded.case(), dir)))
         })
 }
 

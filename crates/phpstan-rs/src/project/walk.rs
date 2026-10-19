@@ -122,6 +122,11 @@ impl<'a> Excluded<'a> {
         self.composer_vendor
     }
 
+    /// The case rule the names compare under.
+    pub(crate) fn case(&self) -> CaseRule {
+        self.case
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.names.is_empty() && !self.composer_vendor
     }
@@ -139,6 +144,28 @@ impl<'a> Excluded<'a> {
                     .iter()
                     .any(|excluded| self.case.key(excluded) == key)
             }
+        }
+    }
+}
+
+/// Whether `dir` is one of `seeds`, the directories of the packages Composer
+/// installed outside their vendor directory (sorted by path), compared as
+/// `case` compares names.
+pub(crate) fn is_seed(seeds: &[PathBuf], case: CaseRule, dir: &Path) -> bool {
+    if seeds.is_empty() {
+        return false;
+    }
+    match case {
+        CaseRule::Exact => seeds
+            .binary_search_by(|seed| seed.as_path().cmp(dir))
+            .is_ok(),
+        CaseRule::Folded => {
+            let dir = dir.to_string_lossy();
+            let key = case.key(&dir);
+            seeds.iter().any(|seed| {
+                let seed = seed.to_string_lossy();
+                case.key(&seed) == key
+            })
         }
     }
 }
@@ -254,6 +281,10 @@ pub(crate) struct Walk<'a, 'p> {
     /// How the letters of the names a root excludes compare with a listed
     /// name's.
     path_case: CaseRule,
+    /// The directories of the packages Composer installed outside their
+    /// project's vendor directory, sorted by path: a walk that leaves out
+    /// Composer's directories leaves these out as well.
+    seeds: Arc<[PathBuf]>,
 }
 
 /// Roots given to a walk, with the walk of each, in the order they were
@@ -967,6 +998,7 @@ impl<'a, 'p> Walk<'a, 'p> {
             packages,
             composer: None,
             path_case: CaseRule::Exact,
+            seeds: Arc::from(Vec::new()),
         }
     }
 
@@ -984,10 +1016,30 @@ impl<'a, 'p> Walk<'a, 'p> {
         self
     }
 
+    /// The walk, leaving out the directories `seeds` lists (sorted by path)
+    /// when a root leaves out Composer's directories.
+    pub(crate) fn with_seeds(mut self, seeds: Arc<[PathBuf]>) -> Self {
+        self.seeds = seeds;
+        self
+    }
+
     /// Whether the walk leaves `dir` out for Composer: the walk's exclusions
-    /// say so, and Composer wrote into `dir`.
-    fn leaves_out_composer(&self, excluded: Excluded<'_>, dir: &Path) -> bool {
-        excluded.leaves_out_composer() && self.composer.is_some_and(|test| test(dir))
+    /// say so, and Composer wrote into `dir`, or `dir` is the directory of a
+    /// package Composer installed outside its vendor directory.
+    fn leaves_out_dir(&self, excluded: Excluded<'_>, dir: &Path) -> bool {
+        excluded.leaves_out_composer()
+            && (self.composer.is_some_and(|test| test(dir))
+                || is_seed(&self.seeds, self.path_case, dir))
+    }
+
+    /// Whether a link to `target` is not followed: the same test as for a
+    /// directory, and also a target below a seed.
+    fn leaves_out_link(&self, excluded: Excluded<'_>, target: &Path) -> bool {
+        excluded.leaves_out_composer()
+            && (self.composer.is_some_and(|test| test(target))
+                || target
+                    .ancestors()
+                    .any(|ancestor| is_seed(&self.seeds, self.path_case, ancestor)))
     }
 
     /// Adds `path` as a root, walked by `finish`. A directory is walked; a file
@@ -1327,7 +1379,7 @@ impl<'a, 'p> Walk<'a, 'p> {
                 let child = dir.child(name);
                 match composer::canonical::canonicalize(child.as_path()) {
                     Ok(target) => {
-                        if !self.leaves_out_composer(scope.excluded, &target) {
+                        if !self.leaves_out_link(scope.excluded, &target) {
                             steps.push(Step::Found(Found::Link(target)));
                         }
                     }
@@ -1349,7 +1401,7 @@ impl<'a, 'p> Walk<'a, 'p> {
                 if scope.outside && self.under_root(child.as_path()) {
                     continue;
                 }
-                if self.leaves_out_composer(scope.excluded, child.as_path()) {
+                if self.leaves_out_dir(scope.excluded, child.as_path()) {
                     continue;
                 }
                 let below = reaching.map(|reaching| {

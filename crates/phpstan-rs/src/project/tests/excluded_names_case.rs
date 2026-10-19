@@ -101,6 +101,7 @@ fn a_path_below_a_default_excluded_directory_is_under_it_by_the_rule() {
             None,
             Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case),
             &|_: &Path| false,
+            &[],
         )
     };
     assert!(under(CaseRule::Folded));
@@ -114,12 +115,19 @@ fn a_path_below_a_composer_directory_is_under_it_only_where_the_walk_leaves_comp
         Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, CaseRule::Exact).leaving_out_composer();
     let path = Path::new("/proj/libs/acme/a.php");
     let root = Some(Path::new("/proj"));
-    assert!(path_under_excluded_dir(path, root, leaving_out, &composer));
+    assert!(path_under_excluded_dir(
+        path,
+        root,
+        leaving_out,
+        &composer,
+        &[]
+    ));
     assert!(!path_under_excluded_dir(
         path,
         root,
         Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, CaseRule::Exact),
         &composer,
+        &[],
     ));
     // The root itself is never asked: a walk of `libs` lists its files.
     assert!(!path_under_excluded_dir(
@@ -127,5 +135,6 @@ fn a_path_below_a_composer_directory_is_under_it_only_where_the_walk_leaves_comp
         Some(Path::new("/proj/libs")),
         leaving_out,
         &composer,
+        &[],
     ));
 }

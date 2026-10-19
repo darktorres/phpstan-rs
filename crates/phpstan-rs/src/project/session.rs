@@ -191,6 +191,10 @@ pub struct Session {
     /// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` when the root is analysed because no
     /// `paths` are configured, nothing otherwise.
     excluded_dir_names: &'static [&'static str],
+    /// The directories of the packages Composer installed outside their
+    /// project's vendor directory, below the root, sorted and unique: the
+    /// walk that leaves out Composer's directories leaves these out too.
+    seeds: Arc<[PathBuf]>,
     /// How the letters of configured path text compare with a path's: as the
     /// root's directory compares names (`Session::resolve` probes it).
     path_case: CaseRule,
@@ -356,10 +360,21 @@ pub(crate) fn identify_through(
 impl Root<'_> {
     /// Whether the walk of this root lists `path`: it lies under the root's
     /// resolved path, and no directory below the root is one the walk leaves
-    /// out (by name, or as Composer's, through `composer`).
-    fn contains(&self, path: &Path, composer: &(dyn Fn(&Path) -> bool + Sync)) -> bool {
+    /// out (by name, as Composer's through `composer`, or as one of `seeds`).
+    fn contains(
+        &self,
+        path: &Path,
+        composer: &(dyn Fn(&Path) -> bool + Sync),
+        seeds: &[PathBuf],
+    ) -> bool {
         path.starts_with(&self.path)
-            && !super::path_under_excluded_dir(path, Some(&self.path), self.excluded, composer)
+            && !super::path_under_excluded_dir(
+                path,
+                Some(&self.path),
+                self.excluded,
+                composer,
+                seeds,
+            )
     }
 }
 
@@ -397,16 +412,17 @@ pub(crate) struct Classified {
 }
 
 /// The role of a file no root lists: context when a directory of `path` below
-/// `root` is one the walk leaves out by default (by name, or as Composer's),
-/// analysed otherwise.
+/// `root` is one the walk leaves out by default (by name, as Composer's, or as
+/// one of `seeds`), analysed otherwise.
 pub(crate) fn unlisted_role(
     path: &Path,
     root: Option<&Path>,
     case: CaseRule,
     composer: &(dyn Fn(&Path) -> bool + Sync),
+    seeds: &[PathBuf],
 ) -> Role {
     let excluded = Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case).leaving_out_composer();
-    if super::path_under_excluded_dir(path, root, excluded, composer) {
+    if super::path_under_excluded_dir(path, root, excluded, composer, seeds) {
         Role::Context
     } else {
         Role::Analysed
@@ -417,8 +433,9 @@ pub(crate) fn unlisted_role(
 /// path, with the role `unlisted_role` gives it, and not a stub.
 pub(crate) fn classify_unlisted(path: &Path) -> Classified {
     let path = composer::manifest::resolve(path);
-    let role =
-        with_unlisted_composer(|composer| unlisted_role(&path, None, CaseRule::Exact, composer));
+    let role = with_unlisted_composer(|composer| {
+        unlisted_role(&path, None, CaseRule::Exact, composer, &[])
+    });
     Classified {
         path,
         role,
@@ -901,6 +918,7 @@ impl Session {
         let mut composer_manifests = Vec::new();
         let mut composer_php_versions = None;
         let mut root_manifest = None;
+        let mut seeds: Vec<PathBuf> = Vec::new();
         // The `vendor` directory of each Composer project: a tree the project
         // reads where `composer install` has built it, and a directory a
         // deployment builds where it has not.
@@ -926,6 +944,7 @@ impl Session {
             for composer_root in composer_roots {
                 // The manifest's paths are resolved, as the files they are
                 // compared with are.
+                let installed = layout.vendor_location(&composer_root).installed.clone();
                 let package = composer::PackageContext::load(
                     &composer_root,
                     &composer_root,
@@ -933,6 +952,14 @@ impl Session {
                     &variables,
                     Some(&file_cache::GENERATED),
                 );
+                if let (Some(manifest), Some(vendor)) = (&package.manifest, &installed) {
+                    seeds.extend(
+                        manifest
+                            .installed_elsewhere(vendor)
+                            .into_iter()
+                            .filter(|dir| dir.starts_with(&absolute_root) && *dir != absolute_root),
+                    );
+                }
                 if composer_root == absolute_root {
                     composer_php_versions = declared_php_versions(&package);
                     root_manifest = package.manifest.clone();
@@ -1082,6 +1109,11 @@ impl Session {
             check_mock_hygiene: mockstan.check_mock_hygiene.unwrap_or(extensions.mockstan),
             mock_banned_classes: mockstan.mock_banned_classes,
             excluded_dir_names,
+            seeds: {
+                seeds.sort();
+                seeds.dedup();
+                Arc::from(seeds)
+            },
             environment: environment.clone(),
             path_case,
             baseline,
@@ -1240,7 +1272,8 @@ impl Session {
     ) -> Listing {
         let mut walk = Walk::new(Arc::clone(&self.dir_listings), &self.settings.packages)
             .with_path_case(self.path_case)
-            .with_composer(composer);
+            .with_composer(composer)
+            .with_seeds(Arc::clone(&self.seeds));
         // A degrade root leaves out the directories Composer wrote into, and a
         // root with configured paths does not.
         let leaves_out_composer = !self.excluded_dir_names.is_empty();
@@ -1327,7 +1360,7 @@ impl Session {
                 for root in listing
                     .roots
                     .iter()
-                    .filter(|root| root.contains(&path, composer))
+                    .filter(|root| root.contains(&path, composer, &self.seeds))
                 {
                     role = Some(role.map_or(root.role, |role: Role| role.max(root.role)));
                     is_stub |= root.stub;
@@ -1338,6 +1371,7 @@ impl Session {
                         Some(self.absolute_root.as_path()),
                         self.path_case,
                         composer,
+                        &self.seeds,
                     )
                 });
                 (role, is_stub)
@@ -1359,7 +1393,7 @@ impl Session {
                 listing
                     .roots
                     .iter()
-                    .any(|root| root.contains(path, composer))
+                    .any(|root| root.contains(path, composer, &self.seeds))
             })
     }
 
