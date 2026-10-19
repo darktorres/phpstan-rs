@@ -1155,7 +1155,7 @@ impl Project {
             facts,
             line_index,
             class_fn_refs: _,
-            lazy_names: _,
+            lazy: _,
             owner,
         } = parsed;
         let FileText {
@@ -2098,7 +2098,7 @@ impl Project {
             facts,
             line_index,
             class_fn_refs: _,
-            lazy_names: _,
+            lazy: _,
             owner: _,
         } = parsed;
         let ast = ast.expect("a parse keeps its tree");
@@ -3352,9 +3352,9 @@ pub struct ParsedFile {
     // The file's class and function use sites, indexed alongside the parse
     // (`Project::index_use_sites`); `insert_file_tables` takes them.
     class_fn_refs: Option<Vec<(Span, use_sites::RefTarget)>>,
-    // The class names the file names, for the lazy context lookup (set only
-    // with `lazy_context_enabled`).
-    lazy_names: Vec<String>,
+    // What the file names, includes and defines, for the lazy context lookup
+    // (set only with `lazy_context_enabled`).
+    lazy: lazy_context::LazyRefs,
     // The composer package that owns the file, as the walk that listed it
     // found it; `insert_numbered_file` finds it itself when no walk did.
     owner: Option<Option<composer::PackageOwner>>,
@@ -3475,7 +3475,7 @@ pub fn parse_file_with_names<'a>(
             facts,
             line_index,
             class_fn_refs: None,
-            lazy_names: Vec::new(),
+            lazy: Default::default(),
             owner: None,
         };
         // A file that skipped bodies gives what the whole of it gives, but for

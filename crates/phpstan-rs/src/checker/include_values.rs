@@ -94,7 +94,7 @@ impl<'ast> Visitor<'ast> for Initializers {
 
 /// The function a call's callee names, as an unqualified name in a
 /// namespace falls back to the global one.
-fn callee_name(e: &Expr) -> Option<&str> {
+pub(crate) fn callee_name(e: &Expr) -> Option<&str> {
     match &e.kind {
         ExprKind::Name(n) => {
             let (primary, fallback) = n.candidates();

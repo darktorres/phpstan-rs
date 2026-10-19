@@ -931,7 +931,7 @@ mod global_constants;
 mod imports;
 mod impossible_instanceof;
 pub mod include_lookup;
-mod include_values;
+pub(crate) mod include_values;
 mod includes;
 mod ini_directives;
 mod instantiation;

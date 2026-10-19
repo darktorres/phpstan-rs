@@ -26,6 +26,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
+use super::lazy_context::LazyRefs;
 use rustc_hash::FxHashSet;
 use syntax::FileFacts;
 use syntax::lexer::LexWarning;
@@ -124,7 +125,7 @@ pub(super) struct CachedFile {
     facts: FileFacts,
     line_index: Arc<LineIndex>,
     class_fn_refs: Option<Vec<(Span, RefTarget)>>,
-    lazy_names: Vec<String>,
+    lazy: LazyRefs,
 }
 
 impl CachedFile {
@@ -149,7 +150,7 @@ impl CachedFile {
             facts: parsed.facts,
             line_index: Arc::clone(&parsed.line_index),
             class_fn_refs: parsed.class_fn_refs.clone(),
-            lazy_names: parsed.lazy_names.clone(),
+            lazy: parsed.lazy.clone(),
         }
     }
 
@@ -181,7 +182,7 @@ impl CachedFile {
             facts: self.facts,
             line_index: self.line_index,
             class_fn_refs: self.class_fn_refs,
-            lazy_names: self.lazy_names,
+            lazy: self.lazy,
             owner: None,
         }
     }

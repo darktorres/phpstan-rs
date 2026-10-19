@@ -9,7 +9,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use syntax::span::Span;
@@ -41,6 +41,7 @@ use crate::{ext, ignore_errors};
 
 use super::configured_path;
 use super::file_cache;
+use super::lazy_context::{Constants, INCLUDE_MARK, LazyRefs, include_name, path_ends_with};
 use super::path_spelling;
 use super::source::FileSource;
 use super::walk::{Excluded, FileIndex, FinalFiles, Listed, Role, Root, Unstreamed, Walk, Walked};
@@ -285,7 +286,7 @@ fn class_names_read(read: &Read) -> Vec<String> {
     let Read::Loaded(loaded) = read else {
         return Vec::new();
     };
-    loaded.parsed.lazy_names.clone()
+    loaded.parsed.lazy.names.clone()
 }
 
 /// The parse of a walk's files as the walk lists them. A directory's files
@@ -1582,7 +1583,7 @@ impl Session {
                     .push(at);
             }
         }
-        let reach = LazyReach {
+        let mut reach = LazyReach {
             session: self,
             lazy,
             project,
@@ -1595,14 +1596,23 @@ impl Session {
             reached: Mutex::default(),
             read: Mutex::default(),
         };
-        let seeds: Vec<String> = slots.iter().flatten().flat_map(class_names_read).collect();
-        self.pool.scope(|scope| reach.follow(scope, seeds));
-        let read = reach
-            .read
-            .into_inner()
-            .unwrap_or_else(PoisonError::into_inner);
-        for (at, read) in read {
-            slots[at] = Some(read);
+        // Each round follows the names the loaded files give, with the includes
+        // read against the constants they define. A round that reads a file
+        // gives the next one more names and constants; a round that reads none
+        // ends the load.
+        let mut seeds: Vec<String> = slots.iter().flatten().flat_map(class_names_read).collect();
+        loop {
+            seeds.extend(include_seeds(slots));
+            self.pool
+                .scope(|scope| reach.follow(scope, std::mem::take(&mut seeds)));
+            let read = std::mem::take(reach.read.get_mut().unwrap_or_else(PoisonError::into_inner));
+            if read.is_empty() {
+                break;
+            }
+            for (at, read) in read {
+                seeds.extend(class_names_read(&read));
+                slots[at] = Some(read);
+            }
         }
         for slot in slots.iter_mut() {
             if slot.is_none() {
@@ -1882,13 +1892,12 @@ impl Session {
         // Only the reader holds the text, so the use sites are indexed here.
         project.index_use_sites(&mut parsed, &text);
         if super::lazy_context_enabled() {
-            let mut names = match &parsed.ast {
-                Some(ast) if analysed => super::use_sites::class_names_named(ast),
-                Some(ast) => super::use_sites::class_names_declared(ast),
-                None => Vec::new(),
+            let mut refs = match &parsed.ast {
+                Some(ast) => super::use_sites::lazy_refs(ast, analysed),
+                None => LazyRefs::default(),
             };
-            names.extend(super::use_sites::doc_names(&text));
-            parsed.lazy_names = names;
+            refs.names.extend(super::use_sites::doc_names(&text));
+            parsed.lazy = refs;
         }
         let source = keeps_source.then(|| text.into_owned());
         Read::Loaded(Box::new(ReadFile {
@@ -2648,8 +2657,8 @@ impl<'a> LazyReach<'a> {
     /// the files its path names, and an include of a path not known finds every
     /// file not yet read, as it may name any of them.
     fn find(&self, name: &str) -> Vec<usize> {
-        match name.strip_prefix(super::use_sites::INCLUDE_MARK) {
-            Some(path) => self.find_include(path),
+        match name.strip_prefix(INCLUDE_MARK) {
+            Some(tail) => self.find_include(tail),
             None => self
                 .lazy
                 .candidates(name)
@@ -2661,12 +2670,10 @@ impl<'a> LazyReach<'a> {
         }
     }
 
-    fn find_include(&self, path: &str) -> Vec<usize> {
-        let parts: Vec<&str> = path
-            .split(['/', '\\'])
-            .filter(|part| !part.is_empty() && *part != "." && *part != "..")
-            .collect();
-        let Some(last) = parts.last() else {
+    /// The files an include whose path ends with `tail` may read, among the
+    /// lazy files not yet read. With no literal text at its end, it may read any.
+    fn find_include(&self, tail: &str) -> Vec<usize> {
+        let Some(last) = tail.rsplit('/').next().filter(|_| !tail.is_empty()) else {
             return self.pending.iter().copied().collect();
         };
         self.pending_by_name
@@ -2674,43 +2681,24 @@ impl<'a> LazyReach<'a> {
             .into_iter()
             .flatten()
             .copied()
-            .filter(|&at| ends_with_parts(self.combined_files[at].path.as_path(), &parts))
+            .filter(|&at| path_ends_with(self.combined_files[at].path.as_path(), tail))
             .collect()
     }
 }
 
-/// Whether `path` ends with the components `parts`. A component matches
-/// whatever its letter case, as a file system that folds case does.
-fn ends_with_parts(path: &Path, parts: &[&str]) -> bool {
-    let mut trailing = path
-        .components()
-        .rev()
-        .filter_map(|component| match component {
-            Component::Normal(name) => Some(name.to_string_lossy()),
+/// The lazy names the include paths of the loaded files name, each read against
+/// the constants the loaded files define.
+fn include_seeds(slots: &[Option<Read>]) -> Vec<String> {
+    let refs: Vec<&LazyRefs> = slots
+        .iter()
+        .filter_map(|slot| match slot {
+            Some(Read::Loaded(file)) => Some(&file.parsed.lazy),
             _ => None,
-        });
-    parts.iter().rev().all(|&part| {
-        trailing
-            .next()
-            .is_some_and(|name| name.eq_ignore_ascii_case(part))
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ends_with_parts;
-    use std::path::Path;
-
-    #[test]
-    fn ends_with_parts_matches_trailing_components_whatever_their_case() {
-        let path = Path::new("/root/vendor/Acme/Lib/Thing.php");
-        assert!(ends_with_parts(path, &["lib", "thing.php"]));
-        assert!(ends_with_parts(path, &["thing.php"]));
-        assert!(!ends_with_parts(path, &["vendor", "thing.php"]));
-        assert!(!ends_with_parts(path, &["root", "acme", "thing.php"]));
-        assert!(ends_with_parts(
-            path,
-            &["root", "vendor", "acme", "lib", "thing.php"]
-        ));
-    }
+        })
+        .collect();
+    let constants = Constants::new(refs.iter().copied());
+    refs.iter()
+        .flat_map(|refs| refs.includes.iter())
+        .map(|parts| include_name(parts, &constants))
+        .collect()
 }

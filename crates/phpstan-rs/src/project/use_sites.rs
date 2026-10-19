@@ -33,9 +33,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::span::Span;
 use syntax::visit::{
-    Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_function_decl, walk_stmts,
+    Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_function_decl, walk_stmt,
+    walk_stmts,
 };
 
+use super::lazy_context::{LazyRefs, PathPart};
+use crate::checker::include_values::callee_name;
 use crate::file_id::FileId;
 use crate::shard::{join_map, split_map};
 
@@ -280,48 +283,43 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
     }
 }
 
-/// The class names `stmts` names, each resolved, from every name the syntax
-/// visitor reaches: heritage and traits, attributes, type hints, catch clauses
-/// and expressions, bodies included. An analysed file's names: its bodies are
-/// checked, so each class they name is needed.
-pub(crate) fn class_names_named(stmts: &[Stmt]) -> Vec<String> {
-    class_names_of(stmts, true)
-}
-
-/// The class names `stmts` names outside function bodies: heritage, traits,
-/// attributes, signatures, property types and defaults, constants, and the
-/// top-level code. A context file's names: its bodies run only when called,
-/// and are not checked, so the classes only they name are not needed.
-pub(crate) fn class_names_declared(stmts: &[Stmt]) -> Vec<String> {
-    class_names_of(stmts, false)
-}
-
-fn class_names_of(stmts: &[Stmt], bodies: bool) -> Vec<String> {
-    let mut w = NameWalker {
+/// What `stmts` hands to the lazy lookup. With bodies, an analysed file's:
+/// each class its bodies name is checked, so it is needed. Without, a context
+/// file's: its bodies run only when called and are not checked, so the classes
+/// only they name are not needed.
+pub(crate) fn lazy_refs(stmts: &[Stmt], bodies: bool) -> LazyRefs {
+    let mut names = NameWalker {
         bodies,
-        out: Vec::new(),
+        refs: LazyRefs::default(),
     };
-    walk_stmts(&mut w, stmts);
-    w.out
+    walk_stmts(&mut names, stmts);
+    let mut constants = ConstWalker(Vec::new());
+    walk_stmts(&mut constants, stmts);
+    names.refs.constants = constants.0;
+    names.refs
+}
+
+fn short_name(name: &str) -> &str {
+    name.rsplit('\\').next().unwrap_or(name)
 }
 
 struct NameWalker {
     /// Whether a function's body is walked.
     bodies: bool,
-    out: Vec<String>,
+    refs: LazyRefs,
 }
 
 impl<'ast> Visitor<'ast> for NameWalker {
     fn visit_name(&mut self, name: &'ast QualifiedName) {
         if let Some(fqn) = name.resolved_class() {
-            self.out.push(fqn.to_string());
+            self.refs.names.push(fqn.to_string());
         }
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
         stack::guard(|| {
             if let ExprKind::Include(_, arg) = &expr.kind {
-                self.out.push(include_name(arg));
+                self.refs.includes.push(path_parts_of(arg));
             }
             walk_expr(self, expr);
         })
@@ -344,39 +342,75 @@ impl<'ast> Visitor<'ast> for NameWalker {
     }
 }
 
-/// The first character of a lazy name that is not a class name. Followed by
-/// a path, the name is an include of that path, which names a file by its
-/// trailing components. Alone, it is an include of a path not known, which
-/// may name any file.
-pub(crate) const INCLUDE_MARK: char = '\u{1}';
+/// The constants a file defines: `const`, and `define()` with a literal name,
+/// in any statement or body. A definition the load never runs can only make a
+/// name defined twice, which reads as unknown, so every one is taken.
+struct ConstWalker(Vec<(String, Vec<PathPart>)>);
 
-/// The lazy name of an include of `arg`: see `INCLUDE_MARK`.
-fn include_name(arg: &Expr) -> String {
-    let mut path = String::new();
-    if include_path(arg, &mut path) {
-        format!("{INCLUDE_MARK}{path}")
-    } else {
-        INCLUDE_MARK.to_string()
+impl<'ast> Visitor<'ast> for ConstWalker {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        if let StmtKind::GlobalConst(consts) = &stmt.kind {
+            for c in consts {
+                self.0
+                    .push((short_name(&c.name).to_string(), path_parts_of(&c.value)));
+            }
+        }
+        walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        stack::guard(|| {
+            if let ExprKind::Call(callee, args) = &expr.kind
+                && callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
+                && let [name, value, ..] = args.as_slice()
+                && let ExprKind::Literal(Literal::String(name)) = &name.value.kind
+            {
+                self.0.push((
+                    short_name(&name.to_str_lossy()).to_string(),
+                    path_parts_of(&value.value),
+                ));
+            }
+            walk_expr(self, expr);
+        })
     }
 }
 
-/// Appends to `path` the text an include path reads as: its string literals,
-/// joined. `__DIR__` is the directory of the including file, which the lookup
-/// does not place, so it adds nothing. Returns false for any other part.
-fn include_path(expr: &Expr, path: &mut String) -> bool {
+/// The parts of an include's path, or of a constant's value.
+fn path_parts_of(expr: &Expr) -> Vec<PathPart> {
+    let mut parts = Vec::new();
+    push_path_parts(expr, &mut parts);
+    parts
+}
+
+fn push_path_parts(expr: &Expr, parts: &mut Vec<PathPart>) {
     let expr = expr.peeled();
     match &expr.kind {
-        ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => true,
         ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
-            include_path(lhs, path) && include_path(rhs, path)
+            push_path_parts(lhs, parts);
+            push_path_parts(rhs, parts);
         }
-        _ => match literal_string_value(expr) {
-            Some(text) => {
-                path.push_str(&text);
-                true
-            }
-            None => false,
-        },
+        ExprKind::Literal(Literal::String(s)) => parts.push(match s.as_str() {
+            Some(text) => PathPart::Text(text.to_string()),
+            None => PathPart::Unknown,
+        }),
+        // The separator is the one `/`, which both worlds' paths are read with.
+        ExprKind::Name(n)
+            if n.trim_start_matches('\\')
+                .eq_ignore_ascii_case("DIRECTORY_SEPARATOR") =>
+        {
+            parts.push(PathPart::Text("/".to_string()));
+        }
+        // `__DIR__` and the other magic constants, and any name that is not a
+        // constant of the project, are not known text.
+        ExprKind::Name(n) => {
+            let name = n.trim_start_matches('\\');
+            parts.push(if name.starts_with("__") && name.ends_with("__") {
+                PathPart::Unknown
+            } else {
+                PathPart::Const(short_name(name).to_string())
+            });
+        }
+        _ => parts.push(PathPart::Unknown),
     }
 }
 
