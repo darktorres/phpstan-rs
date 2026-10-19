@@ -251,10 +251,9 @@ The off-run rows still open:
 
 ### 9. The batch after the cross-platform fixes — `~/.claude/plans/another-session-is-finishing-majestic-comet.md`
 
-Designed in plan mode on 2026-10-18 and 2026-10-19; its four documents are at the
-repository root (`4837b369`): `POST_LEVEL_9_PLAN.md` (Parts A, C, D, E, F, G5, I2 to
-I5, K, L), `FLAT_TREE_PLAN.md` (B, G1 to G4, I1), `ENGINE_PLAN.md` (H, J) and
-`PLAN_REVIEW_LEDGER.md` (M). The ledger and stack edits its Part N lists follow.
+Designed in plan mode on 2026-10-18 and 2026-10-19 (`~/.claude/plans/another-session-is-finishing-majestic-comet.md`).
+The plan is in `docs/level-9/`: one file per part, indexed by `docs/level-9/README.md`. It has no
+Part M; the review's rulings live in the parts. The ledger and stack edits its Part N lists follow.
 
 Start condition, as read on 2026-10-19: the cross-platform fixes are finished
 (`a83b1675`), this file has no other level 9, `git status` is clean, and no build or
@@ -273,7 +272,7 @@ Order, as the plan sets it:
    and the level-3 triage by probe is run: `LEVEL3_TRIAGE.md` has 120 rows, 60 of which reproduce and change a dump (Part E 22). Then item 9, the flat tree, steps 0 to 3, with spike
    S-12 before step 2.
 3. Part C's batches (tokens, the lexer, parse recovery, names, products, PHPDoc, the
-   check's temporaries), then the wall (Part D), whose engine is `ENGINE_PLAN.md`.
+   check's temporaries), then the wall (Part D), whose engine is Parts H and J (`docs/level-9/18-part-h1.md` to `23-part-j.md`).
 
 Spikes S-1 to S-12 (Part H5) run before the designs they settle. Level 8's list is not
 reordered until the go.
