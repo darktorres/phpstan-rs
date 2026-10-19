@@ -1,5 +1,6 @@
 mod binary_operator_precedence;
 mod declarations;
+mod deep_nesting;
 mod doc_comments_and_robustness;
 mod expressions_and_operators;
 mod goto_labels;
