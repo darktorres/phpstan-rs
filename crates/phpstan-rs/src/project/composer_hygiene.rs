@@ -287,13 +287,16 @@ impl Project {
 
         analyzed.retain(|(_, file)| file.owner == Some(PackageOwner::Root(root)));
         for &(id, file) in &analyzed {
+            let Some(ast) = self.ast_of(id) else {
+                continue;
+            };
             let path = self.files.path(id);
             let absolute = self.absolute_path(path);
             let production = manifest.covers(&manifest.autoload, &absolute);
             let dev_only = !production && manifest.covers(&manifest.autoload_dev, &absolute);
             let used_before: FxHashSet<String> = used_packages.clone();
             let mut facts = FileFacts::default();
-            collect_facts_in_stmts(file.ast(), &mut facts);
+            collect_facts_in_stmts(&ast, &mut facts);
             // Class names written as strings (service wiring, config)
             // count as using their package.
             for s in &facts.strings {
@@ -310,7 +313,7 @@ impl Project {
             let mut reported_extensions: FxHashSet<String> = FxHashSet::default();
             let mut reported_dev_symbols: FxHashSet<String> = FxHashSet::default();
             let diagnostics = out.entry(id).or_default();
-            for (span, target) in index_class_fn_refs_without_source(file.ast()) {
+            for (span, target) in index_class_fn_refs_without_source(&ast) {
                 let (kind, display, declared_in, builtin_extension) = match &target {
                     RefTarget::Class(fqn) => {
                         let lower = fqn.to_ascii_lowercase();
@@ -456,7 +459,7 @@ impl Project {
 ));
                 }
             }
-            self.check_psr4_locations(manifest, path, file, diagnostics);
+            self.check_psr4_locations(manifest, path, file, &ast, diagnostics);
             if !dev_only {
                 used_outside_dev.extend(used_packages.difference(&used_before).cloned());
             }
@@ -533,10 +536,11 @@ impl Project {
         manifest: &ComposerManifest,
         path: &Path,
         file: &super::FileState,
+        ast: &[Stmt],
         diagnostics: &mut Vec<Diagnostic>,
     ) {
         let mut declared: Vec<(String, Span)> = Vec::new();
-        collect_declared_classes(file.ast(), &mut declared);
+        collect_declared_classes(ast, &mut declared);
         if declared.is_empty() {
             return;
         }

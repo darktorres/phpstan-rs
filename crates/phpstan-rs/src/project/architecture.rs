@@ -242,9 +242,12 @@ impl Project {
             if classes.is_empty() {
                 continue;
             }
-            let refs = index_class_fn_refs_without_source(file.ast());
+            let Some(ast) = self.ast_of(id) else {
+                continue;
+            };
+            let refs = index_class_fn_refs_without_source(&ast);
             let mut constructed = FxHashSet::default();
-            new_class_spans(file.ast(), &mut constructed);
+            new_class_spans(&ast, &mut constructed);
             let mut class_names: Vec<&String> = classes.keys().collect();
             class_names.sort();
             for lower in class_names {

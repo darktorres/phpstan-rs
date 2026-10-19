@@ -103,8 +103,11 @@ impl Project {
             .collect();
         files.sort_by_key(|&(id, _)| self.files.rank_of(id));
         for (id, file) in files {
+            let Some(ast) = self.ast_of(id) else {
+                continue;
+            };
             let mut classes = Vec::new();
-            collect_classes(file.ast(), &mut classes);
+            collect_classes(&ast, &mut classes);
             let mut found = Vec::new();
             for (fqn, c) in classes {
                 if closed_classes {

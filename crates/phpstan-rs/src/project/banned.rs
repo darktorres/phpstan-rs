@@ -475,7 +475,10 @@ impl Project {
                 classes: Vec::new(),
                 out: Vec::new(),
             };
-            for stmt in file.ast() {
+            let Some(ast) = self.ast_of(id) else {
+                continue;
+            };
+            for stmt in ast.iter() {
                 walker.visit_stmt(stmt);
             }
             let mut ignore_lines: Vec<u32> = file

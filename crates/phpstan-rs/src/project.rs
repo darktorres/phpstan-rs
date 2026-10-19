@@ -218,17 +218,6 @@ impl AstCache {
 }
 
 impl FileState {
-    /// The file's tree, for a reader of a file whose tree is kept: an
-    /// analysed file's. A test build asserts that no reader asks for the
-    /// tree of a file that has none.
-    fn ast(&self) -> &[Stmt] {
-        debug_assert!(
-            self.kept_ast.is_some(),
-            "a reader asked for the tree of a context file that dropped it"
-        );
-        self.kept_ast.as_deref().unwrap_or(&[])
-    }
-
     /// The file's tree, when it is kept.
     fn tree(&self) -> Option<&[Stmt]> {
         self.kept_ast.as_deref()
@@ -841,7 +830,10 @@ impl Project {
             if !report_unmatched {
                 continue;
             }
-            let trait_lines = trait_line_ranges(file.ast(), &file.line_index);
+            let Some(ast) = self.ast_of(id) else {
+                continue;
+            };
+            let trait_lines = trait_line_ranges(&ast, &file.line_index);
             let in_trait = |line: u32| trait_lines.iter().any(|(a, b)| (*a..=*b).contains(&line));
             let mut unmatched: Vec<Diagnostic> = Vec::new();
             let mut unmatched_line = |line: u32, message: String, identifier: &'static str| {
@@ -1841,8 +1833,9 @@ impl Project {
             && self.indexes_class_fn_sites()
             && let Some(file) = self.files.get_by_id(id)
             && let Some(source) = &file.source
+            && let Some(ast) = self.ast_of(id)
         {
-            for (span, target) in use_sites::index_class_fn_refs(file.ast(), source) {
+            for (span, target) in use_sites::index_class_fn_refs(&ast, source) {
                 self.use_sites.insert(id, target, span);
             }
         }
@@ -1890,7 +1883,8 @@ impl Project {
                         .par_iter_with_ids()
                         .filter_map(|(id, _, file)| {
                             let source = file.source.as_ref()?;
-                            Some((id, use_sites::index_class_fn_refs(file.ast(), source)))
+                            let ast = self.ast_of(id)?;
+                            Some((id, use_sites::index_class_fn_refs(&ast, source)))
                         })
                         .collect()
                 });
@@ -2720,9 +2714,11 @@ impl Project {
             );
         }
         diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-        if self.settings.phpstan_api {
+        if self.settings.phpstan_api
+            && let Some(ast) = self.ast_of(id)
+        {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
-                file.ast(),
+                &ast,
                 &file.line_index,
                 &self.registry,
                 Some(file.owner.and_then(|owner| self.packages.name(owner))),
