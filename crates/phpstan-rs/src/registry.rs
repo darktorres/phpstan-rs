@@ -75,8 +75,11 @@ pub use shared::Shared;
 pub use summaries::BodySummary;
 pub type FunctionTable = NameTable<FunctionReflection>;
 pub(crate) use index::{BuiltDecl, DeclKind, built_declaration, register_global_constant};
+// The unit tests call this in every profile, not only in debug builds.
+#[cfg(any(debug_assertions, test))]
+pub(crate) use index::build_declarations;
 #[cfg(debug_assertions)]
-pub(crate) use index::{Keep, build_declarations, build_declarations_where};
+pub(crate) use index::{Keep, build_declarations_where};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub(crate) use name_table::{folded_key, function_key, with_function_key};
 pub(crate) use property_writes::PropertyWrites;
