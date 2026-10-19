@@ -680,6 +680,7 @@ fn a_listed_file_carries_the_package_that_owns_its_directory() {
             &base,
             &base,
             Some(&base.join("vendor")),
+            &composer::dir_listings::DirListings::default(),
         )
         .into_iter()
         .collect(),

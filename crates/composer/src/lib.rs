@@ -122,14 +122,16 @@ impl PackageContext {
     ) -> PackageContext {
         let layout = Layout::new(listings, variables);
         let installed = layout.installed_dir(root);
+        let vendor = PendingVendor::spawn(installed.clone(), Arc::clone(listings), cache);
         PackageContext {
             manifest: ComposerManifest::load(
                 &layout.manifest_path(spelled_root),
                 spelled_root,
                 root,
                 installed.as_deref(),
+                listings,
             ),
-            vendor: PendingVendor::spawn(installed, Arc::clone(listings), cache),
+            vendor,
         }
     }
 

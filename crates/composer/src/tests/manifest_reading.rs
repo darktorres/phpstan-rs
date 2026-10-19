@@ -5,6 +5,7 @@
 use super::super::*;
 use super::helpers::*;
 use crate::canonical::canonicalize;
+use crate::dir_listings::DirListings;
 use crate::manifest::{Autoload, Located};
 
 /// Loads a project whose `composer.json` is `composer` and whose
@@ -21,6 +22,7 @@ fn load(label: &str, composer: &str, installed: Option<&str>) -> Option<Composer
         &root,
         &root,
         Some(&root.join("vendor")),
+        &DirListings::default(),
     )
 }
 

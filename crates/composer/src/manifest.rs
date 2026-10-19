@@ -6,10 +6,11 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -17,6 +18,8 @@ use serde_json::value::RawValue;
 use syntax::span::LineIndex;
 
 use crate::canonical;
+use crate::dir_listings::DirListings;
+use crate::hashed_path::HashedPath;
 
 /// One `composer.json` entry and the 1-based line it's written on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +139,7 @@ impl ComposerManifest {
         root: &Path,
         absolute_root: &Path,
         installed: Option<&Path>,
+        listings: &DirListings,
     ) -> Option<ComposerManifest> {
         let text = std::fs::read_to_string(path).ok()?;
         let json: Members = parse_document(&text)?;
@@ -209,7 +213,7 @@ impl ComposerManifest {
             }
         }
         manifest.include_path = include_directories(absolute_root, json.raw("include-path"));
-        manifest.installed = read_installed(installed);
+        manifest.installed = read_installed(installed, listings);
         Some(manifest)
     }
 
@@ -302,7 +306,11 @@ impl ComposerManifest {
     }
 }
 
-fn read_installed(installed: Option<&Path>) -> Vec<InstalledPackage> {
+/// The packages Composer installed under the vendor directory `installed`. A
+/// package's directory is read from the listings of the vendor directory and
+/// of its vendor name when both are real directories, which resolves no link;
+/// any other path is resolved as it always was.
+fn read_installed(installed: Option<&Path>, listings: &DirListings) -> Vec<InstalledPackage> {
     let Some(installed_dir) = installed else {
         return Vec::new();
     };
@@ -313,16 +321,26 @@ fn read_installed(installed: Option<&Path>) -> Vec<InstalledPackage> {
     let Some(Installed(packages)) = parse_document::<Installed>(&text) else {
         return Vec::new();
     };
+    let installed_hp = HashedPath::new(installed_dir.to_path_buf());
+    let composer_is_dir = real_dir_named(listings, &installed_hp, OsStr::new("composer"));
     packages
         .iter()
         .filter_map(|package| {
             let name: String = package.read("name")?;
-            let vendor_dir = resolve(&installed_dir.join(&name));
-            let install_dir = package
-                .read::<String>("install-path")
-                .map(|rel| composer_dir.join(rel))
-                .unwrap_or_else(|| vendor_dir.clone());
-            let install_dir = resolve(&install_dir);
+            let parts = package_parts(&name);
+            let vendor_dir = parts
+                .and_then(|(vendor, package)| package_dir(listings, &installed_hp, vendor, package))
+                .unwrap_or_else(|| resolve(&installed_dir.join(&name)));
+            let install_dir = match package.read::<String>("install-path") {
+                None => vendor_dir.clone(),
+                Some(rel)
+                    if composer_is_dir
+                        && parts.is_some_and(|parts| installs_in_place(&rel, parts)) =>
+                {
+                    vendor_dir.clone()
+                }
+                Some(rel) => resolve(&composer_dir.join(rel)),
+            };
             Some(InstalledPackage {
                 kind: package
                     .read("type")
@@ -344,6 +362,57 @@ fn read_installed(installed: Option<&Path>) -> Vec<InstalledPackage> {
             })
         })
         .collect()
+}
+
+/// The vendor name and the package name of a package `name`, when it is
+/// exactly two plain components.
+fn package_parts(name: &str) -> Option<(&str, &str)> {
+    let (vendor, package) = name.split_once('/')?;
+    let plain = |part: &str| !part.is_empty() && part != "." && part != ".." && !part.contains('/');
+    (plain(vendor) && plain(package)).then_some((vendor, package))
+}
+
+/// The directory `installed/vendor/package`, read from the listings when each
+/// of its three components is a real directory, so no link is resolved.
+/// `None` otherwise, and the caller resolves the path.
+fn package_dir(
+    listings: &DirListings,
+    installed: &HashedPath,
+    vendor: &str,
+    package: &str,
+) -> Option<PathBuf> {
+    let vendor_dir = real_dir_child(listings, installed, vendor)?;
+    real_dir_child(listings, &vendor_dir, package).map(HashedPath::into_path_buf)
+}
+
+/// The child `name` of `dir`, when the listing of `dir` holds it as a real
+/// directory (a link, or an entry the listing does not hold, is `None`).
+fn real_dir_child(listings: &DirListings, dir: &HashedPath, name: &str) -> Option<HashedPath> {
+    real_dir_named(listings, dir, OsStr::new(name)).then(|| dir.child(OsStr::new(name)))
+}
+
+/// Whether the listing of `dir` holds `name` as a real directory.
+fn real_dir_named(listings: &DirListings, dir: &HashedPath, name: &OsStr) -> bool {
+    listings.listing(dir).is_some_and(|listing| {
+        listing
+            .entry(name)
+            .and_then(|entry| entry.kind)
+            .is_some_and(|kind| kind.is_dir())
+    })
+}
+
+/// Whether `rel`, an `install-path` relative to the vendor directory's
+/// `composer` directory, names the package's own directory: `..` from
+/// `composer` and then the package's two names. Where `composer` is a real
+/// directory that is the same directory as `vendor/name`.
+fn installs_in_place(rel: &str, (vendor, package): (&str, &str)) -> bool {
+    let mut parts = Path::new(rel)
+        .components()
+        .filter(|part| *part != Component::CurDir);
+    parts.next() == Some(Component::ParentDir)
+        && parts.next() == Some(Component::Normal(OsStr::new(vendor)))
+        && parts.next() == Some(Component::Normal(OsStr::new(package)))
+        && parts.next().is_none()
 }
 
 /// The directories an `include-path` lists, below `base`. Composer trims the
@@ -728,6 +797,7 @@ mod tests {
             &root,
             &root,
             Some(&root.join("vendor")),
+            &crate::dir_listings::DirListings::default(),
         )
         .unwrap();
         let names: Vec<&str> = manifest
