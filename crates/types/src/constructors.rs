@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::intern::Constant;
 use crate::{
     AccessoryKind, CallSiteVariance, CallableSig, ClassKind, ConditionalSubject, ExtensionTypeData,
-    Name, PhpString, Repr, Shape, ShapeKey, TemplateParam, Type,
+    MixedKind, Name, PhpString, Repr, Shape, ShapeKey, TemplateParam, Type,
 };
 
 impl Type {
@@ -21,7 +21,12 @@ impl Type {
 
     /// `mixed`, explicit or not.
     pub fn mixed_with(explicit: bool) -> Type {
-        Type::new(Repr::Mixed(explicit, None))
+        let kind = if explicit {
+            MixedKind::Explicit
+        } else {
+            MixedKind::Implicit
+        };
+        Type::new(Repr::Mixed(kind, None))
     }
 
     pub fn error() -> Type {

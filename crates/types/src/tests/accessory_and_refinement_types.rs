@@ -379,7 +379,7 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
             )],
             Some(Box::new((
                 Type::new(Repr::String),
-                Type::new(Repr::Mixed(false, None))
+                Type::new(Repr::Mixed(MixedKind::Implicit, None))
             ))),
             None,
         ))

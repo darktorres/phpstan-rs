@@ -3,7 +3,9 @@
 //! and integer refinements comparisons and counts prove.
 
 use crate::UnionAll as _;
-use crate::{AccessoryKind, PhpString, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
+use crate::{
+    AccessoryKind, MixedKind, PhpString, Relation, Repr, Shape, ShapeField, ShapeKey, Type,
+};
 
 impl Relation<'_> {
     /// Narrows `original` to `target` along the branch where a check for
@@ -139,7 +141,7 @@ impl Relation<'_> {
                 }
             }
             _ if self.is_super_type_of(target, original).yes() => original.clone(),
-            Repr::Error => original.clone(),
+            Repr::Mixed(MixedKind::Error, None) => original.clone(),
             Repr::Mixed(_, Some(lacks)) => target.without(lacks),
             _ => self.intersect(vec![original.clone(), target.clone()]),
         }
@@ -164,14 +166,15 @@ impl Type {
         stack::guard(|| {
             // `mixed` without a type is `mixed~type`: what it can't be is
             // remembered (`isset($x)` leaves `mixed~null`).
-            if let Repr::Mixed(explicit, lacks) = self.repr()
-                && !matches!(excluded.repr(), Repr::Mixed(..) | Repr::Never | Repr::Error)
+            if let Repr::Mixed(kind, lacks) = self.repr()
+                && *kind != MixedKind::Error
+                && !matches!(excluded.repr(), Repr::Mixed(..) | Repr::Never)
             {
                 let lacks = match lacks {
                     Some(lacks) => Type::union((*lacks).clone(), excluded.clone()),
                     None => excluded.clone(),
                 };
-                return Type::new(Repr::Mixed(*explicit, Some(lacks)));
+                return Type::new(Repr::Mixed(*kind, Some(lacks)));
             }
             match self.repr() {
                 // Recurses into `Type::without` for each kept member,
@@ -600,15 +603,17 @@ impl Type {
             }
             Repr::Null | Repr::False | Repr::IntLiteral(0) => Type::never(),
             Repr::FloatLiteral(f) if *f == 0.0 => Type::never(),
-            Repr::Mixed(..) => self.without(&Type::union_of(vec![
-                Type::null(),
-                Type::bool_literal(false),
-                Type::int_literal(0),
-                Type::float_literal(0.0),
-                Type::string_literal(PhpString::default()),
-                Type::string_literal("0".into()),
-                Type::array_shape(Shape::sealed(Vec::new())),
-            ])),
+            Repr::Mixed(kind, _) if *kind != MixedKind::Error => {
+                self.without(&Type::union_of(vec![
+                    Type::null(),
+                    Type::bool_literal(false),
+                    Type::int_literal(0),
+                    Type::float_literal(0.0),
+                    Type::string_literal(PhpString::default()),
+                    Type::string_literal("0".into()),
+                    Type::array_shape(Shape::sealed(Vec::new())),
+                ]))
+            }
             Repr::Bool => Type::bool_literal(true),
             Repr::Int => without_zero(None, None),
             Repr::IntRange(min, max) => without_zero(*min, *max),

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{AccessoryKind, ClassHierarchy, Repr, Shape, ShapeField, ShapeKey, Type};
+use crate::{AccessoryKind, ClassHierarchy, MixedKind, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// How many members a union keeps: past it, its members are generalized
 /// (shapes by key set, extension payloads widened, literals to their base
@@ -125,7 +125,7 @@ fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>)
             _ => {}
         }
         // An error absorbs everything, as a `mixed` does.
-        if operands.iter().any(|t| matches!(t.repr(), Repr::Error)) {
+        if operands.iter().any(Type::is_error) {
             return Type::error();
         }
         // A `mixed` absorbs everything, and stays explicit when either side
@@ -154,7 +154,7 @@ fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>)
         // once flattened out of a multi-member `Union` operand (real shape:
         // `?mixed`'s own union-with-`Null` construction, `types/parse.rs`'s
         // `parse_type_string`, before its own analogous fix), which the
-        // fast-path's `a == Repr::Mixed(false, None)`/`b == Repr::Mixed(false, None)`
+        // fast-path's `a == Repr::Mixed(MixedKind::Implicit, None)`/`b == Repr::Mixed(MixedKind::Implicit, None)`
         // checks never see since neither whole operand is bare `Mixed` -
         // only one of its now-flattened members is. Without this, a
         // `Mixed`-containing union merged with anything else keeps
@@ -1332,8 +1332,8 @@ fn union_with_mixed(types: &[&Type]) -> Option<Type> {
     let mut explicit = None;
     let mut subtracted: Option<Option<Type>> = None;
     for ty in types {
-        if let Repr::Mixed(written, lacks) = ty.repr() {
-            explicit = Some(explicit.unwrap_or(false) || *written);
+        if let Repr::Mixed(kind, lacks) = ty.repr() {
+            explicit = Some(explicit.unwrap_or(false) || *kind == MixedKind::Explicit);
             subtracted = Some(match (subtracted, lacks.as_ref()) {
                 (None, lacks) => lacks.cloned(),
                 (Some(Some(before)), Some(lacks)) if before == *lacks => Some(before),
@@ -1348,5 +1348,10 @@ fn union_with_mixed(types: &[&Type]) -> Option<Type> {
             subtracted = subtracted.map(|s| s.without(ty)).filter(|s| !s.is_never());
         }
     }
-    Some(Type::new(Repr::Mixed(explicit, subtracted)))
+    let kind = if explicit {
+        MixedKind::Explicit
+    } else {
+        MixedKind::Implicit
+    };
+    Some(Type::new(Repr::Mixed(kind, subtracted)))
 }

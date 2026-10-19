@@ -540,7 +540,7 @@ fn generic_arg_with_bivariant_marker_parses_to_a_variance_arg() {
             "Collection".into(),
             vec![Type::new(Repr::VarianceArg(
                 CallSiteVariance::Bivariant,
-                Type::new(Repr::Mixed(false, None))
+                Type::new(Repr::Mixed(MixedKind::Implicit, None))
             ))]
         )
     );

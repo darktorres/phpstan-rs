@@ -373,17 +373,25 @@ impl std::fmt::Debug for Type {
     }
 }
 
+/// What a `mixed` stands for. `Implicit` is `mixed` with nothing known (an
+/// unresolvable expression, a missing type). `Explicit` is `mixed` written
+/// out (the keyword, or an unbounded `@template T`), PHPStan's
+/// `MixedType::isExplicitMixed()`. `Error` is the value of an expression a
+/// rule reports as invalid: a `mixed` that accepts and is accepted by
+/// everything, so the reported error doesn't cascade into more, and that
+/// no rule reports on again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) enum MixedKind {
+    Implicit,
+    Explicit,
+    Error,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Repr {
-    // PHPStan's `MixedType::isExplicitMixed()`: `true` when `mixed` was
-    // written (the keyword, or an unbounded `@template T`), `false` when
-    // nothing is known (an unresolvable expression, a missing type). Type
-    // equality ignores the flag, as `MixedType::equals()` does.
-    Mixed(bool, Option<Type>),
-    // PHPStan's `ErrorType`: the value of an expression a rule reports as
-    // invalid. A `mixed` that accepts and is accepted by everything, so the
-    // reported error doesn't cascade into more.
-    Error,
+    // Type equality ignores whether `mixed` was written, as
+    // `MixedType::equals()` does, but tells an error apart from either.
+    Mixed(MixedKind, Option<Type>),
     Never,
     Void,
     Null,
@@ -611,8 +619,9 @@ impl PartialEq for Type {
 /// as types.
 fn repr_eq(a: &Repr, b: &Repr) -> bool {
     match (a, b) {
-        (Repr::Mixed(_, a), Repr::Mixed(_, b)) => a == b,
-        (Repr::Error, Repr::Error) => true,
+        (Repr::Mixed(a, x), Repr::Mixed(b, y)) => {
+            (*a == MixedKind::Error) == (*b == MixedKind::Error) && x == y
+        }
         (Repr::Never, Repr::Never) => true,
         (Repr::Void, Repr::Void) => true,
         (Repr::Null, Repr::Null) => true,
@@ -689,7 +698,6 @@ fn repr_eq(a: &Repr, b: &Repr) -> bool {
         }
         (
             Repr::Mixed(..)
-            | Repr::Error
             | Repr::Never
             | Repr::Void
             | Repr::Null
@@ -755,8 +763,7 @@ fn semantic_hash(repr: &Repr) -> u64 {
     std::mem::discriminant(repr).hash(state);
     match repr {
         Repr::Mixed(_, subtracted) => subtracted.hash(state),
-        Repr::Error
-        | Repr::Never
+        Repr::Never
         | Repr::Void
         | Repr::Null
         | Repr::Bool

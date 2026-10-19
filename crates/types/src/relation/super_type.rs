@@ -1,5 +1,5 @@
 use crate::relation::Relation;
-use crate::{AccessoryKind, Repr, Shape, TrinaryLogic, Type};
+use crate::{AccessoryKind, MixedKind, Repr, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
 
 impl Relation<'_> {
@@ -105,8 +105,10 @@ impl Relation<'_> {
     pub(crate) fn is_super_type_of_by_form(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         stack::guard(|| {
             match (sup.repr(), sub.repr()) {
-                (Repr::Error, _) => TrinaryLogic::Yes,
-                (_, Repr::Error) => self.is_super_type_of(sup, &Type::mixed()),
+                (Repr::Mixed(MixedKind::Error, None), _) => TrinaryLogic::Yes,
+                (_, Repr::Mixed(MixedKind::Error, None)) => {
+                    self.is_super_type_of(sup, &Type::mixed())
+                }
                 // `mixed~S` holds everything but `S`.
                 (Repr::Mixed(_, Some(subtracted)), _) if !sub.is_never() => {
                     if self.is_super_type_of(subtracted, sub).yes() {
@@ -525,8 +527,8 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
             !is_array
                 && scalars_disjoint(
                     &Type::array(
-                        Type::new(Repr::Mixed(false, None)),
-                        Type::new(Repr::Mixed(false, None)),
+                        Type::new(Repr::Mixed(MixedKind::Implicit, None)),
+                        Type::new(Repr::Mixed(MixedKind::Implicit, None)),
                     ),
                     sub,
                 )
@@ -749,7 +751,7 @@ mod tests {
         vec![
             Type::mixed(),
             Type::explicit_mixed(),
-            Type::new(Repr::Mixed(false, Some(Type::int()))),
+            Type::new(Repr::Mixed(MixedKind::Implicit, Some(Type::int()))),
             Type::never(),
             Type::void(),
             Type::error(),
@@ -799,7 +801,7 @@ mod tests {
             Type::float_literal(f64::NAN),
             Type::float_literal(1.5),
             Type::new(Repr::ClassKindString(crate::ClassKind::Interface)),
-            Type::new(Repr::Mixed(false, Some(Type::int()))),
+            Type::new(Repr::Mixed(MixedKind::Implicit, Some(Type::int()))),
             Type::array(Type::int(), Type::int_literal(1)),
             Type::union_of(vec![Type::int_literal(1), Type::int_literal(2)]),
             Type::union_of(vec![Type::never(), Type::null()]),
@@ -864,7 +866,7 @@ mod tests {
         let mut types = samples();
         types.extend([
             Type::float_literal(f64::NAN),
-            Type::new(Repr::Mixed(true, Some(Type::string()))),
+            Type::new(Repr::Mixed(MixedKind::Explicit, Some(Type::string()))),
             Type::union_of(vec![Type::int(), Type::null()]),
         ]);
         for relation in [Relation::structural()] {

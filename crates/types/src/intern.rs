@@ -15,7 +15,7 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
 use rustc_hash::{FxHashMap, FxHasher};
 
-use crate::{CallableSig, Node, Repr, Shape, TemplateParam, Type};
+use crate::{CallableSig, MixedKind, Node, Repr, Shape, TemplateParam, Type};
 
 const SHARDS: usize = 64;
 
@@ -185,9 +185,9 @@ impl Constant {
     /// The constant `repr` is, if it is one.
     pub(crate) fn of(repr: &Repr) -> Option<Constant> {
         Some(match repr {
-            Repr::Mixed(false, None) => Constant::Mixed,
-            Repr::Mixed(true, None) => Constant::ExplicitMixed,
-            Repr::Error => Constant::Error,
+            Repr::Mixed(MixedKind::Implicit, None) => Constant::Mixed,
+            Repr::Mixed(MixedKind::Explicit, None) => Constant::ExplicitMixed,
+            Repr::Mixed(MixedKind::Error, None) => Constant::Error,
             Repr::Never => Constant::Never,
             Repr::Void => Constant::Void,
             Repr::Null => Constant::Null,
@@ -206,9 +206,9 @@ impl Constant {
 
     pub(crate) fn repr(self) -> Repr {
         match self {
-            Constant::Mixed => Repr::Mixed(false, None),
-            Constant::ExplicitMixed => Repr::Mixed(true, None),
-            Constant::Error => Repr::Error,
+            Constant::Mixed => Repr::Mixed(MixedKind::Implicit, None),
+            Constant::ExplicitMixed => Repr::Mixed(MixedKind::Explicit, None),
+            Constant::Error => Repr::Mixed(MixedKind::Error, None),
             Constant::Never => Repr::Never,
             Constant::Void => Repr::Void,
             Constant::Null => Repr::Null,
@@ -384,8 +384,7 @@ fn same_callable(a: &CallableSig, b: &CallableSig) -> bool {
 fn exact_eq_owned(a: &Repr, b: &Repr) -> bool {
     match (a, b) {
         (Repr::Mixed(aw, a), Repr::Mixed(bw, b)) => aw == bw && same_option(a, b),
-        (Repr::Error, Repr::Error)
-        | (Repr::Never, Repr::Never)
+        (Repr::Never, Repr::Never)
         | (Repr::Void, Repr::Void)
         | (Repr::Null, Repr::Null)
         | (Repr::Bool, Repr::Bool)
@@ -502,14 +501,13 @@ fn exact_hash_owned(repr: &Repr) -> u64 {
     let state = &mut hasher;
     std::mem::discriminant(repr).hash(state);
     match repr {
-        Repr::Mixed(written, subtracted) => {
-            written.hash(state);
+        Repr::Mixed(kind, subtracted) => {
+            kind.hash(state);
             if let Some(subtracted) = subtracted {
                 hash_type(subtracted, state);
             }
         }
-        Repr::Error
-        | Repr::Never
+        Repr::Never
         | Repr::Void
         | Repr::Null
         | Repr::Bool

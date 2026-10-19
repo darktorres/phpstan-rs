@@ -3,7 +3,7 @@
 //! another member is within it.
 
 use crate::UnionAll as _;
-use crate::{AccessoryKind, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
+use crate::{AccessoryKind, MixedKind, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// The intersection of `members`, with no class knowledge. `list<int>&
 /// non-empty-array` is one array (`int` values, `int` keys) carrying both
@@ -242,13 +242,17 @@ impl Relation<'_> {
     fn narrower(&self, a: Type, b: Type) -> Type {
         stack::guard(|| {
             // `mixed~S` narrows the other side to it without `S`.
-            if let Repr::Mixed(_, lacks) = b.repr() {
+            if let Repr::Mixed(kind, lacks) = b.repr()
+                && *kind != MixedKind::Error
+            {
                 return match lacks {
                     Some(lacks) => a.without(lacks),
                     None => a,
                 };
             }
-            if let Repr::Mixed(_, lacks) = a.repr() {
+            if let Repr::Mixed(kind, lacks) = a.repr()
+                && *kind != MixedKind::Error
+            {
                 return match lacks {
                     Some(lacks) => b.without(lacks),
                     None => b,

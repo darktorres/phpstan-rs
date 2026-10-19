@@ -1,5 +1,5 @@
 use crate::relation::{AcceptsResult, Relation};
-use crate::{CallableSig, ClassKind, Repr, Shape, ShapeKey, Type, Variance};
+use crate::{CallableSig, ClassKind, MixedKind, Repr, Shape, ShapeKey, Type, Variance};
 
 // The levels at which PHPStan's `RuleLevelHelper` checks turn on
 // (`rule_level_accepts`, `accepts_at_level`).
@@ -29,7 +29,8 @@ impl Relation<'_> {
     pub(crate) fn accepts_type(&self, sub: &Type, sup: &Type) -> bool {
         stack::guard(|| {
             match (sub.repr(), sup.repr()) {
-                (Repr::Error, _) | (_, Repr::Error) => true,
+                (Repr::Mixed(MixedKind::Error, None), _)
+                | (_, Repr::Mixed(MixedKind::Error, None)) => true,
                 // No value to reject.
                 (Repr::Never, _) => true,
                 // A `key-of<T>`/`T[K]` still over a template is what `T`'s
@@ -484,7 +485,9 @@ impl Relation<'_> {
     /// member is (PHPStan accepts its `Maybe`); from it on, every member
     /// must be.
     fn rule_level_accepts_type(&self, sub: &Type, sup: &Type) -> bool {
-        if matches!(sub.repr(), Repr::Error) || matches!(sup.repr(), Repr::Error) {
+        if matches!(sub.repr(), Repr::Mixed(MixedKind::Error, None))
+            || matches!(sup.repr(), Repr::Mixed(MixedKind::Error, None))
+        {
             return true;
         }
         // Never configured means "assume the strictest threshold for
@@ -613,13 +616,13 @@ impl Relation<'_> {
     /// "`checkExplicitMixed`/`checkImplicitMixed` stay off unless opted
     /// into" default `rule_level_accepts` documents.
     pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
-        let Repr::Mixed(is_explicit, _) = ty.repr() else {
+        let Repr::Mixed(kind, _) = ty.repr() else {
             return None;
         };
-        let threshold = if *is_explicit {
-            EXPLICIT_MIXED_CHECK_LEVEL
-        } else {
-            IMPLICIT_MIXED_CHECK_LEVEL
+        let threshold = match kind {
+            MixedKind::Explicit => EXPLICIT_MIXED_CHECK_LEVEL,
+            MixedKind::Implicit => IMPLICIT_MIXED_CHECK_LEVEL,
+            MixedKind::Error => return None,
         };
         (self.configured_level? >= threshold).then_some(threshold)
     }
@@ -630,6 +633,10 @@ impl Relation<'_> {
     /// anywhere; at or past it, only where `mixed` itself is
     /// (`StrictMixedType::isAcceptedBy`).
     fn accepts_at_level(&self, sub: &Type, sup: &Type, level: u8) -> bool {
+        // An error is accepted and accepts everything at every level.
+        if sub.is_error() || sup.is_error() {
+            return true;
+        }
         // A template bounded by nothing is as unknown as an explicit
         // `mixed` (PHPStan's `TemplateMixedType`).
         if let Repr::TemplateParam(tp) = sub.repr()
@@ -638,8 +645,8 @@ impl Relation<'_> {
         {
             return true;
         }
-        if let Repr::Mixed(is_explicit, _) = sub.repr() {
-            let strict_level = if *is_explicit {
+        if let Repr::Mixed(kind, _) = sub.repr() {
+            let strict_level = if *kind == MixedKind::Explicit {
                 EXPLICIT_MIXED_CHECK_LEVEL
             } else {
                 IMPLICIT_MIXED_CHECK_LEVEL

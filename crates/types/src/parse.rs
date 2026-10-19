@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, ConditionalSubject,
-    Repr, Shape, ShapeField, ShapeKey, Type, late,
+    MixedKind, Repr, Shape, ShapeField, ShapeKey, Type, late,
 };
 
 /// The type a type string (`"?string"`, `"int|string"`, `"\App\Foo"`,
@@ -1416,7 +1416,7 @@ fn parse_generic_arg(a: &str) -> Type {
     if trimmed == "*" {
         return Type::variance_arg(
             CallSiteVariance::Bivariant,
-            Type::new(Repr::Mixed(false, None)),
+            Type::new(Repr::Mixed(MixedKind::Implicit, None)),
         );
     }
     if let Some(rest) = trimmed.strip_prefix("covariant ") {

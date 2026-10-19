@@ -4,7 +4,8 @@ use syntax::ast::ClassKind;
 
 use crate::parse::display_shape_key;
 use crate::{
-    AccessoryKind, CallSiteVariance, CallableSig, ConditionalSubject, PhpString, Repr, Shape, Type,
+    AccessoryKind, CallSiteVariance, CallableSig, ConditionalSubject, MixedKind, PhpString, Repr,
+    Shape, Type,
 };
 
 /// `keyword(params): return` - shared by a shaped `callable(...)`/
@@ -54,6 +55,7 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         stack::guard(|| {
             match self.repr() {
+                Repr::Mixed(MixedKind::Error, _) => write!(f, "*ERROR*"),
                 Repr::Mixed(_, None) => write!(f, "mixed"),
                 Repr::Mixed(_, Some(subtracted)) => {
                     if subtracted.union_members().len() > 1 {
@@ -62,7 +64,6 @@ impl fmt::Display for Type {
                         write!(f, "mixed~{subtracted}")
                     }
                 }
-                Repr::Error => write!(f, "*ERROR*"),
                 Repr::Never => write!(f, "never"),
                 Repr::Void => write!(f, "void"),
                 Repr::Null => write!(f, "null"),

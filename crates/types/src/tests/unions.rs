@@ -1,6 +1,6 @@
 //! `Type::union`: which members merge and which stay apart.
 
-use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
+use crate::{MixedKind, Repr, Shape, ShapeField, ShapeKey, Type};
 
 fn shape(fields: &[(&str, Type, bool)]) -> Type {
     Type::array_shape(Shape::sealed(
@@ -92,11 +92,11 @@ fn never_true_and_false_fold_away() {
 fn a_union_keeps_an_explicit_mixed_explicit() {
     assert!(matches!(
         (Type::union(Type::explicit_mixed(), Type::null())).repr(),
-        Repr::Mixed(true, None)
+        Repr::Mixed(MixedKind::Explicit, None)
     ));
     assert!(matches!(
         (Type::union(Type::mixed(), Type::null())).repr(),
-        Repr::Mixed(false, None)
+        Repr::Mixed(MixedKind::Implicit, None)
     ));
 }
 

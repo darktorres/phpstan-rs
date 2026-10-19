@@ -7,7 +7,7 @@
 //! `ArrayTypeTrait`'s always-`ErrorType` `toString()`.
 
 use crate::UnionAll as _;
-use crate::{AccessoryKind, ClassHierarchy, PhpString, Repr, Type, format_php_float};
+use crate::{AccessoryKind, ClassHierarchy, MixedKind, PhpString, Repr, Type, format_php_float};
 
 /// The built-in classes PHPStan's `ObjectType::toInteger()`/`toFloat()`
 /// special-case as numeric-castable; every other object is illegal for
@@ -302,7 +302,9 @@ impl Type {
                 .union_all()
                 .unwrap_or_else(Type::never),
             Repr::TemplateParam(param) => param.bound.to_bitwise_not(),
-            Repr::Mixed(..) => Type::union(Type::int(), Type::string()),
+            Repr::Mixed(kind, _) if *kind != MixedKind::Error => {
+                Type::union(Type::int(), Type::string())
+            }
             _ if self.is_string().yes() => {
                 if self.is_refined_string(AccessoryKind::NonEmptyString).yes() {
                     Type::string().with_string_accessory(AccessoryKind::NonEmptyString)

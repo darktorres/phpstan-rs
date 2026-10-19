@@ -9,7 +9,7 @@ use syntax::php_float::var_export_float;
 
 use crate::{
     AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, ConditionalSubject,
-    PhpString, Repr, Shape, ShapeField, ShapeKey, TemplateParam, Type,
+    MixedKind, PhpString, Repr, Shape, ShapeField, ShapeKey, TemplateParam, Type,
 };
 
 /// The type `s` displays, or `None` when any part of it doesn't parse.
@@ -495,7 +495,10 @@ impl Parser<'_> {
             } else {
                 self.atom()?
             };
-            Some(Type::new(Repr::Mixed(false, Some(subtracted))))
+            Some(Type::new(Repr::Mixed(
+                MixedKind::Implicit,
+                Some(subtracted),
+            )))
         })
     }
 

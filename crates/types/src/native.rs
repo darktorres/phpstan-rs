@@ -1,7 +1,7 @@
 //! The native declaration a type can be written as: PHP's own type
 //! syntax, as far as the configured version allows.
 
-use crate::{PhpVersion, Repr, Type};
+use crate::{MixedKind, PhpVersion, Repr, Type};
 
 impl Type {
     /// The native declaration this type can be written as on `version` (a
@@ -65,7 +65,7 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
             Repr::Array(..) | Repr::ArrayShape(_) => out.add("array"),
             Repr::Callable(_) => out.add("callable"),
             Repr::ObjectShape(_) | Repr::ObjectWithoutClass => out.add("object"),
-            Repr::Mixed(..) => out.add("mixed"),
+            Repr::Mixed(kind, _) if *kind != MixedKind::Error => out.add("mixed"),
             Repr::Void if position == Position::Return => out.add("void"),
             Repr::Never if position == Position::Return => out.add("never"),
             Repr::StaticRef(_) | Repr::This if position == Position::Return => out.add("static"),

@@ -1,6 +1,6 @@
 //! `intersect_types`: which members fold together and which drop.
 
-use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, Type, intersect_types};
+use crate::{AccessoryKind, MixedKind, Repr, Shape, ShapeField, ShapeKey, Type, intersect_types};
 
 fn field(key: i64, ty: Type, optional: bool) -> ShapeField {
     ShapeField::new(ShapeKey::Int(key), ty, optional)
@@ -20,7 +20,7 @@ fn two_shapes_intersect_into_one() {
     ]));
     let b = Type::array_shape(Shape::sealed(vec![
         field(0, literals.clone(), false),
-        field(1, Type::new(Repr::Mixed(false, None)), false),
+        field(1, Type::new(Repr::Mixed(MixedKind::Implicit, None)), false),
     ]));
     assert_eq!(
         intersect_types(vec![a, b]),
@@ -42,7 +42,7 @@ fn a_required_key_the_other_sealed_shape_lacks_is_never() {
 fn a_shape_within_an_array_takes_its_value_type() {
     let shape = Type::array_shape(Shape::sealed(vec![field(
         0,
-        Type::new(Repr::Mixed(false, None)),
+        Type::new(Repr::Mixed(MixedKind::Implicit, None)),
         false,
     )]));
     let array = Type::array(Type::new(Repr::Int), Type::new(Repr::String));

@@ -23,13 +23,13 @@ fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
         &shape,
         &Type::array(
             Type::unknown_array_key(),
-            Type::new(Repr::Mixed(false, None))
+            Type::new(Repr::Mixed(MixedKind::Implicit, None))
         )
     ));
     assert!(!is_subtype(
         &Type::array(
             Type::unknown_array_key(),
-            Type::new(Repr::Mixed(false, None))
+            Type::new(Repr::Mixed(MixedKind::Implicit, None))
         ),
         &shape
     ));
@@ -46,7 +46,10 @@ fn a_string_keyed_shape_is_a_subtype_of_a_matching_string_keyed_mixed_valued_arr
     let shape = parse_type_string("array{name: string}");
     assert!(is_subtype(
         &shape,
-        &Type::array(Type::new(Repr::String), Type::new(Repr::Mixed(false, None)))
+        &Type::array(
+            Type::new(Repr::String),
+            Type::new(Repr::Mixed(MixedKind::Implicit, None))
+        )
     ));
 }
 
@@ -55,7 +58,10 @@ fn a_string_keyed_shape_is_not_a_subtype_of_an_int_keyed_mixed_valued_array() {
     let shape = parse_type_string("array{name: string}");
     assert!(!is_subtype(
         &shape,
-        &Type::array(Type::new(Repr::Int), Type::new(Repr::Mixed(false, None)))
+        &Type::array(
+            Type::new(Repr::Int),
+            Type::new(Repr::Mixed(MixedKind::Implicit, None))
+        )
     ));
 }
 
@@ -269,14 +275,14 @@ fn array_accessory_subtype_rules() {
     let list_ty = Type::new(Repr::Intersection(vec![
         Type::array(
             Type::unknown_array_key(),
-            Type::new(Repr::Mixed(false, None)),
+            Type::new(Repr::Mixed(MixedKind::Implicit, None)),
         ),
         Type::accessory(AccessoryKind::ArrayList),
     ]));
     let non_empty_ty = Type::new(Repr::Intersection(vec![
         Type::array(
             Type::unknown_array_key(),
-            Type::new(Repr::Mixed(false, None)),
+            Type::new(Repr::Mixed(MixedKind::Implicit, None)),
         ),
         Type::accessory(AccessoryKind::NonEmptyArray),
     ]));
@@ -320,7 +326,7 @@ fn a_shape_with_a_non_trailing_optional_field_is_not_a_definite_list() {
     let list_ty = Type::new(Repr::Intersection(vec![
         Type::array(
             Type::unknown_array_key(),
-            Type::new(Repr::Mixed(false, None)),
+            Type::new(Repr::Mixed(MixedKind::Implicit, None)),
         ),
         Type::accessory(AccessoryKind::ArrayList),
     ]));
@@ -355,7 +361,7 @@ fn array_subtyping_is_covariant_on_value_type() {
     let ints = Type::array(Type::unknown_array_key(), Type::new(Repr::Int));
     let mixed_arr = Type::array(
         Type::unknown_array_key(),
-        Type::new(Repr::Mixed(false, None)),
+        Type::new(Repr::Mixed(MixedKind::Implicit, None)),
     );
     assert!(is_subtype(&ints, &mixed_arr));
     assert!(!is_subtype(&mixed_arr, &ints));

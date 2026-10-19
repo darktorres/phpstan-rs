@@ -4,8 +4,8 @@ use crate::UnionAll as _;
 use std::sync::Arc;
 
 use crate::{
-    AccessoryKind, CallSiteVariance, CallableSig, ConditionalSubject, Relation, Repr, Shape,
-    ShapeField, ShapeKey, TrinaryLogic, Type,
+    AccessoryKind, CallSiteVariance, CallableSig, ConditionalSubject, MixedKind, Relation, Repr,
+    Shape, ShapeField, ShapeKey, TrinaryLogic, Type,
 };
 
 /// The types the `is_*` queries ask whether a type is within, built once.
@@ -146,12 +146,12 @@ impl Type {
     /// Whether this is the error type: an expression already reported
     /// invalid, which nothing reports on again.
     pub fn is_error(&self) -> bool {
-        matches!(self.repr(), Repr::Error)
+        matches!(self.repr(), Repr::Mixed(MixedKind::Error, None))
     }
 
     /// Whether this is a `mixed` a written type resolved to.
     pub fn is_explicit_mixed(&self) -> bool {
-        matches!(self.repr(), Repr::Mixed(true, _))
+        matches!(self.repr(), Repr::Mixed(MixedKind::Explicit, _))
     }
 
     /// Whether a `mixed` a written type resolved to stands anywhere in this
@@ -159,7 +159,7 @@ impl Type {
     /// template's own.
     pub fn mentions_explicit_mixed(&self) -> bool {
         match self.repr() {
-            Repr::Mixed(explicit, _) => *explicit,
+            Repr::Mixed(kind, _) => *kind == MixedKind::Explicit,
             Repr::TemplateParam(_) => false,
             _ => self.any_child(Type::mentions_explicit_mixed),
         }
@@ -317,7 +317,10 @@ impl Type {
     /// each of its members can.
     pub fn can_bound_a_template(&self) -> bool {
         match self.repr() {
-            Repr::Void | Repr::Never | Repr::Error | Repr::Conditional { .. } => false,
+            Repr::Void
+            | Repr::Never
+            | Repr::Mixed(MixedKind::Error, None)
+            | Repr::Conditional { .. } => false,
             Repr::Union(members) | Repr::BenevolentUnion(members) | Repr::Intersection(members) => {
                 members
                     .iter()
@@ -778,7 +781,7 @@ impl Type {
 
     /// Whether this is a `mixed` with no type information behind it.
     pub fn is_implicit_mixed(&self) -> bool {
-        matches!(self.repr(), Repr::Mixed(false, None))
+        matches!(self.repr(), Repr::Mixed(MixedKind::Implicit, None))
     }
 
     /// Whether every value of this type is one of `of` (`Yes`), none is

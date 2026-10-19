@@ -219,10 +219,7 @@ impl<'a> Checker<'a> {
         // legal combinations even though either one might hold at
         // runtime. An error or `never` operand (a division by zero) is
         // already reported or never evaluated.
-        if [l_ty, r_ty]
-            .iter()
-            .any(|t| t.is_mixed() || t.is_error() || t.is_never())
-        {
+        if [l_ty, r_ty].iter().any(|t| t.is_mixed() || t.is_never()) {
             return false;
         }
         let Some(valid) = self.binary_operand_validity(op, l_ty, r_ty) else {

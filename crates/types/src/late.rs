@@ -3,7 +3,7 @@
 //! (PHPStan's `LateResolvableType`).
 
 use crate::UnionAll as _;
-use crate::{Repr, ShapeKey, Type};
+use crate::{MixedKind, Repr, ShapeKey, Type};
 
 /// What resolving a class reference inside a type needs to know.
 pub trait ClassConstants {
@@ -55,7 +55,7 @@ impl Type {
 /// anything whose keys aren't known from the type alone.
 pub(crate) fn key_of(ty: &Type) -> Option<Type> {
     match ty.repr() {
-        Repr::Mixed(..) => Some(Type::mixed()),
+        Repr::Mixed(kind, _) if *kind != MixedKind::Error => Some(Type::mixed()),
         Repr::Array(key, _) => Some((*key).clone()),
         Repr::ArrayShape(shape) => Some(join(
             shape
@@ -75,7 +75,7 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
 /// case values need the registry (`Registry::resolve_deferred_value_of`).
 pub(crate) fn value_of(ty: &Type) -> Option<Type> {
     match ty.repr() {
-        Repr::Mixed(..) => Some(Type::mixed()),
+        Repr::Mixed(kind, _) if *kind != MixedKind::Error => Some(Type::mixed()),
         Repr::Array(_, value) => Some((*value).clone()),
         Repr::ArrayShape(shape) => Some(join(shape.types().cloned().collect())),
         Repr::Intersection(members) => members.iter().find_map(value_of),
