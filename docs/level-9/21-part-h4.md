@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -32,7 +32,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 06 07 08 10 12 22 31 |
 | STUB-11 | OPEN | OPEN | 05 06 07 10 12 23 24 |
 | CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 06 10 12 22 |
-| CACHE-10 | BLOCKED | BLOCKED: as CACHE-9 | — |
+| CACHE-10 | BLOCKED | BLOCKED: as CACHE-9 | 06 10 12 22 |
 | CACHE-12 | DONE | DONE `6705eedd`. `Lazy` keeps the file's number beside its encoded bytes: `bind_file` sets it without decoding, and … | — |
 | CACHE-13.1 | OPEN | OPEN | 05 06 07 10 11 12 19 22 |
 | CACHE-13.2 | OPEN | OPEN | 05 06 07 08 10 12 22 23 |

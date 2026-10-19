@@ -23,7 +23,7 @@ exception is level 7's designs, which are rows of the 20 G plan and are worked i
 level 8's order; DOC-2.1 stays deferred.
 
 Level 9 is the active level: the batch that follows the cross-platform fixes. It is
-designed (section 9 below) and has not started; the design waits for the user's go.
+designed and partly built (section 9 below): Part A is built and validated, and batch 0 is partly built. Part B onward waits for the user's go.
 Level 8, the 20 G plan and the off drill, resumes when level 9 starts, in the order
 that level 9 sets.
 
@@ -264,17 +264,23 @@ Order, as the plan sets it:
 
 1. Part A's rows: built, as the ledger's rows record (A1, A2, A3, A5, A5a, A7 and A8,
    with COMP-7 and COMP-8). The one validation (A6) ran at `13694541` on 2026-10-19: the test suites, the fixtures, the gate build, the Piwigo digest, `vendor/monolog`, `vendor/laravel` and `vendor/rector-src` are as recorded in the ledger; the wall cost of the batch (COMP-6 bundled discovery) is accepted at option 1, and the LOAD-9 syscall saving is measured.
-2. Batch 0: the oracle tools and the baseline, the seven fixes the crate split puts
-   first, and the findings that change a dump. Then item 9, the flat tree, steps 0 to
-   3, with spike S-12 before step 2.
+2. Batch 0 (ledger section 17, and VAL-1 for the tooling). Built: the seven fixes the
+   crate split puts first (SRV-1 to SRV-7), F10's tests, F20, F21 and F77's analysed-file
+   half (FIX-10, FIX-20, FIX-21, FIX-77). Not built: VAL-1.1, the item-0 tooling (VAL-1.2 to
+   VAL-1.10), the baseline (VAL-1.12), F69's fixtures (FIX-69), F77's record of a context
+   file's failure in the dump and the per-file cache (FIX-77; the dump needs VAL-1.8), COMP-2's
+   grammar, and the level-3 findings that change a dump: W1's rows are READY and none is built,
+   and the about 115 findings are not yet triaged by probe (Part E 22). Then item 9, the flat tree, steps 0 to 3, with spike
+   S-12 before step 2.
 3. Part C's batches (tokens, the lexer, parse recovery, names, products, PHPDoc, the
    check's temporaries), then the wall (Part D), whose engine is `ENGINE_PLAN.md`.
 
 Spikes S-1 to S-12 (Part H5) run before the designs they settle. Level 8's list is not
 reordered until the go.
 
-The user asked for Part A on 2026-10-19 and nothing else. Part B onward waits for
-the go.
+Part A was the work the user asked for on 2026-10-19. The batch-0 commits listed in
+Part E landed on their own. The opt-in lazy-read commits (`910de4507`, `d674ac1f0`) came from
+a follow-up to another task and are reverted in the tree, as the user asked (ledger Q-16). Part B onward waits for the go.
 
 Leftovers from plan mode, to delete when it ends: the helper scripts, backups and
 probes in the scratchpad (`/tmp/claude-1000/-home-torres-projects-phpstan-rs/0fdc40b5-accc-4267-853a-f5ef8f30c07c/scratchpad`),

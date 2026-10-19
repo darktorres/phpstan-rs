@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -18,10 +18,10 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | SYN-1.7 | OPEN | OPEN | 07 10 12 |
 | SYN-1.8 | OPEN | OPEN | 07 10 12 |
 | SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 05 06 07 10 11 12 16 22 |
+| SYN-1.10 | OPEN | OPEN | 05 06 07 11 12 22 |
 | SYN-2 | OPEN | OPEN; the target grew | 05 07 09 10 11 12 31 |
 | SYN-3.4 | OPEN | OPEN | 05 10 11 12 17 18 |
-| PROD-3 | DONE | DONE `791d29cb` | 05 |
+| PROD-3 | DONE | DONE `791d29cb` | 05 08 |
 | PROD-5.1 | OPEN | OPEN | 05 07 10 11 12 18 20 22 |
 | DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 05 06 07 10 11 12 17 19 |
 | REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 11 12 20 21 22 23 31 |

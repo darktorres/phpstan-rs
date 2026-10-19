@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -33,7 +33,6 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | SYN-1.7 | OPEN | OPEN | 07 12 13 |
 | SYN-1.8 | OPEN | OPEN | 07 12 13 |
 | SYN-1.9 | OPEN | OPEN | 05 07 08 11 12 13 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 05 06 07 11 12 13 16 22 |
 | SYN-2 | OPEN | OPEN; the target grew | 05 07 09 11 12 13 31 |
 | SYN-3.1 | READY | READY | 05 08 09 11 19 |
 | SYN-3.2 | READY | READY, with SYN-3.1 | 05 07 08 09 12 |
@@ -103,10 +102,10 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-7.5 | OPEN | OPEN | 01 02 04 05 06 07 12 20 22 |
 | REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) | 06 20 |
 | REG-7.7 | OPEN | OPEN | 06 20 |
-| REG-7.8 | OPEN | OPEN | 06 08 18 20 |
+| REG-7.8 | OPEN | OPEN | 06 20 |
 | REG-7.9 | OPEN | OPEN | 06 08 19 20 |
 | REG-7.10 | OPEN | OPEN | 06 19 20 |
-| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 06 20 23 |
+| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 06 20 |
 | REG-7.12 | OPEN | OPEN | 06 19 20 23 |
 | REG-8.1 | OPEN | OPEN; a delta: no declaration's members merge into another's, and the server and the batch run bind a name alike … | 06 20 |
 | REG-8.2 | SUPERSEDED | SUPERSEDED by REG-16.3 (decision 3): the read sets are the dependencies the engine records, absent names included | 06 20 |
@@ -127,7 +126,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-11.9 | OPEN | OPEN | — |
 | REG-11.10 | OPEN | OPEN | — |
 | REG-11.11 | OPEN | OPEN | — |
-| REG-11.12 | OPEN | OPEN | 06 |
+| REG-11.12 | OPEN | OPEN | — |
 | REG-11.13 | OPEN | OPEN | 11 18 |
 | REG-11.14 | SUPERSEDED | SUPERSEDED by decision 11: no declaration merges into another, and what is left, a built-in's readings and forms, is … | — |
 | REG-11.15 | OPEN | OPEN | — |
@@ -147,7 +146,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-17.4 | OPEN | OPEN | 20 |
 | REG-18 | OPEN | OPEN | 06 |
 | REG-18.1 | READY | READY | 06 |
-| REG-18.2 | READY | READY | 06 20 23 |
+| REG-18.2 | READY | READY | 06 20 |
 | REG-18.3 | READY | READY | 06 20 23 |
 | REG-18.4 | READY | READY; a delta | 05 06 07 08 12 18 22 31 |
 | REG-18.5 | READY | READY | 06 |
@@ -162,11 +161,11 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | STUB-7.7 | OPEN | OPEN | 08 |
 | STUB-7.8 | OPEN | OPEN | 06 08 |
 | STUB-7.9 | OPEN | OPEN; a delta, approved (decision 14) | 08 |
-| STUB-7.10 | OPEN | OPEN; a delta, approved (decision 14) | 06 08 |
-| STUB-7.11 | OPEN | OPEN | 06 08 |
-| STUB-7.12 | OPEN | OPEN | 06 08 |
+| STUB-7.10 | OPEN | OPEN; a delta, approved (decision 14) | 08 |
+| STUB-7.11 | OPEN | OPEN | 08 23 |
+| STUB-7.12 | OPEN | OPEN | 08 |
 | STUB-8 | OPEN | OPEN; a delta, approved, both parts (VAL-2.4) | 05 06 23 |
-| STUB-10 | PART | PART: decided (STUB-10.2); STUB-10.1's measurements are left | — |
+| STUB-10 | PART | PART: decided (STUB-10.2); STUB-10.1's measurements are left | 06 |
 | STUB-10.1 | OPEN | OPEN | 06 |
 | STUB-11 | OPEN | OPEN | 05 06 07 12 21 23 24 |
 | STUB-12.1 | OPEN | OPEN | 06 23 |
@@ -174,10 +173,13 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | STUB-12.3 | OPEN | OPEN | 06 23 |
 | STUB-12.4 | OPEN | OPEN | 06 12 23 |
 | STUB-12.5 | OPEN | OPEN | 06 23 |
+| STUB-13 | OPEN | OPEN | 06 07 23 |
 | STUB-13.1 | OPEN | OPEN | 06 23 |
 | STUB-13.2 | OPEN | OPEN | 06 |
 | CACHE-8 | READY | READY | 05 07 12 22 31 |
 | CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 06 12 21 22 |
+| CACHE-10 | BLOCKED | BLOCKED: as CACHE-9 | 06 12 21 22 |
+| CACHE-11 | OPEN | OPEN | 06 12 22 |
 | CACHE-13.1 | OPEN | OPEN | 05 06 07 11 12 19 21 22 |
 | CACHE-13.2 | OPEN | OPEN | 05 06 07 08 12 21 22 23 |
 | CHECK-4.2 | READY | READY | 05 07 12 22 31 |
@@ -195,7 +197,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 07 08 11 12 13 |
 | VAL-1.6 | OPEN | OPEN | 05 08 11 12 |
 | VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 05 08 09 11 12 |
-| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 08 11 12 |
+| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 07 08 11 12 |
 | VAL-1.9 | OPEN | OPEN | 08 11 12 |
 | VAL-1.10 | OPEN | OPEN | 08 11 12 |
 | VAL-1.11 | OPEN | OPEN; MEAS-2 has the whole-stack profile at this code | 08 11 12 |

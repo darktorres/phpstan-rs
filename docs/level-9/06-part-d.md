@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -26,7 +26,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | LOAD-7.7 | READY | READY | 10 12 |
 | LOAD-8.8 | DONE | DONE `f676049c`. Before `finalize_results` a project's diagnostics are keyed by the file's number: the per-file checks, … | — |
 | SYN-1.2 | READY | READY | 02 04 05 07 10 12 13 31 |
-| SYN-1.10 | OPEN | OPEN | 05 07 10 11 12 13 16 22 |
+| SYN-1.10 | OPEN | OPEN | 05 07 11 12 13 22 |
 | PROD-5.4 | OPEN | OPEN | 05 07 10 12 21 22 31 |
 | DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) | 05 07 08 09 10 11 12 |
 | DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 05 07 10 11 12 13 17 19 |
@@ -40,6 +40,8 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | TYPE-4.4 | OPEN | OPEN | 10 |
 | REG-1 | DONE | DONE `c0dd2788` | 19 20 |
 | REG-2 | READY | READY. `xtask modgraph --inventory` lists the crossing edges; the `impl` and name inventories are not made | 10 |
+| REG-3 | DONE | DONE `58cfc5d2` | — |
+| REG-4 | PART | PART | 08 |
 | REG-4.1 | DONE | DONE (already on this branch) | — |
 | REG-4.2 | READY | READY; a delta, approved in the plan, fixtured | 05 10 18 20 |
 | REG-4.3 | DONE | DONE `5401afc9` | — |
@@ -65,10 +67,10 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-7.5 | OPEN | OPEN | 01 02 04 05 07 10 12 20 22 |
 | REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) | 10 20 |
 | REG-7.7 | OPEN | OPEN | 10 20 |
-| REG-7.8 | OPEN | OPEN | 08 10 18 20 |
+| REG-7.8 | OPEN | OPEN | 10 20 |
 | REG-7.9 | OPEN | OPEN | 08 10 19 20 |
 | REG-7.10 | OPEN | OPEN | 10 19 20 |
-| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 10 20 23 |
+| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 10 20 |
 | REG-7.12 | OPEN | OPEN | 10 19 20 23 |
 | REG-8 | OPEN | OPEN | 08 18 20 22 |
 | REG-8.1 | OPEN | OPEN; a delta: no declaration's members merge into another's, and the server and the batch run bind a name alike … | 10 20 |
@@ -81,7 +83,6 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-9 | OPEN | OPEN; deltas, approved in the plan | 20 |
 | REG-10 | OPEN | OPEN | 20 |
 | REG-11 | OPEN | OPEN; each a delta, approved in the plan | 10 20 |
-| REG-11.12 | OPEN | OPEN | 10 |
 | REG-12 | OPEN | OPEN | 10 19 20 22 |
 | REG-14.2 | DONE | DONE by REG-4.8 (`e7b2521f`, `0f32829b`); no such field is left | — |
 | REG-14.3 | OPEN | OPEN | 10 12 |
@@ -97,7 +98,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-17 | OPEN | OPEN | 05 08 10 12 19 20 21 |
 | REG-18 | OPEN | OPEN | 10 |
 | REG-18.1 | READY | READY | 10 |
-| REG-18.2 | READY | READY | 10 20 23 |
+| REG-18.2 | READY | READY | 10 20 |
 | REG-18.3 | READY | READY | 10 20 23 |
 | REG-18.4 | READY | READY; a delta | 05 07 08 10 12 18 22 31 |
 | REG-18.5 | READY | READY | 10 |
@@ -108,20 +109,22 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 07 08 10 12 21 22 31 |
 | STUB-7.6 | OPEN | OPEN | 08 10 12 23 |
 | STUB-7.8 | OPEN | OPEN | 08 10 |
-| STUB-7.10 | OPEN | OPEN; a delta, approved (decision 14) | 08 10 |
-| STUB-7.11 | OPEN | OPEN | 08 10 |
-| STUB-7.12 | OPEN | OPEN | 08 10 |
 | STUB-8 | OPEN | OPEN; a delta, approved, both parts (VAL-2.4) | 05 10 23 |
+| STUB-10 | PART | PART: decided (STUB-10.2); STUB-10.1's measurements are left | 10 |
 | STUB-10.1 | OPEN | OPEN | 10 |
 | STUB-11 | OPEN | OPEN | 05 07 10 12 21 23 24 |
+| STUB-12 | OPEN | OPEN | 08 23 |
 | STUB-12.1 | OPEN | OPEN | 10 23 |
 | STUB-12.2 | OPEN | OPEN | 08 10 12 23 |
 | STUB-12.3 | OPEN | OPEN | 10 23 |
 | STUB-12.4 | OPEN | OPEN | 10 12 23 |
 | STUB-12.5 | OPEN | OPEN | 10 23 |
+| STUB-13 | OPEN | OPEN | 07 10 23 |
 | STUB-13.1 | OPEN | OPEN | 10 23 |
 | STUB-13.2 | OPEN | OPEN | 10 |
 | CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 10 12 21 22 |
+| CACHE-10 | BLOCKED | BLOCKED: as CACHE-9 | 10 12 21 22 |
+| CACHE-11 | OPEN | OPEN | 10 12 22 |
 | CACHE-13.1 | OPEN | OPEN | 05 07 10 11 12 19 21 22 |
 | CACHE-13.2 | OPEN | OPEN | 05 07 08 10 12 21 22 23 |
 | CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) | 05 07 12 23 |

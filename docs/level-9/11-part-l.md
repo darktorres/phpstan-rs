@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -16,7 +16,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | SYN-1.4 | OPEN | OPEN | 07 10 12 13 31 |
 | SYN-1.6 | SUPERSEDED | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies … | 08 10 12 13 16 |
 | SYN-1.9 | OPEN | OPEN | 05 07 08 10 12 13 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 05 06 07 10 12 13 16 22 |
+| SYN-1.10 | OPEN | OPEN | 05 06 07 12 13 22 |
 | SYN-2 | OPEN | OPEN; the target grew | 05 07 09 10 12 13 31 |
 | SYN-3.1 | READY | READY | 05 08 09 10 19 |
 | SYN-3.4 | OPEN | OPEN | 05 10 12 13 17 18 |
@@ -70,7 +70,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 07 08 10 12 13 |
 | VAL-1.6 | OPEN | OPEN | 05 08 10 12 |
 | VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 05 08 09 10 12 |
-| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 08 10 12 |
+| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 07 08 10 12 |
 | VAL-1.9 | OPEN | OPEN | 08 10 12 |
 | VAL-1.10 | OPEN | OPEN | 08 10 12 |
 | VAL-1.11 | OPEN | OPEN; MEAS-2 has the whole-stack profile at this code | 08 10 12 |

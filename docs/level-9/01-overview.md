@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -24,7 +24,7 @@ Written in plan mode from the code at `0fb1a4de` (Parts A to F; the other sessio
 `30aa2002` (G) and `8a1ca1e0` (H to J); the review passes re-read the code at `52844b07` and `ffa7cccb`. Line numbers
 are hints from those commits and the tree moves, so a citation is found by the symbol it names; "the fixes plan's R7"
 is `ITEMS_1_TO_3_FIXES_PLAN.md` (ledger LOAD-8.7) and "the cross-platform plan's R7" is `CROSS_PLATFORM_PLAN.md`.
-Nothing here has been built or run. Part C (what follows item 9) and Part D (what follows that:
+Part A is built and validated (its status is in Part A's intro, `02`). Nothing from Part B onward is built by this plan; the batch-0 fixes that landed on their own are listed in Part E. Part C (what follows item 9) and Part D (what follows that:
 levels 1 to 7) are at the end, and Part E gives the most proper answer for every pending decision,
 by number. Where Parts B to D lean otherwise (their first pass weighed churn), Part E governs.
 Part F lists what needed designing; Part G holds the designs of its rows 1 to 4 and 6, Part H the engine cluster
@@ -50,14 +50,14 @@ day, which the user ruled on ("agree"), and the two extensions that came with th
 Both start only after the cross-platform fixes have finished. The level this plan was written under, the items 1 to 3
 fixes, finished on 2026-10-17 (`791a57c6`). The cross-platform fixes this plan follows are
 (`CROSS_PLATFORM_PLAN.md`, rows R0 to R18, started 2026-10-18; at `c5bec58c` R0 to R15 and R18, the module graph, are
-built and R16 and R17 are open; the other session moves this). Its rows edit what this plan's first rows edit: `session.rs`, `project.rs`, `walk.rs` and
+built and R16 and R17 were open, and the cross-platform fixes finished at `a83b1675`). Its rows edit what this plan's first rows edit: `session.rs`, `project.rs`, `walk.rs` and
 `lsp.rs` (R5 to R7), `includes.rs` (R8), `composer` (R3, R9, R16), `main.rs` (R10) and the caches (R11). R18 moves
 code this plan reads: `file_id` and `shard` into reflection, the completion rules (`Completion`, `Reach`,
 `BlockCompletion`) and `is_truthy_literal` into `syntax`, the rebind and include-guard mention bits into
 `checker::mentions` (the project hands the checker the file's whole `mentions`), `set_current_file` taking the shown
 path, `path_bytes` into a crate of its own (`phpstan-rs-path-bytes`, which R16 works in) and the allocator into one
 module of the binary. Heavy jobs run one at a time, and the stack's rule is that level 8 resumes when the cross-platform
-fixes finish. Start condition: `git log` shows R17 and R18, `WORK_STACK.md` no longer lists the cross-platform fixes, `git status` is clean, `ps`
+fixes finish. Start condition (met at `a83b1675` on 2026-10-19, when Part A began): `git log` shows R17 and R18, `WORK_STACK.md` no longer lists the cross-platform fixes, `git status` is clean, `ps`
 shows no other build or profile. Every design below is read against that level's code (the case rule of R7, the
 canonical form of R3, the `/`-spelled report paths of R6, the module homes of R18) and says where it meets one.
 

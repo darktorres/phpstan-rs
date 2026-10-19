@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -25,7 +25,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | SYN-1.7 | OPEN | OPEN | 10 12 13 |
 | SYN-1.8 | OPEN | OPEN | 10 12 13 |
 | SYN-1.9 | OPEN | OPEN | 05 08 10 11 12 13 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 05 06 10 11 12 13 16 22 |
+| SYN-1.10 | OPEN | OPEN | 05 06 11 12 13 22 |
 | SYN-2 | OPEN | OPEN; the target grew | 05 09 10 11 12 13 31 |
 | SYN-3.2 | READY | READY, with SYN-3.1 | 05 08 09 10 12 |
 | SYN-4.1 | OPEN | OPEN | 05 09 10 11 12 |
@@ -63,6 +63,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) | 05 06 08 10 11 12 13 23 |
 | STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 06 08 10 12 21 22 31 |
 | STUB-11 | OPEN | OPEN | 05 06 10 12 21 23 24 |
+| STUB-13 | OPEN | OPEN | 06 10 23 |
 | CACHE-8 | READY | READY | 05 10 12 22 31 |
 | CACHE-13.1 | OPEN | OPEN | 05 06 10 11 12 19 21 22 |
 | CACHE-13.2 | OPEN | OPEN | 05 06 08 10 12 21 22 23 |
@@ -87,9 +88,11 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | CHECK-9 | READY | READY | 05 06 10 11 12 23 24 31 |
 | CHECK-10 | OPEN | OPEN | 05 06 08 10 12 23 |
 | CHECK-11 | READY | READY; a delta | 06 08 10 12 31 |
+| CHECK-12 | OPEN | OPEN | 12 15 31 |
 | VAL-1 | OPEN | OPEN | 05 06 |
 | VAL-1.1 | OPEN | OPEN | 08 10 11 12 |
 | VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 08 10 11 12 13 |
+| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 08 10 11 12 |
 | VAL-2 | PART | PART: VAL-2.1 to 2.9 decided 2026-10-15 (VAL-2.5 extended by decision 1, VAL-2.9 by decision 14); VAL-2.10 is read as … | 18 |
 | VAL-2.9 | DONE | DONE: approved (decision 14), STUB-7.2 and REG-8.5 corrected; each is read at VAL-1 as it lands | 06 12 20 |
 | VAL-2.10 | OPEN | OPEN: read at VAL-1, as they land | 05 06 12 15 20 |
@@ -97,12 +100,24 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | Q-11 | DONE | DONE (2026-10-15): of the 20 follow-ups, 1 is done for one version, 5 are partly done and 14 are not; their section … | 06 11 12 31 |
 | COMP-1 | DONE | DONE `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` (the walk's rule and its tests are `df9640fe` and … | 12 31 |
 | COMP-2 | OPEN | OPEN. Not part of Part A; before the baseline (batch 0), since it changes a range and so a dump | 12 19 23 31 |
-| COMP-3 | OPEN | OPEN, before W2 (H2.8's isolation assumes it) | 12 |
-| COMP-4 | DONE | DONE `2c6f1eec` (Part A's A7): the maps keep their keys, and PSR-0 is read | 12 |
+| COMP-3 | OPEN | OPEN, before W2 (H2.8's isolation assumes it) | 12 31 |
+| COMP-4 | DONE | DONE `2c6f1eec` (Part A's A7): the maps keep their keys, and PSR-0 is read | 12 31 |
 | COMP-5 | PART | PART: A7's maps keep the root's entries (`2c6f1eec`); the flat lists stay filtered, and the class is found through the … | 02 04 12 31 |
 | COMP-6 | DONE | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's … | 02 04 12 31 |
 | COMP-7 | DONE | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a … | 01 02 03 04 10 12 31 |
 | COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 02 03 04 12 19 31 |
+| SRV-1 | DONE | DONE `4460dee39` | 12 |
+| SRV-2 | DONE | DONE `cfb7b9cb5` | — |
+| SRV-3 | DONE | DONE `9f2fde136` | — |
+| SRV-4 | DONE | DONE `8d68e6a1a` | — |
+| SRV-5 | DONE | DONE `b8a332b38` | — |
+| SRV-6 | DONE | DONE `e93890d8f` | — |
+| SRV-7 | DONE | DONE `75cc49526` | 12 |
+| FIX-10 | DONE | DONE `2091070e`; the exhaustive predicate on SYN-2's `TokenKind` is batch 1's | — |
+| FIX-20 | DONE | DONE `eb24e5b44`, `ee32ca801`, `a231be60c`, `a8bfadace`, `6c37fa51e`, `b4f06aac` | — |
+| FIX-21 | DONE | DONE `98d46d9a`, `8454569a`; before the canonical printers (VAL-1.4) | — |
+| FIX-69 | OPEN | OPEN | — |
+| FIX-77 | PART | PART: the analysed-file half, the context-file notice and `--fail-on-context-error` are built in `4278ec2a` (M5 row … | — |
 
 <!-- status:end -->
 
@@ -116,7 +131,7 @@ is ruled until you say so.
 
 Ruled so far: the fixes plan's decisions 1 to 7 (2026-10-17; A1 cites the seventh) and the ledger's
 decisions 1 to 18 (2026-10-15), which the plan cites by number. Gates, not decisions: the go, and
-the start condition (the intro): `git log` shows the cross-platform plan's R17 and R18 and `WORK_STACK.md` no longer lists the cross-platform fixes. Batch
+the start condition (the intro, met at `a83b1675`): `git log` shows the cross-platform plan's R17 and R18 and `WORK_STACK.md` no longer lists the cross-platform fixes. Batch
 numbers below are the new order (see "The sequence this gives"). An answer that departs from a ruled decision's
 wording says so, and M5 lists those (ruled on 2026-10-18) and, apart, the answers the workflow review changed.
 
@@ -211,7 +226,7 @@ I4.3 that wait for C7's name scope, which the lowering does not have.
 
 ## The sequence this gives
 
-0. The cross-platform fixes finish (the other session): R16 and R17 (R0 to R15 and R18 are built at `c5bec58c`); level 8 then resumes
+0. The cross-platform fixes, finished at `a83b1675` (R16 and R17 were open at `c5bec58c`); level 8 then resumes
    with this plan.
 1. Part A's rows: A1 (its mechanism for the skip, its `config.vendor-dir`, `COMPOSER_VENDOR_DIR` and `COMPOSER` commit and
    its COMP-7 commits, all ruled on 2026-10-18, M5d), A2, A3, A5 (SYN-1.1), A5a (LOAD-5.4), A7 (the autoload maps keep
@@ -258,10 +273,11 @@ I4.3 that wait for C7's name scope, which the lowering does not have.
   (`completion.rs`, `build_probe_scope`).
 - `FoldedName` and `ConstName` are not in the code. `Locals` has 415 mentions in 66 files and
   `Rc<Expr>` sits in 11 places. `wide` comes in through `imbl`.
-- The seven fixes the crate split's F1 puts first are all open at `ffa7cccb` (the debounce thread has no stack size,
+- The seven fixes the crate split's F1 puts first were all open at `ffa7cccb`, and each now has a commit: `4460dee39` (the debounce stack), `cfb7b9cb5` (`latest_text`), `9f2fde136` (`didClose`), `8d68e6a1a` (`--generate-baseline`), `b8a332b38` (`--fix`), `e93890d8f` (the closed pipe) and `75cc49526` (rename), which are SRV-1 to SRV-7 in that order. (the debounce thread has no stack size,
   `queue_change` does not write `latest_text`, `didClose` is a no-op, `--generate-baseline` writes the run's results
   alone, `--fix` patches at the earlier analysis's offsets, rename returns an edit for every span, and a closed
   output pipe is not handled).
+- Batch 0, built by commits outside Part A (checked 2026-10-19 against the commit messages): F20 (FIX-20), the recursion guard as its own crate with the 100,000-level tests (`eb24e5b44`, `ee32ca801`, `a231be60c`, `a8bfadace`, `6c37fa51e`, `b4f06aac`); F21 (FIX-21), the error type as a kind of `mixed` and explicit `mixed` as its own kind (`98d46d9a`, `8454569a`); F10's tests (FIX-10) for a bare `yield` (`2091070e`); F77 (FIX-77) for a file that does not parse (`4278ec2a`). The context-file half of F77 is a stderr notice and the `--fail-on-context-error` switch in that commit (M5 row 22). The dump and the per-file cache do not record a context file's failure yet (M5 row 5); the dump needs VAL-1.8. Not built: VAL-1.1, the oracle tools, the item-0 baseline and F69's fixtures (FIX-69).
 - The workspace's `deny(unsafe_code)` very likely does not report the expansions of an external crate's macros (a
   probe on the pinned toolchain compiled an external `macro_rules!` and an external attribute macro that emit
   `unsafe` without a diagnostic); salsa's own expansion was not built, which is what S-2 does first.

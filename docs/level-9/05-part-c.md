@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -17,7 +17,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone | 01 02 04 07 10 11 12 |
 | SYN-1.2 | READY | READY | 02 04 06 07 10 12 13 31 |
 | SYN-1.9 | OPEN | OPEN | 07 08 10 11 12 13 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 06 07 10 11 12 13 16 22 |
+| SYN-1.10 | OPEN | OPEN | 06 07 11 12 13 22 |
 | SYN-2 | OPEN | OPEN; the target grew | 07 09 10 11 12 13 31 |
 | SYN-3.1 | READY | READY | 08 09 10 11 19 |
 | SYN-3.2 | READY | READY, with SYN-3.1 | 07 08 09 10 12 |
@@ -35,7 +35,8 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | SYN-4.10 | READY | READY | 10 11 31 |
 | SYN-6 | OPEN | OPEN | 07 08 10 11 12 15 16 |
 | PROD-1 | DONE | DONE `7726dacf` | 08 |
-| PROD-3 | DONE | DONE `791d29cb` | 13 |
+| PROD-2 | DONE | DONE `11837a04` | 08 |
+| PROD-3 | DONE | DONE `791d29cb` | 08 13 |
 | PROD-5.1 | OPEN | OPEN | 07 10 11 12 13 18 20 22 |
 | PROD-5.2 | READY | READY | 02 09 10 11 23 |
 | PROD-5.3 | READY | READY | 10 11 |
@@ -129,7 +130,7 @@ items 13 and 14, so none is a claim. Validation is at the end of each item, as b
 
 ## C1. The path, in order (the ruled order of Part E's "The sequence this gives"; the second pass made this table agree)
 
-1. The cross-platform fixes (R0 to R15 and R18 are built at `c5bec58c`, R16 and R17 are open); then Part A's rows
+1. The cross-platform fixes (finished at `a83b1675`; at `c5bec58c` R0 to R15 and R18 were built and R16 and R17 open); then Part A's rows
    (A1 to A3, A5, A5a, A7 and A8; A4 is folded into REG-7.5).
 2. Batch 0 (Part E 13 and 22: the oracle tools and the baseline, F10's tests, F20, F21, F77, the level-3 backlog that
    changes a dump, and the seven fixes the crate split's F1 puts first), then item 9: steps 0, 1, 2, then step 3

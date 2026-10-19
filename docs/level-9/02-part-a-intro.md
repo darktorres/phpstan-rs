@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -38,6 +38,8 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 03 04 07 12 19 31 |
 
 <!-- status:end -->
+
+**Status (2026-10-19).** Part A's rows are built, with the commits the ledger records: A1 (`097c164b`, `40d889bb`, `df9640fe`, `000813018`, `2e1728bb`, `fc1c65eca`, tests `c14aa865`), A2 (`3dcb1192`), A3 (`8739437e`), A5 (`2f9b1281`), A5a (`a5ab84c4`), A7 (`2c6f1eec`), A8 (`088089ed`, `5b76d855`, `d5700aa5`) and COMP-7 (`acf48fb8`, `16418a2c`). A4 is folded into REG-7.5 and has no commit. A6 ran on the code at `136945410`, the last of Part A's commits. Two commits after A6 read context files lazily, which A7 says is not built before W3; see A7.
 
 | # | row | item | what | where |
 |---|---|---|---|---|

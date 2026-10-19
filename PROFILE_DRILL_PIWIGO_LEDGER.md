@@ -34,6 +34,9 @@ This is the one list of the branch's tasks. The documents the tasks come from st
 | VAL | validation | §13 |
 | MEAS | the measurements that set targets | §14 |
 | Q | not optimizations: open questions and unbuilt policies | §15 |
+| COMP | the composer crate's follow-ups (Part E 40) | §16 |
+| SRV | the seven fixes the crate split's F1 puts first, batch 0 (Part E 22) | §17 |
+| FIX | the stage B fix review's findings that batch 0 takes (F10, F20, F21, F69, F77), with their own ids (Part E 22) | §17 |
 
 Each area has:
 
@@ -1610,6 +1613,8 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | CHECK-9 | **A dead catch: a caught type that no throw point of the `try` block can be** (`catch.neverThrown`, level 4, beside `catch.alreadyCaught`). The checker already decides it: a catch that no throw state reaches is not merged (`catch_live`, `checker/stmt/try_catch.rs:235`), but it is not reported. The comment at `:126` says this half needs a per-callee throw model, which the catches have (`call_throw_type`, `checker/throws.rs:105`): a user function's declared `@throws`, else anything, and a builtin anything, since it can run user code; `throw` its value; a division `DivisionByZeroError`. REG-17.2 then decides the catches around undocumented calls | decision 9 | READY | — |
 | CHECK-10 | **The engine read over the version range.** Where PHP behaves differently across the range's versions (a loose comparison of a number and a non-numeric string, a division by zero, arithmetic on a non-numeric string), an expression's type is the union of its types at each version, and what only some versions do is possible in part of the range: over 7.4 to 8.5, `0 == 'a'` is `bool`, and `1 / 0` warns on 7.4 and throws `DivisionByZeroError` from 8.0. Today the checker reads one version (`--php-version`): `0 == 'a'` is always true at 7.4 and always false at 8.5 | decision 18 | OPEN | STUB-7.1 (the range) |
 | CHECK-11 | **C3a's `property.unused` delta:** ORM-mapped properties count as used while ext-doctrine is active, and view objects passed to a template renderer aren't reported. At HEAD an entity's mapped private properties are `property.unused` with `ext.doctrine.enabled=true`. The approved gate file `gates/approved/c3-provenance-declarations` is reviewed again with it | split C3 | READY; a delta | — |
+| CHECK-12 | **Exact include modelling:** the included file's top-level assignments are in the includer's scope, and its return value is the include's type (`mixed` today); `any_variable_may_exist` stays the fallback for an include that cannot be resolved | Part N N6; G3.6 | OPEN | Stage D, on the scope model of D1 and D2 |
+| CHECK-13 | **Anonymous classes in the class-shape parent-call rules:** the rules that check a parent call in a class's shape include anonymous classes | Part N N6; H1.4 | OPEN | — |
 
 ### Targets
 
@@ -1860,6 +1865,7 @@ Kept for the record. None is built from this ledger.
 | Q-13 | A builtin's result before PHP 8.0 when its arguments fail its parameter parsing. Outside `strict_types`, PHP 7 warns and the call yields what the function leaves, `null` unless it sets another value: the result starts as `null` (`ZEND_DO_ICALL`, `Zend/zend_vm_def.h:3993`), and `ZEND_PARSE_PARAMETERS_END` reports and returns (`Zend/zend_API.h:1185-1214`) through `zend_internal_type_error`, which throws a `TypeError` only under `strict_types` (`Zend/zend.c:1577`). A wrong argument count goes the same way (`zend_API.c:211`, `zend.c:1594`). These are php-src 7.4.33's sources (`~/.cache/prs-ledger/php-src-7.4.33/`); PHP 8 throws `TypeError` and `ArgumentCountError` (8.5.4: `strlen([])`, `strlen()`). Decision 10's bound and claims describe a call whose arguments parse, so for STUB-12.2's versions a reading misses that `null`. | decision 10 | DONE (2026-10-15): decision 16 | — |
 | Q-14 | Whether a return that REG-17.1 infers keeps its literal values: `return 'x'` as `'x'` or `string`, `return [1]` as `array{1}` or `list<int>`. The installed body returns exactly those values, and a closure's inferred return keeps them today (`closure_inferred_return_type`, `checker/expr.rs:6625`, unions the return points as they are). But decision 9 lets a body's facts fill only what is undeclared because "the installed body is one version of the code", and a literal is the fact the next version is likeliest to change: a vendor function that returns `'1.2'` today would make a caller's `=== '1.2'` always true. | decision 9 | DONE (2026-10-15): decision 17 | — |
 | Q-15 | The oldest PHP version the builtin knowledge covers. STUB-12.2's dumps of real binaries name none, and decision 6's default range, every version known (when neither the configuration nor Composer names a version), starts there. So it sets what decision 6's in-part availability reports in a project that names no version: every builtin that the oldest version lacks or a later one removed, wherever no guard covers its use. | decision 6 | DONE (2026-10-15): decision 18 | — |
+| Q-16 | The lazy context read: `910de4507` and `d674ac1f0` read a context file when the name that reaches it is looked up, opt-in behind `PHPSTAN_RS_LAZY_CONTEXT=1` (its commit measures the same output on Piwigo, with 8.1% fewer instructions). A7 says no interim read of that kind is built before W3, the locator, and Part E 35 and 41 say the same. A follow-up to another task, 2026-10-19 | A7 (04); Part E 35, 41 | DONE in the tree: reverted until W3, as the user asked; `b9de6dcf1` has no lazy code, but the revert commit `034f99308` is on no branch, so the other session's rewrite of master dropped it from history |
 
 ### Q-11: the crate split's C1-C3 follow-ups, read against the code
 
@@ -2157,3 +2163,22 @@ Audited against the code and the corpora on 2026-10-18 (the vendored Composer's 
 | COMP-6 | a package's bundled `vendor/` (`rector/rector`, `symplify/easy-coding-standard`) is vendor context | Part E 40; Part A's A8 | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's is read. The output change of `vendor/laravel` and `vendor/rector-src` is A6's measure | A1 |
 | COMP-7 | third-party code that Composer installed outside the vendor directory (`installer-paths`: Drupal's `web/core`, WordPress plugins) is left out of a degrade root's analysed walk and admitted as context by discovery in every mode | Part E 40 ("also (a)"); Part A's A1 | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a project that uses a custom installer is ruled (M5d) | A2 (the shared package list) |
 | COMP-8 | a degrade root's nested Composer projects: their vendor contexts, their owners and `unbuilt`, found by a scan before the walk and merged in path order | Part E 40 ("also (b)"); Part A's A8 | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. The configured-`paths` case keeps the nearest-ancestor rule, pending the scan's measure (Part A's A8) | A7, COMP-6 |
+
+## 17. SRV and FIX: batch 0's fixes on today's code (Part E 22)
+
+Built by commits outside Part A, checked on 2026-10-19 against the commit messages. The seven SRV rows are the crate split's F1 fixes, each open at `ffa7cccb` and built by its own commit. The FIX rows are findings of `STAGE_B_FIX_REVIEW.md` that batch 0 takes; FIX-n keeps the review's number n.
+
+| id | task | from | state | needs |
+|---|---|---|---|---|
+| SRV-1 | the debounce thread gets the pool's stack size | crate split F1 (Part E 22) | DONE `4460dee39` | — |
+| SRV-2 | `queue_change` writes `latest_text`, so an edit is the live buffer when it arrives | crate split F1 | DONE `cfb7b9cb5` | — |
+| SRV-3 | `didClose` restores the disk's content, and an edit taken after the close is not applied | crate split F1 | DONE `9f2fde136` | — |
+| SRV-4 | `--generate-baseline` keeps the entries of the files it did not analyse | crate split F1 | DONE `8d68e6a1a` | — |
+| SRV-5 | `--fix` writes a file only while its bytes are the bytes it analysed | crate split F1 | DONE `b8a332b38` | — |
+| SRV-6 | a closed stdout ends the run quietly with status 141 | crate split F1 | DONE `e93890d8f` | — |
+| SRV-7 | rename refuses a name that a qualified name, an alias or an import would leave stale | crate split F1 | DONE `75cc49526` | — |
+| FIX-10 | a bare `yield` before a word or symbol operator is tested and checked, not skipped (F10's tests); its symptom was fixed in form by `3b7e4d95` (2026-10-03) | STAGE_B_FIX_REVIEW.md F10 | DONE `2091070e`; the exhaustive predicate on SYN-2's `TokenKind` is batch 1's | — |
+| FIX-20 | the recursion guard is a crate of its own; every recursive library function starts with it; a panic inside a grown segment restores the limit; 100,000 levels parse and walk on a 256 KiB thread | STAGE_B_FIX_REVIEW.md F20 | DONE `eb24e5b44`, `ee32ca801`, `a231be60c`, `a8bfadace`, `6c37fa51e`, `b4f06aac` | — |
+| FIX-21 | the error type is a kind of `mixed`, and explicit `mixed` is a kind of its own | STAGE_B_FIX_REVIEW.md F21 | DONE `98d46d9a`, `8454569a`; before the canonical printers (VAL-1.4) | — |
+| FIX-69 | fixtures for a `catch` that its `try` reaches only through magic: an `ArrayAccess` offset, a string conversion, `__get` and `include` record no throw point | STAGE_B_FIX_REVIEW.md F69 | OPEN | — |
+| FIX-77 | a file that does not parse is a parse-error diagnostic at the failing token | STAGE_B_FIX_REVIEW.md F77 | PART: the analysed-file half, the context-file notice and `--fail-on-context-error` are built in `4278ec2a` (M5 row 22); a context file's failure is not yet recorded in the dump or the per-file cache (M5 row 5) | VAL-1.8 for the dump (the cache can go first) |

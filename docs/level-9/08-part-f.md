@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -19,15 +19,16 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | SYN-3.2 | READY | READY, with SYN-3.1 | 05 07 09 10 12 |
 | SYN-6 | OPEN | OPEN | 05 07 10 11 12 15 16 |
 | PROD-1 | DONE | DONE `7726dacf` | 05 |
+| PROD-2 | DONE | DONE `11837a04` | 05 |
+| PROD-3 | DONE | DONE `791d29cb` | 05 13 |
 | DOC-1 | DONE | DONE `a4035361` | 05 |
 | DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) | 05 06 07 09 10 11 12 |
 | DOC-2.2 | OPEN | OPEN | 05 07 09 10 12 23 |
 | NAME-2 | OPEN | OPEN | 07 |
 | NAME-2.1 | READY | READY | 05 07 10 11 12 18 |
-| REG-4 | PART | PART | — |
+| REG-4 | PART | PART | 06 |
 | REG-4.12 | READY | READY | 06 10 11 12 18 19 20 |
 | REG-7 | OPEN | OPEN | 05 06 12 18 19 20 21 23 |
-| REG-7.8 | OPEN | OPEN | 06 10 18 20 |
 | REG-7.9 | OPEN | OPEN | 06 10 19 20 |
 | REG-8 | OPEN | OPEN | 06 18 20 22 |
 | REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 06 07 10 12 18 20 22 |
@@ -45,10 +46,10 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | STUB-7.7 | OPEN | OPEN | 10 |
 | STUB-7.8 | OPEN | OPEN | 06 10 |
 | STUB-7.9 | OPEN | OPEN; a delta, approved (decision 14) | 10 |
-| STUB-7.10 | OPEN | OPEN; a delta, approved (decision 14) | 06 10 |
-| STUB-7.11 | OPEN | OPEN | 06 10 |
-| STUB-7.12 | OPEN | OPEN | 06 10 |
-| STUB-12 | OPEN | OPEN | 23 |
+| STUB-7.10 | OPEN | OPEN; a delta, approved (decision 14) | 10 |
+| STUB-7.11 | OPEN | OPEN | 10 23 |
+| STUB-7.12 | OPEN | OPEN | 10 |
+| STUB-12 | OPEN | OPEN | 06 23 |
 | STUB-12.2 | OPEN | OPEN | 06 10 12 23 |
 | CACHE-13.2 | OPEN | OPEN | 05 06 07 10 12 21 22 23 |
 | CHECK-4.1 | OPEN | OPEN | 05 09 12 23 |
@@ -65,7 +66,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 07 10 11 12 13 |
 | VAL-1.6 | OPEN | OPEN | 05 10 11 12 |
 | VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 05 09 10 11 12 |
-| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 10 11 12 |
+| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 07 10 11 12 |
 | VAL-1.9 | OPEN | OPEN | 10 11 12 |
 | VAL-1.10 | OPEN | OPEN | 10 11 12 |
 | VAL-1.11 | OPEN | OPEN; MEAS-2 has the whole-stack profile at this code | 10 11 12 |

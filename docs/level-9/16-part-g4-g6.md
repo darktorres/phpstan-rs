@@ -4,13 +4,12 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
 | SYN-1.6 | SUPERSEDED | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies … | 08 10 11 12 13 |
 | SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 13 15 21 22 |
-| SYN-1.10 | OPEN | OPEN | 05 06 07 10 11 12 13 22 |
 | SYN-6 | OPEN | OPEN | 05 07 08 10 11 12 15 |
 | CHECK-6.18 | READY | READY | 05 06 10 12 14 23 |
 | Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 11 12 13 15 19 |

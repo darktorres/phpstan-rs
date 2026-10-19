@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -29,7 +29,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | SYN-1.7 | OPEN | OPEN | 07 10 13 |
 | SYN-1.8 | OPEN | OPEN | 07 10 13 |
 | SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 13 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 05 06 07 10 11 13 16 22 |
+| SYN-1.10 | OPEN | OPEN | 05 06 07 11 13 22 |
 | SYN-2 | OPEN | OPEN; the target grew | 05 07 09 10 11 13 31 |
 | SYN-3.2 | READY | READY, with SYN-3.1 | 05 07 08 09 10 |
 | SYN-3.4 | OPEN | OPEN | 05 10 11 13 17 18 |
@@ -78,6 +78,8 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | STUB-12.4 | OPEN | OPEN | 06 10 23 |
 | CACHE-8 | READY | READY | 05 07 10 22 31 |
 | CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 06 10 21 22 |
+| CACHE-10 | BLOCKED | BLOCKED: as CACHE-9 | 06 10 21 22 |
+| CACHE-11 | OPEN | OPEN | 06 10 22 |
 | CACHE-13.1 | OPEN | OPEN | 05 06 07 10 11 19 21 22 |
 | CACHE-13.2 | OPEN | OPEN | 05 06 07 08 10 21 22 23 |
 | CHECK-4.1 | OPEN | OPEN | 05 08 09 23 |
@@ -96,6 +98,8 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | CHECK-9 | READY | READY | 05 06 07 10 11 23 24 31 |
 | CHECK-10 | OPEN | OPEN | 05 06 07 08 10 23 |
 | CHECK-11 | READY | READY; a delta | 06 07 08 10 31 |
+| CHECK-12 | OPEN | OPEN | 07 15 31 |
+| CHECK-13 | OPEN | OPEN | 31 |
 | VAL-1.1 | OPEN | OPEN | 07 08 10 11 |
 | VAL-1.2 | OPEN | OPEN | 08 10 11 |
 | VAL-1.3 | OPEN | OPEN | 08 10 11 |
@@ -103,7 +107,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 07 08 10 11 13 |
 | VAL-1.6 | OPEN | OPEN | 05 08 10 11 |
 | VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 05 08 09 10 11 |
-| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 08 10 11 |
+| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 07 08 10 11 |
 | VAL-1.9 | OPEN | OPEN | 08 10 11 |
 | VAL-1.10 | OPEN | OPEN | 08 10 11 |
 | VAL-1.11 | OPEN | OPEN; MEAS-2 has the whole-stack profile at this code | 08 10 11 |
@@ -114,12 +118,14 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | Q-11 | DONE | DONE (2026-10-15): of the 20 follow-ups, 1 is done for one version, 5 are partly done and 14 are not; their section … | 06 07 11 31 |
 | COMP-1 | DONE | DONE `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` (the walk's rule and its tests are `df9640fe` and … | 07 31 |
 | COMP-2 | OPEN | OPEN. Not part of Part A; before the baseline (batch 0), since it changes a range and so a dump | 07 19 23 31 |
-| COMP-3 | OPEN | OPEN, before W2 (H2.8's isolation assumes it) | 07 |
-| COMP-4 | DONE | DONE `2c6f1eec` (Part A's A7): the maps keep their keys, and PSR-0 is read | 07 |
+| COMP-3 | OPEN | OPEN, before W2 (H2.8's isolation assumes it) | 07 31 |
+| COMP-4 | DONE | DONE `2c6f1eec` (Part A's A7): the maps keep their keys, and PSR-0 is read | 07 31 |
 | COMP-5 | PART | PART: A7's maps keep the root's entries (`2c6f1eec`); the flat lists stay filtered, and the class is found through the … | 02 04 07 31 |
 | COMP-6 | DONE | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's … | 02 04 07 31 |
 | COMP-7 | DONE | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a … | 01 02 03 04 07 10 31 |
 | COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 02 03 04 07 19 31 |
+| SRV-1 | DONE | DONE `4460dee39` | 07 |
+| SRV-7 | DONE | DONE `75cc49526` | 07 |
 
 <!-- status:end -->
 

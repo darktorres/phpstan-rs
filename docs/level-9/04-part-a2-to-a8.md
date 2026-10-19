@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -181,6 +181,8 @@ stay filtered to the vendor directory, the path repositories and, after A1's COM
 Composer installed elsewhere, so nothing the walk reads moves in A7; W3's lazy locator finds the class. No interim fix is built for the batch path before W3 (the rule of Part E 35 and 41, which replaces such a fix by the
 locator), and a by-name oracle run carries that noise until then.
 
+**Status (2026-10-19): reverted (ledger Q-16).** After A6, two commits read context files lazily by name, as a follow-up to another task: `910de4507` (a context file is read when a class name or a declaration reaches it, through the classmap and the PSR-4 prefixes) and `d674ac1f0` (a lazy context file is read when a name finds it, or an include names its path). Both were opt-in behind `PHPSTAN_RS_LAZY_CONTEXT=1`. The user had them reverted until W3, so the tree has no interim read by name, which is what the paragraph above says. The revert commit `034f99308` is on no branch; the tree is correct, but that commit is not in master's history.
+
 **Tests.** `cargo test -p phpstan-rs-composer`: for each of the 14 vendor trees that carry `vendor/composer/` (A2's
 list) and Piwigo, the keys of `GeneratedEntries` equal the arrays that `php` loads from `autoload_classmap.php`,
 `autoload_psr4.php` and `autoload_namespaces.php` (a script run by `php`, its output compared in the test as data);
@@ -291,6 +293,8 @@ The batch's base is the commit before the first of these rows that lands; every 
 (copy `vendor/phpstan-src` in, its own target dir, its binaries copied to `.corpus-runs/gate/bin/<commit>/<profile>/`
 at once so `abab.py` finds them, the worktree removed afterwards), and every "after" is HEAD. The item-0 baseline
 does not exist yet (batch 0 comes after Part A), so this validation compares binaries and the Piwigo digest.
+
+**Result (2026-10-19).** Run on the code at `136945410`, the last of Part A's commits, as `WORK_STACK.md` records: the test suites, the fixtures, the gate build, the Piwigo digest and the vendor trees (`vendor/monolog`, `vendor/laravel`, `vendor/rector-src`) are as the ledger's rows record, and the wall cost of COMP-6's bundled discovery was accepted at option 1. The two commits that came after it and read context files lazily (A7) are not in this validation.
 
 - `cargo test --workspace` and `cargo test -p phpstan-rs --test fixtures` (the workspace run skips fixtures); A1, A2,
   A5, A7 and A8 edit `composer` and `syntax`, whose tests run here with the rest.

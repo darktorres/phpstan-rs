@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -22,10 +22,10 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-7.5 | OPEN | OPEN | 01 02 04 05 06 07 10 12 22 |
 | REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) | 06 10 |
 | REG-7.7 | OPEN | OPEN | 06 10 |
-| REG-7.8 | OPEN | OPEN | 06 08 10 18 |
+| REG-7.8 | OPEN | OPEN | 06 10 |
 | REG-7.9 | OPEN | OPEN | 06 08 10 19 |
 | REG-7.10 | OPEN | OPEN | 06 10 19 |
-| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 06 10 23 |
+| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 06 10 |
 | REG-7.12 | OPEN | OPEN | 06 10 19 23 |
 | REG-8 | OPEN | OPEN | 06 08 18 22 |
 | REG-8.1 | OPEN | OPEN; a delta: no declaration's members merge into another's, and the server and the batch run bind a name alike … | 06 10 |
@@ -46,7 +46,7 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-17.2 | OPEN | OPEN | 10 11 24 |
 | REG-17.3 | OPEN | OPEN | 10 |
 | REG-17.4 | OPEN | OPEN | 10 |
-| REG-18.2 | READY | READY | 06 10 23 |
+| REG-18.2 | READY | READY | 06 10 |
 | REG-18.3 | READY | READY | 06 10 23 |
 | REG-18.6 | READY | READY | 03 06 10 11 12 |
 | VAL-2.9 | DONE | DONE: approved (decision 14), STUB-7.2 and REG-8.5 corrected; each is read at VAL-1 as it lands | 06 07 12 |

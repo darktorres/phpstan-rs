@@ -4,7 +4,7 @@
 
 ## Status of this part's tasks
 
-From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
@@ -26,7 +26,6 @@ From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_stat
 | REG-4.12 | READY | READY | 06 08 10 11 12 19 20 |
 | REG-4.15 | OPEN | OPEN | 05 06 07 10 11 12 20 22 |
 | REG-7 | OPEN | OPEN | 05 06 08 12 19 20 21 23 |
-| REG-7.8 | OPEN | OPEN | 06 08 10 20 |
 | REG-8 | OPEN | OPEN | 06 08 20 22 |
 | REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 06 07 08 10 12 20 22 |
 | REG-11.13 | OPEN | OPEN | 10 11 |
