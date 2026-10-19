@@ -444,6 +444,22 @@ fn read_raw<'de, T: Deserialize<'de>>(raw: &'de RawValue) -> Option<T> {
     serde_json::from_str(raw.get()).ok()
 }
 
+/// The string values of the manifest's `config` section, by key. Composer
+/// reads a directory setting and its `{$name}` references from here; a value
+/// that is not a string is left out, so a reference to it reads as absent.
+pub(crate) fn declared_config(text: &str) -> BTreeMap<String, String> {
+    let Some(json) = parse_document::<Members>(text) else {
+        return BTreeMap::new();
+    };
+    let Some(config) = json.read::<Members>("config") else {
+        return BTreeMap::new();
+    };
+    config
+        .iter()
+        .filter_map(|(key, raw)| Some((key.to_string(), read_raw::<String>(raw)?)))
+        .collect()
+}
+
 /// The deepest nesting of arrays and objects that `json_decode` reads at its
 /// default depth of 512.
 const MAX_NESTING: usize = 511;

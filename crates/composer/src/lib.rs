@@ -9,6 +9,7 @@ pub mod canonical;
 pub mod constraint;
 pub mod dir_listings;
 pub mod hashed_path;
+pub mod layout;
 pub mod manifest;
 pub mod path_order;
 pub mod vendor;
