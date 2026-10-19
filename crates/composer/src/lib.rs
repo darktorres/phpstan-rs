@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use dir_listings::DirListings;
 use layout::{Layout, Variables};
 use manifest::ComposerManifest;
-use vendor::{GeneratedCache, VendorContext};
+use vendor::{GeneratedCache, OutsideInstalls, OutsideSetter, VendorContext};
 
 /// Everything a Composer project root provides, read once.
 #[derive(Debug, Default, Clone)]
@@ -56,12 +56,13 @@ impl PendingVendor {
         installed: Option<PathBuf>,
         listings: Arc<DirListings>,
         cache: Option<&'static dyn GeneratedCache>,
+        outside: Arc<OutsideInstalls>,
     ) -> PendingVendor {
         let Some(installed) = installed else {
             return PendingVendor::from(VendorContext::default());
         };
         let thread = std::thread::spawn(move || {
-            vendor::discover_vendor_context(&installed, &listings, cache)
+            vendor::discover_vendor_context_with(&installed, &listings, cache, &outside)
         });
         PendingVendor(Arc::new(PendingVendorInner {
             found: OnceLock::new(),
@@ -122,17 +123,29 @@ impl PackageContext {
     ) -> PackageContext {
         let layout = Layout::new(listings, variables);
         let installed = layout.installed_dir(root);
-        let vendor = PendingVendor::spawn(installed.clone(), Arc::clone(listings), cache);
-        PackageContext {
-            manifest: ComposerManifest::load(
-                &layout.manifest_path(spelled_root),
-                spelled_root,
-                root,
-                installed.as_deref(),
-                listings,
-            ),
-            vendor,
-        }
+        // Discovery takes the install directories of the packages the manifest
+        // lists outside the vendor directory, which the manifest gives: the
+        // setter gives them (or none, when the load ends before that).
+        let outside = OutsideInstalls::pending();
+        let setter = OutsideSetter::new(&outside);
+        let vendor = PendingVendor::spawn(
+            installed.clone(),
+            Arc::clone(listings),
+            cache,
+            Arc::clone(&outside),
+        );
+        let manifest = ComposerManifest::load(
+            &layout.manifest_path(spelled_root),
+            spelled_root,
+            root,
+            installed.as_deref(),
+            listings,
+        );
+        setter.set(match (&manifest, installed.as_deref()) {
+            (Some(manifest), Some(vendor)) => manifest.installed_elsewhere(vendor),
+            _ => Vec::new(),
+        });
+        PackageContext { manifest, vendor }
     }
 
     /// Whether the project requires `phpstan/phpstan` or

@@ -299,6 +299,25 @@ impl ComposerManifest {
             .collect()
     }
 
+    /// The install directories of the installed packages that Composer put
+    /// outside `vendor` (a custom installer's `installer-paths`, such as
+    /// Drupal's `web/core`), sorted and without repeats. A package of a path
+    /// repository is the project's own code, promoted to analysed paths, and
+    /// is not one of them; a metapackage's directory is `vendor` itself.
+    pub fn installed_elsewhere(&self, vendor: &Path) -> Vec<PathBuf> {
+        let promoted = self.path_repository_packages();
+        let mut dirs: Vec<PathBuf> = self
+            .installed
+            .iter()
+            .filter(|p| !p.install_dir.starts_with(vendor))
+            .filter(|p| !promoted.iter().any(|q| q.name == p.name))
+            .map(|p| p.install_dir.clone())
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        dirs
+    }
+
     pub fn installed_package(&self, name: &str) -> Option<&InstalledPackage> {
         self.installed
             .iter()

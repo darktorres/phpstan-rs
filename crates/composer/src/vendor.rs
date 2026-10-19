@@ -35,7 +35,7 @@ use std::cell::OnceCell;
 use std::ffi::OsStr;
 use std::fs::FileType;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 
@@ -111,6 +111,24 @@ pub fn discover_vendor_context(
     listings: &DirListings,
     cache: Option<&dyn GeneratedCache>,
 ) -> VendorContext {
+    discover_vendor_context_with(
+        vendor_dir,
+        listings,
+        cache,
+        &OutsideInstalls::filled(Vec::new()),
+    )
+}
+
+/// `discover_vendor_context`, which also takes the entries that a directory
+/// of `outside` holds: the install directories of the packages Composer
+/// installed outside the vendor directory, which are context as the vendor
+/// directory's own packages are.
+pub fn discover_vendor_context_with(
+    vendor_dir: &Path,
+    listings: &DirListings,
+    cache: Option<&dyn GeneratedCache>,
+    outside: &OutsideInstalls,
+) -> VendorContext {
     let composer_dir = vendor_dir.join("composer");
     if !composer_dir.is_dir() {
         return VendorContext::default();
@@ -131,9 +149,86 @@ pub fn discover_vendor_context(
     // what should be a quiet "skip this source of context" degrade.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let entries = discover_inner(&composer_dir, &vendor_dir, &base_dir, listings, cache);
+    let entries = discover_inner(
+        &composer_dir,
+        &vendor_dir,
+        &base_dir,
+        listings,
+        cache,
+        outside,
+    );
     std::panic::set_hook(default_hook);
     entries.into_context(listings)
+}
+
+/// The install directories of the packages Composer installed outside the
+/// vendor directory, which vendor discovery takes as context. A load sets
+/// them once its manifest is read, and discovery, which runs beside the load,
+/// waits for them where a path first lies outside the vendor directory.
+#[derive(Debug)]
+pub struct OutsideInstalls {
+    dirs: Mutex<Option<Vec<PathBuf>>>,
+    ready: Condvar,
+}
+
+impl OutsideInstalls {
+    /// The directories, already known.
+    pub fn filled(dirs: Vec<PathBuf>) -> OutsideInstalls {
+        OutsideInstalls {
+            dirs: Mutex::new(Some(dirs)),
+            ready: Condvar::new(),
+        }
+    }
+
+    /// Directories not yet known: `OutsideSetter::new` gives them.
+    pub fn pending() -> Arc<OutsideInstalls> {
+        Arc::new(OutsideInstalls {
+            dirs: Mutex::new(None),
+            ready: Condvar::new(),
+        })
+    }
+
+    /// Keeps `dirs` if none were kept yet, and wakes the waiters.
+    fn fill(&self, dirs: Vec<PathBuf>) {
+        let mut slot = self.dirs.lock().unwrap_or_else(PoisonError::into_inner);
+        if slot.is_none() {
+            *slot = Some(dirs);
+            self.ready.notify_all();
+        }
+    }
+
+    /// The directories, once they are known.
+    fn wait(&self) -> Vec<PathBuf> {
+        let mut slot = self.dirs.lock().unwrap_or_else(PoisonError::into_inner);
+        while slot.is_none() {
+            slot = self
+                .ready
+                .wait(slot)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        slot.clone().unwrap_or_default()
+    }
+}
+
+/// Gives a pending `OutsideInstalls` its directories. Dropped without giving
+/// them (a load that ended early), it gives none, so discovery never waits
+/// for a value that is not coming.
+pub struct OutsideSetter(Arc<OutsideInstalls>);
+
+impl OutsideSetter {
+    pub fn new(outside: &Arc<OutsideInstalls>) -> OutsideSetter {
+        OutsideSetter(Arc::clone(outside))
+    }
+
+    pub fn set(self, dirs: Vec<PathBuf>) {
+        self.0.fill(dirs);
+    }
+}
+
+impl Drop for OutsideSetter {
+    fn drop(&mut self) {
+        self.0.fill(Vec::new());
+    }
 }
 
 /// The older separate generated files, each with its reading, in the order
@@ -151,6 +246,7 @@ fn discover_inner(
     base_dir: &Path,
     listings: &DirListings,
     cache: Option<&dyn GeneratedCache>,
+    outside: &OutsideInstalls,
 ) -> Entries {
     let static_path = composer_dir.join("autoload_static.php");
     let generated = match static_path
@@ -164,7 +260,7 @@ fn discover_inner(
             .filter_map(|(name, reading)| read_generated(&composer_dir.join(name), reading, cache))
             .collect(),
     };
-    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, listings);
+    let mut resolver = Resolver::new(vendor_dir, base_dir, composer_dir, listings, outside);
     let mut entries = Entries::default();
     for generated in &generated {
         resolver.collect(&generated.files, &mut entries.files);
@@ -553,6 +649,11 @@ struct Resolver<'p> {
     /// The directories whose entries were taken as written, by their text as
     /// written.
     written: FxHashMap<Vec<u8>, AsWritten>,
+    /// The install directories of the packages Composer installed outside the
+    /// vendor directory, which the load sets (`OutsideInstalls`).
+    outside: &'p OutsideInstalls,
+    /// `outside`, taken once, when a path first asks for it.
+    installs: OnceCell<Vec<PathBuf>>,
 }
 
 impl<'p> Resolver<'p> {
@@ -561,6 +662,7 @@ impl<'p> Resolver<'p> {
         base_dir: &'p Path,
         generated_dir: &'p Path,
         table: &'p DirListings,
+        outside: &'p OutsideInstalls,
     ) -> Self {
         Resolver {
             vendor_dir,
@@ -570,18 +672,53 @@ impl<'p> Resolver<'p> {
             table,
             listings: FxHashMap::default(),
             written: FxHashMap::default(),
+            outside,
+            installs: OnceCell::new(),
         }
     }
 
-    /// Each of `paths` that `locate` finds, onto `out`.
+    /// Each of `paths` that `locate` finds, or that lies in a package Composer
+    /// installed outside the vendor directory, onto `out`.
     fn collect(&mut self, paths: &Spelled, out: &mut Vec<Located>) {
         let (generated_dir, vendor_dir, base_dir) =
             (self.generated_dir, self.vendor_dir, self.base_dir);
         paths.each(generated_dir, vendor_dir, base_dir, |raw| {
-            if let Some(found) = path_of(raw).and_then(|path| self.locate(path)) {
+            if let Some(found) = path_of(raw)
+                .and_then(|path| self.locate(path).or_else(|| self.installed_elsewhere(path)))
+            {
                 out.push(found);
             }
         });
+    }
+
+    /// `raw` when it lies in an install directory of a package Composer
+    /// installed outside the vendor directory, as the walk takes it: as
+    /// written when that places it there, else as the system resolves it.
+    /// The directories are taken from the load on first use, and the system
+    /// is asked only when the written path lies elsewhere.
+    fn installed_elsewhere(&mut self, raw: &Path) -> Option<Located> {
+        let outside = self.outside;
+        let dirs = self.installs.get_or_init(|| outside.wait());
+        if dirs.is_empty() {
+            return None;
+        }
+        let lexical = lexically_normalized(raw);
+        if dirs
+            .iter()
+            .any(|dir| path_bytes::starts_with(&lexical, dir))
+        {
+            return Some(Located {
+                path: HashedPath::new(lexical),
+                kind: None,
+            });
+        }
+        let resolved = canonical::canonicalize(raw).ok()?;
+        dirs.iter()
+            .any(|dir| path_bytes::starts_with(&resolved, dir))
+            .then(|| Located {
+                path: HashedPath::new(resolved),
+                kind: None,
+            })
     }
 
     /// Resolves one path a generated file lists to an absolute path under

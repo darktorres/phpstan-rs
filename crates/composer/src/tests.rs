@@ -3,6 +3,7 @@ mod dir_listings;
 mod hashed_path;
 mod helpers;
 mod installed_packages;
+mod installer_paths;
 mod manifest_reading;
 mod package_ownership;
 mod phpstan_dependency_detection;
