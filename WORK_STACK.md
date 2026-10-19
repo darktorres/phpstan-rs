@@ -11,7 +11,7 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-19, `25cf2a7f` on branch `master` (named `callgrind-20g` until
+State as of 2026-10-19, `a83b1675` on branch `master` (named `callgrind-20g` until
 2026-10-18). Counts below were read from the files on 2026-10-17. This file covers
 this branch only.
 
@@ -22,24 +22,14 @@ together later. Their sections below keep the content they had that day. The one
 exception is level 7's designs, which are rows of the 20 G plan and are worked in
 level 8's order; DOC-2.1 stays deferred.
 
-Level 8 is the active level again. It holds the 20 G plan and the off drill, and
-its order is in its section below: work the lowest item that has a READY row, item
-2 as of 2026-10-17 (LOAD-2.2's last part, decided that day), then item 8.
+Level 9 is the active level: the batch that follows the cross-platform fixes. It is
+designed (section 9 below) and has not started; the design waits for the user's go.
+Level 8, the 20 G plan and the off drill, resumes when level 9 starts, in the order
+that level 9 sets.
 
-Level 10 is planned, not started: the report viewer (`REPORT_VIEWER_PLAN.md`).
-Level 9's code is pushed, so the condition for its start holds. Its place against
-level 8 and the post-level-9 documents is open.
-
-Level 9 has been used twice, and both uses are finished.
-
-- The fixes for the costs that the attribution of the 20 G plan's items 1 to 3
-  found (`ITEMS_1_TO_3_FIXES_PLAN.md`) finished on 2026-10-17: every row is in and
-  the batch's checks passed. The plan and the ledger's LOAD-8 keep the record.
-- The cross-platform fixes (`CROSS_PLATFORM_PLAN.md`) finished on 2026-10-19: every
-  row is built and pushed, and the CI legs of Linux, macOS and Windows pass. The
-  plan keeps the record, and the ledger's LOAD-8.7 section has the platforms'
-  figures. The release workflow's changes (R2) have not run on a runner: the user
-  dropped its dispatch, so the next run of the workflow is their first.
+Level 10 is planned, not started: the report viewer (`REPORT_VIEWER_PLAN.md`). The
+cross-platform fixes it was to follow are pushed, so its start condition holds. Its
+place against levels 8 and 9 is open.
 
 ## The stack
 
@@ -47,7 +37,7 @@ Levels 1 to 7 are deferred; see Where to resume.
 
 ### 0. The CI split — `/home/torres/.claude/plans/the-ci-files-could-curried-nautilus.md`
 
-Started on 2026-10-18, during level 9. One CI run took 35 minutes, because the `gates` and `platforms` jobs ran their steps one after another, and level 9's rounds are checked on CI, so each one waits that long. Its commits are on `callgrind-20g`: `cbb51738`, `076b9d2a`, `5421d398`, `c222556c`, `a9f1c05d`, `7c10e994`, `87e137ed`, `ee272e48`, `dbe6c371`, `5e0af885`, and the docs commit after them. Nothing is pushed. It waits on the user for:
+Started on 2026-10-18, during the cross-platform fixes. One CI run took 35 minutes, because the `gates` and `platforms` jobs ran their steps one after another, and those rounds are checked on CI, so each one waits that long. Its commits are on `callgrind-20g`: `cbb51738`, `076b9d2a`, `5421d398`, `c222556c`, `a9f1c05d`, `7c10e994`, `87e137ed`, `ee272e48`, `dbe6c371`, `5e0af885`, and the docs commit after them. Nothing is pushed. It waits on the user for:
 
 - the push, once the user says go; then the first run is checked against the plan's verification, item 7;
 - a `workflow_dispatch` run of `release.yml` on all five targets, which the user approves first;
@@ -270,11 +260,43 @@ The off-run rows still open:
   E9 (CHECK-5, folded into CHECK-6.16) and E12 (CACHE-7) are SKIP; D3, D6, C7 and
   C8 are decided.
 
+### 9. The batch after the cross-platform fixes — `~/.claude/plans/another-session-is-finishing-majestic-comet.md`
+
+Designed in plan mode on 2026-10-18 and 2026-10-19; nothing in it is built. Until the
+user says go it stays in that file. At the go its parts become four documents at the
+repository root: `POST_LEVEL_9_PLAN.md` (Parts A, C, D, E, F, G5, I2 to I5, K, L),
+`FLAT_TREE_PLAN.md` (B, G1 to G4, I1), `ENGINE_PLAN.md` (H, J) and
+`PLAN_REVIEW_LEDGER.md` (M). The ledger and stack edits its Part N lists follow.
+
+Start condition, as read on 2026-10-19: the cross-platform fixes are finished
+(`a83b1675`), this file has no other level 9, `git status` is clean, and no build or
+profile runs.
+
+Order once started, as the plan sets it:
+
+1. Part A's rows: LOAD-2.2's last part (A1), LOAD-9 (A2), REG-14.4 (A3), SYN-1.1 (A5),
+   LOAD-5.4 (A5a) and the composer follow-ups (A7, A8), then one validation (A6).
+2. Batch 0: the oracle tools and the baseline, the seven fixes the crate split puts
+   first, and the findings that change a dump. Then item 9, the flat tree, steps 0 to
+   3, with spike S-12 before step 2.
+3. Part C's batches (tokens, the lexer, parse recovery, names, products, PHPDoc, the
+   check's temporaries), then the wall (Part D), whose engine is `ENGINE_PLAN.md`.
+
+Spikes S-1 to S-12 (Part H5) run before the designs they settle. Level 8's list is not
+reordered until the go.
+
+Open: the user has not said go. The plan's Part E header says which answers are
+ruled, and that note is not confirmed.
+
+Leftovers from plan mode, to delete when it ends: the helper scripts, backups and
+probes in the scratchpad (`/tmp/claude-1000/-home-torres-projects-phpstan-rs/0fdc40b5-accc-4267-853a-f5ef8f30c07c/scratchpad`),
+the empty `~/.cache/prs-ledger-gen`, and `/tmp/claude-1000/regfields.txt`.
+
 ### 10. The report viewer — `REPORT_VIEWER_PLAN.md`
 
 Planned on 2026-10-18, not started. The browser feature is ROADMAP Phase 181:
 a local page that browses one analysis's findings. The plan's rows (V1 to V13)
-are built in this checkout, on this branch, after level 9 is pushed. The first
+are built in this checkout, on this branch, after the cross-platform fixes are pushed. The first
 row measures whether one scan can stand in for a run at each level.
 
 ## Documents with no place in the stack
@@ -282,8 +304,9 @@ row measures whether one scan can stand in for a run at each level.
 Standalone research and plans; none blocks anything. Still at the repository root:
 
 - `CRASH_REPORTING_PLAN.md`
-- `CROSS_PLATFORM_PLAN.md` (level 9, finished on 2026-10-19; the ledger's LOAD-8.7)
-- `ITEMS_1_TO_3_FIXES_PLAN.md` (level 9, finished on 2026-10-17; the ledger's LOAD-8)
+- `CROSS_PLATFORM_PLAN.md` (finished on 2026-10-19; the ledger's LOAD-8.7; its release
+  workflow's changes have not run on a runner, since the user dropped the dispatch)
+- `ITEMS_1_TO_3_FIXES_PLAN.md` (finished on 2026-10-17; the ledger's LOAD-8)
 - `MAGO_ARCHITECTURE_COMPARISON.md`
 - `MASTER_REIMPLEMENTATION_LEDGER.md` (level 6, dropped)
 - `PIWIGO_CORPUS_TRIAGE_ab4c2b5.md`
