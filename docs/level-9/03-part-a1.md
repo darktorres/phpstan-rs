@@ -4,11 +4,17 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| LOAD-2.2 | SEE LEDGER | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … |
+| task | status | ledger | also in |
+|---|---|---|---|
+| LOAD-2.2 | DONE | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 04 10 11 12 |
+| LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 02 04 21 22 |
+| LOAD-7.8 | OPEN | OPEN | 04 08 12 31 |
+| LOAD-8.10 | DONE | DONE `9513479b`. **The rule:** a walk hands a directory's files over when it is the one walk of their strongest role … | 04 21 |
+| REG-18.6 | READY | READY | 06 10 11 12 20 |
+| COMP-7 | DONE | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a … | 01 02 04 07 10 12 31 |
+| COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 02 04 07 12 19 31 |
 
 <!-- status:end -->
 

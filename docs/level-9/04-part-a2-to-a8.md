@@ -4,19 +4,33 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … |
-| REG-14.4 | DONE | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all … |
-| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … |
-| REG-7.5 | OPEN | OPEN |
-| SYN-1.1 | DONE | DONE `2f9b1281`: the loop, with a test at a depth the recursion needed a guard for; A6 (2026-10-19) found no standalone … |
-| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone |
-| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) |
-| COMP-6 | DONE | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's … |
-| COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … |
+| task | status | ledger | also in |
+|---|---|---|---|
+| LOAD-2.2 | DONE | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 03 10 11 12 |
+| LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 02 03 21 22 |
+| LOAD-2.8 | DONE | Parts 1 and 2 DONE: `27c3b093` (the manifests and `installed.json` read member by member; a repeated key keeps its last … | 02 07 |
+| LOAD-3.1 | OPEN | OPEN | 02 05 06 10 12 19 21 |
+| LOAD-5.1 | OPEN | OPEN | 05 06 07 10 12 19 21 23 31 |
+| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone | 01 02 05 07 10 11 12 |
+| LOAD-7.6 | READY | READY; a delta in the config's keys | 06 07 08 10 12 31 |
+| LOAD-7.8 | OPEN | OPEN | 03 08 12 31 |
+| LOAD-8.10 | DONE | DONE `9513479b`. **The rule:** a walk hands a directory's files over when it is the one walk of their strongest role … | 03 21 |
+| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … | 01 02 10 12 21 |
+| SYN-1.1 | DONE | DONE `2f9b1281`: the loop, with a test at a depth the recursion needed a guard for; A6 (2026-10-19) found no standalone … | 02 07 10 |
+| SYN-1.2 | READY | READY | 02 05 06 07 10 12 13 31 |
+| REG-7.2 | OPEN | OPEN | 05 06 10 11 20 |
+| REG-7.5 | OPEN | OPEN | 01 02 05 06 07 10 12 20 22 |
+| REG-14 | PART | PART | — |
+| REG-14.4 | DONE | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all … | 01 02 10 12 |
+| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … | 01 02 07 10 12 22 31 |
+| REG-16.4 | OPEN | OPEN | 02 05 06 07 08 10 11 12 13 20 21 22 23 31 |
+| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 06 07 08 10 12 21 22 31 |
+| COMP-5 | PART | PART: A7's maps keep the root's entries (`2c6f1eec`); the flat lists stay filtered, and the class is found through the … | 02 07 12 31 |
+| COMP-6 | DONE | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's … | 02 07 12 31 |
+| COMP-7 | DONE | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a … | 01 02 03 07 10 12 31 |
+| COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 02 03 07 12 19 31 |
 
 <!-- status:end -->
 

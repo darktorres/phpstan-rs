@@ -4,72 +4,122 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| SYN-1.2 | READY | READY |
-| SYN-1.3 | OPEN | OPEN |
-| SYN-1.9 | OPEN | OPEN |
-| SYN-6 | OPEN | OPEN |
-| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … |
-| SYN-1.10 | OPEN | OPEN |
-| SYN-2 | OPEN | OPEN; the target grew |
-| SYN-3.2 | READY | READY, with SYN-3.1 |
-| SYN-3.1 | READY | READY |
-| SYN-4.1 | OPEN | OPEN |
-| NAME-1.2 | READY | READY; the container-field keys are a delta, approved (VAL-2.7) |
-| VAL-2.7 | DONE | DONE: approved |
-| PROD-5.1 | OPEN | OPEN |
-| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) |
-| REG-4.10 | READY | READY; overlaps DOC-2.6 |
-| DOC-2.6 | OPEN | OPEN; overlaps REG-4.10 |
-| TYPE-5 | READY | READY |
-| CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) |
-| VAL-2.8 | DONE | DONE: approved in principle; each family's output diff is read at VAL-1, and anything that is not an improvement is … |
-| CHECK-6.8 | READY | READY |
-| CHECK-6.10 | READY | READY |
-| CHECK-4.2 | READY | READY |
-| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) |
-| VAL-2.5 | DONE | DONE: approved; decision 1 withdrew REG-7.6's `mixed` in its favour |
-| CHECK-11 | READY | READY; a delta |
-| LOAD-7.6 | READY | READY; a delta in the config's keys |
-| REG-18.4 | READY | READY; a delta |
-| LOAD-7.2 | OPEN | OPEN; the PHPUnit half needs a ruling |
-| REG-14.4 | DONE | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all … |
-| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … |
-| REG-7.5 | OPEN | OPEN |
-| REG-4.9 | READY | READY |
-| REG-4.11 | OPEN | OPEN; the comments can be corrected now |
-| REG-7 | OPEN | OPEN |
-| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 |
-| NAME-1 | OPEN | OPEN |
-| NAME-2 | OPEN | OPEN |
-| REG-16.4 | OPEN | OPEN |
-| REG-16.5 | OPEN | OPEN |
-| REG-17 | OPEN | OPEN |
-| LOAD-2.2 | SEE LEDGER | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … |
-| REG-18.6 | READY | READY |
-| LOAD-5.1 | OPEN | OPEN |
-| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … |
-| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 |
-| PROD-5.8 | READY | READY |
-| PROD-5.2 | READY | READY |
-| LOAD-7.5 | READY | READY |
-| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … |
-| CACHE-13.1 | OPEN | OPEN |
-| CACHE-13.2 | OPEN | OPEN |
-| CACHE-8 | READY | READY |
-| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format |
-| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) |
-| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) |
-| STUB-12.2 | OPEN | OPEN |
-| STUB-11 | OPEN | OPEN |
-| VAL-1.2 | OPEN | OPEN |
-| VAL-2.9 | DONE | DONE: approved (decision 14), STUB-7.2 and REG-8.5 corrected; each is read at VAL-1 as it lands |
-| STUB-7.2 | OPEN | OPEN; a delta, approved and corrected (decision 14) |
-| REG-8.5 | OPEN | OPEN; a delta, approved and corrected (decision 14; nsrt `property-hooks.php`) |
-| VAL-1 | OPEN | OPEN |
+| task | status | ledger | also in |
+|---|---|---|---|
+| LOAD-2.2 | DONE | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 03 04 10 11 |
+| LOAD-3.1 | OPEN | OPEN | 02 04 05 06 10 19 21 |
+| LOAD-3.5 | OPEN | OPEN | 05 10 13 19 |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … | 02 05 06 07 10 21 22 31 |
+| LOAD-5.1 | OPEN | OPEN | 04 05 06 07 10 19 21 23 31 |
+| LOAD-5.2 | OPEN | OPEN | 05 06 07 10 19 21 22 |
+| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone | 01 02 04 05 07 10 11 |
+| LOAD-7.2 | OPEN | OPEN; the PHPUnit half needs a ruling | 06 07 08 31 |
+| LOAD-7.5 | READY | READY | 06 10 11 |
+| LOAD-7.6 | READY | READY; a delta in the config's keys | 04 06 07 08 10 31 |
+| LOAD-7.7 | READY | READY | 06 10 |
+| LOAD-7.8 | OPEN | OPEN | 03 04 08 31 |
+| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … | 01 02 04 10 21 |
+| SYN-1.2 | READY | READY | 02 04 05 06 07 10 13 31 |
+| SYN-1.3 | OPEN | OPEN | 07 10 11 13 |
+| SYN-1.4 | OPEN | OPEN | 07 10 11 13 31 |
+| SYN-1.5 | OPEN | OPEN | 07 10 13 |
+| SYN-1.6 | SUPERSEDED | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies … | 08 10 11 13 16 |
+| SYN-1.7 | OPEN | OPEN | 07 10 13 |
+| SYN-1.8 | OPEN | OPEN | 07 10 13 |
+| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 13 15 16 21 22 |
+| SYN-1.10 | OPEN | OPEN | 05 06 07 10 11 13 16 22 |
+| SYN-2 | OPEN | OPEN; the target grew | 05 07 09 10 11 13 31 |
+| SYN-3.2 | READY | READY, with SYN-3.1 | 05 07 08 09 10 |
+| SYN-3.4 | OPEN | OPEN | 05 10 11 13 17 18 |
+| SYN-4.1 | OPEN | OPEN | 05 07 09 10 11 |
+| SYN-4.5 | READY | READY | 05 07 10 11 18 31 |
+| SYN-4.8 | READY | READY | 05 07 09 10 11 17 |
+| SYN-4.9 | READY | READY | 05 07 09 10 11 |
+| SYN-6 | OPEN | OPEN | 05 07 08 10 11 15 16 |
+| PROD-5.1 | OPEN | OPEN | 05 07 10 11 13 18 20 22 |
+| PROD-5.4 | OPEN | OPEN | 05 06 07 10 21 22 31 |
+| PROD-5.5 | READY | READY | 05 10 |
+| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 | 02 05 07 10 21 22 31 |
+| PROD-5.8 | READY | READY | 02 05 07 10 11 19 21 |
+| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) | 05 06 07 08 09 10 11 |
+| DOC-2.2 | OPEN | OPEN | 05 07 08 09 10 23 |
+| DOC-2.5 | OPEN | OPEN. DOC-1 rewrote the tag parser to pull tokens; the borrowed token text is not built | 05 07 09 10 |
+| DOC-2.7 | READY | READY | 07 09 10 |
+| DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 05 06 07 10 11 13 17 19 |
+| NAME-1.2 | READY | READY; the container-field keys are a delta, approved (VAL-2.7) | 05 06 07 10 11 18 |
+| NAME-2.1 | READY | READY | 05 07 08 10 11 18 |
+| NAME-2.2 | READY | READY | 05 10 18 |
+| TYPE-5 | READY | READY | 05 07 09 10 11 31 |
+| REG-4.9 | READY | READY | 06 10 11 |
+| REG-4.10 | READY | READY; overlaps DOC-2.6 | 05 06 07 10 11 |
+| REG-4.11 | OPEN | OPEN; the comments can be corrected now | 06 10 18 20 22 |
+| REG-4.12 | READY | READY | 06 08 10 11 18 19 20 |
+| REG-4.15 | OPEN | OPEN | 05 06 07 10 11 18 20 22 |
+| REG-7 | OPEN | OPEN | 05 06 08 18 19 20 21 23 |
+| REG-7.5 | OPEN | OPEN | 01 02 04 05 06 07 10 20 22 |
+| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 06 07 08 10 18 20 22 |
+| REG-14.1 | OPEN | OPEN; a delta, approved (VAL-2.6) | 02 05 |
+| REG-14.3 | OPEN | OPEN | 06 10 |
+| REG-14.4 | DONE | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all … | 01 02 04 10 |
+| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … | 01 02 04 07 10 22 31 |
+| REG-16.2 | READY | READY | 05 06 07 08 10 11 22 31 |
+| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 11 13 20 21 22 23 31 |
+| REG-16.5 | OPEN | OPEN | 06 10 20 21 22 |
+| REG-17 | OPEN | OPEN | 05 06 08 10 19 20 21 |
+| REG-18.4 | READY | READY; a delta | 05 06 07 08 10 18 22 31 |
+| REG-18.6 | READY | READY | 03 06 10 11 20 |
+| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) | 05 06 07 08 10 11 13 23 |
+| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 06 07 08 10 21 22 31 |
+| STUB-7.6 | OPEN | OPEN | 06 08 10 23 |
+| STUB-11 | OPEN | OPEN | 05 06 07 10 21 23 24 |
+| STUB-12.2 | OPEN | OPEN | 06 08 10 23 |
+| STUB-12.4 | OPEN | OPEN | 06 10 23 |
+| CACHE-8 | READY | READY | 05 07 10 22 31 |
+| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 06 10 21 22 |
+| CACHE-13.1 | OPEN | OPEN | 05 06 07 10 11 19 21 22 |
+| CACHE-13.2 | OPEN | OPEN | 05 06 07 08 10 21 22 23 |
+| CHECK-4.1 | OPEN | OPEN | 05 08 09 23 |
+| CHECK-4.2 | READY | READY | 05 07 10 22 31 |
+| CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) | 05 06 07 23 |
+| CHECK-6.2 | READY | READY | 06 07 23 |
+| CHECK-6.3 | OPEN | OPEN | 05 06 07 13 14 23 |
+| CHECK-6.7 | OPEN | OPEN | 05 06 07 23 |
+| CHECK-6.8 | READY | READY | 05 06 10 11 23 |
+| CHECK-6.10 | READY | READY | 05 06 07 08 09 23 |
+| CHECK-6.13 | OPEN | OPEN | 05 06 07 23 |
+| CHECK-6.14 | OPEN | OPEN | 05 06 07 23 |
+| CHECK-6.15 | OPEN | OPEN | 05 06 07 23 |
+| CHECK-6.18 | READY | READY | 05 06 10 14 16 23 |
+| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) | 05 06 07 08 10 21 |
+| CHECK-9 | READY | READY | 05 06 07 10 11 23 24 31 |
+| CHECK-10 | OPEN | OPEN | 05 06 07 08 10 23 |
+| CHECK-11 | READY | READY; a delta | 06 07 08 10 31 |
+| VAL-1.1 | OPEN | OPEN | 07 08 10 11 |
+| VAL-1.2 | OPEN | OPEN | 08 10 11 |
+| VAL-1.3 | OPEN | OPEN | 08 10 11 |
+| VAL-1.4 | OPEN | OPEN | 05 08 09 10 11 |
+| VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 07 08 10 11 13 |
+| VAL-1.6 | OPEN | OPEN | 05 08 10 11 |
+| VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 05 08 09 10 11 |
+| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 08 10 11 |
+| VAL-1.9 | OPEN | OPEN | 08 10 11 |
+| VAL-1.10 | OPEN | OPEN | 08 10 11 |
+| VAL-1.11 | OPEN | OPEN; MEAS-2 has the whole-stack profile at this code | 08 10 11 |
+| VAL-1.12 | OPEN | OPEN | 06 08 10 11 |
+| VAL-2.9 | DONE | DONE: approved (decision 14), STUB-7.2 and REG-8.5 corrected; each is read at VAL-1 as it lands | 06 07 20 |
+| VAL-2.10 | OPEN | OPEN: read at VAL-1, as they land | 05 06 07 15 20 |
+| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 11 13 15 16 19 |
+| Q-11 | DONE | DONE (2026-10-15): of the 20 follow-ups, 1 is done for one version, 5 are partly done and 14 are not; their section … | 06 07 11 31 |
+| COMP-1 | DONE | DONE `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` (the walk's rule and its tests are `df9640fe` and … | 07 31 |
+| COMP-2 | OPEN | OPEN. Not part of Part A; before the baseline (batch 0), since it changes a range and so a dump | 07 19 23 31 |
+| COMP-3 | OPEN | OPEN, before W2 (H2.8's isolation assumes it) | 07 |
+| COMP-4 | DONE | DONE `2c6f1eec` (Part A's A7): the maps keep their keys, and PSR-0 is read | 07 |
+| COMP-5 | PART | PART: A7's maps keep the root's entries (`2c6f1eec`); the flat lists stay filtered, and the class is found through the … | 02 04 07 31 |
+| COMP-6 | DONE | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's … | 02 04 07 31 |
+| COMP-7 | DONE | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a … | 01 02 03 04 07 10 31 |
+| COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 02 03 04 07 19 31 |
 
 <!-- status:end -->
 

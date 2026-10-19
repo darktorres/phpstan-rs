@@ -4,15 +4,15 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| CHECK-9 | READY | READY |
-| REG-17.2 | OPEN | OPEN |
-| STUB-11 | OPEN | OPEN |
-| REG-15 | OPEN | OPEN |
-| REG-15.1 | OPEN | OPEN |
+| task | status | ledger | also in |
+|---|---|---|---|
+| REG-15 | OPEN | OPEN | 06 |
+| REG-15.1 | OPEN | OPEN | 06 23 |
+| REG-17.2 | OPEN | OPEN | 10 11 20 |
+| STUB-11 | OPEN | OPEN | 05 06 07 10 12 21 23 |
+| CHECK-9 | READY | READY | 05 06 07 10 11 12 23 31 |
 
 <!-- status:end -->
 

@@ -4,19 +4,27 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| — | — | no ledger row named in this part's headings or tables |
+| task | status | ledger | also in |
+|---|---|---|---|
+| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 13 16 21 22 |
+| SYN-6 | OPEN | OPEN | 05 07 08 10 11 12 16 |
+| VAL-2.10 | OPEN | OPEN: read at VAL-1, as they land | 05 06 07 12 20 |
+| Q-1 | DONE | DONE (2026-10-15): none. `check` over D6's 18 trees with HEAD's gate build (`7a449c44`) read 111,974 files: D6's … | — |
+| Q-2 | DONE | DONE (2026-10-16): probed under PHP 5.6–8.5.4 in Docker (`~/.cache/prs-ledger/q2/php-matrix.txt`), and with `check` and … | 05 11 |
+| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 11 12 13 16 19 |
 
 <!-- status:end -->
 
-**Why now.** Decision 4 says every parse yields a tree; Q-10 and decision 15 say what a failing file
+### G3 why now
+
+Decision 4 says every parse yields a tree; Q-10 and decision 15 say what a failing file
 keeps and how its version range is read; F77 says the failure is reported. Step 2 fixes the stored
 layout and the builder's API, and batch 3 builds the recovery on them, so the model comes first.
 
-**What exists (verified).**
+### G3 what exists (verified)
+
 - `parse` returns `Result<ParsedFile, ParseError>`; `ParseError { message, span }` is built at 28
   sites (31 lines name `ParseError {`; the type and its two impls are the other three), and the `expect*`
   helpers in `parser/tokens.rs` (`expect`, `expect_semicolon`, `expect_ident`, `expect_variable`) are the
@@ -40,7 +48,9 @@ layout and the builder's API, and batch 3 builds the recovery on them, so the mo
 - `docker` is available, and `tools/php-comparison-matrix` is the precedent: a PHP script run on
   official images whose JSON is committed as test data (`crates/types/src/tests/data/`).
 
-**G3.1 Contract.** `syntax::parse(bytes) -> Parsed` is infallible. `Parsed` holds the `Ast`, whose
+### G3.1 Contract
+
+`syntax::parse(bytes) -> Parsed` is infallible. `Parsed` holds the `Ast`, whose
 `errors() -> &[SyntaxError]` and `marks() -> &[Mark]` are sorted by position, and the file facts
 with `has_errors`. For every byte string: it returns within a work bound proportional to the input and
 within a memory bound (tested); it does not panic; every span is inside the file and nested in its
@@ -55,7 +65,8 @@ before `parse` (B5), so the id and offset limits cannot fire inside it. `ParseEr
 span, kind: ErrorKind, detail: Text }`; the message is built from the kind when shown, in PHP's wording
 (`syntax error, unexpected token ";", expecting "]"`), so no per-error string lives in the tree.
 
-**G3.2 Three kinds of failure, and one thing that is not a failure.**
+### G3.2 Three kinds of failure, and one thing that is not a failure
+
 1. *Missing.* A required token or operand is absent and the next token cannot continue the
    construct. The parser records the error at the position and builds the node as if the token were
    there: a call without `)`, a block without `}`, a statement without `;`, an operator without its
@@ -86,7 +97,9 @@ span, kind: ErrorKind, detail: Text }`; the message is built from the kind when 
    character 0x00"), which bounds a file from above at 8.0 (decision 15) and keeps the oracle's rule of G3.7.1
    without an exception.
 
-**G3.3 Layout, for step 2.** Three enum arms, each with a payload of one `ErrorId` (4 bytes, inside
+### G3.3 Layout, for step 2
+
+Three enum arms, each with a payload of one `ErrorId` (4 bytes, inside
 the 32-byte node budget), added with SYN-1.9: `ExprRepr::Error`, `StmtRepr::Error` and `HintRepr::Error`
 (no `MemberRepr`: item 2 of G3.2 says where a class records its errors). `Ast` gains `errors:
 Vec<SyntaxError>` and `marks: Vec<Mark>`. Step 2 does not build them: the parse functions keep
@@ -95,7 +108,9 @@ replaces each `?` with the recovery below. What step 2 must guarantee is only th
 is as wide as its largest arm, and the largest arms of `ExprRepr` and `StmtRepr` are 20 and 28 bytes
 (I1.2, I1.3), so a 4-byte payload relays out nothing; `HintNode` has room in its 20 bytes.
 
-**G3.4 The recovery (batch 3).** A parse function returns its node, never a `Result`.
+### G3.4 The recovery (batch 3)
+
+A parse function returns its node, never a `Result`.
 - *Progress, as a mechanism.* Every recovery loop records its position when it starts an iteration and,
   if the position has not moved when it comes round again, consumes one token as unexpected; the `expect*`
   helpers peek before they fail (so "an `expect` that fails consumes nothing" is true of all four); an
@@ -147,7 +162,9 @@ is as wide as its largest arm, and the largest arms of `ExprRepr` and `StmtRepr`
   follows the same four rules; each construct's sync set is a table next to its parse function, and
   the tests of G3.7 cover each row.
 
-**G3.5 Marks: what a file used that a version lacks (decision 15).** `Mark { feature:
+### G3.5 Marks: what a file used that a version lacks (decision 15)
+
+`Mark { feature:
 SyntaxFeature, span: Span, detail: MarkDetail }`, recorded by the parser where the grammar uses a
 feature, deduplicated by span, sorted. `SyntaxFeature` is the grammar-only subset of `types::PhpFeature`'s
 45 variants plus those below, defined in a leaf crate both `syntax` and `types` depend on (`php-version`:
@@ -196,7 +213,8 @@ parameters (8.0), enums and `never` and `0o` octals (8.1), the pipe operator (8.
 from the grammar's history: **the matrix of G3.7 is its authority**, and a row is not final until the
 images agree with it.
 
-**G3.6 What readers do with an error (the contract).**
+### G3.6 What readers do with an error (the contract)
+
 - *Checker.* `ExprKind::Error` infers the error type (F21's `Mixed(Error)`, which lands in batch 0: every "is this unknown" guard already covers it, and it records that a report was made), narrows nothing, reports nothing. **What a statement error sets** is stated, because the flag the first draft named does not silence anything: `any_variable_may_exist`
   (set by `extract()`, `eval` and `include`) is read today only at `builtin_calls.rs:826`, and the diagnostics
   `extract()` and `eval` discard are dropped by `saw_dynamic_var_construct`, which drops every diagnostic of
@@ -253,7 +271,8 @@ images agree with it.
   with its own `LineIndex`): the project's tree lags the buffer by the debounce window and the last-good tree
   stops being a notion (G4b).
 
-**G3.7 Oracles and tests.**
+### G3.7 Oracles and tests
+
 1. *The syntax matrix.* `tools/php-syntax-matrix/`: a probe set (one file per feature and per edge,
    including the contexts above) run under the official images 7.0 to 8.5 with `php -l` on each probe
    file, writing `{probe: {version: ok | parse error: message | fatal: message}}` into
@@ -293,7 +312,9 @@ images agree with it.
    canonical dump of Part B8.
 5. *Editor tests*: completion, hover and symbols on buffers broken in each way (G4b).
 
-**G3.8 Staging.** (a) Step 2 as G3.3 says. (b) Batch 3, in this order: the lexer's errors and tokens
+### G3.8 Staging
+
+(a) Step 2 as G3.3 says. (b) Batch 3, in this order: the lexer's errors and tokens
 (the new ones: unterminated strings, comments and heredocs, the NUL byte as an `Error` token, the clamped
 span); `SyntaxError`, `errors()` and the infallible signatures with the first-error behaviour unchanged for
 valid input (dump equality); the statement, expression, list, class-body and header rules, each with

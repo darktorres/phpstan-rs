@@ -4,54 +4,156 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| REG-7 | OPEN | OPEN |
-| REG-8 | OPEN | OPEN |
-| REG-4.2 | READY | READY; a delta, approved in the plan, fixtured |
-| REG-16.3 | OPEN | OPEN |
-| CACHE-13.2 | OPEN | OPEN |
-| REG-16.4 | OPEN | OPEN |
-| STUB-11 | OPEN | OPEN |
-| STUB-10.1 | OPEN | OPEN |
-| REG-15 | OPEN | OPEN |
-| REG-7.2 | OPEN | OPEN |
-| STUB-8 | OPEN | OPEN; a delta, approved, both parts (VAL-2.4) |
-| VAL-2.4 | DONE | DONE: approved, both parts |
-| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format |
-| REG-7.1 | OPEN | OPEN |
-| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) |
-| TYPE-4 | OPEN | OPEN |
-| NAME-2.4 | OPEN | OPEN |
-| LOAD-3.1 | OPEN | OPEN |
-| LOAD-5.1 | OPEN | OPEN |
-| LOAD-5.2 | OPEN | OPEN |
-| REG-17 | OPEN | OPEN |
-| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) |
-| VAL-2.5 | DONE | DONE: approved; decision 1 withdrew REG-7.6's `mixed` in its favour |
-| CHECK-8 | OPEN | OPEN |
-| CHECK-10 | OPEN | OPEN |
-| REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) |
-| REG-7.5 | OPEN | OPEN |
-| PROD-5.4 | OPEN | OPEN |
-| SYN-1.10 | OPEN | OPEN |
-| REG-14.3 | OPEN | OPEN |
-| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … |
-| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 |
-| PROD-5.8 | READY | READY |
-| PROD-5.2 | READY | READY |
-| STUB-7.3 | OPEN | OPEN; a delta, approved (decision 14) |
-| REG-8.3 | OPEN | OPEN |
-| REG-2 | READY | READY. `xtask modgraph --inventory` lists the crossing edges; the `impl` and name inventories are not made |
-| REG-12 | OPEN | OPEN |
-| REG-16 | OPEN | OPEN |
-| REG-18 | OPEN | OPEN |
-| STUB-7 | OPEN | OPEN |
-| LOAD-7 | OPEN | OPEN |
-| CHECK-11 | READY | READY; a delta |
-| VAL-1 | OPEN | OPEN |
+| task | status | ledger | also in |
+|---|---|---|---|
+| LOAD-1 | DONE | DONE (LOAD-1.6 SUPERSEDED by REG-16.4) | 07 08 |
+| LOAD-1.3 | DONE | DONE `c9f6a85c` | 11 |
+| LOAD-1.4 | DONE | DONE `3334ebc9` | 21 |
+| LOAD-3.1 | OPEN | OPEN | 02 04 05 10 12 19 21 |
+| LOAD-4.6 | SUPERSEDED | SUPERSEDED by REG-7 and REG-16.4 (decision 3). `closure_scope` computes the finishing passes' scopes … | — |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … | 02 05 07 10 12 21 22 31 |
+| LOAD-5.1 | OPEN | OPEN | 04 05 07 10 12 19 21 23 31 |
+| LOAD-5.2 | OPEN | OPEN | 05 07 10 12 19 21 22 |
+| LOAD-7 | OPEN | OPEN | — |
+| LOAD-7.1 | READY | READY | 07 10 |
+| LOAD-7.2 | OPEN | OPEN; the PHPUnit half needs a ruling | 07 08 12 31 |
+| LOAD-7.3 | READY | READY | 10 |
+| LOAD-7.4 | READY | READY | 10 |
+| LOAD-7.5 | READY | READY | 10 11 12 |
+| LOAD-7.6 | READY | READY; a delta in the config's keys | 04 07 08 10 12 31 |
+| LOAD-7.7 | READY | READY | 10 12 |
+| LOAD-8.8 | DONE | DONE `f676049c`. Before `finalize_results` a project's diagnostics are keyed by the file's number: the per-file checks, … | — |
+| SYN-1.2 | READY | READY | 02 04 05 07 10 12 13 31 |
+| SYN-1.10 | OPEN | OPEN | 05 07 10 11 12 13 16 22 |
+| PROD-5.4 | OPEN | OPEN | 05 07 10 12 21 22 31 |
+| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) | 05 07 08 09 10 11 12 |
+| DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 05 07 10 11 12 13 17 19 |
+| NAME-1 | OPEN | OPEN | 05 11 |
+| NAME-1.2 | READY | READY; the container-field keys are a delta, approved (VAL-2.7) | 05 07 10 11 12 18 |
+| NAME-2.4 | OPEN | OPEN | 05 10 |
+| TYPE-4 | OPEN | OPEN | 05 10 18 19 21 |
+| TYPE-4.1 | OPEN | OPEN | 10 |
+| TYPE-4.2 | OPEN | OPEN | 10 |
+| TYPE-4.3 | OPEN | OPEN | 10 |
+| TYPE-4.4 | OPEN | OPEN | 10 |
+| REG-1 | DONE | DONE `c0dd2788` | 19 20 |
+| REG-2 | READY | READY. `xtask modgraph --inventory` lists the crossing edges; the `impl` and name inventories are not made | 10 |
+| REG-4.1 | DONE | DONE (already on this branch) | — |
+| REG-4.2 | READY | READY; a delta, approved in the plan, fixtured | 05 10 18 20 |
+| REG-4.3 | DONE | DONE `5401afc9` | — |
+| REG-4.4 | DONE | DONE `8d35c99d` | — |
+| REG-4.5 | READY | READY. The plan names only the property case. Item 4 also made `redeclared_methods` a flag; since decision 3 it goes … | 10 |
+| REG-4.6 | DONE | DONE `7a61603e` | — |
+| REG-4.7 | READY | READY | 10 |
+| REG-4.8 | DONE | DONE `e7b2521f`, corrected `0f32829b` | — |
+| REG-4.9 | READY | READY | 10 11 12 |
+| REG-4.10 | READY | READY; overlaps DOC-2.6 | 05 07 10 11 12 |
+| REG-4.11 | OPEN | OPEN; the comments can be corrected now | 10 12 18 20 22 |
+| REG-4.12 | READY | READY | 08 10 11 12 18 19 20 |
+| REG-4.13 | READY | READY | 10 |
+| REG-4.14 | READY | READY; a delta, approved (decision 14), fixtured | 10 19 |
+| REG-4.15 | OPEN | OPEN | 05 07 10 11 12 18 20 22 |
+| REG-5 | PART | PART: the purity part was done by REG-1; what is left is a delta, approved (decision 14): a call spelled in another … | 10 |
+| REG-6 | READY | READY; a test-expectation delta, approved (decision 14) | 10 |
+| REG-7 | OPEN | OPEN | 05 08 12 18 19 20 21 23 |
+| REG-7.1 | OPEN | OPEN | 10 20 23 |
+| REG-7.2 | OPEN | OPEN | 04 05 10 11 20 |
+| REG-7.3 | OPEN | OPEN | 10 20 23 |
+| REG-7.4 | OPEN | OPEN | 05 10 20 23 |
+| REG-7.5 | OPEN | OPEN | 01 02 04 05 07 10 12 20 22 |
+| REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) | 10 20 |
+| REG-7.7 | OPEN | OPEN | 10 20 |
+| REG-7.8 | OPEN | OPEN | 08 10 18 20 |
+| REG-7.9 | OPEN | OPEN | 08 10 19 20 |
+| REG-7.10 | OPEN | OPEN | 10 19 20 |
+| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 10 20 23 |
+| REG-7.12 | OPEN | OPEN | 10 19 20 23 |
+| REG-8 | OPEN | OPEN | 08 18 20 22 |
+| REG-8.1 | OPEN | OPEN; a delta: no declaration's members merge into another's, and the server and the batch run bind a name alike … | 10 20 |
+| REG-8.2 | SUPERSEDED | SUPERSEDED by REG-16.3 (decision 3): the read sets are the dependencies the engine records, absent names included | 10 20 |
+| REG-8.3 | OPEN | OPEN | 02 05 10 20 |
+| REG-8.4 | OPEN | OPEN | 10 20 |
+| REG-8.5 | OPEN | OPEN; a delta, approved and corrected (decision 14; nsrt `property-hooks.php`) | 10 20 |
+| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 07 08 10 12 18 20 22 |
+| REG-8.7 | OPEN | OPEN | 10 20 |
+| REG-9 | OPEN | OPEN; deltas, approved in the plan | 20 |
+| REG-10 | OPEN | OPEN | 20 |
+| REG-11 | OPEN | OPEN; each a delta, approved in the plan | 10 20 |
+| REG-11.12 | OPEN | OPEN | 10 |
+| REG-12 | OPEN | OPEN | 10 19 20 22 |
+| REG-14.2 | DONE | DONE by REG-4.8 (`e7b2521f`, `0f32829b`); no such field is left | — |
+| REG-14.3 | OPEN | OPEN | 10 12 |
+| REG-15 | OPEN | OPEN | 24 |
+| REG-15.1 | OPEN | OPEN | 23 24 |
+| REG-15.2 | OPEN | OPEN | — |
+| REG-16 | OPEN | OPEN | — |
+| REG-16.1 | DONE | DONE (2026-10-15): salsa, with each name asked once per file (its record) | 08 18 19 22 |
+| REG-16.2 | READY | READY | 05 07 08 10 11 12 22 31 |
+| REG-16.3 | OPEN | OPEN | 05 10 11 |
+| REG-16.4 | OPEN | OPEN | 02 04 05 07 08 10 11 12 13 20 21 22 23 31 |
+| REG-16.5 | OPEN | OPEN | 10 12 20 21 22 |
+| REG-17 | OPEN | OPEN | 05 08 10 12 19 20 21 |
+| REG-18 | OPEN | OPEN | 10 |
+| REG-18.1 | READY | READY | 10 |
+| REG-18.2 | READY | READY | 10 20 23 |
+| REG-18.3 | READY | READY | 10 20 23 |
+| REG-18.4 | READY | READY; a delta | 05 07 08 10 12 18 22 31 |
+| REG-18.5 | READY | READY | 10 |
+| REG-18.6 | READY | READY | 03 10 11 12 20 |
+| STUB-7 | OPEN | OPEN | 10 |
+| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) | 05 07 08 10 11 12 13 23 |
+| STUB-7.3 | OPEN | OPEN; a delta, approved (decision 14) | 05 08 10 13 |
+| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 07 08 10 12 21 22 31 |
+| STUB-7.6 | OPEN | OPEN | 08 10 12 23 |
+| STUB-7.8 | OPEN | OPEN | 08 10 |
+| STUB-7.10 | OPEN | OPEN; a delta, approved (decision 14) | 08 10 |
+| STUB-7.11 | OPEN | OPEN | 08 10 |
+| STUB-7.12 | OPEN | OPEN | 08 10 |
+| STUB-8 | OPEN | OPEN; a delta, approved, both parts (VAL-2.4) | 05 10 23 |
+| STUB-10.1 | OPEN | OPEN | 10 |
+| STUB-11 | OPEN | OPEN | 05 07 10 12 21 23 24 |
+| STUB-12.1 | OPEN | OPEN | 10 23 |
+| STUB-12.2 | OPEN | OPEN | 08 10 12 23 |
+| STUB-12.3 | OPEN | OPEN | 10 23 |
+| STUB-12.4 | OPEN | OPEN | 10 12 23 |
+| STUB-12.5 | OPEN | OPEN | 10 23 |
+| STUB-13.1 | OPEN | OPEN | 10 23 |
+| STUB-13.2 | OPEN | OPEN | 10 |
+| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 10 12 21 22 |
+| CACHE-13.1 | OPEN | OPEN | 05 07 10 11 12 19 21 22 |
+| CACHE-13.2 | OPEN | OPEN | 05 07 08 10 12 21 22 23 |
+| CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) | 05 07 12 23 |
+| CHECK-6.2 | READY | READY | 07 12 23 |
+| CHECK-6.3 | OPEN | OPEN | 05 07 12 13 14 23 |
+| CHECK-6.4 | READY | READY | 05 07 08 11 |
+| CHECK-6.5 | READY | READY | 05 07 11 |
+| CHECK-6.6 | READY | READY | 05 07 |
+| CHECK-6.7 | OPEN | OPEN | 05 07 12 23 |
+| CHECK-6.8 | READY | READY | 05 10 11 12 23 |
+| CHECK-6.9 | READY | READY | 05 07 |
+| CHECK-6.10 | READY | READY | 05 07 08 09 12 23 |
+| CHECK-6.11 | READY | READY | 05 07 |
+| CHECK-6.12 | READY | READY | 05 07 |
+| CHECK-6.13 | OPEN | OPEN | 05 07 12 23 |
+| CHECK-6.14 | OPEN | OPEN | 05 07 12 23 |
+| CHECK-6.15 | OPEN | OPEN | 05 07 12 23 |
+| CHECK-6.16 | READY | READY | 05 07 |
+| CHECK-6.17 | READY | READY | 05 07 |
+| CHECK-6.18 | READY | READY | 05 10 12 14 16 23 |
+| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) | 05 07 08 10 12 21 |
+| CHECK-8 | OPEN | OPEN | 08 10 21 |
+| CHECK-9 | READY | READY | 05 07 10 11 12 23 24 31 |
+| CHECK-10 | OPEN | OPEN | 05 07 08 10 12 23 |
+| CHECK-11 | READY | READY; a delta | 07 08 10 12 31 |
+| VAL-1 | OPEN | OPEN | 05 07 |
+| VAL-1.12 | OPEN | OPEN | 08 10 11 12 |
+| VAL-1.13 | OPEN | OPEN; the last step of the 20 G plan | 10 11 13 |
+| VAL-2.4 | DONE | DONE: approved, both parts | — |
+| VAL-2.9 | DONE | DONE: approved (decision 14), STUB-7.2 and REG-8.5 corrected; each is read at VAL-1 as it lands | 07 12 20 |
+| VAL-2.10 | OPEN | OPEN: read at VAL-1, as they land | 05 07 12 15 20 |
+| Q-11 | DONE | DONE (2026-10-15): of the 20 follow-ups, 1 is done for one version, 5 are partly done and 14 are not; their section … | 07 11 12 31 |
 
 <!-- status:end -->
 

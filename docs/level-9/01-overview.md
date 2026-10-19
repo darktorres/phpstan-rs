@@ -4,11 +4,19 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| — | — | no ledger row named in this part's headings or tables |
+| task | status | ledger | also in |
+|---|---|---|---|
+| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone | 02 04 05 07 10 11 12 |
+| LOAD-8.7 | DONE | DONE `30aa2002`, `8a1ca1e0`. Read from the fresh off profile of LOAD-8.8's `f676049c`, after the rows that took their … | — |
+| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … | 02 04 10 12 21 |
+| SYN-1 | OPEN | OPEN | — |
+| REG-7.5 | OPEN | OPEN | 02 04 05 06 07 10 12 20 22 |
+| REG-14.4 | DONE | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all … | 02 04 10 12 |
+| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … | 02 04 07 10 12 22 31 |
+| COMP-7 | DONE | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a … | 02 03 04 07 10 12 31 |
+| COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 02 03 04 07 12 19 31 |
 
 <!-- status:end -->
 

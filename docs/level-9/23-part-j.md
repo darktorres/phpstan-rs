@@ -4,23 +4,54 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| STUB-11 | OPEN | OPEN |
-| STUB-12 | OPEN | OPEN |
-| STUB-12.2 | OPEN | OPEN |
-| CHECK-10 | OPEN | OPEN |
-| CHECK-6.3 | OPEN | OPEN |
-| CHECK-6.2 | READY | READY |
-| CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) |
-| VAL-2.8 | DONE | DONE: approved in principle; each family's output diff is read at VAL-1, and anything that is not an improvement is … |
-| CHECK-6.10 | READY | READY |
-| LOAD-5.1 | OPEN | OPEN |
-| CHECK-6.8 | READY | READY |
-| REG-16.4 | OPEN | OPEN |
-| CACHE-13.2 | OPEN | OPEN |
+| task | status | ledger | also in |
+|---|---|---|---|
+| LOAD-5.1 | OPEN | OPEN | 04 05 06 07 10 12 19 21 31 |
+| PROD-5.2 | READY | READY | 02 05 09 10 11 |
+| DOC-2.2 | OPEN | OPEN | 05 07 08 09 10 12 |
+| REG-7 | OPEN | OPEN | 05 06 08 12 18 19 20 21 |
+| REG-7.1 | OPEN | OPEN | 06 10 20 |
+| REG-7.3 | OPEN | OPEN | 06 10 20 |
+| REG-7.4 | OPEN | OPEN | 05 06 10 20 |
+| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 06 10 20 |
+| REG-7.12 | OPEN | OPEN | 06 10 19 20 |
+| REG-15.1 | OPEN | OPEN | 06 24 |
+| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 11 12 13 20 21 22 31 |
+| REG-17.1 | OPEN | OPEN | 10 20 |
+| REG-18.2 | READY | READY | 06 10 20 |
+| REG-18.3 | READY | READY | 06 10 20 |
+| REG-18.7 | OPEN | OPEN | — |
+| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) | 05 06 07 08 10 11 12 13 |
+| STUB-7.4 | OPEN | OPEN | 08 10 |
+| STUB-7.6 | OPEN | OPEN | 06 08 10 12 |
+| STUB-8 | OPEN | OPEN; a delta, approved, both parts (VAL-2.4) | 05 06 10 |
+| STUB-10.2 | DONE | DONE (decided 2026-10-15, §2.4 decision 7): yes, for PHP's declarations and PHPStan's function map and `.stub` files; … | — |
+| STUB-11 | OPEN | OPEN | 05 06 07 10 12 21 24 |
+| STUB-12 | OPEN | OPEN | 08 |
+| STUB-12.1 | OPEN | OPEN | 06 10 |
+| STUB-12.2 | OPEN | OPEN | 06 08 10 12 |
+| STUB-12.3 | OPEN | OPEN | 06 10 |
+| STUB-12.4 | OPEN | OPEN | 06 10 12 |
+| STUB-12.5 | OPEN | OPEN | 06 10 |
+| STUB-13 | OPEN | OPEN | — |
+| STUB-13.1 | OPEN | OPEN | 06 10 |
+| CACHE-13.2 | OPEN | OPEN | 05 06 07 08 10 12 21 22 |
+| CHECK-4.1 | OPEN | OPEN | 05 08 09 12 |
+| CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) | 05 06 07 12 |
+| CHECK-6.2 | READY | READY | 06 07 12 |
+| CHECK-6.3 | OPEN | OPEN | 05 06 07 12 13 14 |
+| CHECK-6.7 | OPEN | OPEN | 05 06 07 12 |
+| CHECK-6.8 | READY | READY | 05 06 10 11 12 |
+| CHECK-6.10 | READY | READY | 05 06 07 08 09 12 |
+| CHECK-6.13 | OPEN | OPEN | 05 06 07 12 |
+| CHECK-6.14 | OPEN | OPEN | 05 06 07 12 |
+| CHECK-6.15 | OPEN | OPEN | 05 06 07 12 |
+| CHECK-6.18 | READY | READY | 05 06 10 12 14 16 |
+| CHECK-9 | READY | READY | 05 06 07 10 11 12 24 31 |
+| CHECK-10 | OPEN | OPEN | 05 06 07 08 10 12 |
+| COMP-2 | OPEN | OPEN. Not part of Part A; before the baseline (batch 0), since it changes a range and so a dump | 07 12 19 31 |
 
 <!-- status:end -->
 

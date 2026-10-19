@@ -4,11 +4,38 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| — | — | no ledger row named in this part's headings or tables |
+| task | status | ledger | also in |
+|---|---|---|---|
+| LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 02 03 04 21 |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … | 02 05 06 07 10 12 21 31 |
+| LOAD-5.2 | OPEN | OPEN | 05 06 07 10 12 19 21 |
+| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 13 15 16 21 |
+| SYN-1.10 | OPEN | OPEN | 05 06 07 10 11 12 13 16 |
+| PROD-5.1 | OPEN | OPEN | 05 07 10 11 12 13 18 20 |
+| PROD-5.4 | OPEN | OPEN | 05 06 07 10 12 21 31 |
+| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 | 02 05 07 10 12 21 31 |
+| NAME-1.5 | READY | READY | 05 10 11 18 |
+| REG-4.11 | OPEN | OPEN; the comments can be corrected now | 06 10 12 18 20 |
+| REG-4.15 | OPEN | OPEN | 05 06 07 10 11 12 18 20 |
+| REG-7.5 | OPEN | OPEN | 01 02 04 05 06 07 10 12 20 |
+| REG-8 | OPEN | OPEN | 06 08 18 20 |
+| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 06 07 08 10 12 18 20 |
+| REG-12 | OPEN | OPEN | 06 10 19 20 |
+| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … | 01 02 04 07 10 12 31 |
+| REG-16.1 | DONE | DONE (2026-10-15): salsa, with each name asked once per file (its record) | 06 08 18 19 |
+| REG-16.2 | READY | READY | 05 06 07 08 10 11 12 31 |
+| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 11 12 13 20 21 23 31 |
+| REG-16.5 | OPEN | OPEN | 06 10 12 20 21 |
+| REG-18.4 | READY | READY; a delta | 05 06 07 08 10 12 18 31 |
+| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 06 07 08 10 12 21 31 |
+| CACHE-8 | READY | READY | 05 07 10 12 31 |
+| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 06 10 12 21 |
+| CACHE-11 | OPEN | OPEN | — |
+| CACHE-13.1 | OPEN | OPEN | 05 06 07 10 11 12 19 21 |
+| CACHE-13.2 | OPEN | OPEN | 05 06 07 08 10 12 21 23 |
+| CHECK-4.2 | READY | READY | 05 07 10 12 31 |
 
 <!-- status:end -->
 

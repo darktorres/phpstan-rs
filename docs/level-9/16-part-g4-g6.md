@@ -4,15 +4,22 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| — | — | no ledger row named in this part's headings or tables |
+| task | status | ledger | also in |
+|---|---|---|---|
+| SYN-1.6 | SUPERSEDED | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies … | 08 10 11 12 13 |
+| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 13 15 21 22 |
+| SYN-1.10 | OPEN | OPEN | 05 06 07 10 11 12 13 22 |
+| SYN-6 | OPEN | OPEN | 05 07 08 10 11 12 15 |
+| CHECK-6.18 | READY | READY | 05 06 10 12 14 23 |
+| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 11 12 13 15 19 |
 
 <!-- status:end -->
 
-**What exists (verified).** Hover, signature help and completion share `ProbeScope` (`navigation.rs`:
+### G4 what exists (verified)
+
+Hover, signature help and completion share `ProbeScope` (`navigation.rs`:
 `Function(Box<FunctionDecl>)` or `TopLevel(Vec<Stmt>)`), built by the navigation `Walker`, which
 deep-clones every function it enters. `Server::probe_receiver_type` and `probe_variable_provenance`
 build a throwaway `Checker`, set `probe_span`, run `check_function` or `check_program` over the scope
@@ -27,7 +34,9 @@ the fragment); clones the function, drops the statements ending on or after the 
 and a read of `$probe`, with sentinel spans `u32::MAX - 3` and `- 1` and `NodeId::SYNTHETIC`). Its
 doc says the uniform `$probe` read is what makes `->` and `::` alike.
 
-**G4a. The entry point (item 9, step 2).** Step 2 makes the tree immutable, so the synthetic
+### G4a The entry point (item 9, step 2)
+
+Step 2 makes the tree immutable, so the synthetic
 statements cannot be built. The replacement builds nothing. **It is interim, on purpose,** and the
 alternatives were weighed: recovery (G3) cannot come before step 2 because it is built on the layout step 2
 fixes (G3.3), and a window with no completion between step 2 and batch 3 is worse than a small tail (about a
@@ -70,7 +79,9 @@ fallback:
    the edit retain statements below the cursor. Tests pin each (nested block, closure, arrow function,
    top-level, lines inserted above), so batch 3 has a before and after; G4b removes the limits.
 
-**G4b. The live tree (batch 3, with SYN-1.9).** With recovery the live buffer always parses, but not always
+### G4b The live tree (batch 3, with SYN-1.9)
+
+With recovery the live buffer always parses, but not always
 with a missing name: in PHP an arrow typed in front of an existing statement takes the next token as the
 member name (`$x->` newline `$y = 5;` is `$x->$y = 5;`, `$x->` newline `foo();` a method call, `Foo::`
 newline `bar();` a static call; php 8.5.4 accepts all of them), and when the next token cannot be a name

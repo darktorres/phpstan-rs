@@ -39,6 +39,8 @@ says it "waits for the user's word", the ruling of 2026-10-18 (Part E, M5) is th
 | Part M (intro, M1, M2) | [`24-part-m-intro.md`](24-part-m-intro.md) |
 | Part M (M4, M5) | [`31-m4-m5.md`](31-m4-m5.md) |
 
+Each part opens with a status table of the ledger tasks it names, generated from the ledger by `scripts/plan_status.py`. A task named in several parts appears in each, with an `also in` column. The script fails if a pending task is named by no part.
+
 Part B, G1 to G4, G6 and I1 came from the flat-tree document; Part H and J from the engine document; Part M from the ledger
 document. The rest came from the batch document. The split is mechanical: every non-empty line of the four documents is in
 one of these files, apart from the intros they had, which this index replaces.

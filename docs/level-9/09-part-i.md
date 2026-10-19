@@ -4,14 +4,28 @@
 
 ## Status of this part's tasks
 
-From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+From the ledger at `13ff6c1e1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
-| task | status | ledger |
-|---|---|---|
-| SYN-4.1 | OPEN | OPEN |
-| SYN-4.8 | READY | READY |
-| SYN-3.2 | READY | READY, with SYN-3.1 |
-| SYN-3.1 | READY | READY |
+| task | status | ledger | also in |
+|---|---|---|---|
+| SYN-2 | OPEN | OPEN; the target grew | 05 07 10 11 12 13 31 |
+| SYN-3.1 | READY | READY | 05 08 10 11 19 |
+| SYN-3.2 | READY | READY, with SYN-3.1 | 05 07 08 10 12 |
+| SYN-4.1 | OPEN | OPEN | 05 07 10 11 12 |
+| SYN-4.3 | OPEN | OPEN | 05 07 10 11 |
+| SYN-4.8 | READY | READY | 05 07 10 11 12 17 |
+| SYN-4.9 | READY | READY | 05 07 10 11 12 |
+| PROD-5.2 | READY | READY | 02 05 10 11 23 |
+| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) | 05 06 07 08 10 11 12 |
+| DOC-2.2 | OPEN | OPEN | 05 07 08 10 12 23 |
+| DOC-2.5 | OPEN | OPEN. DOC-1 rewrote the tag parser to pull tokens; the borrowed token text is not built | 05 07 10 12 |
+| DOC-2.7 | READY | READY | 07 10 12 |
+| DOC-2.8 | READY | READY | 05 07 10 |
+| TYPE-5 | READY | READY | 05 07 10 11 12 31 |
+| CHECK-4.1 | OPEN | OPEN | 05 08 12 23 |
+| CHECK-6.10 | READY | READY | 05 06 07 08 12 23 |
+| VAL-1.4 | OPEN | OPEN | 05 08 10 11 12 |
+| VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 05 08 10 11 12 |
 
 <!-- status:end -->
 
