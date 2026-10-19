@@ -47,7 +47,7 @@ impl Type {
                 ConditionalSubject::Parameter(param) => argument(param.as_str()),
                 ConditionalSubject::Template(_) => None,
             } {
-                Some(bound) if *bound != Type::mixed() => {
+                Some(bound) if !bound.is_plain_mixed() => {
                     match conditional_branch(relation, bound, target, *negated) {
                         Some(true) => if_true.resolve_conditional(argument, relation),
                         Some(false) => if_false.resolve_conditional(argument, relation),

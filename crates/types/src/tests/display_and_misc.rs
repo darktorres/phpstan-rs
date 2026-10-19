@@ -69,21 +69,10 @@ fn equal_types_hash_alike() {
     use std::hash::{BuildHasher, BuildHasherDefault};
     let hash = |ty: &Type| BuildHasherDefault::<rustc_hash::FxHasher>::default().hash_one(ty);
     let pairs = [
-        (Type::explicit_mixed(), Type::mixed()),
         (Type::float_literal(0.0), Type::float_literal(-0.0)),
         (
             Type::float_literal(f64::NAN),
             Type::float_literal(-f64::NAN),
-        ),
-        (
-            Type::array(
-                Type::new(Repr::Int),
-                Type::new(Repr::Mixed(MixedKind::Explicit, None)),
-            ),
-            Type::array(
-                Type::new(Repr::Int),
-                Type::new(Repr::Mixed(MixedKind::Implicit, None)),
-            ),
         ),
         (
             Type::new(Repr::Union(vec![Type::int(), Type::string()])),
@@ -134,5 +123,18 @@ fn an_offset_accessory_shows_its_key_as_a_type() {
     assert_eq!(
         Type::has_offset(ShapeKey::Str("it's".into())).to_string(),
         "hasOffset('it\\'s')"
+    );
+}
+
+#[test]
+fn explicit_and_implicit_mixed_are_different_types() {
+    assert_ne!(Type::explicit_mixed(), Type::mixed());
+    assert_ne!(
+        Type::array(Type::int(), Type::explicit_mixed()),
+        Type::array(Type::int(), Type::mixed())
+    );
+    assert_ne!(
+        Type::union(Type::explicit_mixed(), Type::null()),
+        Type::union(Type::mixed(), Type::null())
     );
 }

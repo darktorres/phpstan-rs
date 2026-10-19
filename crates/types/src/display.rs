@@ -248,7 +248,7 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         let known_key = !is_list && *key != Type::unknown_array_key();
         let elem_str = if known_key {
             format!("<{key}, {elem}>")
-        } else if *elem == Type::mixed() {
+        } else if elem.is_plain_mixed() {
             String::new()
         } else {
             format!("<{elem}>")

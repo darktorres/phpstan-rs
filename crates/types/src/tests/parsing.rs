@@ -24,13 +24,13 @@ fn union_parses_flat() {
 // argument-compatibility check on its own, even though the whole union
 // is vacuously satisfiable.
 #[test]
-fn a_union_containing_mixed_collapses_to_plain_mixed() {
-    assert_eq!(parse_type_string("mixed|false"), Type::mixed());
-    assert_eq!(parse_type_string("mixed|null"), Type::mixed());
+fn a_union_containing_mixed_collapses_to_explicit_mixed() {
+    assert_eq!(parse_type_string("mixed|false"), Type::explicit_mixed());
+    assert_eq!(parse_type_string("mixed|null"), Type::explicit_mixed());
 }
 
 #[test]
-fn a_leading_nullable_mark_on_mixed_still_collapses_to_plain_mixed() {
+fn a_leading_nullable_mark_on_mixed_still_collapses_to_explicit_mixed() {
     // A different code path from the pipe-separated `mixed|null` case
     // just above: `?mixed`'s nullable prefix is stripped and re-wrapped
     // around the already-parsed inner type at the very end of
@@ -39,7 +39,7 @@ fn a_leading_nullable_mark_on_mixed_still_collapses_to_plain_mixed() {
     // regardless of what the inner type turned out to be, building
     // `Union([Mixed, Null])` for this one shape with nothing to ever
     // collapse it back down.
-    assert_eq!(parse_type_string("?mixed"), Type::mixed());
+    assert_eq!(parse_type_string("?mixed"), Type::explicit_mixed());
 }
 
 #[test]

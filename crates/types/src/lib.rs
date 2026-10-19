@@ -389,8 +389,6 @@ pub(crate) enum MixedKind {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Repr {
-    // Type equality ignores whether `mixed` was written, as
-    // `MixedType::equals()` does, but tells an error apart from either.
     Mixed(MixedKind, Option<Type>),
     Never,
     Void,
@@ -602,12 +600,9 @@ fn same_members(a: &[Type], b: &[Type]) -> bool {
     true
 }
 
-/// Deliberately not derived: `Mixed`'s own `bool` is ignored entirely
-/// (matching real PHPStan's own `MixedType::equals()`, see `Repr::Mixed`'s
-/// doc comment), and two NaN float literals are equal (PHPStan's
-/// `ConstantFloatType::equals()`), which makes the relation an `Eq`; a
-/// union's or an intersection's members compare in any order. `Hash`
-/// below agrees with it.
+/// Deliberately not derived: a union's or an intersection's members compare
+/// in any order, and two NaN float literals are equal, which makes the
+/// relation an `Eq`. `Hash` below agrees with it.
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
@@ -619,9 +614,7 @@ impl PartialEq for Type {
 /// as types.
 fn repr_eq(a: &Repr, b: &Repr) -> bool {
     match (a, b) {
-        (Repr::Mixed(a, x), Repr::Mixed(b, y)) => {
-            (*a == MixedKind::Error) == (*b == MixedKind::Error) && x == y
-        }
+        (Repr::Mixed(a, x), Repr::Mixed(b, y)) => a == b && x == y,
         (Repr::Never, Repr::Never) => true,
         (Repr::Void, Repr::Void) => true,
         (Repr::Null, Repr::Null) => true,
@@ -762,7 +755,10 @@ fn semantic_hash(repr: &Repr) -> u64 {
     let state = &mut hasher;
     std::mem::discriminant(repr).hash(state);
     match repr {
-        Repr::Mixed(_, subtracted) => subtracted.hash(state),
+        Repr::Mixed(kind, subtracted) => {
+            kind.hash(state);
+            subtracted.hash(state);
+        }
         Repr::Never
         | Repr::Void
         | Repr::Null

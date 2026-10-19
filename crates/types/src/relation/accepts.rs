@@ -188,8 +188,8 @@ impl Relation<'_> {
                         // is bound," which this project's own call-argument
                         // binding is simply never invoked for at this nested
                         // position.
-                        if a_i == Type::mixed()
-                            || b_i == Type::mixed()
+                        if a_i.is_plain_mixed()
+                            || b_i.is_plain_mixed()
                             || matches!(a_i.repr(), Repr::TemplateParam(_))
                             || matches!(b_i.repr(), Repr::TemplateParam(_))
                         {

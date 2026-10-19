@@ -44,7 +44,7 @@ pub(crate) fn parse_written_type_unmemoized(raw: &str) -> Type {
         // on the one hiding inside the angle brackets.
         if is_plain_word(s) {
             let ty = parse_type_atom(s);
-            return if nullable && ty != Type::mixed() {
+            return if nullable && !ty.is_plain_mixed() {
                 Type::new(Repr::Union(vec![ty, Type::null()]))
             } else {
                 ty
@@ -62,7 +62,7 @@ pub(crate) fn parse_written_type_unmemoized(raw: &str) -> Type {
             parse_type_atom(s)
         };
 
-        if nullable && ty != Type::mixed() {
+        if nullable && !ty.is_plain_mixed() {
             Type::new(Repr::Union(vec![ty, Type::null()]))
         } else {
             ty

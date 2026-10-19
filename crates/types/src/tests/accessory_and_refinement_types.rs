@@ -1,7 +1,7 @@
 //! Accessory and refinement pseudo-types (list, class-string, int ranges, array shapes, etc.).
 use super::super::*;
 use super::is_subtype;
-use crate::Repr;
+use crate::{MixedKind, Repr};
 
 #[test]
 fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
@@ -379,7 +379,7 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
             )],
             Some(Box::new((
                 Type::new(Repr::String),
-                Type::new(Repr::Mixed(MixedKind::Implicit, None))
+                Type::new(Repr::Mixed(MixedKind::Explicit, None))
             ))),
             None,
         ))

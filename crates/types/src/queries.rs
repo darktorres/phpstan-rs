@@ -784,6 +784,15 @@ impl Type {
         matches!(self.repr(), Repr::Mixed(MixedKind::Implicit, None))
     }
 
+    /// Whether this is `mixed` with nothing subtracted, explicit or implicit.
+    /// An error is `mixed` too, but it is a failed type, so it does not count.
+    pub(crate) fn is_plain_mixed(&self) -> bool {
+        matches!(
+            self.repr(),
+            Repr::Mixed(MixedKind::Implicit | MixedKind::Explicit, None)
+        )
+    }
+
     /// Whether every value of this type is one of `of` (`Yes`), none is
     /// (`No`), or some are (`Maybe`). `never` is no kind of value.
     pub(crate) fn is_within(&self, of: &Type) -> TrinaryLogic {
