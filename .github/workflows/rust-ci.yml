@@ -53,6 +53,7 @@ jobs:
           cargo metadata --locked --format-version 1 > /dev/null
           cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
           cargo metadata --locked --format-version 1 --manifest-path patches/dhat/Cargo.toml > /dev/null
+          cargo metadata --locked --format-version 1 --manifest-path scripts/probe-vendor/Cargo.toml > /dev/null
       - name: Format
         if: ${{ !cancelled() }}
         run: cargo fmt --all --check
