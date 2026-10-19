@@ -20,6 +20,10 @@ fn vendor_directory_is_excluded_from_the_analyzed_walk() {
         "vendor/acme/App.php",
         "<?php class App { public function ghostMethod(): int { return 1; } }",
     );
+    dir.write(
+        "vendor/composer/autoload_real.php",
+        "<?php\nclass ComposerAutoloaderInit {}\n",
+    );
     let use_src = "<?php function use_it(App $a) { $a->ownMethod(); }";
     let use_path = dir.write("src/Use.php", use_src);
     let use_uri = path_to_uri(&use_path).to_string();
@@ -70,6 +74,10 @@ fn composer_vendor_context_is_still_loaded_for_type_resolution() {
         "<?php\nreturn ['Acme\\\\VendorOnly' => __DIR__ . '/../acme/VendorOnly.php'];\n",
     );
     dir.write(
+        "vendor/composer/autoload_real.php",
+        "<?php\nclass ComposerAutoloaderInit {}\n",
+    );
+    dir.write(
         "vendor/acme/VendorOnly.php",
         "<?php\nnamespace Acme;\nclass VendorOnly { public function vendorOnly(): int { return 1; } }\n",
     );
@@ -97,6 +105,10 @@ fn first_party_declaration_wins_a_same_name_collision_with_vendor_context() {
     dir.write(
         "vendor/composer/autoload_classmap.php",
         "<?php\nreturn ['Shared' => __DIR__ . '/../acme/Shared.php'];\n",
+    );
+    dir.write(
+        "vendor/composer/autoload_real.php",
+        "<?php\nclass ComposerAutoloaderInit {}\n",
     );
     dir.write(
         "vendor/acme/Shared.php",
@@ -189,6 +201,10 @@ fn opening_an_undiscovered_vendor_file_does_not_clobber_a_first_party_declaratio
         "<?php\nclass Shared { public function ownMethod(): int { return 1; } }\n",
     );
     let vendor_src = "<?php\nclass Shared { public function vendorMethod(): int { return 1; } }\n";
+    dir.write(
+        "vendor/composer/autoload_real.php",
+        "<?php\nclass ComposerAutoloaderInit {}\n",
+    );
     let vendor_path = dir.write("vendor/acme/Shared.php", vendor_src);
     let vendor_uri = path_to_uri(&vendor_path).to_string();
 
@@ -247,6 +263,10 @@ fn opening_a_context_file_as_it_was_loaded_publishes_its_diagnostics() {
     dir.write(
         "vendor/composer/autoload_classmap.php",
         "<?php\nreturn ['Acme\\\\VendorOnly' => __DIR__ . '/../acme/VendorOnly.php'];\n",
+    );
+    dir.write(
+        "vendor/composer/autoload_real.php",
+        "<?php\nclass ComposerAutoloaderInit {}\n",
     );
     let vendor_src = "<?php\nnamespace Acme;\nclass VendorOnly { public function m(): int { return $undefinedVar; } }\n";
     let vendor_path = dir.write("vendor/acme/VendorOnly.php", vendor_src);

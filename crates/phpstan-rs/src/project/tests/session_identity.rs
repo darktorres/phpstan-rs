@@ -77,6 +77,7 @@ fn a_new_file_takes_the_role_of_the_root_that_holds_it() {
 fn a_new_file_under_a_default_excluded_directory_is_context() {
     let dir = TempDir::new("classify_excluded_new");
     dir.write("proj/a.php", "<?php");
+    dir.write("proj/vendor/composer/autoload_real.php", "<?php");
     let root = resolved(&dir).join("proj");
     let session = session(&root, Vec::new());
     dir.write("proj/vendor/new.php", "<?php");
@@ -92,6 +93,7 @@ fn a_file_no_root_holds_takes_the_default_role() {
     dir.write("proj/a.php", "<?php");
     dir.write("outside/x.php", "<?php");
     dir.write("outside/vendor/y.php", "<?php");
+    dir.write("outside/vendor/composer/autoload_real.php", "<?php");
     let base = resolved(&dir);
     let session = session(&base.join("proj"), Vec::new());
 

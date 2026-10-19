@@ -262,21 +262,34 @@ fn analyzed_paths_and_is_analyzed_reflect_how_each_file_was_loaded() {
 
 #[test]
 fn update_file_defaults_a_never_before_seen_path_by_its_excluded_dir_status() {
+    let dir = TempDir::new("update_file_defaults");
+    dir.write(
+        "vendor/composer/autoload_real.php",
+        "<?php class ComposerAutoloaderInit {}",
+    );
+    let root = resolved(&dir);
     let mut project = Project::new();
 
+    let composers = root.join("vendor/acme/Foo.php");
     project
-        .update_file(&PathBuf::from("vendor/acme/Foo.php"), "<?php class Foo {}")
+        .update_file(&composers, "<?php class Foo {}")
         .unwrap();
     assert!(
-        !project.is_analyzed(&PathBuf::from("vendor/acme/Foo.php")),
-        "a never-before-seen path under vendor/ must default to context, not analyzed"
+        !project.is_analyzed(&composers),
+        "a never-before-seen path under Composer's vendor directory must default to context"
     );
 
-    project
-        .update_file(&PathBuf::from("src/Foo.php"), "<?php class Bar {}")
-        .unwrap();
+    let own = root.join("lib/vendor/Bar.php");
+    project.update_file(&own, "<?php class Bar {}").unwrap();
     assert!(
-        project.is_analyzed(&PathBuf::from("src/Foo.php")),
+        project.is_analyzed(&own),
+        "a vendor/ of the project's own code, which Composer did not write into, is analyzed"
+    );
+
+    let src = root.join("src/Foo.php");
+    project.update_file(&src, "<?php class Baz {}").unwrap();
+    assert!(
+        project.is_analyzed(&src),
         "a never-before-seen path outside any excluded dir must default to analyzed"
     );
 }
@@ -292,7 +305,7 @@ fn update_file_reads_the_excluded_dir_names_by_the_roots_case_rule() {
             path_case: case,
             ..ProjectSettings::default()
         });
-        let path = PathBuf::from("Vendor/acme/Foo.php");
+        let path = PathBuf::from("Node_Modules/acme/Foo.php");
         project.update_file(&path, "<?php class Foo {}").unwrap();
         assert_eq!(project.is_analyzed(&path), analysed, "{case:?}");
     }

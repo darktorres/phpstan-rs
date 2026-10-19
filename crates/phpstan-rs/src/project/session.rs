@@ -9,7 +9,7 @@
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use syntax::span::Span;
@@ -174,6 +174,9 @@ pub struct Session {
     /// The directory listings that the vendor discovery and the walk share,
     /// held until the listing is walked.
     dir_listings: Arc<DirListings>,
+    /// The process environment the Composer answers of this session are made
+    /// from.
+    environment: Environment,
     stub_dirs: Vec<PathBuf>,
     level: u8,
     emission_order: bool,
@@ -352,17 +355,35 @@ pub(crate) fn identify_through(
 
 impl Root<'_> {
     /// Whether the walk of this root lists `path`: it lies under the root's
-    /// resolved path, and no directory below the root has an excluded name.
-    fn contains(&self, path: &Path) -> bool {
-        let Ok(rest) = path.strip_prefix(&self.path) else {
-            return false;
-        };
-        let mut directories = rest.parent().into_iter().flat_map(Path::components);
-        !directories.any(|component| match component {
-            Component::Normal(name) => self.excluded.excludes(name),
-            _ => false,
-        })
+    /// resolved path, and no directory below the root is one the walk leaves
+    /// out (by name, or as Composer's, through `composer`).
+    fn contains(&self, path: &Path, composer: &(dyn Fn(&Path) -> bool + Sync)) -> bool {
+        path.starts_with(&self.path)
+            && !super::path_under_excluded_dir(path, Some(&self.path), self.excluded, composer)
     }
+}
+
+/// The process environment, read once by a session. Its Composer answers are
+/// made from this copy.
+pub(crate) type Environment = FxHashMap<OsString, OsString>;
+
+/// Asks `f` whether a directory is Composer's, answered by a layout over
+/// `listings` and `environment`.
+pub(crate) fn with_composer_test<T>(
+    listings: &DirListings,
+    environment: &Environment,
+    f: impl FnOnce(&(dyn Fn(&Path) -> bool + Sync)) -> T,
+) -> T {
+    let variables = |name: &OsStr| environment.get(name).cloned();
+    let layout = Layout::new(listings, &variables);
+    f(&|dir: &Path| layout.is_composer_dir(dir))
+}
+
+/// `with_composer_test` for a path no session lists: the environment is read
+/// now, and the listings are a fresh cache.
+pub(crate) fn with_unlisted_composer<T>(f: impl FnOnce(&(dyn Fn(&Path) -> bool + Sync)) -> T) -> T {
+    let environment: Environment = std::env::vars_os().collect();
+    with_composer_test(&DirListings::default(), &environment, f)
 }
 
 /// A path a client names, as the project keys it, and the role the
@@ -375,12 +396,17 @@ pub(crate) struct Classified {
     pub(crate) is_stub: bool,
 }
 
-/// The role of a file no root lists: context when a directory the walk
-/// excludes by default holds it below `root`, analysed otherwise.
-fn unlisted_role(path: &Path, root: Option<&Path>, case: CaseRule) -> Role {
-    let shown = super::shown_path(root, path);
-    let excluded = Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case);
-    if super::path_under_excluded_dir(shown, excluded) {
+/// The role of a file no root lists: context when a directory of `path` below
+/// `root` is one the walk leaves out by default (by name, or as Composer's),
+/// analysed otherwise.
+pub(crate) fn unlisted_role(
+    path: &Path,
+    root: Option<&Path>,
+    case: CaseRule,
+    composer: &(dyn Fn(&Path) -> bool + Sync),
+) -> Role {
+    let excluded = Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case).leaving_out_composer();
+    if super::path_under_excluded_dir(path, root, excluded, composer) {
         Role::Context
     } else {
         Role::Analysed
@@ -391,7 +417,8 @@ fn unlisted_role(path: &Path, root: Option<&Path>, case: CaseRule) -> Role {
 /// path, with the role `unlisted_role` gives it, and not a stub.
 pub(crate) fn classify_unlisted(path: &Path) -> Classified {
     let path = composer::manifest::resolve(path);
-    let role = unlisted_role(&path, None, CaseRule::Exact);
+    let role =
+        with_unlisted_composer(|composer| unlisted_role(&path, None, CaseRule::Exact, composer));
     Classified {
         path,
         role,
@@ -1055,6 +1082,7 @@ impl Session {
             check_mock_hygiene: mockstan.check_mock_hygiene.unwrap_or(extensions.mockstan),
             mock_banned_classes: mockstan.mock_banned_classes,
             excluded_dir_names,
+            environment: environment.clone(),
             path_case,
             baseline,
             baseline_mode,
@@ -1200,15 +1228,31 @@ impl Session {
                 roots: Vec::new(),
             };
         }
+        with_composer_test(&self.dir_listings, &self.environment, |composer| {
+            self.walk_with(sink, composer)
+        })
+    }
+
+    fn walk_with<S: FinalFiles>(
+        &self,
+        sink: &S,
+        composer: &(dyn Fn(&Path) -> bool + Sync),
+    ) -> Listing {
         let mut walk = Walk::new(Arc::clone(&self.dir_listings), &self.settings.packages)
-            .with_path_case(self.path_case);
+            .with_path_case(self.path_case)
+            .with_composer(composer);
+        // A degrade root leaves out the directories Composer wrote into, and a
+        // root with configured paths does not.
+        let leaves_out_composer = !self.excluded_dir_names.is_empty();
         for dir in &self.dirs {
-            let excluded: &'static [&'static str] = if self.promoted.contains(dir) {
-                &[]
+            let path = self.root.join(dir);
+            if self.promoted.contains(dir) {
+                walk.add(&path, Role::Analysed, &[]);
+            } else if leaves_out_composer {
+                walk.add_leaving_out_composer(&path, Role::Analysed, self.excluded_dir_names);
             } else {
-                self.excluded_dir_names
-            };
-            walk.add(&self.root.join(dir), Role::Analysed, excluded);
+                walk.add(&path, Role::Analysed, self.excluded_dir_names);
+            }
         }
         for dir in &self.stub_dirs {
             walk.add(&self.root.join(dir), Role::Stub, &[]);
@@ -1276,15 +1320,28 @@ impl Session {
                 is_stub: listed.stub,
             };
         }
-        let mut role = None;
-        let mut is_stub = false;
-        for root in listing.roots.iter().filter(|root| root.contains(&path)) {
-            role = Some(role.map_or(root.role, |role: Role| role.max(root.role)));
-            is_stub |= root.stub;
-        }
-        let role = role.unwrap_or_else(|| {
-            unlisted_role(&path, Some(self.absolute_root.as_path()), self.path_case)
-        });
+        let (role, is_stub) =
+            with_composer_test(&self.dir_listings, &self.environment, |composer| {
+                let mut role = None;
+                let mut is_stub = false;
+                for root in listing
+                    .roots
+                    .iter()
+                    .filter(|root| root.contains(&path, composer))
+                {
+                    role = Some(role.map_or(root.role, |role: Role| role.max(root.role)));
+                    is_stub |= root.stub;
+                }
+                let role = role.unwrap_or_else(|| {
+                    unlisted_role(
+                        &path,
+                        Some(self.absolute_root.as_path()),
+                        self.path_case,
+                        composer,
+                    )
+                });
+                (role, is_stub)
+            });
         Classified {
             path,
             role,
@@ -1298,7 +1355,12 @@ impl Session {
     pub(crate) fn reaches(&self, path: &Path) -> bool {
         let listing = self.listing_of();
         listing.index.position(&listing.files, path).is_some()
-            || listing.roots.iter().any(|root| root.contains(path))
+            || with_composer_test(&self.dir_listings, &self.environment, |composer| {
+                listing
+                    .roots
+                    .iter()
+                    .any(|root| root.contains(path, composer))
+            })
     }
 
     fn configure(&self, project: &mut Project) {

@@ -1389,6 +1389,10 @@ fn initialize_does_not_publish_diagnostics_for_clean_workspace_files() {
 fn initialize_does_not_publish_diagnostics_for_files_under_vendor_directory() {
     let dir = TempDir::new("no_publish_for_vendor");
     dir.write("app.php", "<?php function helperA(): int { return 1; }");
+    dir.write(
+        "vendor/composer/autoload_real.php",
+        "<?php\nclass ComposerAutoloaderInit {}\n",
+    );
     let vendor_path = dir.write(
         "vendor/lib/bad.php",
         "<?php function f() { echo $undefinedInVendor; }",

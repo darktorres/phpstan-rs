@@ -1963,10 +1963,14 @@ impl Project {
         source: impl AsRef<[u8]>,
         should_abort: impl FnMut() -> bool,
     ) -> Result<FxHashMap<FileId, Vec<Diagnostic>>, ParseError> {
-        let analysed = !path_under_excluded_dir(
-            shown_path(self.absolute_root(), path),
-            walk::Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, self.settings.path_case),
-        );
+        let analysed = session::with_unlisted_composer(|composer| {
+            session::unlisted_role(
+                path,
+                self.absolute_root(),
+                self.settings.path_case,
+                composer,
+            )
+        }) == walk::Role::Analysed;
         self.update_file_as(path, source, analysed, false, should_abort)
     }
 
@@ -3525,16 +3529,29 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
 /// config (1.1's own `phpstan-rs.toml` `paths`) says otherwise - a
 /// hardcoded floor, not a substitute for real exclusion config. Matches
 /// exactly one path component, not a prefix (`vendor-utils/` is
-/// unaffected).
-pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &["vendor", ".git", "node_modules"];
+/// unaffected). A Composer vendor directory is left out by what Composer
+/// wrote into it, whatever it is called, not by its name.
+pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &[".git", "node_modules"];
 
-/// `true` if any component of `path` is one of the `excluded` directory
-/// names - a pure name check, no filesystem access. Used in
-/// `Project::update_file_cancellable`, as a never-before-seen path's default
-/// `analyzed` classification (see that call site's own doc comment).
-pub(crate) fn path_under_excluded_dir(path: &Path, excluded: walk::Excluded<'_>) -> bool {
-    path.components()
-        .any(|component| excluded.excludes(component.as_os_str()))
+/// `true` if a directory below `root` (every ancestor of `path` when `root` is
+/// `None`, or does not hold `path`) is one of the `excluded` names, or is
+/// Composer's where `excluded` leaves those out and `composer` says so. The
+/// names are compared with the case rule of `excluded`. A pure check of the
+/// path, with the filesystem only where `composer` reads it.
+pub(crate) fn path_under_excluded_dir(
+    path: &Path,
+    root: Option<&Path>,
+    excluded: walk::Excluded<'_>,
+    composer: &dyn Fn(&Path) -> bool,
+) -> bool {
+    let root = root.filter(|root| path.starts_with(root));
+    path.ancestors()
+        .skip(1)
+        .take_while(|dir| root.is_none_or(|root| *dir != root && dir.starts_with(root)))
+        .any(|dir| {
+            dir.file_name().is_some_and(|name| excluded.excludes(name))
+                || (excluded.leaves_out_composer() && composer(dir))
+        })
 }
 
 /// `path` as the reports spell it: relative to `root` when it lies under it,
