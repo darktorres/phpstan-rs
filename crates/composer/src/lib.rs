@@ -45,6 +45,9 @@ pub struct PendingVendor(Arc<PendingVendorInner>);
 struct PendingVendorInner {
     found: OnceLock<VendorContext>,
     thread: Mutex<Option<std::thread::JoinHandle<VendorContext>>>,
+    /// The vendor contexts of the packages that bundle a vendor directory of
+    /// their own, merged after this one; set once, by the load that found them.
+    bundled: OnceLock<Vec<PendingVendor>>,
 }
 
 impl PendingVendor {
@@ -67,11 +70,18 @@ impl PendingVendor {
         PendingVendor(Arc::new(PendingVendorInner {
             found: OnceLock::new(),
             thread: Mutex::new(Some(thread)),
+            bundled: OnceLock::new(),
         }))
     }
 
+    /// Adds the contexts of packages that bundle a vendor directory: they
+    /// follow this one's in `get`. Set once; a later call changes nothing.
+    pub fn attach_bundled(&self, bundled: Vec<PendingVendor>) {
+        let _ = self.0.bundled.set(bundled);
+    }
+
     /// The vendor context, once discovery has ended: empty when it
-    /// failed.
+    /// failed, with the bundled packages' contexts after the project's own.
     pub fn get(&self) -> &VendorContext {
         self.0.found.get_or_init(|| {
             let thread = self
@@ -80,9 +90,13 @@ impl PendingVendor {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .take();
-            thread
+            let mut context = thread
                 .and_then(|thread| thread.join().ok())
-                .unwrap_or_default()
+                .unwrap_or_default();
+            for bundled in self.0.bundled.get().into_iter().flatten() {
+                context.extend_with(bundled.get());
+            }
+            context
         })
     }
 }
@@ -94,6 +108,7 @@ impl From<VendorContext> for PendingVendor {
         PendingVendor(Arc::new(PendingVendorInner {
             found,
             thread: Mutex::new(None),
+            bundled: OnceLock::new(),
         }))
     }
 }
@@ -145,6 +160,29 @@ impl PackageContext {
             (Some(manifest), Some(vendor)) => manifest.installed_elsewhere(vendor),
             _ => Vec::new(),
         });
+        // A package that bundles a vendor directory of its own (its autoloader
+        // loads the classes it names from there) adds that directory's context.
+        let bundled = manifest.as_ref().map_or_else(Vec::new, |manifest| {
+            let mut dirs: Vec<PathBuf> = manifest
+                .installed
+                .iter()
+                .filter_map(|package| layout.installed_dir(&package.install_dir))
+                .filter(|dir| Some(dir) != installed.as_ref())
+                .collect();
+            dirs.sort();
+            dirs.dedup();
+            dirs.into_iter()
+                .map(|dir| {
+                    PendingVendor::spawn(
+                        Some(dir),
+                        Arc::clone(listings),
+                        cache,
+                        Arc::new(OutsideInstalls::filled(Vec::new())),
+                    )
+                })
+                .collect()
+        });
+        vendor.attach_bundled(bundled);
         PackageContext { manifest, vendor }
     }
 

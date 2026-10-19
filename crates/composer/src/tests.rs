@@ -1,4 +1,5 @@
 mod autoload_maps;
+mod bundled_vendor;
 mod canonical;
 mod dir_listings;
 mod hashed_path;

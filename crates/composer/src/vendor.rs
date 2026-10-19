@@ -52,6 +52,14 @@ pub struct VendorContext {
     pub dirs: Vec<VendorPath>,
 }
 
+impl VendorContext {
+    /// Adds what `other` lists, after what this lists.
+    pub fn extend_with(&mut self, other: &VendorContext) {
+        self.files.extend(other.files.iter().cloned());
+        self.dirs.extend(other.dirs.iter().cloned());
+    }
+}
+
 /// A path the vendor context lists.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VendorPath {
