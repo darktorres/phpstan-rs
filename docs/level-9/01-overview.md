@@ -4,7 +4,7 @@ The plan is written from the code at `0fb1a4de` (Parts A to F), `30aa2002` (G) a
 are hints from those commits and the tree moves, so a citation is found by the symbol it names; "the fixes plan's R7"
 is `ITEMS_1_TO_3_FIXES_PLAN.md` (ledger LOAD-8.7) and "the cross-platform plan's R7" is `CROSS_PLATFORM_PLAN.md`.
 
-Part A is built and validated (its status is in Part A's intro, [`02-part-a-intro.md`](02-part-a-intro.md)). Nothing from Part B onward is built by this plan. The batch-0 fixes already in the tree are listed in the README's batch 0 rows. The order of the parts and what each one designs are in the [README](README.md).
+Part A is built and validated (its status is in Part A's intro, [`02-part-a-intro.md`](02-part-a-intro.md)). Nothing from Part B onward is built by this plan. The batch-0 fixes already in the tree are listed in the README's batch 0 rows. The order of the work is the sequence in the [README](README.md).
 
 Both start only after the cross-platform fixes have finished (`CROSS_PLATFORM_PLAN.md`, rows R0 to R18, finished at `a83b1675`). Its rows edit what this plan's first rows edit: `session.rs`, `project.rs`, `walk.rs` and
 `lsp.rs` (R5 to R7), `includes.rs` (R8), `composer` (R3, R9, R16), `main.rs` (R10) and the caches (R11). R18 moves
