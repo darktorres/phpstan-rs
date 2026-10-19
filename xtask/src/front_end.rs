@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use syntax::lexer::Lexer;
 
-fn php_files(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(crate) fn php_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

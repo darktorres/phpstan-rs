@@ -26,6 +26,7 @@ mod recursion;
 mod stub_index;
 #[cfg(test)]
 mod tests;
+mod tree_stats;
 
 const LEVELS: [&str; 12] = [
     "unset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
@@ -48,6 +49,7 @@ fn main() -> ExitCode {
             recursion::recursion(&root(), args.get(1).is_some_and(|a| a == "--wrap"))
         }
         Some("front-end-dump") => front_end::front_end_dump(&args[1..]),
+        Some("tree-stats") => tree_stats::tree_stats(&args[1..]),
         Some("stub-index") => write_stub_index(),
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
@@ -91,6 +93,10 @@ const USAGE: &str = "usage: cargo xtask <command>
                          one line for each PHP file under the directories:
                          its path and a hash of what the lexer and the
                          parser make of it (--show prints one file whole)
+  tree-stats [--files] <dir>...
+                         the parser's tree over the PHP files under the
+                         directories: nodes by kind, tokens per node, list
+                         lengths, record bytes (--files adds a line per file)
   stub-index             regenerate crates/stub-sources/index.tsv
   baseline               generate the reference baselines (Stage A only)
   approve <slug> [--full] [--against <commit>]
