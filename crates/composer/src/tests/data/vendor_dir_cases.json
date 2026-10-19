@@ -1,0 +1,123 @@
+[
+    {
+        "name": "default",
+        "config": null,
+        "vendor-dir": null,
+        "env": null,
+        "resolved": "/ROOT/vendor"
+    },
+    {
+        "name": "relative",
+        "config": null,
+        "vendor-dir": "libs",
+        "env": null,
+        "resolved": "/ROOT/libs"
+    },
+    {
+        "name": "nested",
+        "config": null,
+        "vendor-dir": "libs/vendor",
+        "env": null,
+        "resolved": "/ROOT/libs/vendor"
+    },
+    {
+        "name": "dot-prefixed-with-trailing-slash",
+        "config": null,
+        "vendor-dir": "./libs/",
+        "env": null,
+        "resolved": "/ROOT/./libs"
+    },
+    {
+        "name": "parent",
+        "config": null,
+        "vendor-dir": "../vendor",
+        "env": null,
+        "resolved": "/ROOT/../vendor"
+    },
+    {
+        "name": "absolute",
+        "config": null,
+        "vendor-dir": "/abs/v",
+        "env": null,
+        "resolved": "/abs/v"
+    },
+    {
+        "name": "home",
+        "config": null,
+        "vendor-dir": "~/v",
+        "env": null,
+        "resolved": "/HOME/v"
+    },
+    {
+        "name": "trailing-backslash",
+        "config": null,
+        "vendor-dir": "libs\\",
+        "env": null,
+        "resolved": "/ROOT/libs"
+    },
+    {
+        "name": "drive-letter",
+        "config": null,
+        "vendor-dir": "C:/v",
+        "env": null,
+        "resolved": "C:/v"
+    },
+    {
+        "name": "scheme",
+        "config": null,
+        "vendor-dir": "https://x/y",
+        "env": null,
+        "resolved": "https://x/y"
+    },
+    {
+        "name": "two-backslashes",
+        "config": null,
+        "vendor-dir": "\\\\server\\share\\v",
+        "env": null,
+        "resolved": "\\\\server\\share\\v"
+    },
+    {
+        "name": "env-variable",
+        "config": null,
+        "vendor-dir": "$PROBE_LIB/vendor",
+        "env": null,
+        "resolved": "/ROOT/lib/vendor"
+    },
+    {
+        "name": "env-percent",
+        "config": null,
+        "vendor-dir": "%PROBE_LIB%/vendor",
+        "env": null,
+        "resolved": "/ROOT/lib/vendor"
+    },
+    {
+        "name": "reference-to-config",
+        "config": {
+            "lib": "libs"
+        },
+        "vendor-dir": "{$lib}/vendor",
+        "env": null,
+        "resolved": "/ROOT/libs/vendor"
+    },
+    {
+        "name": "environment-absolute-over-manifest",
+        "config": null,
+        "vendor-dir": "libs",
+        "env": "/abs/env",
+        "resolved": "/abs/env"
+    },
+    {
+        "name": "environment-relative-over-manifest",
+        "config": null,
+        "vendor-dir": "libs",
+        "env": "env-libs",
+        "resolved": "/ROOT/env-libs"
+    },
+    {
+        "name": "environment-without-manifest",
+        "config": null,
+        "vendor-dir": null,
+        "env": "env-only",
+        "resolved": "/ROOT/env-only"
+    }
+]
