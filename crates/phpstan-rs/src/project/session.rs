@@ -9,7 +9,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use syntax::span::Span;
@@ -820,6 +820,9 @@ enum Read {
     Unreadable(String),
     /// The parser panicked, with the panic's message.
     Panicked(String),
+    /// A lazy context file no name reached: it is not read, as the autoloader
+    /// does not load a file that nothing asks for.
+    Unreached,
 }
 
 /// The report of a file that did not load: its identifier, and where and
@@ -877,6 +880,7 @@ fn load_failure_of(read: Read) -> Option<LoadFailure> {
             "phpstanRs.internalError",
             format!("internal error while parsing: {message}"),
         )),
+        Read::Unreached => None,
     }
 }
 
@@ -889,7 +893,7 @@ fn declaration_of<'a>(
 ) -> Option<(&'a Path, bool, &'a [BuiltDecl])> {
     match read {
         Read::Loaded(file) => Some((path, analyzed, file.parsed.built_decls())),
-        Read::Unparsed(_) | Read::Unreadable(_) | Read::Panicked(_) => None,
+        Read::Unparsed(_) | Read::Unreadable(_) | Read::Panicked(_) | Read::Unreached => None,
     }
 }
 
@@ -1569,6 +1573,15 @@ impl Session {
             .collect();
         let pending: FxHashSet<usize> =
             (0..slots.len()).filter(|&at| slots[at].is_none()).collect();
+        let mut pending_by_name: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+        for &at in &pending {
+            if let Some(name) = combined_files[at].path.as_path().file_name() {
+                pending_by_name
+                    .entry(name.to_string_lossy().to_ascii_lowercase())
+                    .or_default()
+                    .push(at);
+            }
+        }
         let reach = LazyReach {
             session: self,
             lazy,
@@ -1578,7 +1591,8 @@ impl Session {
             index_use_sites,
             context_at,
             pending,
-            queued: Mutex::default(),
+            pending_by_name,
+            reached: Mutex::default(),
             read: Mutex::default(),
         };
         let seeds: Vec<String> = slots.iter().flatten().flat_map(class_names_read).collect();
@@ -1592,7 +1606,7 @@ impl Session {
         }
         for slot in slots.iter_mut() {
             if slot.is_none() {
-                *slot = Some(Read::Unread);
+                *slot = Some(Read::Unreached);
             }
         }
     }
@@ -1873,7 +1887,7 @@ impl Session {
                 Some(ast) => super::use_sites::class_names_declared(ast),
                 None => Vec::new(),
             };
-            names.extend(super::use_sites::doc_names(&String::from_utf8_lossy(bytes)));
+            names.extend(super::use_sites::doc_names(&text));
             parsed.lazy_names = names;
         }
         let source = keeps_source.then(|| text.into_owned());
@@ -2027,7 +2041,7 @@ impl Session {
                 Read::Unparsed(failure) => {
                     failures.push((file.path.as_path().to_path_buf(), failure.message))
                 }
-                Read::Unreadable(_) | Read::Panicked(_) => {}
+                Read::Unreadable(_) | Read::Panicked(_) | Read::Unreached => {}
             }
         }
         failures
@@ -2228,7 +2242,8 @@ impl Session {
         // rank, which decides a collision between two context files.
         let mut context_order: Vec<usize> = (0..context_files.len()).collect();
         if let Some(lazy) = lazy {
-            context_order.sort_by_key(|&at| (lazy.rank(context_files[at].path.as_path()), at));
+            context_order
+                .sort_by_cached_key(|&at| (lazy.rank(context_files[at].path.as_path()), at));
         }
         project.insert_declarations(
             pool,
@@ -2568,10 +2583,21 @@ struct LazyReach<'a> {
     context_at: FxHashMap<&'a Path, usize>,
     /// The indices of the lazy files not yet read.
     pending: FxHashSet<usize>,
-    /// The indices of the lazy files whose read is queued.
-    queued: Mutex<FxHashSet<usize>>,
+    /// The indices of the lazy files not yet read, by their file name in lower
+    /// case.
+    pending_by_name: FxHashMap<String, Vec<usize>>,
+    /// The names followed and the files whose read is queued.
+    reached: Mutex<Reached>,
     /// Each lazy file read, with its index.
     read: Mutex<Vec<(usize, Read)>>,
+}
+
+/// What one lazy load has followed: a name is looked up once, and a file is
+/// read once, whichever of the names that reach it come first.
+#[derive(Default)]
+struct Reached {
+    names: FxHashSet<String>,
+    files: FxHashSet<usize>,
 }
 
 impl<'a> LazyReach<'a> {
@@ -2581,18 +2607,22 @@ impl<'a> LazyReach<'a> {
     where
         'a: 's,
     {
-        for name in names {
-            let Some(at) = self.find(&name) else {
-                continue;
-            };
-            let first = self
-                .queued
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(at);
-            if !first {
-                continue;
-            }
+        let fresh: Vec<String> = {
+            let mut reached = self.reached.lock().unwrap_or_else(PoisonError::into_inner);
+            names
+                .into_iter()
+                .filter_map(|name| reached.names.insert(name.clone()).then_some(name))
+                .collect()
+        };
+        let found: Vec<usize> = fresh.iter().flat_map(|name| self.find(name)).collect();
+        let queue: Vec<usize> = {
+            let mut reached = self.reached.lock().unwrap_or_else(PoisonError::into_inner);
+            found
+                .into_iter()
+                .filter(|&at| reached.files.insert(at))
+                .collect()
+        };
+        for at in queue {
             scope.spawn(move |scope| {
                 let read = self.workers.with(|worker| {
                     self.session.read_indexed(
@@ -2613,13 +2643,74 @@ impl<'a> LazyReach<'a> {
         }
     }
 
-    /// The lazy file a name is found in: the first candidate that exists among
-    /// the context files, if it is one not yet read.
-    fn find(&self, name: &str) -> Option<usize> {
-        self.lazy
-            .candidates(name)
+    /// The lazy files a name finds, each not yet read. A class name finds the
+    /// first candidate that exists among the context files. An include finds
+    /// the files its path names, and an include of a path not known finds every
+    /// file not yet read, as it may name any of them.
+    fn find(&self, name: &str) -> Vec<usize> {
+        match name.strip_prefix(super::use_sites::INCLUDE_MARK) {
+            Some(path) => self.find_include(path),
+            None => self
+                .lazy
+                .candidates(name)
+                .into_iter()
+                .find_map(|path| self.context_at.get(path.as_path()).copied())
+                .filter(|at| self.pending.contains(at))
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    fn find_include(&self, path: &str) -> Vec<usize> {
+        let parts: Vec<&str> = path
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty() && *part != "." && *part != "..")
+            .collect();
+        let Some(last) = parts.last() else {
+            return self.pending.iter().copied().collect();
+        };
+        self.pending_by_name
+            .get(&last.to_ascii_lowercase())
             .into_iter()
-            .find_map(|path| self.context_at.get(path.as_path()).copied())
-            .filter(|at| self.pending.contains(at))
+            .flatten()
+            .copied()
+            .filter(|&at| ends_with_parts(self.combined_files[at].path.as_path(), &parts))
+            .collect()
+    }
+}
+
+/// Whether `path` ends with the components `parts`. A component matches
+/// whatever its letter case, as a file system that folds case does.
+fn ends_with_parts(path: &Path, parts: &[&str]) -> bool {
+    let mut trailing = path
+        .components()
+        .rev()
+        .filter_map(|component| match component {
+            Component::Normal(name) => Some(name.to_string_lossy()),
+            _ => None,
+        });
+    parts.iter().rev().all(|&part| {
+        trailing
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case(part))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ends_with_parts;
+    use std::path::Path;
+
+    #[test]
+    fn ends_with_parts_matches_trailing_components_whatever_their_case() {
+        let path = Path::new("/root/vendor/Acme/Lib/Thing.php");
+        assert!(ends_with_parts(path, &["lib", "thing.php"]));
+        assert!(ends_with_parts(path, &["thing.php"]));
+        assert!(!ends_with_parts(path, &["vendor", "thing.php"]));
+        assert!(!ends_with_parts(path, &["root", "acme", "thing.php"]));
+        assert!(ends_with_parts(
+            path,
+            &["root", "vendor", "acme", "lib", "thing.php"]
+        ));
     }
 }

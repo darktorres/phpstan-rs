@@ -28,7 +28,7 @@
 //! and merged into this same index by `Project::ensure_member_index_built`/
 //! `Project::reindex_tier2_for_file`.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use syntax::ast::*;
 use syntax::span::Span;
@@ -318,6 +318,15 @@ impl<'ast> Visitor<'ast> for NameWalker {
         }
     }
 
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        stack::guard(|| {
+            if let ExprKind::Include(_, arg) = &expr.kind {
+                self.out.push(include_name(arg));
+            }
+            walk_expr(self, expr);
+        })
+    }
+
     fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
         if self.bodies {
             walk_function_decl(self, function);
@@ -335,6 +344,42 @@ impl<'ast> Visitor<'ast> for NameWalker {
     }
 }
 
+/// The first character of a lazy name that is not a class name. Followed by
+/// a path, the name is an include of that path, which names a file by its
+/// trailing components. Alone, it is an include of a path not known, which
+/// may name any file.
+pub(crate) const INCLUDE_MARK: char = '\u{1}';
+
+/// The lazy name of an include of `arg`: see `INCLUDE_MARK`.
+fn include_name(arg: &Expr) -> String {
+    let mut path = String::new();
+    if include_path(arg, &mut path) {
+        format!("{INCLUDE_MARK}{path}")
+    } else {
+        INCLUDE_MARK.to_string()
+    }
+}
+
+/// Appends to `path` the text an include path reads as: its string literals,
+/// joined. `__DIR__` is the directory of the including file, which the lookup
+/// does not place, so it adds nothing. Returns false for any other part.
+fn include_path(expr: &Expr, path: &mut String) -> bool {
+    let expr = expr.peeled();
+    match &expr.kind {
+        ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => true,
+        ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
+            include_path(lhs, path) && include_path(rhs, path)
+        }
+        _ => match literal_string_value(expr) {
+            Some(text) => {
+                path.push_str(&text);
+                true
+            }
+            None => false,
+        },
+    }
+}
+
 /// The class names a file's doc comments name, found in their text: every
 /// word of a doc comment, resolved against the file's namespace and imports
 /// as a class name is, each candidate kept. Over-approximates: a word that
@@ -346,7 +391,7 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
     let mut uses: FxHashMap<String, String> = FxHashMap::default();
     for line in source.lines() {
         if let Some(rest) = line.strip_prefix("namespace ") {
-            namespace = rest.trim_end_matches(';').trim().to_string();
+            namespace = rest.trim_end_matches(';').trim().to_ascii_lowercase();
         } else if let Some(rest) = line.strip_prefix("use ") {
             if rest.starts_with("function ") || rest.starts_with("const ") {
                 continue;
@@ -363,7 +408,10 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
             );
         }
     }
-    let mut names = Vec::new();
+    // Each name is kept once: a word repeats across a file's doc comments.
+    let mut names: FxHashSet<String> = FxHashSet::default();
+    let mut lower = String::new();
+    let mut joined = String::new();
     let mut rest = source;
     while let Some(start) = rest.find("/**") {
         let after = &rest[start + 3..];
@@ -375,19 +423,63 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
             if word.is_empty() || !word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
                 continue;
             }
-            let lower = word.to_ascii_lowercase();
-            if let Some(target) = uses.get(lower.split('\\').next().unwrap_or(&lower)) {
-                names.push(match lower.split_once('\\') {
-                    Some((_, tail)) => format!("{target}\\{tail}"),
-                    None => target.clone(),
-                });
+            lower.clear();
+            lower.push_str(word);
+            lower.make_ascii_lowercase();
+            let head = lower.split('\\').next().unwrap_or(&lower);
+            if let Some(target) = uses.get(head) {
+                match lower.split_once('\\') {
+                    Some((_, tail)) => {
+                        joined.clear();
+                        joined.push_str(target);
+                        joined.push('\\');
+                        joined.push_str(tail);
+                        add_name(&mut names, &joined);
+                    }
+                    None => add_name(&mut names, target),
+                }
             }
             if !namespace.is_empty() {
-                names.push(format!("{}\\{}", namespace.to_ascii_lowercase(), lower));
+                joined.clear();
+                joined.push_str(&namespace);
+                joined.push('\\');
+                joined.push_str(&lower);
+                add_name(&mut names, &joined);
             }
-            names.push(lower);
+            add_name(&mut names, &lower);
         }
         rest = &after[end.min(after.len())..];
     }
-    names
+    names.into_iter().collect()
+}
+
+/// Adds `name` to `names`, allocating only when it is new.
+fn add_name(names: &mut FxHashSet<String>, name: &str) {
+    if !names.contains(name) {
+        names.insert(name.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::doc_names;
+
+    #[test]
+    fn doc_names_keep_each_name_once_resolved_against_the_namespace_and_uses() {
+        let source = "<?php\nnamespace App\\Model;\nuse Lib\\Thing as T;\n/** @var T|Helper|T */\n";
+        let mut names = doc_names(source);
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "app\\model\\helper",
+                "app\\model\\t",
+                "app\\model\\var",
+                "helper",
+                "lib\\thing",
+                "t",
+                "var",
+            ]
+        );
+    }
 }
