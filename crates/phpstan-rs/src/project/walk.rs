@@ -382,6 +382,9 @@ impl Reach {
 /// A directory walk: its role and the names it excludes.
 type DirWalk<'a> = (Role, Excluded<'a>);
 
+/// Whether a walk with the exclusions it has leaves a directory out (`Walk::leaves_out_dir`).
+type Cut<'c, 'a> = &'c dyn Fn(Excluded<'a>, &Path) -> bool;
+
 /// The walks the roots start, by the path each starts from. Each walk is
 /// counted here before any runs, so a file's walks are known when it is listed.
 #[derive(Default)]
@@ -457,31 +460,35 @@ impl<'a> Starts<'a> {
     }
 
     /// What reaches `dir`, a resolved directory: what each directory above it
-    /// passes down, from the top.
-    fn reaching(&self, dir: &Path) -> Reaching<'a> {
+    /// passes down, from the top. `cut` says which directories a walk leaves
+    /// out for Composer (`Walk::leaves_out_dir`).
+    fn reaching(&self, dir: &Path, cut: Cut<'_, 'a>) -> Reaching<'a> {
         hashed_ancestors(dir)
             .rev()
             .fold(Reaching::default(), |above, (ancestor, hash, name)| {
-                self.below(&above, ancestor, hash, name)
+                self.below(&above, ancestor, hash, name, cut)
             })
     }
 
     /// What reaches `dir`, whose hash is `hash` and whose name is `name`, a
     /// subdirectory of a directory that `above` reaches: the walks that reach
-    /// that directory and do not exclude `name`, and the walks that start at
-    /// `dir`.
+    /// that directory and neither exclude `name` nor leave `dir` out, and the
+    /// walks that start at `dir`.
     fn below(
         &self,
         above: &Reaching<'a>,
         dir: &Path,
         hash: PathHash,
         name: Option<&OsStr>,
+        cut: Cut<'_, 'a>,
     ) -> Reaching<'a> {
         let mut walks: Vec<DirWalk<'a>> = above
             .walks
             .iter()
             .copied()
-            .filter(|&(_, excluded)| !name.is_some_and(|name| excluded.excludes(name)))
+            .filter(|&(_, excluded)| {
+                !name.is_some_and(|name| excluded.excludes(name)) && !cut(excluded, dir)
+            })
             .collect();
         if let Some((_, starting)) = self.dirs.find(hash, |(start, _)| start.as_path() == dir) {
             walks.extend_from_slice(starting);
@@ -520,13 +527,14 @@ impl<'a> Starts<'a> {
     /// covering root holds one, without what a walk carries down: the reading
     /// that `reaching` and `below` must agree with.
     #[cfg(test)]
-    fn reach_by_ancestors(&self, dir: &Path) -> (Reach, bool) {
+    fn reach_by_ancestors(&self, dir: &Path, cut: Cut<'_, 'a>) -> (Reach, bool) {
         let covered = dir
             .ancestors()
             .any(|ancestor| self.covers(ancestor, path_hash(ancestor)));
         let mut reach = Reach::default();
-        // The names of the directories below the ancestor being checked, down to `dir`.
-        let mut below: Vec<&OsStr> = Vec::new();
+        // The names and paths of the directories below the ancestor being
+        // checked, down to `dir`.
+        let mut below: Vec<(&OsStr, &Path)> = Vec::new();
         for ancestor in dir.ancestors() {
             let hash = path_hash(ancestor);
             let starting = self
@@ -535,14 +543,16 @@ impl<'a> Starts<'a> {
                 .map_or(&[][..], |(_, walks)| walks.as_slice());
             for &(role, excluded) in starting {
                 if (covered && role == Role::Context)
-                    || below.iter().any(|&name| excluded.excludes(name))
+                    || below
+                        .iter()
+                        .any(|&(name, path)| excluded.excludes(name) || cut(excluded, path))
                 {
                     continue;
                 }
                 reach.add(role);
             }
             if let Some(name) = ancestor.file_name() {
-                below.push(name);
+                below.push((name, ancestor));
             }
         }
         (reach, covered)
@@ -1248,7 +1258,9 @@ impl<'a, 'p> Walk<'a, 'p> {
                 if let Some(take) = take {
                     let starts = self.starts_for(*role);
                     // What the directory walks that reach the directory decide.
-                    let reach = dir.map_or_else(Reach::default, |dir| starts.reaching(dir).reach());
+                    let cut = |excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
+                    let reach =
+                        dir.map_or_else(Reach::default, |dir| starts.reaching(dir, &cut).reach());
                     for path in files {
                         if let Some(stub) = starts.with_file_walks(reach, path).hands_over(*role) {
                             take(vec![Listed {
@@ -1294,8 +1306,9 @@ impl<'a, 'p> Walk<'a, 'p> {
         scope: Scope<'a>,
         take: Option<&Take<'_>>,
     ) -> Vec<Found> {
+        let cut = |excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
         let reaching =
-            (!scope.outside).then(|| self.starts_for(scope.role).reaching(path.as_path()));
+            (!scope.outside).then(|| self.starts_for(scope.role).reaching(path.as_path(), &cut));
         if reaching
             .as_ref()
             .is_some_and(|reaching| scope.prunes(reaching))
@@ -1338,11 +1351,12 @@ impl<'a, 'p> Walk<'a, 'p> {
             return Vec::new();
         };
         let starts = self.starts_for(scope.role);
+        let cut = |excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
         #[cfg(test)]
         if let Some(reaching) = reaching {
             assert_eq!(
                 (reaching.reach(), reaching.covered),
-                starts.reach_by_ancestors(dir.as_path()),
+                starts.reach_by_ancestors(dir.as_path(), &cut),
                 "what reaches {}",
                 dir.as_path().display()
             );
@@ -1405,7 +1419,7 @@ impl<'a, 'p> Walk<'a, 'p> {
                     continue;
                 }
                 let below = reaching.map(|reaching| {
-                    starts.below(reaching, child.as_path(), child.hash(), Some(name))
+                    starts.below(reaching, child.as_path(), child.hash(), Some(name), &cut)
                 });
                 if below.as_ref().is_some_and(|below| scope.prunes(below)) {
                     continue;

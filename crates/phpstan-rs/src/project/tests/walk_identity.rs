@@ -1195,3 +1195,63 @@ fn context_roots_given_while_the_stronger_walks_run_are_walked_as_when_given_fir
         ]
     );
 }
+
+/// A Composer project under `proj` whose vendor directory is `vendor_dir`: a
+/// file of the project, an installed.json and two files of one package.
+/// Returns the project's resolved path.
+fn composer_project(dir: &TempDir, vendor_dir: &str) -> PathBuf {
+    dir.write("proj/a.php", "<?php");
+    dir.write(&format!("proj/{vendor_dir}/composer/installed.json"), "{}");
+    dir.write(&format!("proj/{vendor_dir}/pkg/src/x.php"), "<?php");
+    dir.write(&format!("proj/{vendor_dir}/pkg/y.php"), "<?php");
+    resolved(dir).join("proj")
+}
+
+#[test]
+fn a_degrade_root_leaves_out_a_composer_vendor_directory_and_its_context_walk_lists_it() {
+    for vendor_dir in ["vendor", "libs", "libs/vendor"] {
+        let dir = TempDir::new("walk_vendor_handed");
+        let root = composer_project(&dir, vendor_dir);
+        let vendor = root.join(vendor_dir);
+        let composer = |path: &Path| path == vendor.as_path();
+
+        let mut walk = Walk::new(Arc::default(), &NO_PACKAGES).with_composer(&composer);
+        walk.add_leaving_out_composer(&root, Role::Analysed, &[]);
+        walk.add(&vendor, Role::Context, &[]);
+        let (handed, listing) = handed_over(walk);
+
+        // Only the context walk lists the vendor directory's files, so it
+        // hands them over, and each is listed once.
+        let expected = vec![
+            (root.join("a.php"), Role::Analysed, false),
+            (vendor.join("pkg/src/x.php"), Role::Context, false),
+            (vendor.join("pkg/y.php"), Role::Context, false),
+        ];
+        assert_eq!(sorted(handed), expected.clone(), "{vendor_dir}");
+        assert_eq!(sorted(listing), expected, "{vendor_dir}");
+    }
+}
+
+#[test]
+fn a_configured_root_and_a_degrade_root_over_one_composer_project_list_each_file_once() {
+    let dir = TempDir::new("walk_vendor_overlap");
+    let root = composer_project(&dir, "vendor");
+    let vendor = root.join("vendor");
+    let composer = |path: &Path| path == vendor.as_path();
+
+    // The configured root names the vendor directory, so its files are
+    // analysed; the degrade root leaves the directory out, and the two walks
+    // meet over the same files.
+    let mut walk = Walk::new(Arc::default(), &NO_PACKAGES).with_composer(&composer);
+    walk.add_leaving_out_composer(&root, Role::Analysed, &[]);
+    walk.add(&vendor, Role::Analysed, &[]);
+    let (handed, listing) = handed_over(walk);
+
+    let expected = vec![
+        (root.join("a.php"), Role::Analysed, false),
+        (vendor.join("pkg/src/x.php"), Role::Analysed, false),
+        (vendor.join("pkg/y.php"), Role::Analysed, false),
+    ];
+    assert_eq!(sorted(handed), expected);
+    assert_eq!(sorted(listing), expected);
+}

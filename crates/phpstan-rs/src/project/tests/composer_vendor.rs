@@ -4,11 +4,16 @@
 //! into it, wherever it lies and whatever it is called. A directory with
 //! neither is the project's own code, `lib/vendor` included.
 
-use super::super::session::{Session, classify_unlisted, unlisted_role, with_unlisted_composer};
+use super::super::Project;
+use super::super::session::{
+    ErrorPolicy, Overrides, Session, classify_unlisted, unlisted_role, with_unlisted_composer,
+};
 use super::super::walk::Role;
 use super::helpers::{TempDir, resolved};
 use super::installer_paths::composed;
+use crate::registry::stub_set::Stubs;
 use crate::test_links::link_dir;
+use config::ConfigFile;
 use diagnostics::CaseRule;
 use std::path::{Path, PathBuf};
 
@@ -238,5 +243,107 @@ fn a_never_seen_path_is_classified_alike_by_the_session_and_unlisted() {
         assert_eq!(by_session, expected, "session: {rel}");
         assert_eq!(by_root, expected, "unlisted under the root: {rel}");
         assert_eq!(by_unlisted, expected, "unlisted: {rel}");
+    }
+}
+
+/// The project at `root`, loaded with Composer as the language server loads it.
+fn composed_project(root: &Path) -> Project {
+    let config_path = root.join("phpstan-rs.toml");
+    std::fs::write(&config_path, "").unwrap();
+    let config = ConfigFile::load(&config_path, &config::Schema::new()).unwrap();
+    let session = Session::resolve(
+        &config,
+        config.dir().map(Path::to_path_buf),
+        root.to_path_buf(),
+        Overrides {
+            paths: vec![PathBuf::new()],
+            ..Overrides::default()
+        },
+        Stubs::shared().clone(),
+        ErrorPolicy::Fail,
+    )
+    .unwrap();
+    let mut project = Project::new();
+    project.apply_settings(session.editor_settings());
+    session.load_into(&mut project).unwrap();
+    project
+}
+
+/// The paths the include rule reports as missing in `file` of the project at
+/// `root`, loaded with Composer.
+fn missing_includes(root: &Path, file: &Path) -> Vec<String> {
+    composed_project(root)
+        .check_file(file)
+        .iter()
+        .filter(|d| d.identifier.ends_with(".fileNotFound"))
+        .map(|d| d.message.clone())
+        .collect()
+}
+
+/// Two includes of the project's `libs` directory, the first of a file that
+/// the project's autoloader writes and the second of a file that is not there.
+const LIBS_INCLUDES: &str = "<?php\nrequire __DIR__ . '/../libs/autoload.php';\nrequire __DIR__ . '/../libs/missing.php';\n";
+
+#[test]
+fn an_include_below_an_uninstalled_vendor_directory_named_by_the_manifest_is_not_judged() {
+    let (dir, root) = project("composer_vendor_include_unbuilt");
+    dir.write(
+        "proj/composer.json",
+        r#"{"config": {"vendor-dir": "libs"}}"#,
+    );
+    dir.write("proj/src/a.php", LIBS_INCLUDES);
+    let missing = missing_includes(&root, &root.join("src/a.php"));
+    assert!(missing.is_empty(), "{missing:?}");
+}
+
+#[test]
+fn an_include_below_an_installed_vendor_directory_named_by_the_manifest_is_judged() {
+    let (dir, root) = project("composer_vendor_include_installed");
+    dir.write(
+        "proj/composer.json",
+        r#"{"config": {"vendor-dir": "libs"}}"#,
+    );
+    dir.write("proj/libs/composer/installed.json", INSTALLED);
+    dir.write("proj/libs/autoload.php", "<?php");
+    dir.write("proj/src/a.php", LIBS_INCLUDES);
+    let missing = missing_includes(&root, &root.join("src/a.php"));
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert!(missing[0].contains("missing.php"), "{missing:?}");
+}
+
+#[test]
+fn an_edit_of_a_path_the_project_has_not_seen_is_analysed_as_the_session_classifies_it() {
+    let cases = [
+        ("vendor/acme/new.php", false),
+        ("lib/vendor/new.php", true),
+        ("src/new.php", true),
+    ];
+    for (rel, analysed) in cases {
+        let (dir, root) = project("composer_vendor_edit");
+        dir.write("proj/composer.json", "{}");
+        dir.write("proj/vendor/composer/installed.json", INSTALLED);
+        let session = composed(&root);
+        let path = root.join(rel);
+        assert_eq!(
+            role_of(&session, &path) == Role::Analysed,
+            analysed,
+            "session: {rel}"
+        );
+
+        // A class that extends a missing one is reported only in an analysed
+        // file.
+        let mut project = composed_project(&root);
+        let affected = project
+            .update_file(&path, "<?php class New extends Missing {}")
+            .unwrap();
+        // The editor publishes the diagnostics of analysed files only, so a
+        // context file's own findings are not what it shows.
+        let published = project.analyzed_files();
+        let reported = affected
+            .iter()
+            .filter(|(id, _)| published.contains(id))
+            .flat_map(|(_, diags)| diags)
+            .any(|d| d.identifier.ends_with("class.notFound"));
+        assert_eq!(reported, analysed, "edit: {rel}");
     }
 }
