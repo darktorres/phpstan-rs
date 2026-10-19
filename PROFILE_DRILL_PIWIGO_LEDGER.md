@@ -813,7 +813,7 @@ Merging the sources into one list found six places where two of them disagree, o
 - **LOAD-8 holds `ITEMS_1_TO_3_FIXES_PLAN.md`'s rows,** but for R11 (LOAD-3.3) and R12 (CACHE-12). The plan's decisions were ruled on 2026-10-17: the finishing passes' unused cores are in REG-7's notes (its decision 1), the stub-base wait in STUB's notes (its decision 5), and the name floor in LOAD-2.2 (its decision 7). R8 and R11 to R15 are older costs than items 1 to 3, kept by its decision 6.
 
 - **LOAD-8.7 on each platform** (the cross-platform plan's R16, `9c555663`).
-  - The −126.7 M is x86_64 Linux's, by callgrind. macOS reads the same Unix paths with the same code on aarch64 and has not been measured. Windows asked `Path` for every query until R16 gave it a reader of its own (a drive and a root, then names separated by `\`; anything else is left to `Path`). No Windows machine runs the load here, so there is no load-level figure for it and none is claimed.
+  - The −126.7 M is x86_64 Linux's, by callgrind. macOS and aarch64 Linux read the same Unix paths with the same code; their runners' per-call times are in the second table, and no callgrind total exists for them. Windows asked `Path` for every query until R16 gave it a reader of its own (a drive and a root, then names separated by `\`; anything else is left to `Path`). No Windows machine runs the load here, so there is no load-level figure for it and none is claimed.
   - `crates/path-bytes/benches/path_bytes.rs` times each query over 1,000 paths shaped as a load's (absolute, below a project's root, a few directories deep, a PHP file) and, for the last three rows, over paths the bytes leave to `Path` (a `.` component or a doubled separator), which costs what looking first costs. Medians of 100 samples, ns per call, `Path` then the bytes, one run each. Linux ran natively (load average 3.4 to 2.6). Windows ran as `x86_64-pc-windows-gnu` under wine with MinGW (load average 1.2 to 4.0), so its `std::path` is Windows' own but the build is not the MSVC leg's.
 
     | query | Linux | Windows, under wine |
@@ -830,7 +830,24 @@ Merging the sources into one list found six places where two of them disagree, o
     | unusual `strip_prefix` | 148.0 → 233.6 | 221.9 → 327.0 |
     | unusual components and ancestors | 592.8 → 679.7 | 1,049 → 1,079 |
 
-  - On Windows the name read (`file_name`) is level with `Path`: another run of the wine bench gave 39.1 and 41.4, the other way round, so no saving is claimed for it. The other reads save between a third and about nine tenths of a call; `is_normal_absolute` is one pass over the bytes. A path the bytes leave to `Path` pays for the look first, 12 to 58 % more for `parent` and `strip_prefix`, which a load does not meet: every path it carries is spelled as its components are.
+  - Under wine the name read (`file_name`) is level with `Path`: another run of the wine bench gave 39.1 and 41.4, the other way round, so no saving was claimed for it from those runs; the Windows runner's below shows 27 %. The other reads save between a third and about nine tenths of a call; `is_normal_absolute` is one pass over the bytes. A path the bytes leave to `Path` pays for the look first, 12 to 58 % more for `parent` and `strip_prefix`, which a load does not meet: every path it carries is spelled as its components are.
+  - **On the runners** (CI run `39190477354` at `63546707`, the `platform-test` jobs' bench step, `cargo bench -p phpstan-rs-path-bytes --bench path_bytes -- --warm-up-time 1 --measurement-time 2`). The middle of criterion's interval over 100 samples, ns per call (a bench iteration is 1,000 paths, so its microseconds are the call's nanoseconds), `Path` then the bytes, one run each on GitHub's shared runners, whose load is not known: `ubuntu-26.04-arm`, `macos-26` (arm64) and `windows-2025-vs2026` (the MSVC build).
+
+    | query | aarch64 Linux | macOS | Windows |
+    |---|---|---|---|
+    | `file_name` | 18.1 → 11.1 | 18.5 → 9.3 | 37.4 → 27.4 |
+    | `parent` | 28.7 → 11.2 | 36.9 → 15.0 | 57.3 → 25.2 |
+    | `split` (both) | 45.1 → 14.6 | 50.1 → 12.9 | 90.6 → 30.2 |
+    | `has_file_name` | 18.4 → 2.6 | 19.1 → 1.3 | 35.7 → 4.3 |
+    | `starts_with` | 82.6 → 14.0 | 72.0 → 15.0 | 190.8 → 23.7 |
+    | `strip_prefix` | 107.3 → 43.4 | 95.5 → 56.1 | 218.4 → 110.0 |
+    | `is_normal_absolute` | 68.6 → 40.7 | 78.5 → 51.4 | 156.0 → 87.5 |
+    | components and ancestors | 374.8 → 84.5 | 398.4 → 111.6 | 770.5 → 251.4 |
+    | unusual `parent` | 33.4 → 42.2 | 35.0 → 44.9 | 70.9 → 86.5 |
+    | unusual `strip_prefix` | 108.9 → 148.1 | 91.8 → 150.2 | 220.5 → 295.3 |
+    | unusual components and ancestors | 382.2 → 420.2 | 403.1 → 514.7 | 802.8 → 894.7 |
+
+  - On all three runners every load-shaped query is faster from the bytes, by 27 % (Windows `file_name`) to 93 % (macOS `has_file_name`); `has_file_name` and `starts_with` save the most, 79 to 93 %. A path the bytes leave to `Path` pays for the look first: 22 to 28 % more for `parent`, 34 to 64 % for `strip_prefix` and 10 to 28 % for the components, which a load does not meet.
 
 ### Records
 
