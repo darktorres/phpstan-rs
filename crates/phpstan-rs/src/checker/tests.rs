@@ -1,6 +1,7 @@
 mod accessory_and_refinement_types;
 mod array_literals_and_shapes;
 mod codemods;
+mod computed_static_calls;
 mod dynamic_variable_bodies;
 mod helpers;
 mod include_guards;

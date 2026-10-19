@@ -14,6 +14,7 @@ use crate::checker::{
 };
 use crate::pest_config;
 use crate::registry::FunctionReflection;
+use crate::registry::PropertyWrites;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::span::Span;
@@ -176,7 +177,6 @@ impl<'a> Checker<'a> {
     /// properties; an object argument's, unless it writes at most its own
     /// object's. What is known about each object itself stays.
     fn forget_members_a_call_may_change(&self, e: &Expr, locals: &mut Locals) {
-        use crate::registry::PropertyWrites;
         // With no property chain, index, or fact about one in the scope,
         // there is nothing a call could make stale, however much it writes.
         if !locals.has_state_to_forget() {
@@ -205,37 +205,8 @@ impl<'a> Checker<'a> {
                 (locals.key_of(recv), args, writes)
             }
             ExprKind::StaticCall(target, method, args) => {
-                let class = self.infer_static_target_class(target, locals);
-                let keyword = |word: &str| matches!(target, StaticTarget::Name(name) if name.is_keyword(word));
-                let resolved = class.as_deref().and_then(|class| {
-                    let (owner, sig) = if keyword("parent") {
-                        self.registry
-                            .lookup_ancestor_method_with_owner(class, method)?
-                    } else {
-                        self.lookup_method_with_owner(class, method)?
-                    };
-                    let exact = !keyword("static")
-                        || crate::registry::is_non_overridable(
-                            self.registry,
-                            class,
-                            &owner,
-                            method,
-                            sig,
-                        );
-                    Some((owner, exact))
-                });
-                let forwards_this = (keyword("self") || keyword("static") || keyword("parent"))
-                    && !resolved
-                        .as_ref()
-                        .is_some_and(|(owner, _)| self.method_is_static(owner, method));
-                let writes = match resolved {
-                    Some((owner, true)) => {
-                        self.registry
-                            .method_property_writes(&owner, method, self.bodies)
-                    }
-                    _ => PropertyWrites::Anything,
-                };
-                (forwards_this.then(|| locals.var_key("this")), args, writes)
+                let (receiver, writes) = self.static_call_writes(target, method, locals);
+                (receiver, args, writes)
             }
             ExprKind::Call(callee, args) => {
                 let writes = match &callee.kind {
@@ -276,6 +247,18 @@ impl<'a> Checker<'a> {
             }
             _ => return,
         };
+        self.forget_call_members(receiver, args, writes, locals);
+    }
+
+    /// What a call with receiver `receiver` and arguments `args` makes stale,
+    /// given how it writes members.
+    fn forget_call_members(
+        &self,
+        receiver: Option<LocalKey>,
+        args: &[Arg],
+        writes: PropertyWrites,
+        locals: &mut Locals,
+    ) {
         let mut stale: Vec<LocalKey> = Vec::new();
         if writes > PropertyWrites::Nothing {
             stale.extend(receiver);
@@ -295,6 +278,58 @@ impl<'a> Checker<'a> {
                 purge_stale_narrowing_for(locals, key);
             }
         }
+    }
+
+    /// What a `Foo::{$name}()` call with its name known makes stale: the same as
+    /// the `Foo::name()` call it stands for.
+    fn forget_static_call_members(
+        &self,
+        target: &StaticTarget,
+        method: &Ident,
+        args: &[Arg],
+        locals: &mut Locals,
+    ) {
+        if !locals.has_state_to_forget() {
+            return;
+        }
+        let (receiver, writes) = self.static_call_writes(target, method, locals);
+        self.forget_call_members(receiver, args, writes, locals);
+    }
+
+    /// What a call to `Foo::method` may write, as the receiver whose members it
+    /// may write (`$this` for a forwarding call) and how they are written.
+    fn static_call_writes(
+        &self,
+        target: &StaticTarget,
+        method: &Ident,
+        locals: &Locals,
+    ) -> (Option<LocalKey>, PropertyWrites) {
+        let class = self.infer_static_target_class(target, locals);
+        let keyword =
+            |word: &str| matches!(target, StaticTarget::Name(name) if name.is_keyword(word));
+        let resolved = class.as_deref().and_then(|class| {
+            let (owner, sig) = if keyword("parent") {
+                self.registry
+                    .lookup_ancestor_method_with_owner(class, method)?
+            } else {
+                self.lookup_method_with_owner(class, method)?
+            };
+            let exact = !keyword("static")
+                || crate::registry::is_non_overridable(self.registry, class, &owner, method, sig);
+            Some((owner, exact))
+        });
+        let forwards_this = (keyword("self") || keyword("static") || keyword("parent"))
+            && !resolved
+                .as_ref()
+                .is_some_and(|(owner, _)| self.method_is_static(owner, method));
+        let writes = match resolved {
+            Some((owner, true)) => {
+                self.registry
+                    .method_property_writes(&owner, method, self.bodies)
+            }
+            _ => PropertyWrites::Anything,
+        };
+        (forwards_this.then(|| locals.var_key("this")), writes)
     }
 
     /// Whether `class`'s `method` is declared static.
@@ -2544,282 +2579,7 @@ impl<'a> Checker<'a> {
                 anonymous_class_type(class)
             }
             ExprKind::StaticCall(target, method, args) => {
-                if let Some(property) = target.parent_hook_property() {
-                    for a in args {
-                        self.check_expr(&a.value, locals, label);
-                    }
-                    return self.parent_hook_call_type(property, method);
-                }
-                // Mirrors ExprKind::MethodCall's own structure exactly -
-                // resolve first (self/parent/static-aware, or - for a
-                // genuinely dynamic receiver - via its own checked,
-                // inferred type), predefine byref/unknown args using the
-                // real signature before checking them, then the
-                // existence/arg-type check.
-                let resolved_class = self.resolve_static_target_class(target, locals, label);
-                // `_with_owner`, not the plain `lookup_method` - the
-                // visibility check needs the *declaring* class, which can
-                // differ from `resolved_class` for an inherited method.
-                let sig_with_owner = resolved_class
-                    .as_ref()
-                    .and_then(|class| self.static_call_method(target, class, method));
-                let sig = sig_with_owner.as_ref().map(|(_, s)| s.as_ref());
-                // The `::cases()` escape hatch - see
-                // `Checker::escaped_enums`'s own doc comment. `owner`
-                // (not `resolved_class`) is the registry's own
-                // canonically-declared name, which matters here: a
-                // differently-cased call site (`SUIT::cases()`) would
-                // silently fail to match `self.registry.classes` if
-                // keyed by `resolved_class` instead.
-                if method.eq_ignore_ascii_case("cases")
-                    && let Some((owner, _)) = &sig_with_owner
-                    && self
-                        .registry
-                        .classes
-                        .get(owner.as_ref())
-                        .is_some_and(|c| c.kind() == ClassKind::Enum)
-                {
-                    self.record_enum_escape(owner);
-                }
-                // This static call's own throw contribution.
-                if let Some(class) = &resolved_class {
-                    let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
-                    self.record_call_throw_point(dynamic_throw, sig, e.span);
-                } else {
-                    self.current_function_has_unannotated_call = true;
-                }
-                let resolved = sig
-                    .map(|s| resolve_call_args(args, s.params()))
-                    .unwrap_or_default();
-                self.maybe_record_param_name_hints(sig, args);
-                self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
-                // `Closure::bind($closure, $newThis, $scope)` makes
-                // `$this` (and, for private/protected access, the
-                // calling scope) available inside a closure that
-                // otherwise wouldn't have it - real, idiomatic PHP for
-                // reaching into an object's state from outside its class.
-                // Only special-cased when the first argument is literally
-                // a closure expression right here (not some arbitrary
-                // `Closure`-typed value) - the closure
-                // body needs to still be reachable as an `Expr` to
-                // re-check with the rebound `$this`.
-                if resolved_class.as_deref() == Some("Closure")
-                    && method == "bind"
-                    && !args.is_empty()
-                    && matches!(
-                        args[0].value.peeled().kind,
-                        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
-                    )
-                {
-                    let this_ty = args
-                        .get(1)
-                        .map(|a| self.infer_expr(&a.value, locals))
-                        .unwrap_or(Type::mixed());
-                    let scope_class = args
-                        .get(2)
-                        .and_then(|a| self.literal_class_name_from_expr(&a.value));
-                    self.check_closure_literal_with_this_and_scope(
-                        args[0].value.peeled(),
-                        locals,
-                        label,
-                        this_ty,
-                        scope_class,
-                    );
-                    for a in &args[1..] {
-                        self.check_expr(&a.value, locals, label);
-                        // `argument.unpackNonIterable` - see
-                        // `ExprKind::Call`'s identical check above.
-                        if a.spread {
-                            let spread_ty = self.infer_expr(&a.value, locals);
-                            if let Some(level) = self.failing_level(&spread_ty, 3, |m| {
-                                self.relation().is_iterable(m).no()
-                            }) {
-                                self.report(
-                                    format!("Only iterables can be unpacked, {spread_ty} given."),
-                                    a.value.span,
-                                    level,
-                                    "argument.unpackNonIterable",
-                                );
-                            }
-                        }
-                    }
-                } else {
-                    for (i, a) in args.iter().enumerate() {
-                        // `argument.unpackNonIterable` - see
-                        // `ExprKind::Call`'s identical check above.
-                        if a.spread {
-                            let spread_ty = self.infer_expr(&a.value, locals);
-                            if let Some(level) = self.failing_level(&spread_ty, 3, |m| {
-                                self.relation().is_iterable(m).no()
-                            }) {
-                                self.report(
-                                    format!("Only iterables can be unpacked, {spread_ty} given."),
-                                    a.value.span,
-                                    level,
-                                    "argument.unpackNonIterable",
-                                );
-                            }
-                        }
-                        let closure_this = sig
-                            .and_then(|s| s.params().get(i))
-                            .and_then(|p| p.closure_this_type().clone());
-                        if let Some(this_ty) = closure_this
-                            && matches!(
-                                a.value.peeled().kind,
-                                ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
-                            )
-                        {
-                            // `@param-closure-this` - see
-                            // `ExprKind::Call`'s identical branch.
-                            self.check_closure_literal_with_this_and_scope(
-                                a.value.peeled(),
-                                locals,
-                                label,
-                                this_ty,
-                                None,
-                            );
-                        } else {
-                            self.check_expr(&a.value, locals, label);
-                        }
-                    }
-                }
-                if let Some(class) = &resolved_class {
-                    // `class.nameCase` - `class_name` is the raw,
-                    // as-written text (`resolve_static_class_name` above
-                    // already resolved `self`/`parent`/`static`/a
-                    // variable target to `class`, but never touches
-                    // `class_name` itself; `check_class_name_case`'s
-                    // registry lookup harmlessly no-ops for a pseudo-
-                    // keyword like `self` or a genuinely undefined class).
-                    if let Some(raw) = target.as_name() {
-                        self.check_class_name_case(raw);
-                    }
-                    if let Some(sig) = sig {
-                        if let Some((owner, _)) = &sig_with_owner {
-                            self.check_member_visibility(MemberVisibilityCheck {
-                                member: MemberLabel {
-                                    kind: MemberKind::StaticMethod,
-                                    owner,
-                                    name: method,
-                                },
-                                visibility: &sig.visibility(),
-                                span: e.span,
-                            });
-                            self.check_internal_method_call(owner, method, sig, true, e.span);
-                            self.check_restricted_method_call(
-                                owner, method, true, args, locals, e.span,
-                            );
-                            self.check_deprecated_method_call(owner, method, sig, true, e.span);
-                            self.record_member_usage_token(
-                                UsageTokenKind::Method,
-                                owner,
-                                sig.deprecated().is_some(),
-                                sig.is_internal(),
-                                e.span,
-                            );
-                            self.record_member_ref(e.span, owner, method);
-                            self.check_static_call_context(target, class, owner, method, e.span);
-                            // Mirrors real PHPStan's
-                            // `CallPrivateMethodThroughStaticRule` - same
-                            // late-static-binding unsafety as the
-                            // identical class-constant/static-property
-                            // rules.
-                            if target.as_name().is_some_and(|n| n.is_keyword("static"))
-                                && sig.visibility() == Visibility::Private
-                            {
-                                self.check_static_private_method_access(owner, method, e.span);
-                            }
-                        }
-                        self.check_call_site_method_name_case(
-                            class,
-                            method,
-                            e.span,
-                            Span {
-                                start: static_target_end(target),
-                                end: e.span.end,
-                            },
-                        );
-                        // See the identical comment on the plain-
-                        // function Call arm above - `check_args` is
-                        // spread-aware, so it's always worth calling.
-                        let owner = sig_with_owner
-                            .as_ref()
-                            .map_or_else(|| class.to_string(), |(o, _)| o.to_string());
-                        let declared = self.registry.declared_method_name(&owner, method);
-                        let is_static = self
-                            .registry
-                            .classes
-                            .get(owner.as_str())
-                            .is_some_and(|info| info.static_methods().contains(declared.as_str()));
-                        self.check_args(CheckArgsCall {
-                            callee_label: CalleeLabel::Method { class, method },
-                            callee: Callee::StaticMethod {
-                                class: &owner,
-                                name: &declared,
-                                is_static,
-                            },
-                            sig,
-                            args,
-                            locals,
-                            defining_class: Some(class),
-                            is_builtin: self.registry.is_builtin_class(&owner),
-                            span: e.span,
-                        });
-                        self.apply_param_out_types(sig, args, locals);
-                    } else if self.registry.classes.contains_key(class.as_str())
-                        && self.registry.lookup_method(class, "__callStatic").is_none()
-                    {
-                        // Same leniency as MethodCall's own undefined-
-                        // method check: only fires once the class itself
-                        // is confirmed known, and __callStatic (the
-                        // static equivalent of __call) suppresses it
-                        // entirely, matching real PHPStan.
-                        self.report(
-                            format!("call to undefined static method {class}::{method}()"),
-                            e.span,
-                            0,
-                            "staticMethod.notFound",
-                        );
-                    } else if !self.registry.classes.contains_key(class.as_str())
-                        && !Self::class_guarded(class, locals)
-                    {
-                        // Mirrors real PHPStan's `StaticMethodCallCheck`'s
-                        // "class doesn't exist at all" half - neither
-                        // branch above fires for a genuinely undefined
-                        // class (no `sig` to check args against, and the
-                        // `contains_key` guard on the undefined-method
-                        // branch correctly excludes it too).
-                        self.report(
-                            format!("static method call target class {class} not found"),
-                            e.span,
-                            0,
-                            "class.notFound",
-                        );
-                    }
-                } else {
-                    self.check_unresolved_static_call_target(target, method, locals, e.span);
-                }
-                match (&resolved_class, sig) {
-                    (Some(class), Some(s)) => {
-                        let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
-                        let resolved_ty =
-                            self.narrow_enum_from_call(class, method, args, resolved_ty, locals);
-                        // The `::from()`/`::tryFrom()` literal-argument
-                        // signal - see `project::whole_program::
-                        // dead_enum_cases`'s own doc comment. Reads the
-                        // type `narrow_enum_from_call` just computed
-                        // rather than threading a new span parameter
-                        // through it.
-                        if let Some((case_class, case)) = resolved_ty.as_enum_case() {
-                            self.record_member_ref(e.span, case_class, case);
-                        }
-                        match self.class_argument_return(class, method, args, locals) {
-                            Some(ty) => ty,
-                            None => self.resolve_static_call_return(&resolved_ty, target, class),
-                        }
-                    }
-                    _ => Type::mixed(),
-                }
+                self.check_static_call(target, method, args, e.span, locals, label)
             }
             ExprKind::DynamicClassConstFetch(target, name) => {
                 // `$obj::{$name}`: the receiver is checked once, whatever
@@ -2841,7 +2601,7 @@ impl<'a> Checker<'a> {
                         let fetched: Vec<Type> = names
                             .into_iter()
                             .map(|n| {
-                                self.check_expr(&constant_fetch(target, n, e.span), locals, label)
+                                self.check_static_constant_fetch(target, &n, e.span, locals, label)
                             })
                             .collect();
                         self.relation().union_of(fetched)
@@ -2852,7 +2612,7 @@ impl<'a> Checker<'a> {
                             if n == "class" {
                                 Type::class_string(Type::object(class.clone().into(), Vec::new()))
                             } else {
-                                self.static_member_of_class(e, &class, None, &n, false)
+                                self.static_member_of_class(e.span, &class, None, &n, false)
                             }
                         })
                         .collect::<Vec<_>>()
@@ -2871,14 +2631,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ExprKind::ClassNameFetch(target) => {
-                // `Foo::class` / `$obj::class` is a string naming the
-                // class, not a member.
-                match self.resolve_static_target_class(target, locals, label) {
-                    Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
-                    None => Type::string(),
-                }
-            }
+            ExprKind::ClassNameFetch(target) => self.check_class_name_fetch(target, locals, label),
             ExprKind::DynamicStaticPropertyFetch(target, name) => {
                 // A computed static property name (`Foo::${$e}`/
                 // `Foo::$$e`) has no statically known name to check.
@@ -2894,10 +2647,10 @@ impl<'a> Checker<'a> {
                 Type::mixed()
             }
             ExprKind::ClassConstFetch(target, name) => {
-                self.check_static_member_fetch(e, target, name, false, locals, label)
+                self.check_static_member_fetch(e.span, target, name, false, locals, label)
             }
             ExprKind::StaticPropertyFetch(target, name) => {
-                self.check_static_member_fetch(e, target, name, true, locals, label)
+                self.check_static_member_fetch(e.span, target, name, true, locals, label)
             }
             ExprKind::DynamicVariable(name_expr) => {
                 self.check_expr(name_expr, locals, label);
@@ -3169,8 +2922,10 @@ impl<'a> Checker<'a> {
                 // `Foo::{'bar'}()`, or a name variable holding one known
                 // string: a call to that method.
                 if let [method] = &name_ty.constant_strings_text()[..] {
-                    let call = static_call(target, method.to_string(), args, e.span);
-                    return self.check_expr(&call, locals, label);
+                    let method = computed_ident(method, e.span);
+                    let call = self.check_static_call(target, &method, args, e.span, locals, label);
+                    self.forget_static_call_members(target, &method, args, locals);
+                    return call;
                 }
                 let class = self.resolve_static_target_class(target, locals, label);
                 for a in args {
@@ -4824,64 +4579,15 @@ impl<'a> Checker<'a> {
                     }
                 }
                 ExprKind::StaticCall(target, method, args) => {
-                    if let Some(property) = target.parent_hook_property() {
-                        return self.parent_hook_call_type(property, method);
-                    }
-                    if self.collect_member_refs
-                        && let Some(class) = self.infer_static_target_class(target, locals)
-                        && let Some((owner, _)) = self.lookup_method_with_owner(&class, method)
-                    {
-                        self.record_member_ref(e.span, &owner, method);
-                        // The `::cases()` escape hatch - see
-                        // `Checker::escaped_enums`'s own doc comment. `owner`
-                        // is already the registry's own canonically-declared
-                        // name (same reasoning as `check_expr`'s identical
-                        // hook).
-                        if method.eq_ignore_ascii_case("cases")
-                            && self
-                                .registry
-                                .classes
-                                .get(owner.as_ref())
-                                .is_some_and(|c| c.kind() == ClassKind::Enum)
-                        {
-                            self.record_enum_escape(&owner);
-                        }
-                    }
-                    self.infer_static_target_class(target, locals)
-                        .and_then(|class| {
-                            self.static_call_method(target, &class, method)
-                                .map(|(_, sig)| {
-                                    let sig = sig.as_ref();
-                                    let resolved_args = resolve_call_args(args, sig.params());
-                                    let resolved =
-                                        self.infer_call_return_type(sig, &resolved_args, locals);
-                                    let resolved = self.narrow_enum_from_call(
-                                        &class, method, args, resolved, locals,
-                                    );
-                                    // The `::from()`/`::tryFrom()` literal-argument
-                                    // signal - see `check_expr`'s
-                                    // identical fix just above `ExprKind::
-                                    // ClassConstFetch` for why this reads the
-                                    // already-computed type rather than
-                                    // threading a new span parameter through
-                                    // `narrow_enum_from_call`.
-                                    if let Some((case_class, case)) = resolved.as_enum_case() {
-                                        self.record_member_ref(e.span, case_class, case);
-                                    }
-                                    if let Some(ty) =
-                                        self.class_argument_return(&class, method, args, locals)
-                                    {
-                                        return ty;
-                                    }
-                                    self.resolve_static_call_return(&resolved, target, &class)
-                                })
-                        })
-                        .unwrap_or(Type::mixed())
+                    self.infer_static_call(target, method, args, e.span, locals)
                 }
                 ExprKind::DynamicStaticCall(target, name, args) => {
                     match &self.infer_expr(name, locals).constant_strings_text()[..] {
-                        [method] => self.infer_expr(
-                            &static_call(target, method.to_string(), args, e.span),
+                        [method] => self.infer_static_call(
+                            target,
+                            &computed_ident(method, e.span),
+                            args,
+                            e.span,
                             locals,
                         ),
                         _ => Type::mixed(),
@@ -4897,17 +4603,12 @@ impl<'a> Checker<'a> {
                         .into_iter()
                         .flatten()
                         .map(|member| {
-                            self.infer_expr(&constant_fetch(target, member, e.span), locals)
+                            self.infer_static_constant_fetch(target, &member, e.span, locals)
                         })
                         .union_all_with(&self.relation())
                         .unwrap_or(Type::mixed())
                 }
-                ExprKind::ClassNameFetch(target) => {
-                    match self.infer_static_target_class(target, locals) {
-                        Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
-                        None => Type::string(),
-                    }
-                }
+                ExprKind::ClassNameFetch(target) => self.infer_class_name_fetch(target, locals),
                 ExprKind::DynamicStaticPropertyFetch(target, _) => {
                     if self.collect_member_refs {
                         self.record_dynamic_static_member_escape(target);
@@ -4942,26 +4643,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::mixed())
                 }
                 ExprKind::ClassConstFetch(target, member) => {
-                    let Some(class) = self.infer_static_target_class(target, locals) else {
-                        return Type::mixed();
-                    };
-                    if self.collect_member_refs
-                        && let Some((owner, _)) =
-                            self.registry.lookup_const_with_owner(&class, member)
-                    {
-                        self.record_member_ref(e.span, &owner, member);
-                    }
-                    self.registry
-                        .lookup_const_with_owner(&class, member)
-                        .map(|(owner, cs)| {
-                            let ty = self.settings.constants.class_constant_type(
-                                &owner,
-                                member,
-                                cs.ty(),
-                            );
-                            self.resolve_pseudo(&ty, &class)
-                        })
-                        .unwrap_or(Type::mixed())
+                    self.infer_class_const_fetch(target, member, e.span, locals)
                 }
                 ExprKind::Ternary(cond, then_, else_) => {
                     let mut else_locals = locals.clone();
@@ -6085,8 +5767,15 @@ fn is_true_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(true)))
 }
 
-/// A synthetic `target::method(args)` call, for a computed method name
-/// whose value is known.
+/// The method or constant a computed member name (`Foo::{$name}`) names, at the
+/// span of the call or fetch.
+fn computed_ident(name: &str, span: Span) -> Ident {
+    Ident {
+        name: name.into(),
+        span,
+    }
+}
+
 fn unhandled_match_error() -> Type {
     Type::object("UnhandledMatchError".into(), Vec::new())
 }
@@ -6098,42 +5787,6 @@ fn forwards_static_binding(target: &StaticTarget) -> bool {
         StaticTarget::Name(n)
             if matches!(n.to_ascii_lowercase().as_str(), "parent" | "self" | "static")
     )
-}
-
-fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) -> Expr {
-    Expr {
-        id: NodeId::SYNTHETIC,
-        kind: ExprKind::StaticCall(
-            target.clone(),
-            Ident {
-                name: method.as_str().into(),
-                span,
-            },
-            args.to_vec(),
-        ),
-        span,
-    }
-}
-
-/// A synthetic `target::NAME` fetch, for a computed constant name whose
-/// possible values are known.
-fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
-    let kind = if name == "class" {
-        ExprKind::ClassNameFetch(target.clone())
-    } else {
-        ExprKind::ClassConstFetch(
-            target.clone(),
-            Ident {
-                name: name.as_str().into(),
-                span,
-            },
-        )
-    };
-    Expr {
-        id: NodeId::SYNTHETIC,
-        kind,
-        span,
-    }
 }
 
 impl Checker<'_> {
@@ -6176,12 +5829,443 @@ pub(crate) fn doctrine_query_result_list_type() -> Type {
 }
 
 impl<'a> Checker<'a> {
+    /// `Foo::method(...)` at `span`, and a computed `Foo::{$name}(...)` whose
+    /// name is known: the call's own checks and its return type.
+    fn check_static_call(
+        &mut self,
+        target: &StaticTarget,
+        method: &Ident,
+        args: &[Arg],
+        span: Span,
+        locals: &mut Locals,
+        label: &str,
+    ) -> Type {
+        if let Some(property) = target.parent_hook_property() {
+            for a in args {
+                self.check_expr(&a.value, locals, label);
+            }
+            return self.parent_hook_call_type(property, method);
+        }
+        // Mirrors ExprKind::MethodCall's own structure exactly -
+        // resolve first (self/parent/static-aware, or - for a
+        // genuinely dynamic receiver - via its own checked,
+        // inferred type), predefine byref/unknown args using the
+        // real signature before checking them, then the
+        // existence/arg-type check.
+        let resolved_class = self.resolve_static_target_class(target, locals, label);
+        // `_with_owner`, not the plain `lookup_method` - the
+        // visibility check needs the *declaring* class, which can
+        // differ from `resolved_class` for an inherited method.
+        let sig_with_owner = resolved_class
+            .as_ref()
+            .and_then(|class| self.static_call_method(target, class, method));
+        let sig = sig_with_owner.as_ref().map(|(_, s)| s.as_ref());
+        // The `::cases()` escape hatch - see
+        // `Checker::escaped_enums`'s own doc comment. `owner`
+        // (not `resolved_class`) is the registry's own
+        // canonically-declared name, which matters here: a
+        // differently-cased call site (`SUIT::cases()`) would
+        // silently fail to match `self.registry.classes` if
+        // keyed by `resolved_class` instead.
+        if method.eq_ignore_ascii_case("cases")
+            && let Some((owner, _)) = &sig_with_owner
+            && self
+                .registry
+                .classes
+                .get(owner.as_ref())
+                .is_some_and(|c| c.kind() == ClassKind::Enum)
+        {
+            self.record_enum_escape(owner);
+        }
+        // This static call's own throw contribution.
+        if let Some(class) = &resolved_class {
+            let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
+            self.record_call_throw_point(dynamic_throw, sig, span);
+        } else {
+            self.current_function_has_unannotated_call = true;
+        }
+        let resolved = sig
+            .map(|s| resolve_call_args(args, s.params()))
+            .unwrap_or_default();
+        self.maybe_record_param_name_hints(sig, args);
+        self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
+        // `Closure::bind($closure, $newThis, $scope)` makes
+        // `$this` (and, for private/protected access, the
+        // calling scope) available inside a closure that
+        // otherwise wouldn't have it - real, idiomatic PHP for
+        // reaching into an object's state from outside its class.
+        // Only special-cased when the first argument is literally
+        // a closure expression right here (not some arbitrary
+        // `Closure`-typed value) - the closure
+        // body needs to still be reachable as an `Expr` to
+        // re-check with the rebound `$this`.
+        if resolved_class.as_deref() == Some("Closure")
+            && method == "bind"
+            && !args.is_empty()
+            && matches!(
+                args[0].value.peeled().kind,
+                ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+            )
+        {
+            let this_ty = args
+                .get(1)
+                .map(|a| self.infer_expr(&a.value, locals))
+                .unwrap_or(Type::mixed());
+            let scope_class = args
+                .get(2)
+                .and_then(|a| self.literal_class_name_from_expr(&a.value));
+            self.check_closure_literal_with_this_and_scope(
+                args[0].value.peeled(),
+                locals,
+                label,
+                this_ty,
+                scope_class,
+            );
+            for a in &args[1..] {
+                self.check_expr(&a.value, locals, label);
+                // `argument.unpackNonIterable` - see
+                // `ExprKind::Call`'s identical check above.
+                if a.spread {
+                    let spread_ty = self.infer_expr(&a.value, locals);
+                    if let Some(level) =
+                        self.failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
+                    {
+                        self.report(
+                            format!("Only iterables can be unpacked, {spread_ty} given."),
+                            a.value.span,
+                            level,
+                            "argument.unpackNonIterable",
+                        );
+                    }
+                }
+            }
+        } else {
+            for (i, a) in args.iter().enumerate() {
+                // `argument.unpackNonIterable` - see
+                // `ExprKind::Call`'s identical check above.
+                if a.spread {
+                    let spread_ty = self.infer_expr(&a.value, locals);
+                    if let Some(level) =
+                        self.failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
+                    {
+                        self.report(
+                            format!("Only iterables can be unpacked, {spread_ty} given."),
+                            a.value.span,
+                            level,
+                            "argument.unpackNonIterable",
+                        );
+                    }
+                }
+                let closure_this = sig
+                    .and_then(|s| s.params().get(i))
+                    .and_then(|p| p.closure_this_type().clone());
+                if let Some(this_ty) = closure_this
+                    && matches!(
+                        a.value.peeled().kind,
+                        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                    )
+                {
+                    // `@param-closure-this` - see
+                    // `ExprKind::Call`'s identical branch.
+                    self.check_closure_literal_with_this_and_scope(
+                        a.value.peeled(),
+                        locals,
+                        label,
+                        this_ty,
+                        None,
+                    );
+                } else {
+                    self.check_expr(&a.value, locals, label);
+                }
+            }
+        }
+        if let Some(class) = &resolved_class {
+            // `class.nameCase` - `class_name` is the raw,
+            // as-written text (`resolve_static_class_name` above
+            // already resolved `self`/`parent`/`static`/a
+            // variable target to `class`, but never touches
+            // `class_name` itself; `check_class_name_case`'s
+            // registry lookup harmlessly no-ops for a pseudo-
+            // keyword like `self` or a genuinely undefined class).
+            if let Some(raw) = target.as_name() {
+                self.check_class_name_case(raw);
+            }
+            if let Some(sig) = sig {
+                if let Some((owner, _)) = &sig_with_owner {
+                    self.check_member_visibility(MemberVisibilityCheck {
+                        member: MemberLabel {
+                            kind: MemberKind::StaticMethod,
+                            owner,
+                            name: method,
+                        },
+                        visibility: &sig.visibility(),
+                        span,
+                    });
+                    self.check_internal_method_call(owner, method, sig, true, span);
+                    self.check_restricted_method_call(owner, method, true, args, locals, span);
+                    self.check_deprecated_method_call(owner, method, sig, true, span);
+                    self.record_member_usage_token(
+                        UsageTokenKind::Method,
+                        owner,
+                        sig.deprecated().is_some(),
+                        sig.is_internal(),
+                        span,
+                    );
+                    self.record_member_ref(span, owner, method);
+                    self.check_static_call_context(target, class, owner, method, span);
+                    // Mirrors real PHPStan's
+                    // `CallPrivateMethodThroughStaticRule` - same
+                    // late-static-binding unsafety as the
+                    // identical class-constant/static-property
+                    // rules.
+                    if target.as_name().is_some_and(|n| n.is_keyword("static"))
+                        && sig.visibility() == Visibility::Private
+                    {
+                        self.check_static_private_method_access(owner, method, span);
+                    }
+                }
+                self.check_call_site_method_name_case(
+                    class,
+                    method,
+                    span,
+                    Span {
+                        start: static_target_end(target),
+                        end: span.end,
+                    },
+                );
+                // See the identical comment on the plain-
+                // function Call arm above - `check_args` is
+                // spread-aware, so it's always worth calling.
+                let owner = sig_with_owner
+                    .as_ref()
+                    .map_or_else(|| class.to_string(), |(o, _)| o.to_string());
+                let declared = self.registry.declared_method_name(&owner, method);
+                let is_static = self
+                    .registry
+                    .classes
+                    .get(owner.as_str())
+                    .is_some_and(|info| info.static_methods().contains(declared.as_str()));
+                self.check_args(CheckArgsCall {
+                    callee_label: CalleeLabel::Method { class, method },
+                    callee: Callee::StaticMethod {
+                        class: &owner,
+                        name: &declared,
+                        is_static,
+                    },
+                    sig,
+                    args,
+                    locals,
+                    defining_class: Some(class),
+                    is_builtin: self.registry.is_builtin_class(&owner),
+                    span,
+                });
+                self.apply_param_out_types(sig, args, locals);
+            } else if self.registry.classes.contains_key(class.as_str())
+                && self.registry.lookup_method(class, "__callStatic").is_none()
+            {
+                // Same leniency as MethodCall's own undefined-
+                // method check: only fires once the class itself
+                // is confirmed known, and __callStatic (the
+                // static equivalent of __call) suppresses it
+                // entirely, matching real PHPStan.
+                self.report(
+                    format!("call to undefined static method {class}::{method}()"),
+                    span,
+                    0,
+                    "staticMethod.notFound",
+                );
+            } else if !self.registry.classes.contains_key(class.as_str())
+                && !Self::class_guarded(class, locals)
+            {
+                // Mirrors real PHPStan's `StaticMethodCallCheck`'s
+                // "class doesn't exist at all" half - neither
+                // branch above fires for a genuinely undefined
+                // class (no `sig` to check args against, and the
+                // `contains_key` guard on the undefined-method
+                // branch correctly excludes it too).
+                self.report(
+                    format!("static method call target class {class} not found"),
+                    span,
+                    0,
+                    "class.notFound",
+                );
+            }
+        } else {
+            self.check_unresolved_static_call_target(target, method, locals, span);
+        }
+        match (&resolved_class, sig) {
+            (Some(class), Some(s)) => {
+                let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
+                let resolved_ty =
+                    self.narrow_enum_from_call(class, method, args, resolved_ty, locals);
+                // The `::from()`/`::tryFrom()` literal-argument
+                // signal - see `project::whole_program::
+                // dead_enum_cases`'s own doc comment. Reads the
+                // type `narrow_enum_from_call` just computed
+                // rather than threading a new span parameter
+                // through it.
+                if let Some((case_class, case)) = resolved_ty.as_enum_case() {
+                    self.record_member_ref(span, case_class, case);
+                }
+                match self.class_argument_return(class, method, args, locals) {
+                    Some(ty) => ty,
+                    None => self.resolve_static_call_return(&resolved_ty, target, class),
+                }
+            }
+            _ => Type::mixed(),
+        }
+    }
+
+    /// `Foo::class` / `$obj::class`: a string naming the class, not a member.
+    fn check_class_name_fetch(
+        &mut self,
+        target: &StaticTarget,
+        locals: &mut Locals,
+        label: &str,
+    ) -> Type {
+        // `Foo::class` / `$obj::class` is a string naming the
+        // class, not a member.
+        match self.resolve_static_target_class(target, locals, label) {
+            Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
+            None => Type::string(),
+        }
+    }
+
+    /// `Foo::{$name}` with the name known: the class name for `class`, a
+    /// constant otherwise.
+    fn check_static_constant_fetch(
+        &mut self,
+        target: &StaticTarget,
+        name: &str,
+        span: Span,
+        locals: &mut Locals,
+        label: &str,
+    ) -> Type {
+        if name == "class" {
+            self.check_class_name_fetch(target, locals, label)
+        } else {
+            self.check_static_member_fetch(span, target, name, false, locals, label)
+        }
+    }
+
+    /// `Foo::method(...)` for inference: the call's return type.
+    fn infer_static_call(
+        &self,
+        target: &StaticTarget,
+        method: &Ident,
+        args: &[Arg],
+        span: Span,
+        locals: &Locals,
+    ) -> Type {
+        if let Some(property) = target.parent_hook_property() {
+            return self.parent_hook_call_type(property, method);
+        }
+        if self.collect_member_refs
+            && let Some(class) = self.infer_static_target_class(target, locals)
+            && let Some((owner, _)) = self.lookup_method_with_owner(&class, method)
+        {
+            self.record_member_ref(span, &owner, method);
+            // The `::cases()` escape hatch - see
+            // `Checker::escaped_enums`'s own doc comment. `owner`
+            // is already the registry's own canonically-declared
+            // name (same reasoning as `check_expr`'s identical
+            // hook).
+            if method.eq_ignore_ascii_case("cases")
+                && self
+                    .registry
+                    .classes
+                    .get(owner.as_ref())
+                    .is_some_and(|c| c.kind() == ClassKind::Enum)
+            {
+                self.record_enum_escape(&owner);
+            }
+        }
+        self.infer_static_target_class(target, locals)
+            .and_then(|class| {
+                self.static_call_method(target, &class, method)
+                    .map(|(_, sig)| {
+                        let sig = sig.as_ref();
+                        let resolved_args = resolve_call_args(args, sig.params());
+                        let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
+                        let resolved =
+                            self.narrow_enum_from_call(&class, method, args, resolved, locals);
+                        // The `::from()`/`::tryFrom()` literal-argument
+                        // signal - see `check_expr`'s
+                        // identical fix just above `ExprKind::
+                        // ClassConstFetch` for why this reads the
+                        // already-computed type rather than
+                        // threading a new span parameter through
+                        // `narrow_enum_from_call`.
+                        if let Some((case_class, case)) = resolved.as_enum_case() {
+                            self.record_member_ref(span, case_class, case);
+                        }
+                        if let Some(ty) = self.class_argument_return(&class, method, args, locals) {
+                            return ty;
+                        }
+                        self.resolve_static_call_return(&resolved, target, &class)
+                    })
+            })
+            .unwrap_or(Type::mixed())
+    }
+
+    /// `Foo::class` / `$obj::class` for inference.
+    fn infer_class_name_fetch(&self, target: &StaticTarget, locals: &Locals) -> Type {
+        match self.infer_static_target_class(target, locals) {
+            Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
+            None => Type::string(),
+        }
+    }
+
+    /// `Foo::BAR` for inference: the constant's type.
+    fn infer_class_const_fetch(
+        &self,
+        target: &StaticTarget,
+        member: &Ident,
+        span: Span,
+        locals: &Locals,
+    ) -> Type {
+        let Some(class) = self.infer_static_target_class(target, locals) else {
+            return Type::mixed();
+        };
+        if self.collect_member_refs
+            && let Some((owner, _)) = self.registry.lookup_const_with_owner(&class, member)
+        {
+            self.record_member_ref(span, &owner, member);
+        }
+        self.registry
+            .lookup_const_with_owner(&class, member)
+            .map(|(owner, cs)| {
+                let ty = self
+                    .settings
+                    .constants
+                    .class_constant_type(&owner, member, cs.ty());
+                self.resolve_pseudo(&ty, &class)
+            })
+            .unwrap_or(Type::mixed())
+    }
+
+    /// `Foo::{$name}` with the name known, for inference.
+    fn infer_static_constant_fetch(
+        &self,
+        target: &StaticTarget,
+        name: &str,
+        span: Span,
+        locals: &Locals,
+    ) -> Type {
+        if name == "class" {
+            self.infer_class_name_fetch(target, locals)
+        } else {
+            let member = computed_ident(name, span);
+            self.infer_class_const_fetch(target, &member, span, locals)
+        }
+    }
+
     /// `Foo::BAR` (`is_property` false) or `Foo::$bar` (true): the
     /// member's type, reporting an unknown class or member, visibility,
     /// deprecation and internal-use problems.
     fn check_static_member_fetch(
         &mut self,
-        e: &Expr,
+        span: Span,
         target: &StaticTarget,
         member: &str,
         is_property: bool,
@@ -6195,7 +6279,7 @@ impl<'a> Checker<'a> {
                 let Some(class) = receiver_class(self.check_expr(receiver, locals, label)) else {
                     return Type::mixed();
                 };
-                return self.static_member_of_class(e, &class, None, member, is_property);
+                return self.static_member_of_class(span, &class, None, member, is_property);
             }
         };
         // A static property (`self::$prop`) can be narrowed the
@@ -6216,14 +6300,14 @@ impl<'a> Checker<'a> {
         if Self::class_guarded(&class, locals) && self.registry.lookup_class(&class).is_none() {
             return Type::mixed();
         }
-        self.static_member_of_class(e, &class, Some(class_name), member, is_property)
+        self.static_member_of_class(span, &class, Some(class_name), member, is_property)
     }
 
     /// `check_static_member_fetch` once the class is known; `written` is
     /// the class name as written, absent for a receiver expression.
     fn static_member_of_class(
         &mut self,
-        e: &Expr,
+        span: Span,
         class: &str,
         written: Option<&QualifiedName>,
         member: &str,
@@ -6254,7 +6338,7 @@ impl<'a> Checker<'a> {
             };
             self.report(
                 format!("{subject} target class {class} not found"),
-                e.span,
+                span,
                 0,
                 "class.notFound",
             );
@@ -6282,22 +6366,22 @@ impl<'a> Checker<'a> {
             if !is_valid_static {
                 self.report(
                     format!("access to undefined static property {class}::${prop_name}"),
-                    e.span,
+                    span,
                     0,
                     "staticProperty.notFound",
                 );
             } else if let Some((owner, sig)) = &prop_with_owner {
-                self.check_internal_property_access(owner, prop_name, sig, e.span);
-                self.check_restricted_property_access(owner, prop_name, true, e.span);
-                self.check_deprecated_property_access(owner, prop_name, sig, e.span);
+                self.check_internal_property_access(owner, prop_name, sig, span);
+                self.check_restricted_property_access(owner, prop_name, true, span);
+                self.check_deprecated_property_access(owner, prop_name, sig, span);
                 self.record_member_usage_token(
                     UsageTokenKind::Property,
                     owner,
                     sig.deprecated().is_some(),
                     sig.is_internal(),
-                    e.span,
+                    span,
                 );
-                self.record_member_ref(e.span, owner, prop_name);
+                self.record_member_ref(span, owner, prop_name);
                 // A static property shares the exact same
                 // visibility rules as an instance one ("Cannot
                 // access private property" is a real fatal error
@@ -6309,7 +6393,7 @@ impl<'a> Checker<'a> {
                         name: prop_name,
                     },
                     visibility: &sig.visibility(),
-                    span: e.span,
+                    span,
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivatePropertyThroughStaticRule` - same
@@ -6318,7 +6402,7 @@ impl<'a> Checker<'a> {
                 if written.is_some_and(|n| n.is_keyword("static"))
                     && sig.visibility() == Visibility::Private
                 {
-                    self.check_static_private_property_access(owner, prop_name, e.span);
+                    self.check_static_private_property_access(owner, prop_name, span);
                 }
             }
             prop_with_owner
@@ -6334,22 +6418,22 @@ impl<'a> Checker<'a> {
             if const_ty.is_none() {
                 self.report(
                     format!("access to undefined constant {class}::{member}"),
-                    e.span,
+                    span,
                     0,
                     "classConstant.notFound",
                 );
             } else if let Some((owner, cs)) = &const_with_owner {
-                self.check_internal_class_constant_access(owner, member, cs, e.span);
-                self.check_restricted_class_constant_access(owner, member, e.span);
-                self.check_deprecated_class_constant_access(owner, member, cs, e.span);
+                self.check_internal_class_constant_access(owner, member, cs, span);
+                self.check_restricted_class_constant_access(owner, member, span);
+                self.check_deprecated_class_constant_access(owner, member, cs, span);
                 self.record_member_usage_token(
                     UsageTokenKind::ClassConstant,
                     owner,
                     cs.deprecated().is_some(),
                     cs.is_internal(),
-                    e.span,
+                    span,
                 );
-                self.record_member_ref(e.span, owner, member);
+                self.record_member_ref(span, owner, member);
                 self.check_member_visibility(MemberVisibilityCheck {
                     member: MemberLabel {
                         kind: MemberKind::Constant,
@@ -6357,14 +6441,14 @@ impl<'a> Checker<'a> {
                         name: member,
                     },
                     visibility: &cs.visibility(),
-                    span: e.span,
+                    span,
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivateConstantThroughStaticRule`.
                 if written.is_some_and(|n| n.is_keyword("static"))
                     && cs.visibility() == Visibility::Private
                 {
-                    self.check_static_private_constant_access(owner, member, e.span);
+                    self.check_static_private_constant_access(owner, member, span);
                 }
             }
             const_ty
