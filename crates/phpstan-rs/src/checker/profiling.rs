@@ -26,7 +26,10 @@ macro_rules! measure_outermost {
                 }
                 ACTIVE.set(true);
                 let _exit = Exit;
-                hotpath::measure_block!($label, $body)
+                // A block is not a literal: a literal label makes hotpath export
+                // a symbol to check that the label is unique, which `unsafe_code`
+                // denies.
+                hotpath::measure_block!({ $label }, $body)
             }
         }
         #[cfg(not(feature = "hotpath"))]
