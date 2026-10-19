@@ -170,6 +170,10 @@ pub fn hashed_ancestors(
         let mut hash = 0;
         for (component, ancestor) in components {
             hash = component_hash(hash, component);
+            // A prefix is part of every ancestor's path and ends none.
+            if matches!(component, Component::Prefix(_)) {
+                continue;
+            }
             let name = match component {
                 Component::Normal(name) => Some(name),
                 _ => None,

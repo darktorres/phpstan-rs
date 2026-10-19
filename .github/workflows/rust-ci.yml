@@ -217,6 +217,11 @@ jobs:
         run: cargo test --locked --lib --manifest-path patches/dhat/Cargo.toml
         env:
           RUSTFLAGS: -D warnings -Z threads=8 -C force-frame-pointers=yes
+      # What reading a path from its bytes costs against asking `Path`, on
+      # each platform's own grammar. The times are in the log.
+      - name: The path_bytes bench
+        if: ${{ !cancelled() }}
+        run: cargo bench -p phpstan-rs-path-bytes -- --warm-up-time 1 --measurement-time 2
 
   platform-fixtures:
     strategy:

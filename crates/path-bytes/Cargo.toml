@@ -8,5 +8,12 @@ license.workspace = true
 [lib]
 name = "path_bytes"
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "path_bytes"
+harness = false
+
 [lints]
 workspace = true

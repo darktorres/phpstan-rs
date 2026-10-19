@@ -1675,6 +1675,9 @@ dependencies = [
 [[package]]
 name = "phpstan-rs-path-bytes"
 version = "0.1.0"
+dependencies = [
+ "criterion",
+]
 
 [[package]]
 name = "phpstan-rs-phpdoc"

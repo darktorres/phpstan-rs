@@ -4,11 +4,29 @@
 //! components are: no empty component, no `.` component and no trailing
 //! separator. Read so, the byte that ends a component is a separator, and a
 //! component's bytes are its name.
+//!
+//! Each platform spells such a path its own way, and has its own reader:
+//!
+//! - On Unix a path is `/` followed by names separated by `/`, or names alone.
+//!   A name is bytes, and every name is read.
+//! - On Windows (`windows`) it is a drive and its root (`C:\`) followed by
+//!   names separated by `\`, or names alone, the first of which is not a
+//!   drive. A name has to be Unicode to be read. Any other spelling is left to
+//!   `Path`: a `/` where the answer depends on it, a root without a drive
+//!   (`\a`), a drive without a root (`C:a`), a share, a device or a verbatim
+//!   prefix, and a `.` or empty component.
+//! - On any other platform every answer is `Path`'s own.
+//!
+//! The Windows reader is made of bytes alone, so its tests are built on every
+//! platform, and the reader is used on Windows.
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
 use std::ffi::OsStr;
 use std::path::{Component, Path};
+
+#[cfg(any(windows, test))]
+mod windows;
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +37,10 @@ pub fn file_name(path: &Path) -> Option<&OsStr> {
     if let Some(name) = last_name(path.as_os_str().as_encoded_bytes()) {
         return Some(os_str_of(name));
     }
+    #[cfg(windows)]
+    if let Some(name) = windows::file_name(path) {
+        return Some(name);
+    }
     path.file_name()
 }
 
@@ -27,6 +49,10 @@ pub fn parent(path: &Path) -> Option<&Path> {
     #[cfg(unix)]
     if let Some((dir, _)) = split_bytes(path.as_os_str().as_encoded_bytes()) {
         return Some(Path::new(os_str_of(dir)));
+    }
+    #[cfg(windows)]
+    if let Some(dir) = windows::parent(path) {
+        return Some(dir);
     }
     path.parent()
 }
@@ -37,6 +63,10 @@ pub fn split(path: &Path) -> Option<(&Path, &OsStr)> {
     #[cfg(unix)]
     if let Some((dir, name)) = split_bytes(path.as_os_str().as_encoded_bytes()) {
         return Some((Path::new(os_str_of(dir)), os_str_of(name)));
+    }
+    #[cfg(windows)]
+    if let Some(split) = windows::split(path) {
+        return Some(split);
     }
     path.parent().zip(path.file_name())
 }
@@ -54,6 +84,10 @@ pub fn has_file_name(path: &Path, name: &str) -> bool {
                 .strip_suffix(name.as_bytes())
                 .is_some_and(|dir| dir.is_empty() || dir.ends_with(b"/"));
         }
+    }
+    #[cfg(windows)]
+    if let Some(has) = windows::has_file_name(path, name) {
+        return has;
     }
     path.file_name() == Some(OsStr::new(name))
 }
@@ -74,6 +108,10 @@ pub fn starts_with(path: &Path, base: &Path) -> bool {
         base.as_os_str().as_encoded_bytes(),
     ) {
         return end.is_some();
+    }
+    #[cfg(windows)]
+    if let Some(starts) = windows::starts_with(path, base) {
+        return starts;
     }
     path.starts_with(base)
 }
@@ -96,6 +134,10 @@ pub fn strip_prefix<'p>(path: &'p Path, base: &Path) -> Option<&'p Path> {
             None => {}
         }
     }
+    #[cfg(windows)]
+    if let Some(stripped) = windows::strip_prefix(path, base) {
+        return stripped;
+    }
     path.strip_prefix(base).ok()
 }
 
@@ -109,7 +151,11 @@ pub fn is_normal_absolute(path: &Path) -> bool {
         let bytes = path.as_os_str().as_encoded_bytes();
         bytes.first() == Some(&b'/') && plain(bytes) == Some(false)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows::is_normal_absolute(path)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = path;
         false
@@ -117,9 +163,10 @@ pub fn is_normal_absolute(path: &Path) -> bool {
 }
 
 /// The components of `path`, from the top, as `Path::components` gives them,
-/// each with the ancestor of `path` that it ends, as `Path::ancestors` gives
-/// them; `None` when the bytes do not tell. A relative path's top ancestor,
-/// the empty path, ends no component.
+/// each with the path made of the components up to it: the ancestor of `path`
+/// that it ends, as `Path::ancestors` gives them, except for a prefix, which
+/// ends none and comes with its own text. `None` when the bytes do not tell.
+/// A relative path's top ancestor, the empty path, ends no component.
 pub fn components(path: &Path) -> Option<impl Iterator<Item = (Component<'_>, &Path)>> {
     #[cfg(unix)]
     {
@@ -145,7 +192,11 @@ pub fn components(path: &Path) -> Option<impl Iterator<Item = (Component<'_>, &P
         let root = root.then(|| (Component::RootDir, Path::new(os_str_of(&bytes[..1]))));
         Some(root.into_iter().chain(names))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows::components(path)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = path;
         None::<std::iter::Empty<(Component<'_>, &Path)>>
