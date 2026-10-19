@@ -175,17 +175,26 @@ pub(crate) fn wants_colour(stdout_is_terminal: bool, no_color: Option<&OsStr>) -
     stdout_is_terminal && no_color.is_none_or(OsStr::is_empty)
 }
 
-/// Prints the friendly report. The escapes of a coloured one reach a Windows
-/// console only through `anstream`, which turns on the console's
-/// virtual-terminal processing, or translates the escapes for a console that
-/// has none. Elsewhere it passes them on as they are.
-fn print_friendly(report: &str, colour: bool) {
-    if colour {
-        anstream::AutoStream::always(std::io::stdout())
-            .write_all(report.as_bytes())
-            .expect("failed printing to stdout");
+/// Writes the report to stdout in one piece. A coloured report's escapes
+/// reach a Windows console only through `anstream`, which turns on the
+/// console's virtual-terminal processing, or translates the escapes for a
+/// console that has none; elsewhere they pass as they are. A closed pipe ends
+/// the run quietly with status 141, the status of a process that SIGPIPE
+/// ended; any other failure is printed and ends the run with status 1.
+fn write_stdout(report: &[u8], colour: bool) {
+    let written = if colour {
+        anstream::AutoStream::always(std::io::stdout()).write_all(report)
     } else {
-        print!("{report}");
+        std::io::stdout().lock().write_all(report)
+    }
+    .and_then(|()| std::io::stdout().flush());
+    match written {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => std::process::exit(141),
+        Err(e) => {
+            eprintln!("failed to write the report: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -269,6 +278,10 @@ fn report(
     // rest would need their own stable fields to add without guessing at
     // what a consumer wants, so they're left for a real request rather
     // than invented here).
+    // The report is built whole and written once, so a closed pipe is found
+    // by one write, not by whichever `println!` meets it first.
+    let mut out: Vec<u8> = Vec::new();
+    let mut colour = false;
     match format {
         OutputFormat::Text | OutputFormat::Friendly => {
             let mut paths: Vec<&PathBuf> = results.keys().collect();
@@ -277,25 +290,31 @@ fn report(
             let mut total = 0usize;
             if format == OutputFormat::Friendly {
                 use std::io::IsTerminal;
-                let colour = wants_colour(
+                colour = wants_colour(
                     std::io::stdout().is_terminal(),
                     std::env::var_os("NO_COLOR").as_deref(),
                 );
-                print_friendly(&output::render_friendly(&results, colour), colour);
+                out.extend_from_slice(output::render_friendly(&results, colour).as_bytes());
                 total = results.values().map(Vec::len).sum();
             } else {
                 for path in paths {
                     for d in &results[path] {
-                        println!("{}:{}", path.display(), output::diagnostic_line(d));
+                        writeln!(out, "{}:{}", path.display(), output::diagnostic_line(d))
+                            .expect("a vector takes every write");
                         if let Some(tip) = d.tip_text() {
-                            println!("    💡 {tip}");
+                            writeln!(out, "    💡 {tip}").expect("a vector takes every write");
                         }
                         total += 1;
                     }
                 }
             }
             for (path, msg) in &check_panics {
-                println!("{}: internal error while checking: {msg}", path.display());
+                writeln!(
+                    out,
+                    "{}: internal error while checking: {msg}",
+                    path.display()
+                )
+                .expect("a vector takes every write");
             }
             let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");
             let mut extras = Vec::new();
@@ -315,23 +334,19 @@ fn report(
             if !extras.is_empty() {
                 summary.push_str(&format!(" ({})", extras.join(", ")));
             }
-            println!("{summary}");
+            writeln!(out, "{summary}").expect("a vector takes every write");
         }
         OutputFormat::Json => {
-            use std::io::Write as _;
-            let mut stdout = std::io::BufWriter::new(std::io::stdout().lock());
-            let written = output::write_json(&mut stdout, &results, checked)
-                .and_then(|()| writeln!(stdout))
-                .and_then(|()| stdout.flush());
-            if let Err(e) = written {
-                eprintln!("failed to write the JSON report: {e}");
-            }
+            output::write_json(&mut out, &results, checked)
+                .and_then(|()| writeln!(out))
+                .expect("a vector takes every write");
         }
         OutputFormat::Checkstyle => {
-            print!("{}", output::render_checkstyle(&results));
+            out.extend_from_slice(output::render_checkstyle(&results).as_bytes());
         }
         OutputFormat::Junit => {
-            print!("{}", output::render_junit(&results));
+            out.extend_from_slice(output::render_junit(&results).as_bytes());
         }
     }
+    write_stdout(&out, colour);
 }

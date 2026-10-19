@@ -11,6 +11,7 @@
 mod common;
 
 use common::{TempDir, bin};
+use std::process::Stdio;
 
 #[test]
 fn check_reports_every_file_parsed_with_zero_failures() {
@@ -1284,6 +1285,33 @@ fn check_project_format_rejects_an_unknown_value() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("yaml"), "got: {stderr}");
+}
+
+#[test]
+fn check_project_ends_quietly_with_status_141_when_its_stdout_is_closed() {
+    let dir = TempDir::new("check_project_closed_stdout");
+    dir.write(
+        "bad.php",
+        "<?php function f(): mixed { return $undefinedVar; }",
+    );
+
+    for format in ["text", "friendly", "json", "checkstyle", "junit"] {
+        let mut child = bin()
+            .arg("check-project")
+            .arg(dir.path())
+            .args(["--format", format])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // The reader closes before the report is written, so the report's
+        // write meets a closed pipe.
+        drop(child.stdout.take());
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(141), "{format}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{format}: {stderr}");
+    }
 }
 
 #[test]
