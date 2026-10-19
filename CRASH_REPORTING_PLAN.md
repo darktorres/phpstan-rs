@@ -174,7 +174,7 @@ At `56c3beab`:
   `--enable-linker-build-id`. `[profile.release]` has no debug info
   (`lto = "thin"`, `codegen-units = 1`), and `[profile.gate]` inherits it.
 - **Release:** five targets (`x86_64`/`aarch64-unknown-linux-gnu` on
-  ubuntu-24.04, the aarch64 one cross-compiled;
+  ubuntu-26.04 and ubuntu-26.04-arm, the aarch64 one native;
   `aarch64`/`x86_64-apple-darwin`; `x86_64-pc-windows-msvc`), built with
   `cargo build --release`, gzipped and attached to the GitHub release. The
   VS Code extension downloads them and starts `phpstan-rs lsp` with no
@@ -186,9 +186,10 @@ At `56c3beab`:
   integration tests (`tests/cli.rs`, `lsp_exit_code.rs`, `version.rs`)
   spawn `phpstan-rs` with the developer's environment. `tools/gate-runner`
   uses the library in-process. The fuzz targets call `syntax` directly.
-- **CI:** `rust-ci.yml` runs on ubuntu-24.04 only. `deny.toml` allows MIT,
-  Apache-2.0, ISC and similar licences. `clippy.toml` already bans randomly
-  seeded hash types through `disallowed-types`.
+- **CI:** `rust-ci.yml` runs its lint and tests on ubuntu-26.04, and its
+  platform jobs on macOS, Windows and ubuntu-26.04-arm. `deny.toml` allows
+  MIT, Apache-2.0, ISC and similar licences. `clippy.toml` already bans
+  randomly seeded hash types through `disallowed-types`.
 - **No cache directory exists yet.** Stage F2 names the user cache
   directory (`$XDG_CACHE_HOME/phpstan-rs` or the platform equivalent) for
   the result cache.
@@ -1013,7 +1014,7 @@ server. `tools/gate-runner` never calls `init`.
   Each job uploads the stripped binary and its debug file as an artifact
   (`actions/upload-artifact`, pinned by commit SHA like the workflow's
   other actions) and packages the stripped binary as today.
-- **An `upload-debug-files` job** on ubuntu-24.04, after every build job,
+- **An `upload-debug-files` job** on ubuntu-26.04, after every build job,
   checks out with `fetch-depth: 0`, downloads the artifacts
   (`actions/download-artifact`, pinned) and `sentry-cli-Linux-x86_64`
   3.8.0, checks its SHA-256 (§4), then runs `debug-files check` on every

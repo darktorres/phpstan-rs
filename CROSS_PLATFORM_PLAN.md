@@ -252,7 +252,7 @@ The `platforms` job below is now three jobs, `platform-check`, `platform-test` a
 `platform-fixtures`, on the same runners (`rust-ci.yml`, commit a9f1c05d).
 
 - A `platforms` job in `rust-ci.yml`:
-  - Matrix: `macos-26` (arm64), `windows-2025-vs2026` (x64) and `ubuntu-24.04-arm` (aarch64
+  - Matrix: `macos-26` (arm64), `windows-2025-vs2026` (x64) and `ubuntu-26.04-arm` (aarch64
     Linux, free for public repositories). This repository is public.
   - Checkout: LF (`git config --global core.autocrlf false` before checkout), the phpstan-src
     submodule, the pinned toolchain and the caches, as the `gates` job has them.
@@ -282,8 +282,8 @@ The `platforms` job below is now three jobs, `platform-check`, `platform-test` a
 - The toolchain cache key adds `runner.arch` in every workflow, since an x64 and an arm64 Linux
   leg now share `runner.os`.
 - `release.yml`:
-  - The aarch64 Linux leg builds natively on `ubuntu-24.04-arm` and runs its binary. This
-    replaces the cross toolchain step. The image's glibc is 2.39, as `ubuntu-24.04`'s, and the
+  - The aarch64 Linux leg builds natively on `ubuntu-26.04-arm` and runs its binary. This
+    replaces the cross toolchain step. The image's glibc is 2.43, as `ubuntu-26.04`'s, and the
     README's note names both images.
   - The x86_64 macOS binary runs under Rosetta on the arm64 runner (`arch -x86_64`). The image's
     software list does not name Rosetta 2, so the leg installs it when `arch -x86_64
