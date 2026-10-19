@@ -166,7 +166,7 @@ impl PackageContext {
             let mut dirs: Vec<PathBuf> = manifest
                 .installed
                 .iter()
-                .filter_map(|package| layout.installed_dir(&package.install_dir))
+                .filter_map(|package| layout.bundled_dir(&package.install_dir))
                 .filter(|dir| Some(dir) != installed.as_ref())
                 .collect();
             dirs.sort();

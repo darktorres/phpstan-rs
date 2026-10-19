@@ -124,6 +124,15 @@ impl<'a> Layout<'a> {
         self.vendor_location(root).installed.clone()
     }
 
+    /// The vendor directory a package bundles, when Composer built it: the
+    /// package's own `vendor` directory, which its autoloader loads by name
+    /// (`__DIR__ . '/vendor/autoload.php'`) whatever its manifest says. Only
+    /// the marks are read, so a package without one costs no manifest read.
+    pub fn bundled_dir(&self, package: &Path) -> Option<PathBuf> {
+        let dir = package.join("vendor");
+        self.written_into(&dir).then_some(dir)
+    }
+
     fn variable(&self, name: &str) -> Option<OsString> {
         (self.variables)(OsStr::new(name))
     }
