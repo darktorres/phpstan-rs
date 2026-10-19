@@ -14,6 +14,7 @@ mod file_discovery_and_misc;
 mod file_removal;
 mod file_tables;
 mod fix_line_breaks;
+mod fix_on_disk;
 mod fused_declarations;
 mod include_environment;
 mod incremental_updates;

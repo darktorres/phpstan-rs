@@ -180,6 +180,9 @@ pub struct Session {
     stub_dirs: Vec<PathBuf>,
     level: u8,
     emission_order: bool,
+    /// Whether the analysis keeps each analysed file's digest, which
+    /// `apply_fixes_to_disk` checks the bytes it writes against.
+    keep_digests: bool,
     banned_constructs: Vec<banned::BannedConstruct>,
     banned_types: Vec<String>,
     check_closed_classes: bool,
@@ -539,6 +542,66 @@ impl Report {
     }
 }
 
+/// What `--fix` did to the files on disk, and what it left alone.
+#[derive(Debug, Default)]
+pub struct FixOutcome {
+    /// Files whose fixes were written.
+    pub fixed_files: usize,
+    /// The fixes written to `fixed_files`.
+    pub applied: usize,
+    /// Files with fixes whose bytes changed since the analysis read them: the
+    /// fixes were computed from other bytes, so the file keeps its own.
+    pub changed_since_analysis: Vec<PathBuf>,
+    /// Files that could not be read or written, one message each.
+    pub failures: Vec<String>,
+}
+
+/// Writes the fixes of `results` to the files they name, but only to a file
+/// whose bytes still have the digest `read_digests` holds for it.
+pub fn apply_fixes_to_disk(
+    results: &FxHashMap<PathBuf, Vec<Diagnostic>>,
+    read_digests: &FxHashMap<PathBuf, u128>,
+) -> FixOutcome {
+    let mut outcome = FixOutcome::default();
+    let mut paths: Vec<&PathBuf> = results.keys().collect();
+    paths.sort();
+    for path in paths {
+        let diagnostics = &results[path];
+        if !diagnostics.iter().any(|d| d.fix.is_some()) {
+            continue;
+        }
+        let source = match std::fs::read(path) {
+            Ok(source) => source,
+            Err(e) => {
+                outcome.failures.push(format!(
+                    "failed to read {} to apply fixes: {e}",
+                    path.display()
+                ));
+                continue;
+            }
+        };
+        if read_digests.get(path) != Some(&super::source::content_hash(&source)) {
+            outcome.changed_since_analysis.push(path.clone());
+            continue;
+        }
+        let (fixed, applied) =
+            diagnostics::fix::apply_fixes(&source, diagnostics::fix::fixes_of(diagnostics));
+        if applied == 0 || fixed == source {
+            continue;
+        }
+        match std::fs::write(path, fixed) {
+            Ok(()) => {
+                outcome.fixed_files += 1;
+                outcome.applied += applied;
+            }
+            Err(e) => outcome
+                .failures
+                .push(format!("failed to write fixes to {}: {e}", path.display())),
+        }
+    }
+    outcome
+}
+
 impl AnalysisResult {
     /// What the analysis says beyond its diagnostics, one line each.
     pub fn notices(&self) -> Vec<String> {
@@ -552,6 +615,21 @@ impl AnalysisResult {
         self.checked_files
             .iter()
             .map(|&id| super::shown_path(root, self.project.path_of(id)).to_path_buf())
+            .collect()
+    }
+
+    /// The digest of each file the analysis read and has results for, keyed by
+    /// the shown path `finalize` gives its results. A file's digest is kept
+    /// only when `Session::keep_read_digests` was called.
+    pub fn read_digests(&self) -> FxHashMap<PathBuf, u128> {
+        let root = self.project.absolute_root();
+        self.results
+            .keys()
+            .filter_map(|&id| {
+                let path = self.project.path_of(id);
+                let digest = self.project.content_hash(path)?;
+                Some((super::shown_path(root, path).to_path_buf(), digest))
+            })
             .collect()
     }
 
@@ -1233,6 +1311,7 @@ impl Session {
             stub_dirs,
             level,
             emission_order: overrides.emission_order,
+            keep_digests: false,
             banned_constructs,
             banned_types: banned_settings.types,
             check_closed_classes: class_shape.check_closed_classes,
@@ -1303,6 +1382,12 @@ impl Session {
             ErrorPolicy::Fail,
         )?;
         Ok((session, base))
+    }
+
+    /// Keeps each analysed file's digest in the analysis, which `--fix` checks
+    /// the bytes it writes against.
+    pub fn keep_read_digests(&mut self) {
+        self.keep_digests = true;
     }
 
     /// The post-processing this session's configuration asks for, without
@@ -1567,8 +1652,7 @@ impl Session {
             return Read::Unread;
         }
         let bytes: &[u8] = bytes;
-        let content_hash = project
-            .retain_source
+        let content_hash = (project.retain_source || self.keep_digests)
             .then(|| super::source::content_hash(bytes));
         let keeps_source = project.keeps_source(analysed);
         let root = Some(self.absolute_root.as_path());

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use output::OutputFormat;
 use phpstan_rs::app::check_project::{self, CheckRequest, CheckRun};
-use phpstan_rs::project::session::AnalysisResult;
+use phpstan_rs::project::session::{AnalysisResult, apply_fixes_to_disk};
 use phpstan_rs::{baseline, output};
 
 /// Load every .php file under the given paths and run the full checker
@@ -123,7 +123,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
             std::process::exit(1);
         }
     };
-    let run = match check_project::prepare_cli(&request, &config, stubs) {
+    let mut run = match check_project::prepare_cli(&request, &config, stubs) {
         Ok(run) => run,
         Err(e) => {
             eprintln!("{e}");
@@ -132,6 +132,9 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     };
     for notice in run.notices() {
         eprintln!("{notice}");
+    }
+    if args.fix {
+        run.session.keep_read_digests();
     }
     // A file whose parse or check panics is reported per file; don't also
     // print each caught panic's default message.
@@ -230,6 +233,11 @@ fn report(
         }
         None => None,
     };
+    let read_digests = if apply_fixes {
+        analysis.read_digests()
+    } else {
+        Default::default()
+    };
     let report = analysis.finalize(&run.finalize_options(baseline));
     for notice in report.notices() {
         eprintln!("{notice}");
@@ -237,33 +245,17 @@ fn report(
     let results = report.results;
 
     if apply_fixes {
-        let mut fixed_files = 0usize;
-        let mut applied_total = 0usize;
-        let mut paths: Vec<&PathBuf> = results.keys().collect();
-        paths.sort();
-        for path in paths {
-            let diagnostics = &results[path];
-            if !diagnostics.iter().any(|d| d.fix.is_some()) {
-                continue;
-            }
-            let Ok(source) = std::fs::read(path) else {
-                eprintln!("failed to read {} to apply fixes", path.display());
-                continue;
-            };
-            let (fixed, applied) =
-                diagnostics::fix::apply_fixes(&source, diagnostics::fix::fixes_of(diagnostics));
-            if applied == 0 || fixed == source {
-                continue;
-            }
-            match std::fs::write(path, fixed) {
-                Ok(()) => {
-                    fixed_files += 1;
-                    applied_total += applied;
-                }
-                Err(e) => eprintln!("failed to write fixes to {}: {e}", path.display()),
-            }
+        let outcome = apply_fixes_to_disk(&results, &read_digests);
+        for path in &outcome.changed_since_analysis {
+            eprintln!("skipped {}: changed since it was analysed", path.display());
         }
-        eprintln!("applied {applied_total} fix(es) in {fixed_files} file(s)");
+        for failure in &outcome.failures {
+            eprintln!("{failure}");
+        }
+        eprintln!(
+            "applied {} fix(es) in {} file(s)",
+            outcome.applied, outcome.fixed_files
+        );
     }
 
     // Text is the only format carrying anything beyond raw diagnostics
