@@ -277,7 +277,7 @@ Done:
 - R0 to R5: the lockfile, the CLI test, the CI legs, the canonical form without
   Windows' verbatim prefix, prefixes hashed, ordered and owned by their kind, and
   URIs read and written by each platform's grammar.
-- Rounds 1 and 2. Their failures are classed in the plan's R2, with the rows they
+- Rounds 1 to 3. Their failures are classed in the plan's R2, with the rows they
   extend.
 - R18, level 2's work pulled forward. The gates job's module graph failed with
   27 problems that predate the plan, and the user chose to fix them in this
@@ -322,13 +322,22 @@ Done:
   `touch` or `diff`, reads the peak memory from each platform's `time` and tells
   engine source by the components of its path; the README says how to verify a
   download and build on each platform, and the scripts that need Linux say so.
+- Round 3's fixes. The include rule reads the project's own paths in each world's
+  spelling, which nine Windows fixtures needed, and a report names the path as the
+  machine's own world reads it. The docs and benches checks of the lint job, the
+  macOS stack bound and a Windows test of the backslash are fixed.
+- R16: `path_bytes` reads Windows paths from their bytes, with a bench of each
+  query against `Path` that the platform legs run. MinGW and wine run the Windows
+  tests here (`scripts/winrun.sh`), which found two defects of the reader before
+  the legs ran and reproduced round 3's Windows failures to check their fix.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
 path and the include rule. All four are built.
 
-Open: round 3's push (asked first), R16 and R17, the rounds after them, and the
-batch's checks.
+Open: round 4's result (pushed on 2026-10-18 at `9c555663`), R17's LOAD-8.7 entry
+for the platforms (from the legs' bench), round 5 (asked first) and the batch's
+checks.
 
 ## Documents with no place in the stack
 

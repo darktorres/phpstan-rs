@@ -10,14 +10,15 @@
   R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`), R8 (`7d5bddd4`, `06486da9`),
   R9 (`da9e86df`), R10 (`007d827b`), R11 (`a94e27ec`), R12 (`acc33609`), R13 (`f5e418d6`,
   `ee903695`, `2c7bf898`, `df4be250`), R14 (`92074e5a`, `4ce90ca9`, `08315491`) and R15
-  (`7d7f2ce5`, `04a78a8b`, `b2528e33`). The rows are built in the order of the table below,
-  one commit each, with a pathspec, since another session shares the checkout. R18 has one
+  (`7d7f2ce5`, `04a78a8b`, `b2528e33`), round 3's four fixes (`bdc49385`, `ccb312b4`,
+  `9e1f8ec9`, `e45a69c0`) and R16 (`9c555663`). The rows are built in the order of the table
+  below, one commit each, with a pathspec, since another session shares the checkout. R18 has one
   commit for each step, R6 has a second for the rule its build found, R7 has a second for the
   case rule, R8 has a second for the files an environment change re-checks, R13 has one for
   the fixture harness, one for four tests' paths, one for the links and one for the line
   breaks, R14 has one for the embedded data, one for two debug-only items and one for the heap
-  profiler, and R15 has one for the compiler flags, one for xtask and one for the README and
-  the scripts.
+  profiler, R15 has one for the compiler flags, one for xtask and one for the README and
+  the scripts, and round 3 has one fix for each cause.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -34,6 +35,15 @@
     Windows (31 tests and fixtures, clippy and dhat) and on the gates job. Each failure is
     classed in R2's "Round 2's result", with the rows it extends: R5 (a follow-up), R13, R14
     and R18.
+- **Round 3** runs `c5bec58c`, pushed on 2026-10-18 with the CI split of the other session.
+  - Extension CI passed on all three systems. The round trip took 1240 ms on Windows, 1786 ms
+    on macOS and 747 ms on Linux.
+  - Rust CI passed on x86_64 and aarch64 Linux, and every platform's clippy and heap profiler
+    build passed. It failed on the lint job (3 steps), macOS (1 test) and Windows (1 lib test,
+    `path_bytes`' two mixes and 9 fixtures). Each failure is classed in R2's "Round 3's
+    result", with the rows it extends: R6, R8, R10, R14 and R16.
+- **Round 4** runs `9c555663`, pushed on 2026-10-18 with the user's go-ahead: round 3's fixes,
+  R16 and its bench step on the three platform legs.
 - **The module graph is fixed in this batch** (the user's decision with round 2's push): R18,
   built before R6. The 20 forbidden edges are refactored away, not listed as exceptions, and
   the graph passes. Round 2 reached the gates job's later steps, and R18 fixes their four
@@ -42,7 +52,8 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** round 3, which covers R13 to R15 and whose push is asked first, then R16.
+- **Next:** round 4's result, then round 5 with the end-of-batch checks, whose push is asked
+  first. R17's records are written while round 4 runs.
 
 ## Context
 
@@ -154,9 +165,12 @@ directory where `HOME` is unset. The Piwigo oracle and the monolog output must s
 - **Linux is the control.** Every row leaves Linux output byte-identical unless the row names a
   Linux defect it fixes. The end of the batch proves it with the oracle, monolog and one
   callgrind run.
-- **Windows and macOS are verified only on the CI legs (R2).** No local cross-build is possible
-  here: aws-lc (rustls), the bundled SQLite, mimalloc, PCRE2 and stacker's assembly need the
-  target's C toolchain and SDK.
+- **Windows and macOS are verified on the CI legs (R2).** macOS cannot be built here: aws-lc
+  (rustls), the bundled SQLite, mimalloc, PCRE2 and stacker's assembly need the target's C
+  toolchain and SDK. `x86_64-pc-windows-gnu` can: MinGW's `gcc` compiles them, and wine runs
+  the tests on Windows' own `std::path` (`scripts/winrun.sh`, from R16 on). That is not the MSVC
+  leg, which keeps the last word. Wine makes no junction or symlink and lists none as Windows
+  does, so the link tests fail only there (composer's 5, and the package's 26 when last run).
 - **No saving without a measurement.** R16's Windows reads are timed per call by a criterion
   bench on the runner. No load-level Windows figure can be made, and none is claimed.
 - **Working rules:**
@@ -435,6 +449,44 @@ code, these are expected:
       composer_hygiene messages' own spelling (R6, R13).
   - The dhat build also warns of two imports it leaves unused (`registry.rs:78`,
     `project/declared_classes.rs:62`), on Linux as well (R14).
+
+**Round 3's result.** Rust CI run 39181642548 on `c5bec58c`. The logs are in
+`~/.cache/prs-profile/fixes/logs/round3-*`.
+
+- **Passed:** x86_64 Linux's tests, tests without default features and fixtures; every
+  platform's clippy and heap profiler build; aarch64 Linux's tests and fixtures; macOS's
+  fixtures. The Windows leg ran R3 to R15's tests for the first time and passed all but three:
+  - composer's 89 (the junction and file-link tests among them, R13);
+  - the CLI's 44 (R1's deep-nesting test, R10's stack);
+  - the file cache's 5 (R11's refresh);
+  - `stub_index`'s 1 and `stub-sources`' 4 (R14);
+  - `syntax`'s 300 (R13's line breaks);
+  - xtask's 20 (R15) and the heap profiler's 3 (R14).
+- **lint** failed three steps:
+  - **Format.** The patched dhat's `build.rs` and `lib.rs` were not rustfmt-clean (R14).
+    `cargo fmt --all` formats a path dependency's crate as well. The other session fixed it
+    (`2c6c4502`).
+  - **Docs.** `diagnostics`' crate doc linked `report_path`, which is a function and a module
+    (R6). It links `report_path()` (`bdc49385`).
+  - **Benches type-check.** `cargo check --release --workspace --benches` builds the lib's test
+    target without debug assertions, where `registry::build_declarations`, which the unit tests
+    call, was not re-exported (R14). It takes the `cfg` `any(debug_assertions, test)`
+    (`ccb312b4`).
+- **macOS:** one of 1,200 lib tests, `the_body_runs_on_a_thread_with_the_stack_size_asked_for`
+  (R10). 67,120,768 bytes remained on the 64 MiB stack, 11,904 more than the size asked for.
+  The upper bound has the megabyte the lower one has (`9e1f8ec9`). The 46 LSP tests of round 1
+  pass.
+- **Windows:**
+  - **lib,** one of 1,336:
+    `a_backslash_separates_names_in_the_windows_world_and_is_part_of_a_name_in_the_unix_world`
+    (R8). Where the host is Windows, `Path` reads the Unix world's `\` as a separator, so the
+    assertion that the Unix world does not find the file holds on Unix hosts alone: it is
+    `cfg(unix)` (`e45a69c0`).
+  - **fixtures,** 9 of 3,847, all `checker/includes` (R8). The Unix world took `__DIR__` for a
+    relative name, so seven fixtures reported nothing, and the `dirname(__FILE__)` of it was `.`
+    in two messages. R8's follow-up has the fix (`e45a69c0`).
+  - **`path_bytes`,** the two mixes that count no paths read by bytes (R16), as in rounds 1 and
+    2. R16 reads Windows paths (`9c555663`).
 
 ### R3. One canonical form of a path, without Windows' verbatim prefix
 
@@ -1317,9 +1369,10 @@ every file outside the project.
 2. **Two worlds.** An expression is read in a Unix world (`PATH_SEPARATOR` `:`,
    `DIRECTORY_SEPARATOR` `/`, `\` a character of a name) and in a Windows world (`;`, `\`, `\`
    a separator, a drive prefix, `.\` and `..\` relative). Found in either is found. A message
-   names the Unix world's value, which is the Windows world's too unless the expression holds
-   `DIRECTORY_SEPARATOR`. `__DIR__` and `__FILE__` are the project's paths, read under the root
-   in each world. Classifying a name is a pure function of the world and the name.
+   names the value as the analysing machine's own world reads it: the Unix world's on Linux and
+   macOS, and the Windows world's on Windows. `__DIR__` and `__FILE__` are the project's paths,
+   each world spelling the place its own way. Classifying a name is a pure function of the
+   world and the name.
 3. **Where a value is looked for,** in PHP's order:
    - an absolute name is that file;
    - a `./` or `../` name is looked up in the working directory only;
@@ -1379,7 +1432,8 @@ functions.
   and `dirname()` take the world's, and `get_include_path()` is a placeholder that the
   environment expands to the declared value, so an operand that names the include path is not
   judged as a path. The two results are judged as pairs. A pair is skipped when either world
-  guards it or finds it, and the message names the Unix value. A name is classified by a pure
+  guards it or finds it, and the message names the value as the machine's world reads it
+  (round 3's follow-up; the Unix value before). A name is classified by a pure
   function of the world and its text: absolute (root, drive, share), `./` or `../`, plain, or
   not a path this analysis can see (a stream wrapper's URL, a drive-relative `C:x`).
 - **PHP's order,** read with php 8.5. An absolute name is that file. `./x` and `../x` are
@@ -1468,6 +1522,45 @@ functions.
     and the filter of files that include.
 - **Left to the legs.** The Windows machine's branches of the lookup (a rooted path takes the
   project's drive, a drive or share is a real path) and their tests run on the Windows leg.
+
+**Round 3's follow-up: the project's own paths in each world's spelling** (`e45a69c0`).
+
+- **Now.** `__DIR__` and `__FILE__` held the machine's text in both worlds. On a Windows
+  machine the Unix world read `D:\a\x` as a relative name with backslashes in it, a plain name
+  that is not judged while the include path is undeclared, and the `dirname()` of it was `.`.
+  Nine include fixtures failed on the Windows leg for it, and so did a lib test of the
+  backslash. The lookup's Windows branches had never run: the Unix world's absolute paths
+  named "a machine this one is not" on Windows, where the Windows world's rooted paths named
+  the machine's own root on Unix.
+- **Change.**
+  - `include_lookup::spell` gives the text of a place of the project in a world. A Unix
+    machine's paths are rooted paths in either world, as before. A Windows machine's are, in
+    the Unix world, the names below the root of the project's drive; a place on another drive,
+    or on a share other than the project's, has no spelling there, and an include built from
+    it is not judged.
+  - `native_absolute` takes a rooted path of either world to the root of the project's drive
+    on Windows, as the Windows world's rooted path already was. The same code is judged alike
+    on every platform: `/proj/lib/a.php` in a project at `C:\proj` names `C:\proj\lib\a.php`.
+  - A report names the value as the machine's own world reads it. On Linux and macOS that is
+    the Unix world's, as before; on Windows it is what the user's machine would hold
+    (`D:\a\x\tools/gone.php`).
+- **Tests.**
+  - Pure, on every platform: `spell` for a Unix machine, a Windows machine, a share and a
+    place on another drive, and that a spelled place reads back as the place.
+  - Windows: a rooted Unix path on the project's drive, the project's own places judged in the
+    Unix world, and `native_absolute`'s table.
+  - The project: a report names `__DIR__ . DIRECTORY_SEPARATOR . 'gone.php'` with the
+    machine's separator, and a path built from the file's own place is judged whatever the
+    include path.
+  - The fixture whose last line reported a `DIRECTORY_SEPARATOR` path loses that line: its
+    spelling is the machine's, so no one expectation holds on every platform. The project test
+    above holds it. The fixture harness names the checked file's directories below the
+    fixture's (`<fixture>/tools`) as it names the fixture's own, so an includer in a
+    subdirectory reads alike on every platform.
+- **Checked here:** the lookup, project and LSP include tests on Linux (79) and, for
+  `x86_64-pc-windows-gnu` under wine, the include tests (75) and all 3,847 fixtures, among them
+  the nine of the Windows leg. Linux's output is by construction unchanged: the Unix machine's
+  spelling is the text, and the message names the Unix world's value.
 
 ### R9. Discovery: unreadable spellings and listing misses
 
@@ -2057,9 +2150,62 @@ bytes read most of it.
 against std on a load's mix of paths. It runs here and on the Windows leg. The per-call times
 go into LOAD-8.7; no load-level Windows figure exists.
 
+**Built** (`9c555663`).
+
+- **The reader,** `path_bytes::windows`, answers `file_name`, `parent`, `split`,
+  `has_file_name`, `starts_with`, `strip_prefix`, `is_normal_absolute` and `components`. The
+  plan said to cut a sub-path from `path.to_str()`, a scan of the whole path for surrogates.
+  A part is checked where it is cut (`str::from_utf8` of the slice) by the reads of a name
+  and a directory, and `components` checks the whole path once.
+  - **Plain** is a drive and its root (`C:\`) followed by names separated by `\`, or names
+    separated by `\` whose first is not a drive. A name is not empty, is not `.`, and holds
+    no `/`; `..` is a `ParentDir`.
+  - **Left to `Path`:** a path that starts with a separator (rooted, share, device, verbatim),
+    a drive without a root (`C:a`, `C:`), a name that is not Unicode, and a `.` or empty
+    component where the answer depends on it.
+  - **A `/` is a separator,** which the plan's "left to std" left out: the reads that end at a
+    separator use both, a path that holds one is plain only where the answer does not depend
+    on it, and a path is compared with a base that spells `\` for the path's `/`. The drive
+    letter is compared in either case and the names as they are.
+  - **`a:b` is not a name.** `PathBuf::push` takes a name that starts like a drive for a path
+    of its own and makes it the whole buffer, so `is_normal_absolute`, which says that
+    rebuilding the path from its components gives it back, is false for such a path.
+  - **The prefix** comes from `Path` (`PrefixComponent` has no constructor), from the two
+    bytes of the drive, and it ends no ancestor: `Path::ancestors` of `C:\a` is `C:\a` and
+    `C:\`. `hashed_ancestors` hashes the prefix and pushes no entry for it.
+  - `is_php_name` read a name's bytes on every platform already.
+- **Tests,** 15 in all, 13 of which run off Windows: the six of `tests.rs`, which hold the
+  platform's reader to `Path` where they run, and nine of the Windows reader.
+  - The Windows reader's tables (names and directories, prefixes and what is left after them,
+    plainness, normal form, components, parts that are not Unicode) run on every platform
+    against the answers Windows' `Path` gives, written down.
+  - On Windows alone, every table is compared with `Path`'s own answers, and a generated mix
+    must be read and not left to `Path` in most cases: 150 or more names, 100 or more
+    directories, 5,000 or more stripped prefixes and 50 or more normal paths.
+- **Verified here,** which the plan thought impossible, with MinGW and wine for
+  `x86_64-pc-windows-gnu` (`scripts/winrun.sh`): the 15 tests on `path_bytes`' real Windows
+  `Path`, composer's 84 of 89 (the 5 are the links wine cannot make), the package's lib tests
+  but its links, all 3,847 fixtures, and clippy over the workspace. Wine found two defects of
+  the reader before it was committed (a path that spells `/` against a base that spells `\`,
+  and `a:b` taken for a plain name) and several expectations of the tests that Windows'
+  `Path` does not give, among them the quirk of `push` above.
+- **The bench** runs a query over a load's mix of 1,000 paths (absolute, below a root, a few
+  directories deep, a PHP file) and over a mix the bytes leave to `Path` (a `.` component or a
+  doubled separator). The `platform-test` job runs it on the three legs, so the log has each
+  platform's numbers; LOAD-8.7 has them.
+- Checked here: clippy on the workspace, `-D warnings`, for Linux and for
+  `x86_64-pc-windows-gnu`; the lint job's other steps; both lockfiles and the dhat one with
+  `--locked`; `cargo deny` and `cargo machete` (the bench's `criterion` is a dev-dependency
+  already in the tree).
+- Left to the legs: the MSVC build's run of the 15 tests, the links, and the timings on the
+  runners.
+
 ### R17. The records
 
+(Written while round 4 runs; each item's state is in the list.)
+
 - `path_bytes`' module doc: which platforms read bytes, and how Windows' grammar differs.
+  Done with R16.
 - LOAD-8.7:
   - −126.7 M is Linux's, by callgrind;
   - macOS takes the same code, unmeasured;
