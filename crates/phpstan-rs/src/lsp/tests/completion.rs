@@ -172,6 +172,29 @@ fn member_completion_after_arrow_lists_methods_and_properties() {
 }
 
 #[test]
+fn member_completion_reads_an_edit_still_waiting_for_the_debounce_window() {
+    // The trigger `->` exists only in the edited text, and the request
+    // arrives before the debounce worker has applied the edit, so the
+    // buffer completion reads is the one the client just sent.
+    let dir = TempDir::new("completion_pending_edit");
+    let valid_src = "<?php\nclass Greeter {\n    function greet(): string { return 'hi'; }\n}\nfunction f(Greeter $g) {\n    $g;\n}\n";
+    let edited_src = "<?php\nclass Greeter {\n    function greet(): string { return 'hi'; }\n}\nfunction f(Greeter $g) {\n    $g->\n}\n";
+    let path = dir.write("a.php", valid_src);
+    let uri = path_to_uri(&path).to_string();
+
+    let messages = run_edit(
+        &dir,
+        &uri,
+        valid_src,
+        edited_src,
+        &[completion_request(3, &uri, pos_after(edited_src, "$g->"))],
+    );
+
+    let got = labels(response_result(&messages, 3));
+    assert!(got.contains(&"greet"), "got: {got:?}");
+}
+
+#[test]
 fn member_completion_after_double_colon_on_a_literal_class_lists_enum_cases() {
     let dir = TempDir::new("completion_enum_colon");
     let valid_src = "<?php\nenum Suit: string {\n    case Hearts = 'H';\n    case Spades = 'S';\n}\nfunction f() {\n    Suit::Hearts;\n}\n";

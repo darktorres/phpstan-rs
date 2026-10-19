@@ -198,8 +198,9 @@ struct Server {
     // (very often mid-edit and unparseable - `$x->` alone is a syntax
     // error) buffer text to tokenize and to extract a receiver
     // expression's own text from. See `completion`'s own module doc
-    // comment for the full mechanism this feeds.
-    latest_text: FxHashMap<PathBuf, String>,
+    // comment for the full mechanism this feeds. Shared with the reader
+    // thread, which records each edit as it arrives (`queue_change`).
+    latest_text: Arc<LiveText>,
     // What a column of a position counts: UTF-16 code units unless the
     // client offered UTF-8 and `initialize` agreed to it.
     unit: Unit,
@@ -427,7 +428,7 @@ impl Server {
             stubs,
             open_uris: FxHashMap::default(),
             published: FxHashMap::default(),
-            latest_text: FxHashMap::default(),
+            latest_text: Arc::new(LiveText::default()),
             unit: Unit::default(),
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
@@ -659,7 +660,7 @@ impl Server {
         };
         if !removed.is_empty() {
             for path in &removed {
-                self.latest_text.remove(path);
+                self.latest_text.lock().unwrap().remove(path);
                 folder.slot.forget(path);
             }
             for (id, diags) in folder.slot.project.remove_files(&removed) {
@@ -680,7 +681,13 @@ impl Server {
         // An open document is set to the editor's text before it is loaded,
         // so the load reads that text rather than the disk's.
         for listed in &to_load {
-            if let Some(text) = self.latest_text.get(listed.path.as_path()) {
+            let text = self
+                .latest_text
+                .lock()
+                .unwrap()
+                .get(listed.path.as_path())
+                .cloned();
+            if let Some(text) = text {
                 folder
                     .slot
                     .project
@@ -805,7 +812,7 @@ impl Server {
         let mut changed = Vec::new();
         let mut messages = Vec::new();
         for path in open {
-            let Some(text) = self.latest_text.get(&path).cloned() else {
+            let Some(text) = self.latest_text.lock().unwrap().get(&path).cloned() else {
                 continue;
             };
             let holders = self.holders(&path);
@@ -1189,7 +1196,10 @@ impl Server {
         let path = self.identify(&spelled);
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris.insert(path.clone(), (uri.clone(), version));
-        self.latest_text.insert(path.clone(), text.to_string());
+        self.latest_text
+            .lock()
+            .unwrap()
+            .insert(path.clone(), text.to_string());
         if !self.enabled {
             return Vec::new();
         }
@@ -1266,7 +1276,6 @@ impl Server {
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris
             .insert(path.clone(), (uri.clone(), Some(version)));
-        self.latest_text.insert(path.clone(), text.to_string());
         if !self.enabled {
             return Vec::new();
         }
@@ -1346,7 +1355,7 @@ impl Server {
         let mut messages = Vec::new();
         for (path, (uri, typ)) in last_by_path {
             if typ == lsp_types::FileChangeType::DELETED {
-                self.latest_text.remove(&path);
+                self.latest_text.lock().unwrap().remove(&path);
                 let mut recorded = vec![path.clone()];
                 for home in self.homes() {
                     let slot = self.slot_mut(home);
@@ -1381,6 +1390,8 @@ impl Server {
             // matches a file that was only ever loaded from disk.
             self.open_uris.insert(path.clone(), (uri, None));
             self.latest_text
+                .lock()
+                .unwrap()
                 .insert(path.clone(), source::decode_text(&bytes).into_owned());
             let mut recorded = Vec::new();
             let document = source::Digested::new(&bytes);
@@ -2387,6 +2398,8 @@ impl Server {
         let project = self.project_for(&path);
         let text = self
             .latest_text
+            .lock()
+            .unwrap()
             .get(&path)
             .cloned()
             .or_else(|| project.source(&path).map(str::to_string))?;
@@ -2727,6 +2740,13 @@ struct DebounceHandle {
     cv: Condvar,
 }
 
+/// The live text of each open document, keyed as `Server::latest_text`
+/// keys it. The reader thread writes an edit's text here as the edit
+/// arrives, before the debounce window elapses, so a request that reads the
+/// buffer sees what the editor sent. The lock is never held across another
+/// lock by the reader; a server-side writer takes it under the server's lock.
+type LiveText = Mutex<FxHashMap<PathBuf, String>>;
+
 /// The key the project has for the file `uri` names, for the reader thread,
 /// which holds no session and must not wait for the server's lock. It is
 /// the path `Session::identify` gives a file that exists.
@@ -2734,18 +2754,20 @@ fn document_key(uri: &Uri) -> Option<PathBuf> {
     Some(composer::manifest::resolve(&uri_to_path(uri)?))
 }
 
-/// Records `path`'s new edit and wakes the debounce worker - a handful
-/// of instructions guarded by a briefly-held, uncontended lock, never
-/// blocked by anything `Project`-related. This is the reader thread's
-/// entire involvement in a `didChange` - no channel message is needed
-/// for it, unlike every other request/notification.
+/// Records `path`'s new edit as the document's live text and wakes the
+/// debounce worker - a handful of instructions guarded by briefly-held,
+/// uncontended locks, never blocked by anything `Project`-related. This is
+/// the reader thread's entire involvement in a `didChange` - no channel
+/// message is needed for it, unlike every other request/notification.
 fn queue_change(
     debounce: &Arc<DebounceHandle>,
+    live: &LiveText,
     path: PathBuf,
     uri: Uri,
     text: String,
     version: i32,
 ) {
+    live.lock().unwrap().insert(path.clone(), text.clone());
     debounce
         .queue
         .lock()
@@ -2834,11 +2856,13 @@ fn run_loop<W: Write + Send + 'static>(
         Arc::clone(&shutdown),
     );
 
+    let live_text = Arc::clone(&server.lock().unwrap().latest_text);
     let exit_code = Dispatch {
         receiver,
         server: &server,
         writer: &writer,
         debounce: &debounce,
+        live_text: &live_text,
         loading: None,
         held: VecDeque::new(),
         shutdown_during_load: false,
@@ -2905,6 +2929,7 @@ struct Dispatch<'a, W: Write> {
     server: &'a Arc<Mutex<Server>>,
     writer: &'a Arc<Mutex<W>>,
     debounce: &'a Arc<DebounceHandle>,
+    live_text: &'a Arc<LiveText>,
     loading: Option<Loading>,
     // Messages received while a load runs, replayed in this order once it
     // installs.
@@ -3056,6 +3081,7 @@ impl<W: Write + Send + 'static> Dispatch<'_, W> {
             {
                 queue_change(
                     self.debounce,
+                    self.live_text,
                     path,
                     params.text_document.uri,
                     change.text,
