@@ -1,10 +1,14 @@
-# mold links, and the parallel compiler front end (`-Z threads`, needs
-# the pinned nightly in rust-toolchain.toml) compiles - both matter for
-# rebuild time on a crate this large. CI installs mold on its Linux
-# runners (`rui314/setup-mold`); clang ships on them already.
+# The parallel compiler front end (`-Z threads`, needs the pinned nightly in
+# rust-toolchain.toml) compiles on every platform, and mold links on x86_64
+# Linux - both matter for rebuild time on a crate this large. CI installs
+# mold on its x86_64 Linux runners (`rui314/setup-mold`); clang ships on them
+# already.
+[target.'cfg(all())']
+rustflags = ["-Z", "threads=8"]
+
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=mold", "-Z", "threads=8"]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 [alias]
 # The task runner builds in the test profile: `cargo test` builds most of its
