@@ -9,7 +9,7 @@ use crate::registry::name_context::{class_ref, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::DocType;
 use phpdoc::docblock::{self, DocBlock};
-use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
+use syntax::ast::{ExprKind, FunctionParts, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
 
 use types::{self, Shape, ShapeField, ShapeKey, TemplateParam, Type};
@@ -693,17 +693,16 @@ impl FunctionReflection {
     // Declared types are joined while the class hierarchy is being built.
     #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_decl(
-        f: &FunctionDecl,
+        f: FunctionParts<'_>,
         ctx: &NameContext,
         class_templates: &FxHashMap<String, TemplateParam>,
         class_type_aliases: &NameMap<Type>,
         visibility: Visibility,
     ) -> FunctionReflection {
-        let doc: Option<std::sync::Arc<DocBlock>> =
-            f.doc_comment.as_deref().map(docblock::parse_shared);
+        let doc: Option<std::sync::Arc<DocBlock>> = f.doc_comment.map(docblock::parse_shared);
         let mut template_params: FxHashMap<String, TemplateParam> = doc
             .as_ref()
-            .map(|d| build_template_params(d, &f.name, ctx))
+            .map(|d| build_template_params(d, f.name, ctx))
             .unwrap_or_default();
         for (name, tp) in class_templates {
             template_params
@@ -796,16 +795,16 @@ impl FunctionReflection {
             ty: return_type,
             native: return_type_native,
             case_refs: return_case_refs,
-        } = declared_type(doc_return, f.return_type.as_ref(), &template_params, ctx);
+        } = declared_type(doc_return, f.return_type, &template_params, ctx);
         let return_type = substitute_type_aliases(return_type, class_type_aliases);
 
         let no_discard = f
             .attrs
             .iter()
             .any(|a| is_no_discard_attribute_name(&a.name));
-        let must_use_result = crate::registry::access_attributes::has_must_use_result(&f.attrs);
+        let must_use_result = crate::registry::access_attributes::has_must_use_result(f.attrs);
         let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
-        let attributes = ReflectionAttribute::all(&f.attrs);
+        let attributes = ReflectionAttribute::all(f.attrs);
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
         let is_api = doc.as_ref().is_some_and(|d| d.api);

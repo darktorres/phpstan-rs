@@ -222,7 +222,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         let fresh = FunctionReflection::from_decl(
-            f,
+            f.parts(),
             &self.name_ctx,
             &rustc_hash::FxHashMap::default(),
             &NameMap::default(),
@@ -317,7 +317,7 @@ impl<'a> Checker<'a> {
             let previous_class =
                 std::mem::replace(&mut self.current_class, class_name.map(str::to_string));
             self.check_default_parameter_types(f, sig, class_name);
-            self.check_phpdoc_types_against_native(f, sig, class_name);
+            self.check_phpdoc_types_against_native(f.parts(), sig, class_name);
             self.check_conditional_types(f, sig, class_name);
             let description = if class_name.is_some() {
                 "a method"

@@ -1088,7 +1088,7 @@ impl ClassReflection {
                 final_methods_by_phpdoc.insert(name.clone());
             }
             let sig = FunctionReflection::from_decl(
-                &m.function,
+                m.function.parts(),
                 ctx,
                 &template_params,
                 &type_aliases,

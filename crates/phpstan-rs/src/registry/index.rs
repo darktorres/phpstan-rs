@@ -814,7 +814,7 @@ pub(crate) fn built_declaration(
                 return;
             }
             let mut sig = FunctionReflection::from_decl(
-                f,
+                f.parts(),
                 ctx,
                 &FxHashMap::default(),
                 &NameMap::default(),

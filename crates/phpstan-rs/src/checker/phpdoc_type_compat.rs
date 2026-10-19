@@ -20,11 +20,11 @@ use types::{ConditionalSubject, TrinaryLogic};
 impl<'a> Checker<'a> {
     pub(crate) fn check_phpdoc_types_against_native(
         &mut self,
-        f: &FunctionDecl,
+        f: FunctionParts<'_>,
         sig: &FunctionReflection,
         class_name: Option<&str>,
     ) {
-        let Some(doc) = f.doc_comment.as_deref() else {
+        let Some(doc) = f.doc_comment else {
             return;
         };
         if !doc.contains("@") {
@@ -290,19 +290,17 @@ impl<'a> Checker<'a> {
             }
             None => ("get", Vec::new(), property_type_hint.cloned()),
         };
-        let decl = FunctionDecl {
-            namespaced_name: None,
-            name: Ident {
-                name: name.into(),
-                span,
-            },
-            params,
-            return_type,
-            body: None,
-            by_ref: false,
-            doc_comment: Some(doc.into()),
-            attrs: Vec::new(),
+        let name = Ident {
+            name: name.into(),
             span,
+        };
+        let parts = FunctionParts {
+            name: &name,
+            params: &params,
+            return_type: return_type.as_ref(),
+            by_ref: false,
+            attrs: &[],
+            doc_comment: Some(doc),
         };
         let previous_class = self.current_class.replace(fqn.to_string());
         let class_templates = self.current_class_template_params();
@@ -314,14 +312,14 @@ impl<'a> Checker<'a> {
             .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
         let sig = FunctionReflection::from_decl(
-            &decl,
+            parts,
             &self.name_ctx,
             &class_templates,
             &aliases,
             Visibility::Public,
         );
         let sig = self.registry.finalize_standalone_sig(sig);
-        self.check_phpdoc_types_against_native(&decl, &sig, Some(fqn));
+        self.check_phpdoc_types_against_native(parts, &sig, Some(fqn));
     }
 
     pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDef) {

@@ -316,6 +316,31 @@ impl FunctionDecl {
     pub fn is_constructor(&self) -> bool {
         is_constructor_name(&self.name)
     }
+
+    /// What a signature and a PHPDoc check read of this declaration.
+    pub fn parts(&self) -> FunctionParts<'_> {
+        FunctionParts {
+            name: &self.name,
+            params: &self.params,
+            return_type: self.return_type.as_ref(),
+            by_ref: self.by_ref,
+            attrs: &self.attrs,
+            doc_comment: self.doc_comment.as_deref(),
+        }
+    }
+}
+
+/// What a signature and a PHPDoc check read of a function: borrowed from its
+/// declaration, or built from the parts a check has when it has no declaration
+/// (a property hook's `get` and `set`).
+#[derive(Clone, Copy)]
+pub struct FunctionParts<'a> {
+    pub name: &'a Ident,
+    pub params: &'a [Param],
+    pub return_type: Option<&'a TypeHint>,
+    pub by_ref: bool,
+    pub attrs: &'a [Attribute],
+    pub doc_comment: Option<&'a str>,
 }
 
 /// Whether a method name is `__construct`, compared as PHP does.
