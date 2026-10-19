@@ -270,7 +270,7 @@ Order, as the plan sets it:
    VAL-1.10), the baseline (VAL-1.12), F69's fixtures (FIX-69), F77's record of a context
    file's failure in the dump and the per-file cache (FIX-77; the dump needs VAL-1.8), COMP-2's
    grammar, and the level-3 findings that change a dump: W1's rows are READY and none is built,
-   and the about 115 findings are not yet triaged by probe (Part E 22). Then item 9, the flat tree, steps 0 to 3, with spike
+   and the level-3 triage by probe is run: `LEVEL3_TRIAGE.md` has 120 rows, 60 of which reproduce and change a dump (Part E 22). Then item 9, the flat tree, steps 0 to 3, with spike
    S-12 before step 2.
 3. Part C's batches (tokens, the lexer, parse recovery, names, products, PHPDoc, the
    check's temporaries), then the wall (Part D), whose engine is `ENGINE_PLAN.md`.
