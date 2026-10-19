@@ -28,7 +28,8 @@
 //! and merged into this same index by `Project::ensure_member_index_built`/
 //! `Project::reindex_tier2_for_file`.
 
-use rustc_hash::FxHashMap;
+use memchr::memmem;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use syntax::ast::*;
 use syntax::span::Span;
@@ -283,20 +284,23 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
     }
 }
 
-/// What `stmts` hands to the lazy lookup. With bodies, an analysed file's:
-/// each class its bodies name is checked, so it is needed. Without, a context
-/// file's: its bodies run only when called and are not checked, so the classes
-/// only they name are not needed.
-pub(crate) fn lazy_refs(stmts: &[Stmt], bodies: bool) -> LazyRefs {
-    let mut names = NameWalker {
+/// What `stmts`, the statements of `source`, hands to the lazy lookup. With
+/// bodies, an analysed file's: each class its bodies name is checked, so it is
+/// needed. Without, a context file's: its bodies run only when called and are
+/// not checked, so the classes only they name are not needed. A doc comment's
+/// names are always taken, as the checker resolves them.
+pub(crate) fn lazy_refs(stmts: &[Stmt], bodies: bool, source: &str) -> LazyRefs {
+    let mut walker = NameWalker {
         bodies,
         refs: LazyRefs::default(),
+        scope: Scope::default(),
     };
-    walk_stmts(&mut names, stmts);
-    let mut constants = ConstWalker(Vec::new());
-    walk_stmts(&mut constants, stmts);
-    names.refs.constants = constants.0;
-    names.refs
+    walk_stmts(&mut walker, stmts);
+    let NameWalker {
+        mut refs, scope, ..
+    } = walker;
+    refs.names.extend(doc_names(source, &scope));
+    refs
 }
 
 fn short_name(name: &str) -> &str {
@@ -307,6 +311,7 @@ struct NameWalker {
     /// Whether a function's body is walked.
     bodies: bool,
     refs: LazyRefs,
+    scope: Scope,
 }
 
 impl<'ast> Visitor<'ast> for NameWalker {
@@ -316,10 +321,53 @@ impl<'ast> Visitor<'ast> for NameWalker {
         }
     }
 
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            StmtKind::Namespace(name) => self.scope.namespace = name.to_ascii_lowercase(),
+            StmtKind::Use(imports) => {
+                for import in imports.iter().filter(|i| i.kind == UseKind::Class) {
+                    let target = import.path.to_string();
+                    let alias = match &import.alias {
+                        Some(alias) => alias.name.to_string(),
+                        None => short_name(&target).to_string(),
+                    };
+                    self.scope.uses.insert(
+                        alias.to_ascii_lowercase(),
+                        target.trim_start_matches('\\').to_ascii_lowercase(),
+                    );
+                }
+            }
+            // A definition the load never runs, in a function body, can only make
+            // a name defined twice, which reads as unknown: it is not taken.
+            StmtKind::GlobalConst(consts) => {
+                for c in consts {
+                    self.refs
+                        .constants
+                        .push((short_name(&c.name).to_string(), path_parts_of(&c.value)));
+                }
+            }
+            _ => {}
+        }
+        walk_stmt(self, stmt);
+    }
+
     fn visit_expr(&mut self, expr: &'ast Expr) {
         stack::guard(|| {
-            if let ExprKind::Include(_, arg) = &expr.kind {
-                self.refs.includes.push(path_parts_of(arg));
+            match &expr.kind {
+                ExprKind::Include(_, arg) => self.refs.includes.push(path_parts_of(arg)),
+                ExprKind::Call(callee, args)
+                    if callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define")) =>
+                {
+                    if let [name, value, ..] = args.as_slice()
+                        && let ExprKind::Literal(Literal::String(name)) = &name.value.kind
+                    {
+                        self.refs.constants.push((
+                            short_name(&name.to_str_lossy()).to_string(),
+                            path_parts_of(&value.value),
+                        ));
+                    }
+                }
+                _ => {}
             }
             walk_expr(self, expr);
         })
@@ -339,39 +387,6 @@ impl<'ast> Visitor<'ast> for NameWalker {
         if let Some(hint) = &function.return_type {
             self.visit_type_hint(hint);
         }
-    }
-}
-
-/// The constants a file defines: `const`, and `define()` with a literal name,
-/// in any statement or body. A definition the load never runs can only make a
-/// name defined twice, which reads as unknown, so every one is taken.
-struct ConstWalker(Vec<(String, Vec<PathPart>)>);
-
-impl<'ast> Visitor<'ast> for ConstWalker {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        if let StmtKind::GlobalConst(consts) = &stmt.kind {
-            for c in consts {
-                self.0
-                    .push((short_name(&c.name).to_string(), path_parts_of(&c.value)));
-            }
-        }
-        walk_stmt(self, stmt);
-    }
-
-    fn visit_expr(&mut self, expr: &'ast Expr) {
-        stack::guard(|| {
-            if let ExprKind::Call(callee, args) = &expr.kind
-                && callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
-                && let [name, value, ..] = args.as_slice()
-                && let ExprKind::Literal(Literal::String(name)) = &name.value.kind
-            {
-                self.0.push((
-                    short_name(&name.to_str_lossy()).to_string(),
-                    path_parts_of(&value.value),
-                ));
-            }
-            walk_expr(self, expr);
-        })
     }
 }
 
@@ -414,80 +429,63 @@ fn push_path_parts(expr: &Expr, parts: &mut Vec<PathPart>) {
     }
 }
 
-/// The class names a file's doc comments name, found in their text: each word
-/// of a doc comment, resolved against the file's namespace and imports as a
-/// class name is, each candidate kept. A PHPDoc type is a reference the checker
-/// resolves, so the lazy context lookup follows it too. Two kinds of word name
-/// no class and are left out: a tag, the word after an `@`, and a PHP reserved
-/// word, which no class is named by. A word with a namespace is kept whole,
-/// since a namespace segment may be a reserved word.
-pub(crate) fn doc_names(source: &str) -> Vec<String> {
-    // A file without a doc comment has none to read.
-    if !source.contains("/**") {
-        return Vec::new();
-    }
-    let mut namespace = String::new();
-    let mut uses: FxHashMap<String, String> = FxHashMap::default();
-    for line in source.lines() {
-        if let Some(rest) = line.strip_prefix("namespace ") {
-            namespace = rest.trim_end_matches(';').trim().to_ascii_lowercase();
-        } else if let Some(rest) = line.strip_prefix("use ") {
-            if rest.starts_with("function ") || rest.starts_with("const ") {
-                continue;
-            }
-            let rest = rest.trim_end_matches(';').trim();
-            let (target, alias) = match rest.rsplit_once(" as ") {
-                Some((target, alias)) => (target.trim(), Some(alias.trim())),
-                None => (rest, None),
-            };
-            let short = target.rsplit('\\').next().unwrap_or(target);
-            uses.insert(
-                alias.unwrap_or(short).to_ascii_lowercase(),
-                target.trim_start_matches('\\').to_ascii_lowercase(),
-            );
-        }
+/// A file's namespace and class imports, lowercased, as its doc comments
+/// resolve their names against them.
+#[derive(Default)]
+struct Scope {
+    namespace: String,
+    /// Each import's alias, with the name it imports.
+    uses: FxHashMap<String, String>,
+}
+
+/// The class names a file's doc comments name: each word of a doc comment,
+/// resolved against the file's namespace and imports as a class name is, each
+/// candidate kept. A PHPDoc type is a reference the checker resolves, so the
+/// lazy context lookup follows it too. Two kinds of word name no class and are
+/// left out: a tag, the word after an `@`, and a PHP reserved word, which no
+/// class is named by. A word with a namespace is kept whole, since a namespace
+/// segment may be a reserved word.
+fn doc_names(source: &str, scope: &Scope) -> Vec<String> {
+    // Each distinct word is resolved once, however many doc comments repeat it.
+    let mut words: FxHashSet<(&str, bool)> = FxHashSet::default();
+    let mut rest = source;
+    while let Some(start) = memmem::find(rest.as_bytes(), b"/**") {
+        let after = &rest[start + 3..];
+        let end = memmem::find(after.as_bytes(), b"*/").unwrap_or(after.len());
+        collect_doc_words(&after[..end], &mut words);
+        rest = &after[end..];
     }
     let mut names: Vec<String> = Vec::new();
     let mut lower = String::new();
     let mut joined = String::new();
-    let mut rest = source;
-    while let Some(start) = rest.find("/**") {
-        let after = &rest[start + 3..];
-        let end = after.find("*/").unwrap_or(after.len());
-        for (word, tag) in doc_words(&after[..end]) {
-            let word = word.trim_matches('\\');
-            if word.is_empty() || !word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
-                continue;
-            }
-            lower.clear();
-            lower.push_str(word);
-            lower.make_ascii_lowercase();
-            if !lower.contains('\\') && (tag || RESERVED.contains(&lower.as_str())) {
-                continue;
-            }
-            let head = lower.split('\\').next().unwrap_or(&lower);
-            if let Some(target) = uses.get(head) {
-                match lower.split_once('\\') {
-                    Some((_, tail)) => {
-                        joined.clear();
-                        joined.push_str(target);
-                        joined.push('\\');
-                        joined.push_str(tail);
-                        add_name(&mut names, &joined);
-                    }
-                    None => add_name(&mut names, target),
-                }
-            }
-            if !namespace.is_empty() {
-                joined.clear();
-                joined.push_str(&namespace);
-                joined.push('\\');
-                joined.push_str(&lower);
-                add_name(&mut names, &joined);
-            }
-            add_name(&mut names, &lower);
+    for (word, tag) in words {
+        lower.clear();
+        lower.push_str(word);
+        lower.make_ascii_lowercase();
+        if !lower.contains('\\') && (tag || RESERVED.contains(&lower.as_str())) {
+            continue;
         }
-        rest = &after[end.min(after.len())..];
+        let head = lower.split('\\').next().unwrap_or(&lower);
+        if let Some(target) = scope.uses.get(head) {
+            match lower.split_once('\\') {
+                Some((_, tail)) => {
+                    joined.clear();
+                    joined.push_str(target);
+                    joined.push('\\');
+                    joined.push_str(tail);
+                    names.push(joined.clone());
+                }
+                None => names.push(target.clone()),
+            }
+        }
+        if !scope.namespace.is_empty() {
+            joined.clear();
+            joined.push_str(&scope.namespace);
+            joined.push('\\');
+            joined.push_str(&lower);
+            names.push(joined.clone());
+        }
+        names.push(lower.clone());
     }
     // A word repeats across a file's doc comments, and a name is kept once.
     names.sort_unstable();
@@ -495,12 +493,11 @@ pub(crate) fn doc_names(source: &str) -> Vec<String> {
     names
 }
 
-/// The words of a doc comment's text, each with whether an `@` comes just
-/// before it.
-fn doc_words(text: &str) -> Vec<(&str, bool)> {
+/// Adds to `words` each word of a doc comment's `text` that can name a class,
+/// with whether an `@` comes just before it.
+fn collect_doc_words<'t>(text: &'t str, words: &mut FxHashSet<(&'t str, bool)>) {
     let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\';
     let bytes = text.as_bytes();
-    let mut words = Vec::new();
     let mut at = 0;
     while at < bytes.len() {
         if !is_word(bytes[at]) {
@@ -511,9 +508,11 @@ fn doc_words(text: &str) -> Vec<(&str, bool)> {
         while at < bytes.len() && is_word(bytes[at]) {
             at += 1;
         }
-        words.push((&text[start..at], start > 0 && bytes[start - 1] == b'@'));
+        let word = text[start..at].trim_matches('\\');
+        if word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            words.insert((word, start > 0 && bytes[start - 1] == b'@'));
+        }
     }
-    words
 }
 
 /// The words PHP 8 reserves, which no class is named by. Lowercase.
@@ -603,21 +602,21 @@ const RESERVED: [&str; 83] = [
     "yield",
 ];
 
-fn add_name(names: &mut Vec<String>, name: &str) {
-    names.push(name.to_string());
-}
-
 #[cfg(test)]
 mod tests {
-    use super::doc_names;
+    /// The names a file's parse gives, of its class names and doc comments.
+    fn names_of(source: &str) -> Vec<String> {
+        let parsed = syntax::parse(source.as_bytes()).expect("parses");
+        let mut names = super::lazy_refs(&parsed.stmts, false, source).names;
+        names.sort();
+        names
+    }
 
     #[test]
     fn doc_names_keep_each_name_once_resolved_against_the_namespace_and_uses() {
         let source = "<?php\nnamespace App\\Model;\nuse Lib\\Thing as T;\n/** @var T|Helper|T */\n";
-        let mut names = doc_names(source);
-        names.sort();
         assert_eq!(
-            names,
+            names_of(source),
             [
                 "app\\model\\helper",
                 "app\\model\\t",
@@ -632,10 +631,8 @@ mod tests {
     fn doc_names_leave_out_tags_and_reserved_words_but_not_namespaced_ones() {
         let source =
             "<?php\nnamespace App\\Model;\n/** Describes array and Foo\\Class, see @param Bar */\n";
-        let mut names = doc_names(source);
-        names.sort();
         assert_eq!(
-            names,
+            names_of(source),
             [
                 "app\\model\\bar",
                 "app\\model\\describes",

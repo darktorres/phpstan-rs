@@ -247,6 +247,7 @@ pub(super) fn key(
     root: Option<&Path>,
     is_stub: bool,
     index_use_sites: bool,
+    lazy_refs: bool,
 ) -> Option<Key> {
     let directory = directory()?;
     let shown = super::shown_path(root, path);
@@ -261,12 +262,12 @@ pub(super) fn key(
     let shown_bytes = shown.as_os_str().as_encoded_bytes();
     hasher.write(shown_bytes);
     hasher.write(&(shown_bytes.len() as u64).to_le_bytes());
-    // A context file's entry carries the names it names only when it is read
-    // by name, so the mode is part of the key.
+    // An entry carries the references a lazy load reads only when it was parsed
+    // to keep them, so whether it did is part of the key.
     hasher.write(&[
         u8::from(is_stub),
         u8::from(index_use_sites),
-        u8::from(super::lazy_context_enabled()),
+        u8::from(lazy_refs),
     ]);
     let digest = hasher.finish_128();
     let hex = format!("{digest:032x}");

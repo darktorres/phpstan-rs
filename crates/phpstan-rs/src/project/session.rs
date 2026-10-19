@@ -338,6 +338,7 @@ impl FinalFiles for StreamParse<'_> {
                             worker,
                             file.role != Role::Analysed,
                             self.index_use_sites,
+                            super::lazy_context_enabled(),
                         )
                     });
                     (file.path, file.role, read)
@@ -1614,6 +1615,7 @@ impl Session {
                                 worker,
                                 true,
                                 index_use_sites,
+                                false,
                             )
                         });
                         (at, read)
@@ -1841,6 +1843,7 @@ impl Session {
         worker: &mut Worker,
         cacheable: bool,
         index_use_sites: bool,
+        lazy_refs: bool,
     ) -> Read {
         let path = listed.path.as_path();
         let is_stub = listed.stub;
@@ -1855,7 +1858,7 @@ impl Session {
         let keeps_source = project.keeps_source(analysed);
         let root = Some(self.absolute_root.as_path());
         let cache_key = if cacheable {
-            file_cache::key(bytes, path, root, is_stub, index_use_sites)
+            file_cache::key(bytes, path, root, is_stub, index_use_sites, lazy_refs)
         } else {
             None
         };
@@ -1922,13 +1925,11 @@ impl Session {
         };
         // Only the reader holds the text, so the use sites are indexed here.
         project.index_use_sites(&mut parsed, &text);
-        if super::lazy_context_enabled() {
-            let mut refs = match &parsed.ast {
-                Some(ast) => super::use_sites::lazy_refs(ast, analysed),
+        if lazy_refs {
+            parsed.lazy = match &parsed.ast {
+                Some(ast) => super::use_sites::lazy_refs(ast, analysed, &text),
                 None => LazyRefs::default(),
             };
-            refs.names.extend(super::use_sites::doc_names(&text));
-            parsed.lazy = refs;
         }
         let source = keeps_source.then(|| text.into_owned());
         Read::Loaded(Box::new(ReadFile {
@@ -1950,9 +1951,16 @@ impl Session {
         worker: &mut Worker,
         cacheable: bool,
         index_use_sites: bool,
+        lazy_refs: bool,
     ) -> Read {
-        let mut read =
-            self.read_and_parse_file(project, listed, worker, cacheable, index_use_sites);
+        let mut read = self.read_and_parse_file(
+            project,
+            listed,
+            worker,
+            cacheable,
+            index_use_sites,
+            lazy_refs,
+        );
         if worker.bytes.capacity() > KEPT_READ_CAPACITY {
             worker.bytes = Vec::new();
         }
@@ -2012,6 +2020,7 @@ impl Session {
                                     worker,
                                     built_once && file.role != Role::Analysed,
                                     index_use_sites,
+                                    super::lazy_context_enabled(),
                                 )
                             })
                         })
@@ -2217,6 +2226,7 @@ impl Session {
                                     // The context files come first.
                                     at < context_files.len(),
                                     index_use_sites,
+                                    super::lazy_context_enabled(),
                                 )
                             });
                             (at, read)
@@ -2671,6 +2681,7 @@ impl<'a> LazyReach<'a> {
                         worker,
                         true,
                         self.index_use_sites,
+                        true,
                     )
                 });
                 let next = class_names_read(&read);
