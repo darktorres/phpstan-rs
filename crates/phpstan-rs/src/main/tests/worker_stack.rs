@@ -8,8 +8,9 @@ fn the_body_runs_on_a_thread_with_the_stack_size_asked_for() {
     let remaining = on_worker_stack(|| {
         stacker::remaining_stack().expect("the system gives the end of the stack")
     });
-    // Nearly all of the stack is left at the start of the thread.
-    assert!(remaining <= WORKER_STACK_SIZE, "{remaining}");
+    // Nearly all of the stack is left at the start of the thread. The bounds
+    // allow a megabyte either way: macOS measures a little more than the size asked for.
+    assert!(remaining <= WORKER_STACK_SIZE + 1024 * 1024, "{remaining}");
     assert!(remaining > WORKER_STACK_SIZE - 1024 * 1024, "{remaining}");
 }
 
