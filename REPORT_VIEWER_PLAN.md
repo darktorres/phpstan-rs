@@ -14,7 +14,7 @@ rows built in this checkout. The WebAssembly playground (ROADMAP Part 15,
 - Starts before Stage F. The roadmap asks for F1 (the Session and
   `AnalysisResult`), E5 (levels) and F3 (the JSON schema) first. The read-only
   rows (V1 to V6) need none of them. The write rows (V7 to V11) need the
-  incremental update that the post-level-9 plan's H4 replaces, so they wait for
+  incremental update that the level 9 plan's H4 replaces, so they wait for
   H4's design (see Coordination).
 - Crates: approved in principle on 2026-10-18 ("we can add deps"). Each is
   judged on merit at its row.
@@ -80,7 +80,7 @@ Crates and gates:
   features, docs, benches and fuzz compile, each feature alone, `cargo machete`,
   `cargo deny`. The Windows and macOS legs run the tests and fixtures.
 
-The post-level-9 plan (`~/.claude/plans/another-session-is-finishing-majestic-comet.md`)
+The level 9 plan (`~/.claude/plans/another-session-is-finishing-majestic-comet.md`)
 redesigns the session as a salsa pipeline (its item 15, "Designed: H4") and keeps
 `AnalysisResult` as its value, owning the inline-ignore records. Its LOAD-2.2
 last part also touches `project/session.rs` and `project.rs`.
