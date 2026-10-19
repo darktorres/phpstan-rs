@@ -11,13 +11,13 @@
 crate syntax stack
 crate types syntax stack
 crate stub-sources
-crate phpdoc syntax types
+crate phpdoc syntax types stack
 crate sql
 crate diagnostics syntax
 crate path-bytes
 crate stack
 crate composer syntax path-bytes stack
-crate config syntax diagnostics
+crate config syntax diagnostics stack
 crate reflection syntax path-bytes types phpdoc stub-sources composer config diagnostics stack
 crate analyser syntax path-bytes types phpdoc stub-sources config diagnostics reflection stack
 crate builtins syntax path-bytes types phpdoc stub-sources config diagnostics reflection analyser stack
