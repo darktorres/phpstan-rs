@@ -32,7 +32,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
       RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold
@@ -92,7 +92,7 @@ jobs:
         run: cargo deny check
 
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
       RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold
@@ -138,7 +138,7 @@ jobs:
           key: test-manifest-${{ github.sha }}
 
   test-no-default-features:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
       RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold
@@ -149,7 +149,7 @@ jobs:
         run: cargo test --workspace --no-default-features --no-fail-fast
 
   fixtures:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
       RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold
@@ -170,7 +170,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-26, windows-2025-vs2026, ubuntu-24.04-arm]
+        os: [macos-26, windows-2025-vs2026, ubuntu-26.04-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -196,7 +196,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-26, windows-2025-vs2026, ubuntu-24.04-arm]
+        os: [macos-26, windows-2025-vs2026, ubuntu-26.04-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -222,7 +222,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-26, windows-2025-vs2026, ubuntu-24.04-arm]
+        os: [macos-26, windows-2025-vs2026, ubuntu-26.04-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:

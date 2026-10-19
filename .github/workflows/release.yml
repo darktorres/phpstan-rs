@@ -17,13 +17,12 @@ jobs:
       matrix:
         include:
           # The Linux legs run on an explicitly pinned Ubuntu LTS image, not
-          # `ubuntu-latest`: its glibc is the oldest the binaries run on
+          # `ubuntu-latest`: its glibc is the floor the binaries run on
           # (README, "Linux glibc compatibility"). When GitHub deprecates
-          # the image, re-pin both legs to the oldest LTS it still supports
-          # and update that note to match.
-          - os: ubuntu-24.04
+          # the image, re-pin both legs and update that note to match.
+          - os: ubuntu-26.04
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             target: aarch64-unknown-linux-gnu
           - os: macos-26
             target: aarch64-apple-darwin
