@@ -173,3 +173,54 @@ fn rename_a_class_updates_type_hints_and_instantiations_but_not_an_unrelated_cla
         "expected the type hint and the `new Foo()` site, not `new Bar()`, got: {result:?}"
     );
 }
+
+#[test]
+fn rename_refuses_a_class_used_through_an_import() {
+    let dir = TempDir::new("rename_refuse_import");
+    let a_src = "<?php\nnamespace App;\nclass Foo {}\n";
+    let b_src = "<?php\nnamespace Other;\nuse App\\Foo;\nfunction f(Foo $x) {}\n";
+    dir.write("a.php", a_src);
+    let b_path = dir.write("b.php", b_src);
+    let b_uri = path_to_uri(&b_path).to_string();
+    let pos = lsp_pos(b_src, "Foo $x");
+
+    let messages = run(&dir, &[rename_request(2, &b_uri, pos, "Renamed")]);
+    assert!(
+        response_result(&messages, 2).is_null(),
+        "a rename that leaves the import resolving to nothing must be refused, got: {messages:?}"
+    );
+}
+
+#[test]
+fn rename_refuses_a_class_used_through_an_alias() {
+    let dir = TempDir::new("rename_refuse_alias");
+    let a_src = "<?php\nnamespace App;\nclass Foo {}\n";
+    let b_src = "<?php\nnamespace Other;\nuse App\\Foo as Bar;\nfunction f(Bar $x) {}\n";
+    dir.write("a.php", a_src);
+    let b_path = dir.write("b.php", b_src);
+    let b_uri = path_to_uri(&b_path).to_string();
+    let pos = lsp_pos(b_src, "Bar $x");
+
+    let messages = run(&dir, &[rename_request(2, &b_uri, pos, "Renamed")]);
+    assert!(
+        response_result(&messages, 2).is_null(),
+        "a rename of a class used through an alias must be refused, got: {messages:?}"
+    );
+}
+
+#[test]
+fn rename_refuses_a_class_referenced_by_a_qualified_name() {
+    let dir = TempDir::new("rename_refuse_qualified");
+    let a_src = "<?php\nnamespace App;\nclass Foo {}\n";
+    let b_src = "<?php\nfunction f(\\App\\Foo $x) {}\n";
+    dir.write("a.php", a_src);
+    let b_path = dir.write("b.php", b_src);
+    let b_uri = path_to_uri(&b_path).to_string();
+    let pos = lsp_pos(b_src, "App\\Foo $x");
+
+    let messages = run(&dir, &[rename_request(2, &b_uri, pos, "Renamed")]);
+    assert!(
+        response_result(&messages, 2).is_null(),
+        "a rename of a class referenced by a qualified name must be refused, got: {messages:?}"
+    );
+}

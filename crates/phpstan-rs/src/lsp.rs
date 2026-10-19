@@ -63,7 +63,7 @@ use crate::project::{Project, ProjectSettings};
 use crate::registry::stub_set::{StubSource, Stubs};
 use crate::registry::{FunctionReflection, format_signature, param_label};
 use crate::{baseline, ignore_errors};
-use syntax::ast::ClassKind;
+use syntax::ast::{ClassKind, StmtKind, UseKind};
 use syntax::span::{LineIndex, Span, Unit};
 use types::Type;
 
@@ -2044,6 +2044,46 @@ impl Server {
         (!locations.is_empty()).then_some(locations)
     }
 
+    /// Whether renaming `target` would leave a reference the rewrite can't
+    /// carry along. The index keeps each reference's span and what it
+    /// resolves to, not how it is written, so the written text is read from
+    /// the source: a qualified name (its text has a `\`) and an alias (its
+    /// text is not the target's short name) are refused, and so is a file
+    /// that imports the target by name, whose `use` the rewrite would leave
+    /// naming the old declaration.
+    fn rename_would_break_references(project: &Project, target: &use_sites::RefTarget) -> bool {
+        let (fqn, kind) = match target {
+            use_sites::RefTarget::Class(fqn) => (fqn.as_str(), UseKind::Class),
+            use_sites::RefTarget::Function(fqn) => (fqn.as_str(), UseKind::Function),
+            use_sites::RefTarget::Member(..) => return true,
+        };
+        let short = fqn.rsplit('\\').next().unwrap_or(fqn);
+        let mut files = FxHashSet::default();
+        for &(file, span) in project.use_sites().references(target) {
+            let path = project.path_of(file);
+            let Some(written) = project
+                .source(path)
+                .and_then(|src| src.get(span.start as usize..span.end as usize))
+            else {
+                return true;
+            };
+            if written.contains('\\') || !written.eq_ignore_ascii_case(short) {
+                return true;
+            }
+            files.insert(file);
+        }
+        files.into_iter().any(|file| {
+            project.ast(project.path_of(file)).is_some_and(|stmts| {
+                stmts.iter().any(|stmt| match &stmt.kind {
+                    StmtKind::Use(imports) => imports
+                        .iter()
+                        .any(|import| import.kind == kind && import.path.eq_ignore_ascii_case(fqn)),
+                    _ => false,
+                })
+            })
+        })
+    }
+
     /// `textDocument/rename` - Class/Function targets only in v1 (see
     /// this item's own edge-case notes: member and local-variable rename
     /// are out of scope; a `Member` target's own `use_sites` spans cover
@@ -2086,6 +2126,9 @@ impl Server {
         };
         self.slot_mut(home).project.ensure_member_index_built();
         let project = &self.slot(home).project;
+        if Self::rename_would_break_references(project, &target) {
+            return None;
+        }
         let mut changes: FxHashMap<Uri, Vec<lsp_types::TextEdit>> = FxHashMap::default();
         for &(file, span) in project.use_sites().references(&target) {
             let p = project.path_of(file);
