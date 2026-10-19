@@ -82,6 +82,14 @@ fn a_disabled_server_checks_and_publishes_nothing_until_it_is_enabled() {
     assert!(server.reload_configuration(settings(false)).is_empty());
 
     let opened = server.handle_open_or_change(&a_uri, CLEAN, Some(1));
+    // The reader thread records an edit's text as it arrives, before the
+    // debounce worker applies it (`queue_change`). This test applies the edit
+    // directly, so it records the text the way the reader would first.
+    server
+        .latest_text
+        .lock()
+        .unwrap()
+        .insert(server.identify(&a), DEPRECATED_CALL.to_string());
     let edited = server.handle_debounced_change(&a, &a_uri, DEPRECATED_CALL, 2, &mut || false);
     let saved = server.analyse_on_save();
     let b = dir.write("b.php", OTHER_DEPRECATED_CALL);

@@ -1255,6 +1255,63 @@ impl Server {
         self.publish_paths(&recorded)
     }
 
+    /// A closed document goes back to its file on disk: the buffer's text is
+    /// dropped and the file is checked as the disk has it. A file that cannot
+    /// be read keeps its state until the file system reports it, as a watched
+    /// file's read failure does.
+    fn handle_close(&mut self, uri: &Uri) -> Vec<Message> {
+        let Some(spelled) = uri_to_path(uri) else {
+            return Vec::new();
+        };
+        let path = self.identify(&spelled);
+        let Ok(bytes) = FileSource::read_disk(&path) else {
+            return Vec::new();
+        };
+        self.reload_from_disk(path, uri.clone(), &bytes)
+    }
+
+    /// Makes `bytes`, the file's content on disk, the content the project
+    /// checks, and returns the diagnostics that changed. Serves a document
+    /// that closed and a file changed outside the editor alike: neither has a
+    /// document version behind it, so the file's `open_uris` entry carries
+    /// `None`.
+    fn reload_from_disk(&mut self, path: PathBuf, uri: Uri, bytes: &[u8]) -> Vec<Message> {
+        self.open_uris.insert(path.clone(), (uri, None));
+        self.latest_text
+            .lock()
+            .unwrap()
+            .insert(path.clone(), source::decode_text(bytes).into_owned());
+        if !self.enabled {
+            return Vec::new();
+        }
+        let mut recorded = Vec::new();
+        let document = source::Digested::new(bytes);
+        for (home, classified) in self.holders(&path) {
+            let slot = self.slot_mut(home);
+            slot.project.unset_document(&path);
+            match slot.project.update_digested_as(
+                &path,
+                document,
+                classified.role == Role::Analysed,
+                classified.is_stub,
+                || false,
+            ) {
+                Ok(results) => recorded.extend(self.record(home, &path, results)),
+                Err(e) => {
+                    eprintln!(
+                        "phpstan-rs lsp: skipping {} - failed to parse: {e}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        if recorded.is_empty() {
+            Vec::new()
+        } else {
+            self.publish_paths(&recorded)
+        }
+    }
+
     /// The debounce worker's own counterpart to `handle_open_or_change` -
     /// identical except it drives `Project::update_digested_as` with a real
     /// `should_abort` closure, and takes an already-resolved `path` (the
@@ -1272,6 +1329,12 @@ impl Server {
         version: i32,
         should_abort: &mut impl FnMut() -> bool,
     ) -> Vec<Message> {
+        // An edit superseded by a newer one, or taken after its document
+        // closed, applies nothing: the newer edit, or the disk's content
+        // that a close restores, is what the project checks.
+        if should_abort() {
+            return Vec::new();
+        }
         let path = self.identify(path);
         *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris
@@ -1385,38 +1448,7 @@ impl Server {
             let Ok(bytes) = FileSource::read_disk(&path) else {
                 continue;
             };
-            // No document version exists for an externally-observed
-            // change (there is no didOpen/didChange behind it) - `None`
-            // matches a file that was only ever loaded from disk.
-            self.open_uris.insert(path.clone(), (uri, None));
-            self.latest_text
-                .lock()
-                .unwrap()
-                .insert(path.clone(), source::decode_text(&bytes).into_owned());
-            let mut recorded = Vec::new();
-            let document = source::Digested::new(&bytes);
-            for (home, classified) in self.holders(&path) {
-                let slot = self.slot_mut(home);
-                slot.project.unset_document(&path);
-                match slot.project.update_digested_as(
-                    &path,
-                    document,
-                    classified.role == Role::Analysed,
-                    classified.is_stub,
-                    || false,
-                ) {
-                    Ok(results) => recorded.extend(self.record(home, &path, results)),
-                    Err(e) => {
-                        eprintln!(
-                            "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                            path.display()
-                        );
-                    }
-                }
-            }
-            if !recorded.is_empty() {
-                messages.extend(self.publish_paths(&recorded));
-            }
+            messages.extend(self.reload_from_disk(path, uri, &bytes));
         }
         messages
     }
@@ -3864,11 +3896,13 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
         // therefore a no-op, matching this arm's own absence rather than
         // silently double-applying the edit through two different paths.
         "textDocument/didClose" => {
-            // Deliberately a no-op: the file stays in the project (its
-            // registry entries and dependency edges are still real and
-            // other open files may depend on them), it's just no longer
-            // tracked as "currently open" for the purposes of picking a
-            // URI to publish under later.
+            if let Ok(params) =
+                serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(not.params)
+            {
+                for message in server.handle_close(&params.text_document.uri) {
+                    let _ = write_message(writer, &message);
+                }
+            }
         }
         _ => {
             // An unrecognized notification is just ignored, per the spec.

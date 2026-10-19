@@ -5,6 +5,7 @@ mod configuration;
 mod debounce_integration;
 mod deep_nesting;
 mod disabled_server;
+mod document_close;
 mod document_highlight;
 mod helpers;
 mod include_environment;
