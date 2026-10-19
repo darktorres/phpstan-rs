@@ -202,11 +202,12 @@ fn report(
     );
     let baseline_per_identifier = run.baseline_per_identifier;
     if let Some(generate_baseline_path) = generate_baseline_path {
+        let checked = analysis.checked_paths();
         let results = analysis.finalize(&run.finalize_options(None)).results;
         let generated = if baseline_per_identifier {
-            baseline::generate_per_identifier(generate_baseline_path, &results)
+            baseline::generate_per_identifier(generate_baseline_path, &results, &checked)
         } else {
-            baseline::generate(generate_baseline_path, &results)
+            baseline::generate(generate_baseline_path, &results, &checked)
         };
         match generated {
             Ok(count) => println!(

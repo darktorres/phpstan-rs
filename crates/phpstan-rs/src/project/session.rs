@@ -6,7 +6,7 @@
 //! reports. The CLI and the fixture harness both drive it, so a fixture
 //! exercises exactly what `check-project` runs.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -479,6 +479,8 @@ pub struct AnalysisResult {
     project: Project,
     /// Per-file diagnostics as the checks emitted them, by the file's number.
     results: FxHashMap<FileId, Vec<Diagnostic>>,
+    /// The analysed files whose check ran to the end, by the file's number.
+    checked_files: FxHashSet<FileId>,
     /// Analysed files that parsed and checked without an internal error.
     pub checked: usize,
     pub skipped_analyze: usize,
@@ -541,6 +543,16 @@ impl AnalysisResult {
     /// What the analysis says beyond its diagnostics, one line each.
     pub fn notices(&self) -> Vec<String> {
         self.lex_warnings.clone()
+    }
+
+    /// The shown paths of the files whose check ran to the end, spelled as the
+    /// report names them (`finalize` keys its results so).
+    pub fn checked_paths(&self) -> FxHashSet<PathBuf> {
+        let root = self.project.absolute_root();
+        self.checked_files
+            .iter()
+            .map(|&id| super::shown_path(root, self.project.path_of(id)).to_path_buf())
+            .collect()
     }
 
     /// The report `options` make of this analysis, which its results move
@@ -2088,6 +2100,7 @@ impl Session {
 
         let checks = self.check_project(&mut project, &analyze_files_by_size, dump_types);
 
+        let checked_files: FxHashSet<FileId> = checks.per_file.keys().copied().collect();
         let mut results = checks.per_file;
         // A file that does not parse is reported where it fails: PHP
         // refuses to run it.
@@ -2109,6 +2122,7 @@ impl Session {
         AnalysisResult {
             project,
             results,
+            checked_files,
             checked: analyze_files_by_size.len() - skipped_analyze - checks.check_panics.len(),
             skipped_analyze,
             skipped_context,

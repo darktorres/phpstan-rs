@@ -11,6 +11,16 @@ pub(super) fn diag(message: &str) -> Diagnostic {
     )
 }
 
+/// `generate` with every file of `results` checked, as a run that analysed
+/// them all passes.
+pub(super) fn generate_all(
+    path: &Path,
+    results: &FxHashMap<PathBuf, Vec<Diagnostic>>,
+) -> io::Result<usize> {
+    let checked = results.keys().cloned().collect();
+    generate(path, results, &checked)
+}
+
 pub(super) fn temp_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "phpstan_rs_baseline_test_{label}_{}_{:?}",

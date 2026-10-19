@@ -13,7 +13,7 @@ fn generate_then_load_filters_out_every_recorded_diagnostic() {
     results.insert(PathBuf::from("b.php"), vec![diag("undefined variable $z")]);
 
     let path = temp_path("roundtrip");
-    let count = generate(&path, &results).unwrap();
+    let count = generate_all(&path, &results).unwrap();
     assert_eq!(count, 3);
 
     let baseline = Baseline::load(&path).unwrap();
@@ -29,7 +29,7 @@ fn filter_keeps_a_new_diagnostic_not_in_the_baseline() {
     let mut baselined = FxHashMap::default();
     baselined.insert(PathBuf::from("a.php"), vec![diag("undefined variable $x")]);
     let path = temp_path("keep_new");
-    generate(&path, &baselined).unwrap();
+    generate_all(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
     let mut results = FxHashMap::default();
@@ -60,7 +60,7 @@ fn the_same_message_in_a_different_file_is_not_baselined() {
     let mut baselined = FxHashMap::default();
     baselined.insert(PathBuf::from("a.php"), vec![diag("undefined variable $x")]);
     let path = temp_path("cross_file");
-    generate(&path, &baselined).unwrap();
+    generate_all(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
     let mut results = FxHashMap::default();
@@ -78,9 +78,9 @@ fn generating_twice_over_the_same_results_produces_a_byte_identical_file() {
     results.insert(PathBuf::from("a.php"), vec![diag("three")]);
 
     let path = temp_path("deterministic");
-    generate(&path, &results).unwrap();
+    generate_all(&path, &results).unwrap();
     let first = fs::read_to_string(&path).unwrap();
-    generate(&path, &results).unwrap();
+    generate_all(&path, &results).unwrap();
     let second = fs::read_to_string(&path).unwrap();
     assert_eq!(first, second);
 
@@ -95,7 +95,7 @@ fn a_differently_spelled_but_identical_path_is_still_matched() {
         vec![diag("undefined variable $x")],
     );
     let path = temp_path("path_spelling");
-    generate(&path, &baselined).unwrap();
+    generate_all(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
     let mut results = FxHashMap::default();
@@ -114,7 +114,7 @@ fn filter_reports_a_baseline_entry_no_current_diagnostic_matches() {
     let mut baselined = FxHashMap::default();
     baselined.insert(PathBuf::from("a.php"), vec![diag("undefined variable $x")]);
     let path = temp_path("stale_entry");
-    generate(&path, &baselined).unwrap();
+    generate_all(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
     let mut results = FxHashMap::default();
@@ -132,7 +132,7 @@ fn filter_reports_nothing_stale_when_every_entry_still_matches() {
     let mut baselined = FxHashMap::default();
     baselined.insert(PathBuf::from("a.php"), vec![diag("undefined variable $x")]);
     let path = temp_path("no_stale_entries");
-    generate(&path, &baselined).unwrap();
+    generate_all(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
     let mut results = baselined;
@@ -166,7 +166,7 @@ fn a_baseline_entry_written_with_backslashes_names_the_file() {
 fn a_baseline_spells_a_file_with_slashes_on_windows() {
     let path = temp_path("windows_spelling");
     let recorded = results_of("src\\a.php", vec![diag("p")]);
-    generate(&path, &recorded).unwrap();
+    generate_all(&path, &recorded).unwrap();
     let written = fs::read_to_string(&path).unwrap();
     assert!(written.contains("\"file\": \"src/a.php\""), "{written}");
     let baseline = Baseline::load(&path).unwrap();
@@ -228,7 +228,7 @@ fn results_of(file: &str, diagnostics: Vec<Diagnostic>) -> FxHashMap<PathBuf, Ve
 fn a_baseline_entry_absorbs_only_its_recorded_count() {
     let path = temp_path("counts");
     let recorded = results_of("a.php", vec![diag("same problem"), diag("same problem")]);
-    assert_eq!(generate(&path, &recorded).unwrap(), 2);
+    assert_eq!(generate_all(&path, &recorded).unwrap(), 2);
     let written = fs::read_to_string(&path).unwrap();
     assert!(written.contains("\"count\": 2"), "{written}");
 
@@ -249,7 +249,7 @@ fn a_baseline_entry_absorbs_only_its_recorded_count() {
 #[test]
 fn fewer_occurrences_than_recorded_are_reported_with_both_counts() {
     let path = temp_path("fewer");
-    generate(
+    generate_all(
         &path,
         &results_of("a.php", vec![diag("p"), diag("p"), diag("p")]),
     )
@@ -280,7 +280,7 @@ fn a_legacy_baseline_with_repeated_entries_adds_them_up() {
 #[test]
 fn identifier_mode_survives_a_reworded_message() {
     let path = temp_path("identifier");
-    generate(
+    generate_all(
         &path,
         &results_of("a.php", vec![diag_with("Old wording.", "argument.type")]),
     )
@@ -321,7 +321,11 @@ fn a_per_identifier_split_round_trips_through_its_index() {
     );
     fs::create_dir_all(dir.join("baseline")).unwrap();
     fs::write(dir.join("baseline/stale.identifier.json"), "[]").unwrap();
-    assert_eq!(generate_per_identifier(&index, &recorded).unwrap(), 3);
+    let checked = recorded.keys().cloned().collect();
+    assert_eq!(
+        generate_per_identifier(&index, &recorded, &checked).unwrap(),
+        3
+    );
     let mut files: Vec<String> = fs::read_dir(dir.join("baseline"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -338,6 +342,140 @@ fn a_per_identifier_split_round_trips_through_its_index() {
     let stale = filter(&mut now, &Baseline::load(&index).unwrap());
     assert!(now[&PathBuf::from("a.php")].is_empty());
     assert!(stale.is_empty(), "{stale:?}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_unchecked_file_keeps_the_entries_recorded_for_it() {
+    let path = temp_path("unchecked_kept");
+    let mut before = results_of("a.php", vec![diag("old a")]);
+    before.insert(PathBuf::from("b.php"), vec![diag("b finding")]);
+    generate_all(&path, &before).unwrap();
+
+    // The run checked a.php again and did not check b.php.
+    let after = results_of("a.php", vec![diag("new a")]);
+    let checked = [PathBuf::from("a.php")].into_iter().collect();
+    generate(&path, &after, &checked).unwrap();
+
+    let mut now = before.clone();
+    filter(&mut now, &Baseline::load(&path).unwrap());
+    assert!(
+        now[&PathBuf::from("b.php")].is_empty(),
+        "b.php was not checked, so its entry must stay"
+    );
+    assert_eq!(
+        now[&PathBuf::from("a.php")].len(),
+        1,
+        "a.php was checked, so its old entry must go"
+    );
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn a_checked_file_with_no_diagnostics_loses_the_entries_recorded_for_it() {
+    let path = temp_path("checked_clean");
+    generate_all(&path, &results_of("a.php", vec![diag("old a")])).unwrap();
+
+    let checked = [PathBuf::from("a.php")].into_iter().collect();
+    generate(&path, &FxHashMap::default(), &checked).unwrap();
+
+    let mut now = results_of("a.php", vec![diag("old a")]);
+    filter(&mut now, &Baseline::load(&path).unwrap());
+    assert_eq!(
+        now[&PathBuf::from("a.php")].len(),
+        1,
+        "a.php is clean now, so its old entry must not absorb"
+    );
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn an_unparsed_file_keeps_its_entries_and_records_no_new_diagnostic() {
+    let path = temp_path("unparsed");
+    generate_all(&path, &results_of("a.php", vec![diag("old a")])).unwrap();
+
+    // a.php no longer parses, so the run reports its parse error and does not check it.
+    let results = results_of("a.php", vec![diag_with("syntax error", "parse.error")]);
+    generate(&path, &results, &FxHashSet::default()).unwrap();
+
+    let mut now = results_of(
+        "a.php",
+        vec![diag("old a"), diag_with("syntax error", "parse.error")],
+    );
+    filter(&mut now, &Baseline::load(&path).unwrap());
+    let remaining = &now[&PathBuf::from("a.php")];
+    assert_eq!(
+        remaining.len(),
+        1,
+        "the old entry should absorb, and only the parse error remain"
+    );
+    assert_eq!(remaining[0].message, "syntax error");
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn regenerating_an_index_keeps_its_unchecked_entries_in_one_file() {
+    let dir = temp_path("flatten");
+    fs::create_dir_all(&dir).unwrap();
+    let index = dir.join("baseline.json");
+    let mut before = results_of("a.php", vec![diag_with("one", "argument.type")]);
+    before.insert(
+        PathBuf::from("b.php"),
+        vec![diag_with("two", "return.type")],
+    );
+    let checked_all = before.keys().cloned().collect();
+    generate_per_identifier(&index, &before, &checked_all).unwrap();
+    assert!(!read_file(&index).unwrap().includes.is_empty());
+
+    // A later run checked only b.php, which is clean now; a.php was not checked.
+    let checked = [PathBuf::from("b.php")].into_iter().collect();
+    generate(&index, &FxHashMap::default(), &checked).unwrap();
+
+    assert!(
+        read_file(&index).unwrap().includes.is_empty(),
+        "the index still names included files"
+    );
+    let mut now = before.clone();
+    filter(&mut now, &Baseline::load(&index).unwrap());
+    assert!(
+        now[&PathBuf::from("a.php")].is_empty(),
+        "a.php's entry, kept from an include, must still absorb"
+    );
+    assert_eq!(
+        now[&PathBuf::from("b.php")].len(),
+        1,
+        "b.php was checked and is clean, so its entry is gone"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_existing_baseline_that_does_not_load_is_an_error_and_is_not_overwritten() {
+    let path = temp_path("unreadable");
+    fs::write(&path, "{ not a baseline").unwrap();
+    let checked = [PathBuf::from("a.php")].into_iter().collect();
+    let result = generate(&path, &results_of("a.php", vec![diag("new")]), &checked);
+    assert!(result.is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "{ not a baseline");
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn a_per_identifier_regeneration_over_an_unreadable_index_removes_nothing() {
+    let dir = temp_path("unreadable_split");
+    fs::create_dir_all(dir.join("baseline")).unwrap();
+    let index = dir.join("baseline.json");
+    fs::write(&index, "{ not a baseline").unwrap();
+    fs::write(dir.join("baseline/kept.identifier.json"), "[]").unwrap();
+    let checked = [PathBuf::from("a.php")].into_iter().collect();
+    let result = generate_per_identifier(
+        &index,
+        &results_of("a.php", vec![diag_with("new", "argument.type")]),
+        &checked,
+    );
+    assert!(result.is_err());
+    assert!(dir.join("baseline/kept.identifier.json").exists());
+    assert_eq!(fs::read_to_string(&index).unwrap(), "{ not a baseline");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -362,7 +500,7 @@ fn a_version_1_baseline_merges_entries_that_differed_only_by_location() {
 #[test]
 fn generate_writes_the_current_version() {
     let path = temp_path("version");
-    generate(&path, &results_of("a.php", vec![diag("p")])).unwrap();
+    generate_all(&path, &results_of("a.php", vec![diag("p")])).unwrap();
     let written: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(written["version"], 2);

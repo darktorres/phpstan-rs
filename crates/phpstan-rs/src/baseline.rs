@@ -19,7 +19,7 @@
 //! (`VERSION`); a version-1 file (keyed by a symbolic `location` as well)
 //! still loads, its entries merged per new key, and `convert` rewrites it.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -204,7 +204,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 fn entries_for(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
     let mut counts: FxHashMap<Entry, usize> = FxHashMap::default();
     for (file, diagnostics) in results {
-        let file = report_path(&normalize_path(file)).into_owned();
+        let file = entry_file(file);
         for d in diagnostics {
             let key = Entry {
                 file: file.clone(),
@@ -222,10 +222,56 @@ fn entries_for(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
             entry
         })
         .collect();
+    sort_entries(&mut entries);
+    entries
+}
+
+fn sort_entries(entries: &mut [Entry]) {
     entries.sort_by(|a, b| {
         (&a.file, &a.message, &a.identifier).cmp(&(&b.file, &b.message, &b.identifier))
     });
-    entries
+}
+
+/// A report path as a baseline names the file.
+fn entry_file(file: &Path) -> String {
+    report_path(&normalize_path(file)).into_owned()
+}
+
+/// The entries of the baseline at `path`, its includes followed; none when
+/// there is no file there.
+fn existing_entries(path: &Path) -> io::Result<Vec<Entry>> {
+    match fs::metadata(path) {
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    }
+    let mut entries = Vec::new();
+    load_into(path, &mut entries, 0)?;
+    Ok(entries)
+}
+
+/// The entries a regenerated baseline at `path` holds: the diagnostics of the
+/// `checked` files in `results`, and for every other file the entries the
+/// baseline already at `path` records for it. A file there that does not load
+/// is an error, so it is not overwritten.
+fn regenerated_entries(
+    path: &Path,
+    results: &FxHashMap<PathBuf, Vec<Diagnostic>>,
+    checked: &FxHashSet<PathBuf>,
+) -> io::Result<Vec<Entry>> {
+    let checked: FxHashSet<String> = checked.iter().map(|file| entry_file(file)).collect();
+    let mut entries: Vec<Entry> = existing_entries(path)?
+        .into_iter()
+        .filter(|entry| !checked.contains(&entry.file))
+        .collect();
+    entries.extend(
+        entries_for(results)
+            .into_iter()
+            .filter(|entry| checked.contains(&entry.file)),
+    );
+    let mut entries = merge(entries);
+    sort_entries(&mut entries);
+    Ok(entries)
 }
 
 fn write_entries(path: &Path, entries: &[Entry]) -> io::Result<()> {
@@ -239,10 +285,16 @@ fn write_entries(path: &Path, entries: &[Entry]) -> io::Result<()> {
     )
 }
 
-/// Writes every diagnostic in `results` to `path` as a baseline file and
-/// returns the number of diagnostics recorded.
-pub fn generate(path: &Path, results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> io::Result<usize> {
-    let entries = entries_for(results);
+/// Writes the diagnostics of the `checked` files in `results` to `path` as a
+/// baseline file and returns the number of diagnostics recorded. The entries
+/// of the files not checked are kept from the baseline already at `path`, and
+/// written into this file.
+pub fn generate(
+    path: &Path,
+    results: &FxHashMap<PathBuf, Vec<Diagnostic>>,
+    checked: &FxHashSet<PathBuf>,
+) -> io::Result<usize> {
+    let entries = regenerated_entries(path, results, checked)?;
     write_entries(path, &entries)?;
     Ok(entries.iter().map(|e| e.count).sum())
 }
@@ -254,8 +306,10 @@ pub fn generate(path: &Path, results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> i
 pub fn generate_per_identifier(
     path: &Path,
     results: &FxHashMap<PathBuf, Vec<Diagnostic>>,
+    checked: &FxHashSet<PathBuf>,
 ) -> io::Result<usize> {
-    let entries = entries_for(results);
+    // Read before the stale files of the directory are removed below.
+    let entries = regenerated_entries(path, results, checked)?;
     let parent = path.parent().unwrap_or(Path::new(""));
     let stem = path
         .file_stem()
