@@ -66,6 +66,9 @@ jobs:
       - name: Architecture rules
         if: ${{ !cancelled() }}
         run: cargo xtask arch
+      - name: Recursion rules
+        if: ${{ !cancelled() }}
+        run: cargo xtask recursion
       - name: Docs
         if: ${{ !cancelled() }}
         run: cargo doc --workspace --no-deps

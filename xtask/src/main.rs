@@ -22,6 +22,7 @@ mod arch;
 mod front_end;
 mod gatetime;
 mod modgraph;
+mod recursion;
 mod stub_index;
 #[cfg(test)]
 mod tests;
@@ -43,6 +44,9 @@ fn main() -> ExitCode {
         Some("tests") => test_manifest(&args[1..]),
         Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
         Some("arch") => arch::arch(&root()),
+        Some("recursion") => {
+            recursion::recursion(&root(), args.get(1).is_some_and(|a| a == "--wrap"))
+        }
         Some("front-end-dump") => front_end::front_end_dump(&args[1..]),
         Some("stub-index") => write_stub_index(),
         Some("baseline") => baseline_generate(),
@@ -82,6 +86,7 @@ const USAGE: &str = "usage: cargo xtask <command>
                          gates/module-graph.txt (--inventory lists every
                          crossing edge)
   arch                   check the architecture rules
+  recursion              check that recursive functions start with the stack guard
   front-end-dump <dir>... [--show <file>]
                          one line for each PHP file under the directories:
                          its path and a hash of what the lexer and the
@@ -1593,6 +1598,7 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
     timings.time("test manifest", |_| test_manifest(&[]))?;
     timings.time("module graph", |_| modgraph::modgraph(&root(), &[]))?;
     timings.time("arch", |_| arch::arch(&root()))?;
+    timings.time("recursion", |_| recursion::recursion(&root(), false))?;
     timings.time("doc", |_| {
         run(cargo()
             .args(["doc", "--workspace", "--no-deps", "--quiet"])
