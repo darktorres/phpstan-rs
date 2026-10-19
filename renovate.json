@@ -23,6 +23,17 @@
     {
       "matchPackageNames": ["@types/vscode"],
       "enabled": false
+    },
+    {
+      "description": "A comparator-matrix pin is the version its data file records; moving it means regenerating the file.",
+      "matchFileNames": ["tools/phpunit-comparator-matrix/**"],
+      "enabled": false
+    },
+    {
+      "description": "Each line of php-images.lock is one PHP version, so only its digest moves.",
+      "matchFileNames": ["crates/phpstan-rs/tests/runtime_oracle/php-images.lock"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
     }
   ],
   "customManagers": [
@@ -41,6 +52,13 @@
       "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
       "matchStrings": ["(?<depName>cargo-[a-z-]+)@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
       "datasourceTemplate": "crate"
+    },
+    {
+      "description": "PHP images pinned by digest, for the runtime oracle and the comparison matrix.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^crates/phpstan-rs/tests/runtime_oracle/php-images\\.lock$/"],
+      "matchStrings": ["(?<depName>php):(?<currentValue>\\d+\\.\\d+-cli)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "datasourceTemplate": "docker"
     }
   ]
 }
