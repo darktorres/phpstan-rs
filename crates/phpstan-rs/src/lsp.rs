@@ -3199,6 +3199,7 @@ fn spawn_debounce_worker<W: Write + Send + 'static>(
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
         .name("phpstan-rs-lsp-debounce".to_string())
+        .stack_size(crate::project::WORKER_STACK_SIZE)
         .spawn(move || {
             loop {
                 let guard = debounce.queue.lock().unwrap();
