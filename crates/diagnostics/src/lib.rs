@@ -1,7 +1,7 @@
 //! What a check reports: a [`Diagnostic`], assembled through
 //! [`DiagnosticBuilder`], with an optional textual [`DiagnosticFix`]
 //! (applied by [`fix`]), and how reports and messages spell a file's path
-//! and configured path text names one ([`report_path`]).
+//! and configured path text names one ([`report_path()`]).
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
