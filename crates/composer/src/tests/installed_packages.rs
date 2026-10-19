@@ -184,3 +184,57 @@ fn an_install_path_outside_the_vendor_directory_is_resolved() {
     let web = package(&packages, "acme/web");
     assert_eq!(web.install_dir, expected(&dir, "web/core"));
 }
+
+#[test]
+fn a_package_installed_in_place_from_a_path_dist_is_a_path_package() {
+    // A `type: package` repository whose dist is a path, linked from the vendor
+    // directory as league/flysystem-local is. A copy of that path made by a
+    // custom installer is not the path's own install, so it is not promoted.
+    let dir = TempDir::new("installed_path_dist");
+    dir.write(
+        "composer.json",
+        r#"{"name": "acme/app", "repositories": [{"type": "package",
+            "package": {"name": "league/flysystem-local", "version": "3.0.0",
+                "dist": {"type": "path", "url": "src/Local"}}}]}"#,
+    );
+    dir.write(
+        "src/Local/composer.json",
+        r#"{"name": "league/flysystem-local"}"#,
+    );
+    dir.write("src/Local/src/LocalFilesystemAdapter.php", "<?php");
+    dir.write("web/copy/src/Copied.php", "<?php");
+    dir.write(
+        "vendor/composer/installed.json",
+        r#"{"packages": [
+            {"name": "league/flysystem-local", "install-path": "../league/flysystem-local",
+                "dist": {"type": "path", "url": "src/Local"}},
+            {"name": "acme/copy", "install-path": "../../web/copy",
+                "dist": {"type": "path", "url": "src/Local"}}
+        ]}"#,
+    );
+    std::fs::create_dir_all(dir.path().join("vendor/league")).unwrap();
+    link_dir(
+        dir.path().join("src/Local"),
+        dir.path().join("vendor/league/flysystem-local"),
+    );
+    let root = canonicalize(dir.path()).unwrap();
+    let vendor = root.join("vendor");
+    let manifest = ComposerManifest::load(
+        &root.join("composer.json"),
+        &root,
+        &root,
+        Some(vendor.as_path()),
+        &DirListings::default(),
+    )
+    .unwrap();
+    let promoted: Vec<&str> = manifest
+        .path_repository_packages()
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(promoted, vec!["league/flysystem-local"]);
+    assert_eq!(
+        manifest.installed_elsewhere(&vendor),
+        vec![expected(&dir, "web/copy")]
+    );
+}

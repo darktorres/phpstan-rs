@@ -101,6 +101,9 @@ pub struct InstalledPackage {
     pub auto_discovered: bool,
     /// Its `include-path` directories, below `install_dir`.
     pub include_path: Vec<PathBuf>,
+    /// The `dist.url` of a package Composer installed from a path source, as
+    /// Composer wrote it: relative to the project root.
+    pub path_dist: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,9 +291,11 @@ impl ComposerManifest {
                 .any(|f| lexically_normalized(file) == self.absolute(f))
     }
 
-    /// Installed packages that come from a `type: path` repository: local
-    /// sibling packages whose `vendor/<name>` is a link into the
-    /// repository's directory (a `*` in the URL matches any directory).
+    /// Installed packages that come from a path source: a `type: path`
+    /// repository's packages, local sibling packages whose `vendor/<name>` is
+    /// a link into the repository's directory (a `*` in the URL matches any
+    /// directory), and a package whose `dist` is a path (a `type: package`
+    /// repository) that Composer installed in place.
     pub fn path_repository_packages(&self) -> Vec<&InstalledPackage> {
         let roots: Vec<PathBuf> = self
             .repositories
@@ -304,8 +309,21 @@ impl ComposerManifest {
             .collect();
         self.installed
             .iter()
-            .filter(|p| roots.iter().any(|root| p.install_dir.starts_with(root)))
+            .filter(|p| {
+                roots.iter().any(|root| p.install_dir.starts_with(root))
+                    || self.installed_in_place_from_path(p)
+            })
             .collect()
+    }
+
+    /// Whether Composer installed `package` from its `dist` path, as a link
+    /// or in place: the path, relative to the project root, resolves to the
+    /// install directory. A copy made by a custom installer does not.
+    fn installed_in_place_from_path(&self, package: &InstalledPackage) -> bool {
+        package.path_dist.as_deref().is_some_and(|url| {
+            let joined = self.absolute_root.join(url);
+            canonical::canonicalize(&joined).is_ok_and(|dir| dir == package.install_dir)
+        })
     }
 
     /// The install directories of the installed packages that Composer put
@@ -369,7 +387,12 @@ fn read_installed(installed: Option<&Path>, listings: &DirListings) -> Vec<Insta
                 }
                 Some(rel) => resolve(&composer_dir.join(rel)),
             };
+            let path_dist = package
+                .read::<Members>("dist")
+                .filter(|dist| dist.read::<String>("type").as_deref() == Some("path"))
+                .and_then(|dist| dist.read("url"));
             Some(InstalledPackage {
+                path_dist,
                 kind: package
                     .read("type")
                     .unwrap_or_else(|| "library".to_string()),
