@@ -1,5 +1,60 @@
 # Part D. After batch 8: the wall (levels 1 to 7)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| REG-7 | OPEN | OPEN |
+| REG-8 | OPEN | OPEN |
+| REG-4.2 | READY | READY; a delta, approved in the plan, fixtured |
+| REG-16.3 | OPEN | OPEN |
+| CACHE-13.2 | OPEN | OPEN |
+| REG-16.4 | OPEN | OPEN |
+| STUB-11 | OPEN | OPEN |
+| STUB-10.1 | OPEN | OPEN |
+| REG-15 | OPEN | OPEN |
+| REG-7.2 | OPEN | OPEN |
+| STUB-8 | OPEN | OPEN; a delta, approved, both parts (VAL-2.4) |
+| VAL-2.4 | DONE | DONE: approved, both parts |
+| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format |
+| REG-7.1 | OPEN | OPEN |
+| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) |
+| TYPE-4 | OPEN | OPEN |
+| NAME-2.4 | OPEN | OPEN |
+| LOAD-3.1 | OPEN | OPEN |
+| LOAD-5.1 | OPEN | OPEN |
+| LOAD-5.2 | OPEN | OPEN |
+| REG-17 | OPEN | OPEN |
+| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) |
+| VAL-2.5 | DONE | DONE: approved; decision 1 withdrew REG-7.6's `mixed` in its favour |
+| CHECK-8 | OPEN | OPEN |
+| CHECK-10 | OPEN | OPEN |
+| REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) |
+| REG-7.5 | OPEN | OPEN |
+| PROD-5.4 | OPEN | OPEN |
+| SYN-1.10 | OPEN | OPEN |
+| REG-14.3 | OPEN | OPEN |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … |
+| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 |
+| PROD-5.8 | READY | READY |
+| PROD-5.2 | READY | READY |
+| STUB-7.3 | OPEN | OPEN; a delta, approved (decision 14) |
+| REG-8.3 | OPEN | OPEN |
+| REG-2 | READY | READY. `xtask modgraph --inventory` lists the crossing edges; the `impl` and name inventories are not made |
+| REG-12 | OPEN | OPEN |
+| REG-16 | OPEN | OPEN |
+| REG-18 | OPEN | OPEN |
+| STUB-7 | OPEN | OPEN |
+| LOAD-7 | OPEN | OPEN |
+| CHECK-11 | READY | READY; a delta |
+| VAL-1 | OPEN | OPEN |
+
+<!-- status:end -->
+
 Read from `WORK_STACK.md` (levels 1 to 7), the ledger's REG, STUB, CACHE, CHECK, TYPE, NAME, VAL and Q
 sections, `PROFILE_DRILL_PIWIGO_20G.md` §12, and `CRATE_SPLIT_PLAN.md`'s stages C to G (the plan was
 last edited on 2026-10-18, `c1a7e224`, for the module graph; its stage text dates from 2026-09-28). Nothing here is

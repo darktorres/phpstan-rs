@@ -1,5 +1,20 @@
 # Part I. The designs the batches wait for (Part F 5, 7, 8, 11, 12)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| SYN-4.1 | OPEN | OPEN |
+| SYN-4.8 | READY | READY |
+| SYN-3.2 | READY | READY, with SYN-3.1 |
+| SYN-3.1 | READY | READY |
+
+<!-- status:end -->
+
 Each is a section, written from the code at `8a1ca1e0`. I1 is item 9, step 2's layout; I2 to I5 belong to
 batches 1, 2, 6 and 7.
 

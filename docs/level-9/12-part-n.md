@@ -1,5 +1,78 @@
 # Part N. The documents and edits this plan implies
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| SYN-1.2 | READY | READY |
+| SYN-1.3 | OPEN | OPEN |
+| SYN-1.9 | OPEN | OPEN |
+| SYN-6 | OPEN | OPEN |
+| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … |
+| SYN-1.10 | OPEN | OPEN |
+| SYN-2 | OPEN | OPEN; the target grew |
+| SYN-3.2 | READY | READY, with SYN-3.1 |
+| SYN-3.1 | READY | READY |
+| SYN-4.1 | OPEN | OPEN |
+| NAME-1.2 | READY | READY; the container-field keys are a delta, approved (VAL-2.7) |
+| VAL-2.7 | DONE | DONE: approved |
+| PROD-5.1 | OPEN | OPEN |
+| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) |
+| REG-4.10 | READY | READY; overlaps DOC-2.6 |
+| DOC-2.6 | OPEN | OPEN; overlaps REG-4.10 |
+| TYPE-5 | READY | READY |
+| CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) |
+| VAL-2.8 | DONE | DONE: approved in principle; each family's output diff is read at VAL-1, and anything that is not an improvement is … |
+| CHECK-6.8 | READY | READY |
+| CHECK-6.10 | READY | READY |
+| CHECK-4.2 | READY | READY |
+| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) |
+| VAL-2.5 | DONE | DONE: approved; decision 1 withdrew REG-7.6's `mixed` in its favour |
+| CHECK-11 | READY | READY; a delta |
+| LOAD-7.6 | READY | READY; a delta in the config's keys |
+| REG-18.4 | READY | READY; a delta |
+| LOAD-7.2 | OPEN | OPEN; the PHPUnit half needs a ruling |
+| REG-14.4 | DONE | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all … |
+| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … |
+| REG-7.5 | OPEN | OPEN |
+| REG-4.9 | READY | READY |
+| REG-4.11 | OPEN | OPEN; the comments can be corrected now |
+| REG-7 | OPEN | OPEN |
+| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 |
+| NAME-1 | OPEN | OPEN |
+| NAME-2 | OPEN | OPEN |
+| REG-16.4 | OPEN | OPEN |
+| REG-16.5 | OPEN | OPEN |
+| REG-17 | OPEN | OPEN |
+| LOAD-2.2 | SEE LEDGER | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … |
+| REG-18.6 | READY | READY |
+| LOAD-5.1 | OPEN | OPEN |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … |
+| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 |
+| PROD-5.8 | READY | READY |
+| PROD-5.2 | READY | READY |
+| LOAD-7.5 | READY | READY |
+| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … |
+| CACHE-13.1 | OPEN | OPEN |
+| CACHE-13.2 | OPEN | OPEN |
+| CACHE-8 | READY | READY |
+| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format |
+| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) |
+| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) |
+| STUB-12.2 | OPEN | OPEN |
+| STUB-11 | OPEN | OPEN |
+| VAL-1.2 | OPEN | OPEN |
+| VAL-2.9 | DONE | DONE: approved (decision 14), STUB-7.2 and REG-8.5 corrected; each is read at VAL-1 as it lands |
+| STUB-7.2 | OPEN | OPEN; a delta, approved and corrected (decision 14) |
+| REG-8.5 | OPEN | OPEN; a delta, approved and corrected (decision 14; nsrt `property-hooks.php`) |
+| VAL-1 | OPEN | OPEN |
+
+<!-- status:end -->
+
 Nothing here is done in plan mode. This part consolidates what Parts A, B, E, H, J and M scatter ("the ledger would
 otherwise keep false"), so that the docs commit series of Part E 20 and the first commits of each batch have one
 list. A ledger row is edited in the commit that builds it, except where a row says "at approval"; an edit of a ruled

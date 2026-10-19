@@ -1,8 +1,20 @@
 ## A1. LOAD-2.2, last part: the name floor
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| LOAD-2.2 | SEE LEDGER | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … |
+
+<!-- status:end -->
+
 **Now.** `DEFAULT_SCAN_EXCLUDED_DIR_NAMES = ["vendor", ".git", "node_modules"]`
 (`project.rs:3415` at `ffa7cccb`) and `path_under_excluded_dir` (`:3421`, which now takes the walk's `Excluded`, since
-level 9's R7) serve three editor paths and the walk:
+the cross-platform plan's R7) serve three editor paths and the walk:
 
 | use | code | what the names do |
 |---|---|---|
@@ -190,7 +202,7 @@ the build has to prove: it is argued from `walk_dir` and `Starts::below`, and no
    `$baseDir`. COMP-7 adds `ComposerManifest::installed_elsewhere(vendor)` (the installed packages whose install
    directory lies outside `vendor` and which `path_repository_packages` does not return), and discovery's filter admits what
    lies under their directories (the shared package list is `PackageContext::load`'s, above).
-2. `Excluded<'a>` (it exists since level 9's R7: `names` and the root's `case` rule, `walk.rs:97`) gains
+2. `Excluded<'a>` (it exists since the cross-platform plan's R7: `names` and the root's `case` rule, `walk.rs:97`) gains
    `composer_vendor: bool`, a borrowed handle on the session's environment and a borrowed sorted slice of seeds
    (COMP-7), and stays `Copy`. A walk whose `Excluded` has the flag leaves out a directory that is Composer's, decided by
    the directory's own task (the root of a walk is never tested, as no name is applied to it either). The names are

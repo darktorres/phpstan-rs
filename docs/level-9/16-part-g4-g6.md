@@ -1,5 +1,17 @@
 ## G4. The probe (Part F 4)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| — | — | no ledger row named in this part's headings or tables |
+
+<!-- status:end -->
+
 **What exists (verified).** Hover, signature help and completion share `ProbeScope` (`navigation.rs`:
 `Function(Box<FunctionDecl>)` or `TopLevel(Vec<Stmt>)`), built by the navigation `Walker`, which
 deep-clones every function it enters. `Server::probe_receiver_type` and `probe_variable_provenance`

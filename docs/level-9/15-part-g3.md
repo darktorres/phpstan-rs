@@ -1,5 +1,17 @@
 ## G3. The error-node model and parse recovery (Part F 3, 9)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| — | — | no ledger row named in this part's headings or tables |
+
+<!-- status:end -->
+
 **Why now.** Decision 4 says every parse yields a tree; Q-10 and decision 15 say what a failing file
 keeps and how its version range is read; F77 says the failure is reported. Step 2 fixes the stored
 layout and the builder's API, and batch 3 builds the recovery on them, so the model comes first.

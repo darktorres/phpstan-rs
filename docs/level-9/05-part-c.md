@@ -1,5 +1,57 @@
 # Part C. What follows item 9
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| SYN-2 | OPEN | OPEN; the target grew |
+| SYN-4.1 | OPEN | OPEN |
+| SYN-4.8 | READY | READY |
+| SYN-4.9 | READY | READY |
+| SYN-3.1 | READY | READY |
+| SYN-4.2 | READY | READY |
+| SYN-1.9 | OPEN | OPEN |
+| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … |
+| SYN-6 | OPEN | OPEN |
+| NAME-2.1 | READY | READY |
+| NAME-1.1 | READY | READY |
+| SYN-4.5 | READY | READY |
+| REG-18.4 | READY | READY; a delta |
+| CHECK-4.2 | READY | READY |
+| PROD-5.8 | READY | READY |
+| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … |
+| REG-14.1 | OPEN | OPEN; a delta, approved (VAL-2.6) |
+| VAL-2.6 | DONE | DONE: approved |
+| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) |
+| REG-4.10 | READY | READY; overlaps DOC-2.6 |
+| DOC-2.6 | OPEN | OPEN; overlaps REG-4.10 |
+| TYPE-5 | READY | READY |
+| CHECK-6.4 | READY | READY |
+| CHECK-6.8 | READY | READY |
+| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone |
+| CACHE-13.1 | OPEN | OPEN |
+| CACHE-8 | READY | READY |
+| LOAD-5.1 | OPEN | OPEN |
+| LOAD-5.2 | OPEN | OPEN |
+| LOAD-3.1 | OPEN | OPEN |
+| LOAD-3.5 | OPEN | OPEN |
+| PROD-5.2 | READY | READY |
+| DOC-2.2 | OPEN | OPEN |
+| DOC-2.5 | OPEN | OPEN. DOC-1 rewrote the tag parser to pull tokens; the borrowed token text is not built |
+| DOC-1 | SEE LEDGER | 23,216,039,715 |
+| NAME-1.4 | OPEN | OPEN |
+| CHECK-4.1 | OPEN | OPEN |
+| CHECK-6.7 | OPEN | OPEN |
+| CHECK-6.13 | OPEN | OPEN |
+| SYN-1.10 | OPEN | OPEN |
+
+<!-- status:end -->
+
 Read from the 20 G plan's items 10 to 19 (its §10), the ledger's rows, needs and notes
 (`PROFILE_DRILL_PIWIGO_LEDGER.md` §2 to §13) and the code at `0fb1a4de`. The savings are the 20 G
 report's estimates for the off run (the ledger's "now" is 20.37 G at `8a1ca1e0`; 20.57 G is the 20 G profile's
@@ -8,7 +60,7 @@ items 13 and 14, so none is a claim. Validation is at the end of each item, as b
 
 ## C1. The path, in order (the ruled order of Part E's "The sequence this gives"; the second pass made this table agree)
 
-1. The active level 9 (the cross-platform fixes; R0 to R15 and R18 are built at `c5bec58c`, R16 and R17 are open); then Part A's rows
+1. The cross-platform fixes (R0 to R15 and R18 are built at `c5bec58c`, R16 and R17 are open); then Part A's rows
    (A1 to A3, A5, A5a, A7 and A8; A4 is folded into REG-7.5).
 2. Batch 0 (Part E 13 and 22: the oracle tools and the baseline, F10's tests, F20, F21, F77, the level-3 backlog that
    changes a dump, and the seven fixes the crate split's F1 puts first), then item 9: steps 0, 1, 2, then step 3
@@ -61,7 +113,7 @@ skim has a stated reading for a `QualifiedName`, a leading backslash and a `name
   batch 1 (note 1). SYN-4.8 is NAME-1's round trip for qualified names. SYN-4.1 shrinks: its first half, the
   identifier lookup inlined into the lexer's arm with the scratch table, is gone, because the lexer interns nothing
   (I2: the parser's `take` interns); its perfect-hash watch list stays, built by a `const fn` in the caller from the
-  lists it composes (level 9's R18 makes `WATCHED` the join of three layers' lists, `stub_attributes`,
+  lists it composes (the cross-platform plan's R18 makes `WATCHED` the join of three layers' lists, `stub_attributes`,
   `checker::mentions` and `file_declarations`, so `syntax` cannot see the entries when it compiles, and a build script
   there could not either). SYN-4.5 (`RefKey::Constant` keeps namespace and name apart) is `ConstName`, which NAME-1.2
   introduces, and it is the `Constant` kind of PROD-5.8's record (`RefKey` itself goes with the dependents machinery

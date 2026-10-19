@@ -1,5 +1,24 @@
 # Part B. Item 9: the flat tree (SYN-1.2 to 1.10)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| SYN-1.2 | READY | READY |
+| PROD-5.1 | OPEN | OPEN |
+| STUB-7.3 | OPEN | OPEN; a delta, approved (decision 14) |
+| SYN-1.10 | OPEN | OPEN |
+| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) |
+| SYN-1.3 | OPEN | OPEN |
+| LOAD-3.5 | OPEN | OPEN |
+| SYN-1.9 | OPEN | OPEN |
+
+<!-- status:end -->
+
 ## B1. What exists (code facts verified at `0fb1a4de` and re-counted at `ffa7cccb`; figures marked with their commit)
 
 - **The tree** (`syntax/src/ast.rs`, 1,691 lines at `ffa7cccb` since R18 moved `is_truthy_literal` in, 58 public
@@ -312,7 +331,7 @@ Piwigo oracle off and warm; one thread = default threads; callgrind off and warm
 count); wall by `abab` pairs (B8); peak RSS.
 
 Step 1's module order (any order works, because the bridge functions are free; dependencies first leaves the fewest bridge calls): `syntax` internals (`printer`, `declarations`,
-`name_resolution` readers, and `completion`, the statement-completion rules that level 9's R18 moves into `syntax`) → registry (`summaries`, `init_flow`, `purity`, `property_writes`,
+`name_resolution` readers, and `completion`, the statement-completion rules that the cross-platform plan's R18 moves into `syntax`) → registry (`summaries`, `init_flow`, `purity`, `property_writes`,
 `global_vars`, `guard`, `bodies`, `function_sig`, attributes) → project passes (`banned`,
 `mock_hygiene`, `architecture`, `class_shape`, `composer_hygiene`, `use_sites`, `deps`,
 `file_declarations`) → checker (`expr.rs` alone in several commits; `narrowing`, `stmt`,

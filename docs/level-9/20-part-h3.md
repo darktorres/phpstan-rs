@@ -1,5 +1,44 @@
 ## H3. REG-7 and REG-8 on the engine (Part F 14)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| REG-7 | OPEN | OPEN |
+| REG-8 | OPEN | OPEN |
+| REG-4.2 | READY | READY; a delta, approved in the plan, fixtured |
+| REG-7.2 | OPEN | OPEN |
+| REG-7.1 | OPEN | OPEN |
+| REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) |
+| VAL-2.5 | DONE | DONE: approved; decision 1 withdrew REG-7.6's `mixed` in its favour |
+| REG-7.7 | OPEN | OPEN |
+| REG-7.8 | OPEN | OPEN |
+| REG-7.9 | OPEN | OPEN |
+| REG-7.10 | OPEN | OPEN |
+| REG-7.11 | OPEN | OPEN; it lands with the snapshots |
+| REG-8.1 | OPEN | OPEN; a delta: no declaration's members merge into another's, and the server and the batch run bind a name alike … |
+| REG-8.2 | SUPERSEDED | SUPERSEDED by REG-16.3 (decision 3): the read sets are the dependencies the engine records, absent names included |
+| REG-16.3 | OPEN | OPEN |
+| REG-8.3 | OPEN | OPEN |
+| REG-8.4 | OPEN | OPEN |
+| REG-8.5 | OPEN | OPEN; a delta, approved and corrected (decision 14; nsrt `property-hooks.php`) |
+| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 |
+| NAME-1 | OPEN | OPEN |
+| NAME-2 | OPEN | OPEN |
+| REG-8.7 | OPEN | OPEN |
+| REG-9 | OPEN | OPEN; deltas, approved in the plan |
+| REG-11 | OPEN | OPEN; each a delta, approved in the plan |
+| REG-17.1 | OPEN | OPEN |
+| REG-10 | OPEN | OPEN |
+| REG-16.5 | OPEN | OPEN |
+| REG-17 | OPEN | OPEN |
+
+<!-- status:end -->
+
 ### H3.1 The five levels as queries
 
 Each level is a tracked function keyed by `DeclKey`, per declaration (decision 11: no merge). A level reads the

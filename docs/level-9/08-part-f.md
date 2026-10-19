@@ -1,5 +1,31 @@
 # Part F. What still needs designing
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| SYN-3.2 | READY | READY, with SYN-3.1 |
+| SYN-3.1 | READY | READY |
+| REG-7 | OPEN | OPEN |
+| REG-8 | OPEN | OPEN |
+| VAL-1.1 | OPEN | OPEN |
+| VAL-1.4 | OPEN | OPEN |
+| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists |
+| VAL-1.6 | OPEN | OPEN |
+| VAL-1.7 | OPEN | OPEN; `--dump-types` exists |
+| VAL-1.9 | OPEN | OPEN |
+| VAL-1.10 | OPEN | OPEN |
+| VAL-1.11 | OPEN | OPEN; MEAS-2 has the whole-stack profile at this code |
+| VAL-1.2 | OPEN | OPEN |
+| VAL-1.3 | OPEN | OPEN |
+| VAL-1.12 | OPEN | OPEN |
+
+<!-- status:end -->
+
 What exists: Parts A and B are designed (B has the open points below). The 20 G plan's items 0 to
 19 have designs written at `5fb858c9`. The ledger's rows carry specifications. Level 3's tasks carry
 "Design" paragraphs written at `3eaddbd1`. The crate split plan has designs for C6 to G dated

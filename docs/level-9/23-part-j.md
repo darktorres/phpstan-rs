@@ -1,5 +1,29 @@
 # Part J. The wall's later designs (Part F 16, 17, 18)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| STUB-11 | OPEN | OPEN |
+| STUB-12 | OPEN | OPEN |
+| STUB-12.2 | OPEN | OPEN |
+| CHECK-10 | OPEN | OPEN |
+| CHECK-6.3 | OPEN | OPEN |
+| CHECK-6.2 | READY | READY |
+| CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) |
+| VAL-2.8 | DONE | DONE: approved in principle; each family's output diff is read at VAL-1, and anything that is not an improvement is … |
+| CHECK-6.10 | READY | READY |
+| LOAD-5.1 | OPEN | OPEN |
+| CHECK-6.8 | READY | READY |
+| REG-16.4 | OPEN | OPEN |
+| CACHE-13.2 | OPEN | OPEN |
+
+<!-- status:end -->
+
 W4 to W7 are far from batch 4, and the code they build on will have changed by then, so this part settles what can
 be settled now: the data model that must be fixed first (J1), the rows that make C6 to C9 tracked work (J2), and how
 Stages D to G meet the ledger and the engine (J3). It does not re-design Stage D's semantics, which the crate split

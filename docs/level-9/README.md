@@ -37,12 +37,6 @@ says it "waits for the user's word", the ruling of 2026-10-18 (Part E, M5) is th
 | Part H (H5, H6) | [`22-part-h5-h6.md`](22-part-h5-h6.md) |
 | Part J | [`23-part-j.md`](23-part-j.md) |
 | Part M (intro, M1, M2) | [`24-part-m-intro.md`](24-part-m-intro.md) |
-| Part M, ledger rows (areas A, B, G, T) | [`25-m3-ledger-a-b-g-t.md`](25-m3-ledger-a-b-g-t.md) |
-| Part M, ledger rows (areas P, N) | [`26-m3-ledger-p-n.md`](26-m3-ledger-p-n.md) |
-| Part M, ledger rows (areas E1, E2) | [`27-m3-ledger-e1-e2.md`](27-m3-ledger-e1-e2.md) |
-| Part M, ledger rows (areas W, S) | [`28-m3-ledger-w-s.md`](28-m3-ledger-w-s.md) |
-| Part M, ledger rows (areas C, X) | [`29-m3-ledger-c-x.md`](29-m3-ledger-c-x.md) |
-| Part M, ledger rows (area V) | [`30-m3-ledger-v.md`](30-m3-ledger-v.md) |
 | Part M (M4, M5) | [`31-m4-m5.md`](31-m4-m5.md) |
 
 Part B, G1 to G4, G6 and I1 came from the flat-tree document; Part H and J from the engine document; Part M from the ledger

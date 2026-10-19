@@ -1,30 +1,33 @@
 # Part M. Ledger of the workflow review's findings (2026-10-18)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| CHECK-9 | READY | READY |
+| REG-17.2 | OPEN | OPEN |
+| STUB-11 | OPEN | OPEN |
+| REG-15 | OPEN | OPEN |
+| REG-15.1 | OPEN | OPEN |
+
+<!-- status:end -->
+
 A workflow (run `wf_cd83ade2-42f`) of 13 independent, read-only reviewers read the whole plan, one part or aspect each, and
 returned **267 findings: 1 blocker, 84 major, 163 minor, 19 nit**. By basis, 182 cite lines the reviewer read (q), 72 are
 inferences (i) and 13 rest on knowledge from outside the repository (x). The user asked for no verification inside the
 workflow, so the rows began as one reviewer's claim each. **All 267 were then checked one by one in the main thread, in
 ledger order, each against the source it cites (265 hold, one holds in part, one could not be checked here), and the
-confirmed findings were folded into the plan.** A row's state cell reads `<state> (<where>) — holds (<what was read>)`;
-the ones that depart from a ruled decision were ruled on by the user on 2026-10-18 (M5). A row is never deleted.
+confirmed findings were folded into the plan.** The ones that depart from a ruled decision were ruled on by the user on 2026-10-18 (M5). Once every row was applied,
+the ledger rows were deleted; this part keeps the summary.
 
 - **Data.** `~/.claude/projects/-home-torres-projects-phpstan-rs/0fdc40b5-accc-4267-853a-f5ef8f30c07c/subagents/workflows/wf_cd83ade2-42f/journal.jsonl`:
   one `result` line per reviewer (`aspect`, `read`, `checked_ok`, `findings`, `not_reviewed`); a finding has `id`, `where`,
-  `severity`, `kind`, `claim`, `problem`, `evidence`, `basis`, `fix`. The rows give the opening of `problem` only: read the
-  journal entry (claim, evidence, fix) and the source it cites before acting on a row.
-- **Columns.** `sev`: BLK blocker, maj major, min minor, nit. `kind`: fact factual error, design design flaw, gap, incons
-  inconsistency, order ordering, proper not the most proper form, interim built twice or deleted later, risk, unver
-  unverifiable, stale. `b`: basis q, i or x. `plan ref`: where the reviewer points, in the plan's line numbers at the time
-  of the review (they drift as the plan is edited).
-- **States.** `open` reported, unchecked · `holds` checked in the main thread and true · `part` partly true (M1 says which
-  part) · `false` checked and wrong · `folded` the plan was changed for it (where) · `ruling` waits for the user's decision (none does now: the nine read `ruled 2026-10-18`) ·
-  `dup` the same as the finding named · `wontfix` decided not to act (why) · `unver` could not be checked with what is
-  installed (older PHP, another OS, the network). The checks were made in the main thread, one by one in ledger order
-  (A, B, G, T, P, N, E1, E2, W, S, C, X, V), and the state cell holds the state and a short note of what was read. A row
-  checked and confirmed is `holds`, and once the plan was changed for it the state is `folded`, `dup` or `ruling` and
-  the `holds` note follows the dash.
-- **Home.** When plan mode ends this part moves to the repository root as `PLAN_REVIEW_LEDGER.md`, like the other ledgers,
-  and is removed from the plan.
+  `severity`, `kind`, `claim`, `problem`, `evidence`, `basis`, `fix`. The journal is the only full record of each finding
+  now that the ledger rows are gone.
 
 | key | reviewer's range | BLK | maj | min | nit | total |
 |---|---|---|---|---|---|---|
@@ -65,9 +68,9 @@ G-08 (the lifetime on `Locals` is built in item 9 and deleted in Stage D: G1 roo
 A-04 and C-11 (counts), G-04 (the backtick is deprecated and still valid), and N-02 (triomphe's thin pointer exists only
 for slices).
 
-## M2. The same issue found by more than one reviewer (each group checked: the first id's row carries the fold, the others are `dup` or fold with it)
+## M2. The same issue found by more than one reviewer (each group was checked once, under its first id)
 
-`=` the same issue, `~` related. Work the first id of a group; the others close with it (state `dup`).
+`=` the same issue, `~` related. The others close with the first id of their group.
 
 | issue | findings |
 |---|---|
@@ -97,4 +100,3 @@ for slices).
 | per-thread database handles: `for_each_init` makes one per rayon job, and the plan's snippet does not compile as written | E1-08 ~ X-23 |
 | step 1's adapter, bridges and `legacy_mut()` are interim machinery the plan's own rule would reject | C-17 ~ S-08 ~ B-14 |
 
-## M3. The ledger

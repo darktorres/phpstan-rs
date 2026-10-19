@@ -1,5 +1,26 @@
 ## H4. The pipeline, persistence and the Session (Part F 15)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| LOAD-1.2 | DONE | DONE `7bef998a` |
+| LOAD-1.1 | DONE | DONE `aab67287` |
+| REG-16.4 | OPEN | OPEN |
+| SYN-1.9 | OPEN | OPEN |
+| PROD-5.4 | OPEN | OPEN |
+| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … |
+| PROD-5.8 | READY | READY |
+| PROD-5.2 | READY | READY |
+| CACHE-13.2 | OPEN | OPEN |
+
+<!-- status:end -->
+
 REG-16.4, CACHE-13.2 and the crate split's F1 and F2 are one design: F2's own design was superseded by
 decision 3, and building F1 and then REG-16.4 would build the Session twice. What follows is that one design.
 
@@ -35,7 +56,7 @@ decision 3, and building F1 and then REG-16.4 would build the Session twice. Wha
    - `locate` is Composer's `ClassLoader::findFile` over `Packages` and `FileSet`: the classmap entry; else the
      longest PSR-4 prefix and the first of its directories that holds the file; else PSR-0 (STUB-7.5; decision 11's
      "an autoloaded class in the file Composer's loader maps it to"). The directory test is a lookup in `FileSet`,
-     so no filesystem read. The index is keyed through the root's case rule (level 9's R7, probed once per root and
+     so no filesystem read. The index is keyed through the root's case rule (the cross-platform plan's R7, probed once per root and
      exact on Linux), so a candidate spelled in another case than the disk's finds its file where the volume folds
      case; where the rule's fold is not the volume's the lookup asks the system as discovery does (R9) through
      the tracked `resolve(PathKey) -> Option<resolved spelling>` of H4.5, whose answer is then looked up in
@@ -93,7 +114,7 @@ completes and only when it differs.
 | the finalizer | a function of `file_diagnostics`, the whole-program results and `OutputInputs`; stale baseline and unmatched-ignore entries are its output |
 | entry points | `Session::run`, `update(FileDelta, &CancellationToken)`, `reconfigure(Config)`, `generate_baseline`, `apply_fixes`, `snapshot()` (a database handle for one request); `Project`'s ~15 entry points collapse into them |
 | `Project` folds in | the file table is `File` and `FileSet` plus the VFS; the registry is `Provider` over the engine; `dependents` is gone; `use_sites` and the escape sets are `file_products.use_sites` and a project query; `pest_config` is a query; `sql` is an input |
-| the VFS | contents from `FileSource` (overlay first); membership decided once, by `classify` (LOAD-1.2, built), for the walk, a file the editor opens and a watched-file event alike; identity is the canonical path (LOAD-1.1, built; one canonical form on every platform, level 9's R3); URIs are level 9's R5 (RFC 8089 on each platform, an unopened file named in the spelling its client gave the folder), lines and file events F1's text unchanged |
+| the VFS | contents from `FileSource` (overlay first); membership decided once, by `classify` (LOAD-1.2, built), for the walk, a file the editor opens and a watched-file event alike; identity is the canonical path (LOAD-1.1, built; one canonical form on every platform, the cross-platform plan's R3); URIs are the cross-platform plan's R5 (RFC 8089 on each platform, an unopened file named in the spelling its client gave the folder), lines and file events F1's text unchanged |
 | panic isolation on the pool | H2.8 |
 | cancellation and the event loop | **changed.** F1 has requests run "against the last published snapshot while an update builds the next". salsa has one current revision: a write cancels the other handles' queries. A request is answered from its handle, and a request cancelled by a write answers `ContentModified` (or is run again by the loop) — rust-analyzer's model. F1's "publish the edited file first, then the open documents, then the rest" is H2.6's order of queries |
 | last good AST | **gone with recovery.** The engine needs `parse` to be infallible, so REG-16.4 needs SYN-1.9 (batch 3), which the sequence already has first |
@@ -112,7 +133,7 @@ completes and only when it differs.
 | incremental collectors | per-file facts as `file_products` fields and queries, and the whole-program queries over them |
 | the persistent cache per analysed file | the database's memos: `FileCheck` (raw errors before the finalizer), the products, the levels, the verdicts, with the dependency graph |
 | the key | the file is named by (build identity, project root, config key). The config key hashes `ReflectionInputs` and `CheckInputs`; these are *also* inputs, so a change inside a session invalidates exactly its readers; `OutputInputs` are in neither. Alternating configurations keep their own files (F2's entry sets), the four most recently used kept |
-| location, mode `0700`, `CACHEDIR.TAG`, atomic write under a lock, `--no-result-cache`, `clear-result-cache` | unchanged in what they ask, and built for every platform (level 9's R11): the directory is `dirs::cache_dir()` joined with `phpstan-rs` (`PHPSTAN_RS_CACHE_DIR` overrides), so `~/Library/Caches` and `%LOCALAPPDATA%` as well as `$XDG_CACHE_HOME`; mode `0700` is Unix's, and a Windows directory under `%LOCALAPPDATA%` is the user's by inheritance, with ownership and not-a-link checks before an existing directory is read or written; the write is a temporary file renamed over the target, as the two caches do today, which replaces an existing file on Windows too unless another process holds it open, so a reader takes no lock and sees the old file or the new; **the lock is a dedicated `.lock` file** (`File::lock`, portable; the data file is never the lock target, since Windows' lock is mandatory against reads by other handles), taken by the writer around the temporary write and the rename, and a lock failure runs the batch uncached with one warning; retention is the four most recently used config keys per project root (F2's entry sets) under a byte cap (`PHPSTAN_RS_RESULT_CACHE_MB`, default 2048 as the file cache's), last use refreshed on a read at most every 12 hours (`REFRESH_AFTER`); the per-file cache (`file_cache.rs`) and its switches keep serving until CACHE-13.2 replaces them and then go, with `--no-result-cache` taking their place; a result file made by one platform's build is never read by another's, since the build is part of its key, and whether `debug_assertions` belongs in the key is decided in the commit that writes it |
+| location, mode `0700`, `CACHEDIR.TAG`, atomic write under a lock, `--no-result-cache`, `clear-result-cache` | unchanged in what they ask, and built for every platform (the cross-platform plan's R11): the directory is `dirs::cache_dir()` joined with `phpstan-rs` (`PHPSTAN_RS_CACHE_DIR` overrides), so `~/Library/Caches` and `%LOCALAPPDATA%` as well as `$XDG_CACHE_HOME`; mode `0700` is Unix's, and a Windows directory under `%LOCALAPPDATA%` is the user's by inheritance, with ownership and not-a-link checks before an existing directory is read or written; the write is a temporary file renamed over the target, as the two caches do today, which replaces an existing file on Windows too unless another process holds it open, so a reader takes no lock and sees the old file or the new; **the lock is a dedicated `.lock` file** (`File::lock`, portable; the data file is never the lock target, since Windows' lock is mandatory against reads by other handles), taken by the writer around the temporary write and the rename, and a lock failure runs the batch uncached with one warning; retention is the four most recently used config keys per project root (F2's entry sets) under a byte cap (`PHPSTAN_RS_RESULT_CACHE_MB`, default 2048 as the file cache's), last use refreshed on a read at most every 12 hours (`REFRESH_AFTER`); the per-file cache (`file_cache.rs`) and its switches keep serving until CACHE-13.2 replaces them and then go, with `--no-result-cache` taking their place; a result file made by one platform's build is never read by another's, since the build is part of its key, and whether `debug_assertions` belongs in the key is decided in the commit that writes it |
 | the LSP writes back only results whose overlay matches the disk | a result whose reads include an overlay's stamp is dropped from the write (H4.6), since an overlay's stamp is never a disk stamp; the server serializes at shutdown or after an idle period, not "at any quiet moment" |
 
 ### H4.5 Probes outside the file set

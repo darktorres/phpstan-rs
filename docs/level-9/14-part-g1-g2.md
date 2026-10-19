@@ -1,6 +1,18 @@
 # Part G. The designs of Part F 1 to 4 and 6
 
-Written from the code at `30aa2002` (level 9's R7 is in; the stack's bookkeeping for it is not).
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| — | — | no ledger row named in this part's headings or tables |
+
+<!-- status:end -->
+
+Written from the code at `30aa2002` (the cross-platform plan's R7 is in; the stack's bookkeeping for it is not).
 G1 and G2 finish item 9's checker side; G3 is the error-node model; G4 is the probe; G5 is item 0.
 Where a design departs from a first-pass text it says so, and G6 lists the edits that follow.
 

@@ -1,5 +1,17 @@
 ## H5. What no reading settles: spikes S-1 to S-12
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| — | — | no ledger row named in this part's headings or tables |
+
+<!-- status:end -->
+
 Each is a short build with a measurement and a stated accept and kill. None changes this plan's decisions;
 each can send one design to its stated alternative. S-1 runs before batch 4, since it decides the name's layout.
 S-2 and S-3 run early too, since the choice of engine is cited by everything from batch 4's rules (H1.5) to the

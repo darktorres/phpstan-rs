@@ -1,5 +1,53 @@
 # Part E. Pending decisions: the most proper course for each
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| SYN-3.2 | READY | READY, with SYN-3.1 |
+| SYN-3.1 | READY | READY |
+| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) |
+| CACHE-13.1 | OPEN | OPEN |
+| CHECK-9 | READY | READY |
+| TYPE-5 | READY | READY |
+| Q-11 | DONE | DONE (2026-10-15): of the 20 follow-ups, 1 is done for one version, 5 are partly done and 14 are not; their section … |
+| LOAD-2.8 | SEE LEDGER | Parts 1 and 2 DONE: `27c3b093` (the manifests and `installed.json` read member by member; a repeated key keeps its last … |
+| LOAD-5.2 | OPEN | OPEN |
+| NAME-2.1 | READY | READY |
+| REG-4.15 | OPEN | OPEN |
+| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … |
+| PROD-5.8 | READY | READY |
+| PROD-5.2 | READY | READY |
+| PROD-5.4 | OPEN | OPEN |
+| REG-16.4 | OPEN | OPEN |
+| CACHE-13.2 | OPEN | OPEN |
+| REG-16.2 | READY | READY |
+| LOAD-5.1 | OPEN | OPEN |
+| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … |
+| REG-7.5 | OPEN | OPEN |
+| CACHE-8 | READY | READY |
+| STUB-11 | OPEN | OPEN |
+| CHECK-4.2 | READY | READY |
+| REG-18.4 | READY | READY; a delta |
+| VAL-2.9 | DONE | DONE: approved (decision 14), STUB-7.2 and REG-8.5 corrected; each is read at VAL-1 as it lands |
+| STUB-7.2 | OPEN | OPEN; a delta, approved and corrected (decision 14) |
+| REG-8.5 | OPEN | OPEN; a delta, approved and corrected (decision 14; nsrt `property-hooks.php`) |
+| VAL-1 | OPEN | OPEN |
+| LOAD-7.6 | READY | READY; a delta in the config's keys |
+| CHECK-11 | READY | READY; a delta |
+| LOAD-7.2 | OPEN | OPEN; the PHPUnit half needs a ruling |
+| COMP-2 | OPEN | OPEN. Not part of Part A; before the baseline (batch 0), since it changes a range and so a dump |
+| COMP-5 | PART | PART: A7's maps keep the root's entries (`2c6f1eec`); the flat lists stay filtered, and the class is found through the … |
+| COMP-6 | DONE | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's … |
+| COMP-1 | DONE | DONE `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` (the walk's rule and its tests are `df9640fe` and … |
+
+<!-- status:end -->
+
 Churn and effort are not weighed, as you ruled; each answer is what is correct and complete. Part E
 supersedes the leans in Parts B to D wherever they differ: those parts keep the facts and the
 designs, and are brought in line as you rule. "Changed" marks an answer that differs from the
@@ -10,7 +58,7 @@ is ruled until you say so.
 
 Ruled so far: the fixes plan's decisions 1 to 7 (2026-10-17; A1 cites the seventh) and the ledger's
 decisions 1 to 18 (2026-10-15), which the plan cites by number. Gates, not decisions: the go, and
-the start condition (the intro): `git log` shows level 9's R17 and R18 and `WORK_STACK.md` has no level 9. Batch
+the start condition (the intro): `git log` shows the cross-platform plan's R17 and R18 and `WORK_STACK.md` no longer lists the cross-platform fixes. Batch
 numbers below are the new order (see "The sequence this gives"). An answer that departs from a ruled decision's
 wording says so, and M5 lists those (ruled on 2026-10-18) and, apart, the answers the workflow review changed.
 
@@ -39,7 +87,7 @@ wording says so, and M5 lists those (ruled on 2026-10-18) and, apart, the answer
 | 19 | order of the wall | **The spine, then the pipeline as queries (REG-16.4, CACHE-13.2) designed as one thing with Stage F1 and F2** (F2's design is superseded by decision 3, and building both is building the Session twice), then C5, C6 to C9, C10, STUB-11 and 13, Stage D, E, F3 to F5, G | the reevaluation |
 | 20 | rows for C6 to C9 and D to G | **A docs pass at approval, and edit `CRATE_SPLIT_PLAN.md` itself** so there is one source of truth: the rows for C6 to C9 (J2), the D and E rows (J3) and the plan's edits (Appendix F's "each level is a per-class `OnceLock`" and "constant reference cycles type as `mixed`", §3.9's F1 text about the deleted `lsp/workspace_config.rs`, C4's levels, F1's snapshots, F2's dependencies) are one docs commit series made when you approve this plan, with each superseded paragraph marked in place and pointing at the section that replaces it (Part N lists them). Effort is no reason to leave stale text that misleads until the phase is reached | approval |
 | 21 | Stages D to G | **Build them, re-baselined:** they are the target architecture and the home of D5's correctness fixes. The re-read is #20's, not an alternative to building | the reevaluation |
-| 22 | level 3 and the Q-11 follow-ups | **A correctness backlog, not fillers (changed).** Triage the findings first (Part K2: about 115 are distinct; F57, Stage C's O1 and F5 are built), by running each probe on the gate binary. F10's symptom is fixed (`can_begin_expression`'s list, `3b7e4d95`), so its parser tests and fixture go before item 9's baseline, which must not encode a parser bug, and its exhaustive predicate waits for SYN-2's `TokenKind`; F20 before item 9 (after level 9's R10), so its lint checks the recursion that item 9 writes; F21 before the canonical printers; F41 in batch 6; F77 in batch 0, before item 9's baseline (its design needs no recovery, an analysed file's diagnostic and exit status are the final ones, and a parser rewrite that newly refuses a file then shows in O2; batch 3 feeds it from `errors()`). **F77's context-file half** (`phpstanRs.contextParseError`, run-level, failing the run) is new user-visible behaviour that decisions 9 and 15 ("nothing in a context file is reported") do not give, so, as ruled on 2026-10-18, decisions 9 and 15 keep their text and gain one sentence: a context file that fails to parse is reported as a run-level notice (its path, line and column, and the first error; `phpstanRs.contextParseError`), printed where today's "N file(s) skipped: parse error" count is, and it leaves the exit status as it is; an opt-in switch makes it fail the run. Batch 0 builds the notice and records the failure (the count and the first error per file) in the dump; F69's fixtures now, F69 and CHECK-9 in D2 (17); **the seven fixes the crate split's F1 puts first** (the debounce thread's stack size and the scan's parses on the pool, `queue_change` writing `latest_text`, `didClose` restoring the disk's content, `--generate-baseline` keeping the entries of files not analysed, `--fix` skipping a file changed since analysis, a closed output pipe ending the run quietly, rename refusing qualified names, imports and aliases) end the server, lose data or corrupt files on today's code, are independent of everything here and are all still open at `ffa7cccb` (read in the code), so they are commits of batch 0, each with its test, and rows of the ledger and `WORK_STACK.md` (Part N), not part of W3. **Where each finding sits is a place in the sequence, not "between heavy runs":** every finding or follow-up that changes a dump goes before the baseline; the rest in the review's own order (F4 first), fixture first where a later phase rewrites the code (K2 names which); a later commit that changes behaviour runs `dumps-compare`, lists its differences as its delta and rolls the baseline forward | batch 0 |
+| 22 | level 3 and the Q-11 follow-ups | **A correctness backlog, not fillers (changed).** Triage the findings first (Part K2: about 115 are distinct; F57, Stage C's O1 and F5 are built), by running each probe on the gate binary. F10's symptom is fixed (`can_begin_expression`'s list, `3b7e4d95`), so its parser tests and fixture go before item 9's baseline, which must not encode a parser bug, and its exhaustive predicate waits for SYN-2's `TokenKind`; F20 before item 9 (after the cross-platform plan's R10), so its lint checks the recursion that item 9 writes; F21 before the canonical printers; F41 in batch 6; F77 in batch 0, before item 9's baseline (its design needs no recovery, an analysed file's diagnostic and exit status are the final ones, and a parser rewrite that newly refuses a file then shows in O2; batch 3 feeds it from `errors()`). **F77's context-file half** (`phpstanRs.contextParseError`, run-level, failing the run) is new user-visible behaviour that decisions 9 and 15 ("nothing in a context file is reported") do not give, so, as ruled on 2026-10-18, decisions 9 and 15 keep their text and gain one sentence: a context file that fails to parse is reported as a run-level notice (its path, line and column, and the first error; `phpstanRs.contextParseError`), printed where today's "N file(s) skipped: parse error" count is, and it leaves the exit status as it is; an opt-in switch makes it fail the run. Batch 0 builds the notice and records the failure (the count and the first error per file) in the dump; F69's fixtures now, F69 and CHECK-9 in D2 (17); **the seven fixes the crate split's F1 puts first** (the debounce thread's stack size and the scan's parses on the pool, `queue_change` writing `latest_text`, `didClose` restoring the disk's content, `--generate-baseline` keeping the entries of files not analysed, `--fix` skipping a file changed since analysis, a closed output pipe ending the run quietly, rename refusing qualified names, imports and aliases) end the server, lose data or corrupt files on today's code, are independent of everything here and are all still open at `ffa7cccb` (read in the code), so they are commits of batch 0, each with its test, and rows of the ledger and `WORK_STACK.md` (Part N), not part of W3. **Where each finding sits is a place in the sequence, not "between heavy runs":** every finding or follow-up that changes a dump goes before the baseline; the rest in the review's own order (F4 first), fixture first where a later phase rewrites the code (K2 names which); a later commit that changes behaviour runs `dumps-compare`, lists its differences as its delta and rolls the baseline forward | batch 0 |
 | 23 | Part A's validation | **Once, after the last row,** against binaries built at the batch's base commit and the Piwigo digest (A6): the item-0 baseline does not exist yet, since batch 0 comes after Part A. The rows are independent; none changes Piwigo's or `vendor/monolog`'s output, and A1's editor delta, its `config.vendor-dir` commit and A8 are read separately (A6) | Part A |
 | 24 | item 9's validation | **Once, at the end of the item (step 3), by your rule of validating at the end of each top-level item.** The syntax dump baseline is produced at the end of step 1 (a cheap run that stores output, not a suite) and is compared with step 2's dump at the item's end; the item-0 baseline (expression types, registry, O2), taken from validated code before the item, covers step 1's readers and is compared then too. The suites, the fixtures, the Piwigo oracle and the measurements run once, then (B7). The first answer validated after step 1 and step 2 as well, which was a checkpoint you did not ask for | step 1 |
 | 25 | LOAD-2.8's parts 1 and 2 | **Measure (changed).** Builds are pre-approved and the ledger claims nothing unmeasured: callgrind and `abab` at `27c3b093` and `53e6f766` against their parents | Part A bookkeeping |
@@ -105,7 +153,7 @@ I4.3 that wait for C7's name scope, which the lowering does not have.
 
 ## The sequence this gives
 
-0. Level 9 finishes (the other session): R16 and R17 (R0 to R15 and R18 are built at `c5bec58c`); level 8 then resumes
+0. The cross-platform fixes finish (the other session): R16 and R17 (R0 to R15 and R18 are built at `c5bec58c`); level 8 then resumes
    with this plan.
 1. Part A's rows: A1 (its mechanism for the skip, its `config.vendor-dir`, `COMPOSER_VENDOR_DIR` and `COMPOSER` commit and
    its COMP-7 commits, all ruled on 2026-10-18, M5d), A2, A3, A5 (SYN-1.1), A5a (LOAD-5.4), A7 (the autoload maps keep

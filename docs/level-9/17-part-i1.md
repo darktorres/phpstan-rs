@@ -1,5 +1,17 @@
 ## I1. Node layout per variant (Part F 5)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| — | — | no ledger row named in this part's headings or tables |
+
+<!-- status:end -->
+
 Written from `syntax/src/ast.rs` (1,691 lines at `ffa7cccb`, 1,680 when it was read whole), against B3's budgets: `ExprNode` 32 bytes,
 `StmtNode` 40, no element that needs a drop. The census of step 0 confirms the distributions; it can move a
 field between inline and a side table (I1.7) but not change the shape.

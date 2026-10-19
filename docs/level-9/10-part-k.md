@@ -1,5 +1,122 @@
 # Part K. The task-by-task review of 2026-10-18
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| LOAD-2.2 | SEE LEDGER | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … |
+| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … |
+| REG-14.4 | DONE | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all … |
+| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … |
+| REG-7.5 | OPEN | OPEN |
+| SYN-1.1 | DONE | DONE `2f9b1281`: the loop, with a test at a depth the recursion needed a guard for; A6 (2026-10-19) found no standalone … |
+| VAL-1.1 | OPEN | OPEN |
+| VAL-1.2 | OPEN | OPEN |
+| SYN-1.3 | OPEN | OPEN |
+| SYN-1.2 | READY | READY |
+| LOAD-3.5 | OPEN | OPEN |
+| SYN-2 | OPEN | OPEN; the target grew |
+| SYN-3.1 | READY | READY |
+| SYN-4.1 | OPEN | OPEN |
+| SYN-1.9 | OPEN | OPEN |
+| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … |
+| SYN-6 | OPEN | OPEN |
+| NAME-2.1 | READY | READY |
+| NAME-1.1 | READY | READY |
+| PROD-5.1 | OPEN | OPEN |
+| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) |
+| TYPE-5 | READY | READY |
+| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone |
+| CACHE-13.1 | OPEN | OPEN |
+| CACHE-8 | READY | READY |
+| REG-4.2 | READY | READY; a delta, approved in the plan, fixtured |
+| REG-16.4 | OPEN | OPEN |
+| CACHE-13.2 | OPEN | OPEN |
+| LOAD-3.1 | OPEN | OPEN |
+| LOAD-5 | OPEN | OPEN |
+| TYPE-4 | OPEN | OPEN |
+| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) |
+| VAL-2.5 | DONE | DONE: approved; decision 1 withdrew REG-7.6's `mixed` in its favour |
+| CHECK-8 | OPEN | OPEN |
+| REG-17 | OPEN | OPEN |
+| STUB-7 | OPEN | OPEN |
+| CHECK-10 | OPEN | OPEN |
+| STUB-13.1 | OPEN | OPEN |
+| STUB-10 | PART | PART: decided (STUB-10.2); STUB-10.1's measurements are left |
+| STUB-10.2 | DONE | DONE (decided 2026-10-15, §2.4 decision 7): yes, for PHP's declarations and PHPStan's function map and `.stub` files; … |
+| STUB-10.1 | OPEN | OPEN |
+| VAL-1.13 | OPEN | OPEN; the last step of the 20 G plan |
+| REG-2 | READY | READY. `xtask modgraph --inventory` lists the crossing edges; the `impl` and name inventories are not made |
+| REG-4.5 | READY | READY. The plan names only the property case. Item 4 also made `redeclared_methods` a flag; since decision 3 it goes … |
+| REG-4.9 | READY | READY |
+| REG-4.10 | READY | READY; overlaps DOC-2.6 |
+| DOC-2.6 | OPEN | OPEN; overlaps REG-4.10 |
+| REG-5 | PART | PART: the purity part was done by REG-1; what is left is a delta, approved (decision 14): a call spelled in another … |
+| REG-1 | SEE LEDGER | 22,362,774,991 |
+| REG-6 | READY | READY; a test-expectation delta, approved (decision 14) |
+| REG-18.1 | READY | READY |
+| CHECK-11 | READY | READY; a delta |
+| REG-18.4 | READY | READY; a delta |
+| LOAD-7.1 | READY | READY |
+| REG-4.12 | READY | READY |
+| REG-4.15 | OPEN | OPEN |
+| REG-4.11 | OPEN | OPEN; the comments can be corrected now |
+| REG-16.2 | READY | READY |
+| REG-16.3 | OPEN | OPEN |
+| REG-7.1 | OPEN | OPEN |
+| REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) |
+| REG-7.7 | OPEN | OPEN |
+| REG-7.8 | OPEN | OPEN |
+| REG-7.9 | OPEN | OPEN |
+| REG-7.10 | OPEN | OPEN |
+| REG-8.1 | OPEN | OPEN; a delta: no declaration's members merge into another's, and the server and the batch run bind a name alike … |
+| REG-8.2 | SUPERSEDED | SUPERSEDED by REG-16.3 (decision 3): the read sets are the dependencies the engine records, absent names included |
+| REG-8.4 | OPEN | OPEN |
+| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 |
+| NAME-1 | OPEN | OPEN |
+| NAME-2 | OPEN | OPEN |
+| REG-8.7 | OPEN | OPEN |
+| REG-11.1 | OPEN | OPEN |
+| REG-12 | OPEN | OPEN |
+| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format |
+| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … |
+| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 |
+| PROD-5.8 | READY | READY |
+| PROD-5.2 | READY | READY |
+| PROD-5.4 | OPEN | OPEN |
+| LOAD-5.1 | OPEN | OPEN |
+| LOAD-5.2 | OPEN | OPEN |
+| TYPE-4.1 | OPEN | OPEN |
+| NAME-2.4 | OPEN | OPEN |
+| REG-14.3 | OPEN | OPEN |
+| REG-16.5 | OPEN | OPEN |
+| REG-17.1 | OPEN | OPEN |
+| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) |
+| STUB-8 | OPEN | OPEN; a delta, approved, both parts (VAL-2.4) |
+| VAL-2.4 | DONE | DONE: approved, both parts |
+| STUB-12.1 | OPEN | OPEN |
+| CHECK-9 | READY | READY |
+| REG-17.2 | OPEN | OPEN |
+| REG-7.2 | OPEN | OPEN |
+| REG-11.4 | OPEN | OPEN |
+| REG-8.3 | OPEN | OPEN |
+| REG-11.10 | OPEN | OPEN |
+| REG-18 | OPEN | OPEN |
+| LOAD-7.3 | READY | READY |
+| STUB-7.3 | OPEN | OPEN; a delta, approved (decision 14) |
+| LOAD-7.6 | READY | READY; a delta in the config's keys |
+| LOAD-7.7 | READY | READY |
+| VAL-1.3 | OPEN | OPEN |
+| REG-8.5 | OPEN | OPEN; a delta, approved and corrected (decision 14; nsrt `property-hooks.php`) |
+| REG-17.4 | OPEN | OPEN |
+| REG-11.6 | OPEN | OPEN |
+
+<!-- status:end -->
+
 Asked as: is every design the most proper, or does any still avoid churn. The first answer searched the text for
 deferring phrases (the audit in Part E), which the user did not want as a method. This part went through the tasks in
 the order of "The sequence this gives" and, for each, read its ledger row (or its finding), the plan's design for it
@@ -11,8 +128,8 @@ meets. A verdict is "sound" (the row, the design and the code agree) or what cha
 
 | # | task | verdict |
 |---|---|---|
-| 0 | the start condition | **changed.** Level 9 is now the cross-platform plan, not the items 1 to 3 fixes, which finished at `791a57c6` (R0 to R12 and R18 are built at `2c7bf898`, R13 to R17 open; this row's first version said R0 to R5, and the workflow review found it stale twice). Its rows edit the files Part A edits. The intro says so |
-| 1 | A1, LOAD-2.2's last part | **redesigned twice.** First, a list of known vendor directories missed a nested project's `vendor/` (the name test skipped it) in a monorepo opened at its root, so the rule became local to the walk, `vendor_dir(dir)` where a listing holds `composer.json`. Then, in the audit of 2026-10-18, that rule was found to walk a nested project's out-of-subtree vendor directory, to need carried targets and a fact from the parent in the reach tables, and to miss R8's `trees` and `unbuilt`: a directory Composer wrote into is now recognised from its own listing, and the project's directory is `vendor_location`, over candidates (A1; the mechanism was ruled on 2026-10-18, M5d), and the install directories of packages Composer put elsewhere are Composer's too (COMP-7). It follows level 9's R7 (the case rule on the names) |
+| 0 | the start condition | **changed.** The cross-platform plan now comes before this batch, not the items 1 to 3 fixes, which finished at `791a57c6` (R0 to R12 and R18 are built at `2c7bf898`, R13 to R17 open; this row's first version said R0 to R5, and the workflow review found it stale twice). Its rows edit the files Part A edits. The intro says so |
+| 1 | A1, LOAD-2.2's last part | **redesigned twice.** First, a list of known vendor directories missed a nested project's `vendor/` (the name test skipped it) in a monorepo opened at its root, so the rule became local to the walk, `vendor_dir(dir)` where a listing holds `composer.json`. Then, in the audit of 2026-10-18, that rule was found to walk a nested project's out-of-subtree vendor directory, to need carried targets and a fact from the parent in the reach tables, and to miss R8's `trees` and `unbuilt`: a directory Composer wrote into is now recognised from its own listing, and the project's directory is `vendor_location`, over candidates (A1; the mechanism was ruled on 2026-10-18, M5d), and the install directories of packages Composer put elsewhere are Composer's too (COMP-7). It follows the cross-platform plan's R7 (the case rule on the names) |
 | 2 | A2, LOAD-9 | **amended.** The listing shortcut for the install path is exact only if `vendor/composer` is a real directory (a linked one is tested); discovery, spawned first, takes the one `vendor_location` answer; `DirListings` is safe to ask from both threads (read) |
 | 3 | A3, REG-14.4 | **changed.** A predicate `Fn(&str) -> bool`, not `&[Param]`: item 9's step 1 turns the list into a view and the assert code then needs no second change |
 | 4 | A4, REG-14.5 | **folded into REG-7.5** (Part E 41). Decision 8's final-level rule replaces `reconcile_with_native` and both its callers; the function is written there as A4 now describes |
@@ -20,7 +137,7 @@ meets. A verdict is "sound" (the row, the design and the code agree) or what cha
 | 6 | A6, bookkeeping | sound; one line removed with A4 |
 | 7 | VAL-1.1 | sound (`1892b477` exists; the six listed differences are item 0.1's) |
 | 8 | F10 | **already fixed in form.** `can_begin_expression` (`parser/expr.rs:211`) lists the tokens that cannot begin an expression, `and`, `or`, `xor`, `instanceof`, `&` and `\|>` among them, since `3b7e4d95` (2026-10-03, after the review's design); `php -l` accepts every shape the finding lists. Unbuilt: the exhaustive allow-list (a new token must be classified), its table test, the seven parser tests and the fixture. Tests and fixture in batch 0; the predicate on SYN-2's `TokenKind` in batch 1 |
-| 9 | F20 | sound; after level 9's R10 (which edits `syntax::stack`, and is built) and before item 9, so its lint checks the recursion item 9 writes; its `stack` crate restores `LIMIT` from a drop guard so that it runs on unwind too (H2.8) |
+| 9 | F20 | sound; after the cross-platform plan's R10 (which edits `syntax::stack`, and is built) and before item 9, so its lint checks the recursion item 9 writes; its `stack` crate restores `LIMIT` from a drop guard so that it runs on unwind too (H2.8) |
 | 10 | F57 | **already built** (checked in `parse_arrow_fn` and `parse_ternary`); its box in the review is stale |
 | 11 | item 0's tools, VAL-1.2 to 1.12 | **reordered.** VAL-1.2's run includes the edit replay, so the oracle run follows the session and the replay; F21 precedes the printers (it changes `Repr::Mixed`) |
 | 12 | level 3 | **recounted and placed** (K2) |
@@ -38,7 +155,7 @@ meets. A verdict is "sound" (the row, the design and the code agree) or what cha
 | 24 | batch 7, the check's temporaries | sound; CHECK-6.8 and 6.18 reuse only what holds no tree handle (G1); CHECK-4.2 goes with REG-18.4 (Part E 41) |
 | 25 | batch 8, LOAD-5.4, CACHE-13.1, CACHE-8 | CACHE-13.1's stamp follows decision 13 (the stat tuple on known file systems, the content hash on Windows and elsewhere); **CACHE-8 waits for S-4** (Part E 41). The second pass moved LOAD-5.4 to Part A and CACHE-13.1 to W3 (Part E 15), which leaves batch 8 empty |
 | 26 | spikes S-1 to S-11 | S-1 gains the hash contract; S-3 the member grain; S-6 the mixed-strategy cycles; S-7 is rewritten (K3); S-11 is new |
-| 27 | W1, the fillers | LOAD-7.3 follows level 9's R6 and R7 (one matcher; `report_path` and the case rule are its inputs) |
+| 27 | W1, the fillers | LOAD-7.3 follows the cross-platform plan's R6 and R7 (one matcher; `report_path` and the case rule are its inputs) |
 | 28 | W2, REG-4.2, 4.12, 4.15, 16.2, 16.3, 7.1 to 7.12, 8.1 to 8.7, 9 to 12 | **H3.6 gains REG-4.15, REG-4.11 and REG-11**; REG-17 gets its layering (H3.8); salsa's cycle rule is stated (H3.3) |
 | 29 | W3, REG-16.4, CACHE-13.2, LOAD-3.1, LOAD-5.x, TYPE-4, CHECK-7, CHECK-8, REG-17, F1 and F2 | **trees corrected** (K3); STUB-7.5 moves here; the persisted file is built for every platform and one platform's file is never read by another's (H4.4); TYPE-4.2's "provisional answers" cannot come from the hierarchy, which has no salsa cycle, and the relation reads resolved types, not constants' values |
 | 30 | W4, STUB-7.x, 8, 12, CHECK-10, STUB-13.1 | **`effective_range` and the phar locator** added (J1.2) |
@@ -61,7 +178,7 @@ designed.
 | REG-5 | sound; its case delta is F50's |
 | REG-6, REG-18.1, 18.2, 18.3, 18.5, 18.6, CHECK-11 | sound |
 | REG-18.4 | sound; takes CHECK-4.2 (Part E 41) and `ConstName` (H1.2) |
-| LOAD-7.1, 7.4 to 7.7 | sound; 7.3 follows level 9's R6 and R7; 7.2's PHPUnit half still needs the user's ruling; 7.8 is each setting's phase |
+| LOAD-7.1, 7.4 to 7.7 | sound; 7.3 follows the cross-platform plan's R6 and R7; 7.2's PHPUnit half still needs the user's ruling; 7.8 is each setting's phase |
 | REG-4.2 | sound (H1.2: `FoldedName` keys; two names differing in case are one name, so two declarations become `Many` and a duplicate report) |
 | REG-4.12 | sound (H2.4: about 280 sites become `Provider` calls; the grain of a read is the query that answers it) |
 | REG-4.15 | its span field withdrawn (H1.5a, Part E 34) |
@@ -113,7 +230,7 @@ review's own order between heavy runs.
 |---|---|---|
 | F10 | the item 0 baseline (a skipped file has no tree dump) | its symptom is fixed; tests and fixture before the baseline, the exhaustive predicate in batch 1 |
 | F21 | the canonical printers (`Repr::Mixed` changes) | before them |
-| F20 | level 9's R10; item 9 | after R10 and before item 9, so the lint checks the recursion item 9 writes |
+| F20 | the cross-platform plan's R10; item 9 | after R10 and before item 9, so the lint checks the recursion item 9 writes |
 | F77 | the item 0 baseline (a refused file must show in O2) and SYN-1.9 | batch 0, for analysed files; its context-file half is a run-level notice that leaves the exit status (ruled 2026-10-18, M5); batch 3 feeds it from `errors()` |
 | the seven fixes the crate split's F1 puts first (debounce stack, `latest_text`, `didClose`, `--generate-baseline`, `--fix`, the closed pipe, rename) | none: they are on today's code and independent | batch 0, each with its test (all open at `ffa7cccb`) |
 | F22 (closure `use` list), F8 and F7 (the use-site walk) | item 9 step 1 (`Visitor` over handles) | in step 1 |

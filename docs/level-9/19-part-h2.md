@@ -1,5 +1,17 @@
 ## H2. The engine (Part F 13)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| — | — | no ledger row named in this part's headings or tables |
+
+<!-- status:end -->
+
 ### H2.1 The contract, and what it is built on
 
 What the code above the engine may rely on, whichever engine is below:
@@ -92,7 +104,7 @@ list, since the project has a build-time gate.
   a handle in the database (the overlay map and the disk), read only by `file_digest(File)` and
   `parse_analysed`. Because the driver bumps `stamp` whenever the content may differ, a read is always
   consistent with it.
-- `shown` is a field because the checker takes it (`set_current_file`, level 9's R18) for the path
+- `shown` is a field because the checker takes it (`set_current_file`, the cross-platform plan's R18) for the path
   rules (`in_test_code`, the restricted symbols' path rules) and the finalizer matches `ignoreErrors` paths and
   baselines against it (R6); an anonymous class's name carries it. It is a function of the path and the report root,
   so it is a field of the input the driver sets and not a query; a change of root rewrites it, and only the files

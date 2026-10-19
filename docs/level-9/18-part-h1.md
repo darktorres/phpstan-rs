@@ -1,5 +1,21 @@
 # Part H. The engine cluster: identity, the engine, REG-7 and REG-8 on it, the pipeline
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| REG-7 | OPEN | OPEN |
+| REG-8 | OPEN | OPEN |
+| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 |
+| NAME-1 | OPEN | OPEN |
+| NAME-2 | OPEN | OPEN |
+
+<!-- status:end -->
+
 Part F rows 10, 13, 14 and 15, designed together because each constrains the next. Written from the
 code at `8a1ca1e0` and from the source of **salsa 0.28.5**, the version REG-16.1 measured
 (`~/.cargo/registry/src/index.crates.io-*/salsa-0.28.5`). The ledger's prototype directory

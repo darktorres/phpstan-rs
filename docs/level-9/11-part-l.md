@@ -1,18 +1,56 @@
 # Part L. The second pass, at the grain of the ledger's rows (2026-10-18)
 
+<!-- status:begin -->
+
+## Status of this part's tasks
+
+From the ledger at `2f0a3779` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table.
+
+| task | status | ledger |
+|---|---|---|
+| LOAD-2.2 | SEE LEDGER | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … |
+| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone |
+| CACHE-13.1 | OPEN | OPEN |
+| REG-4.10 | READY | READY; overlaps DOC-2.6 |
+| DOC-2.6 | OPEN | OPEN; overlaps REG-4.10 |
+| DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 |
+| SYN-4.1 | OPEN | OPEN |
+| LOAD-7.5 | READY | READY |
+| VAL-1.1 | OPEN | OPEN |
+| SYN-1.3 | OPEN | OPEN |
+| SYN-2 | OPEN | OPEN; the target grew |
+| SYN-3.1 | READY | READY |
+| SYN-4.2 | READY | READY |
+| SYN-1.9 | OPEN | OPEN |
+| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … |
+| SYN-6 | OPEN | OPEN |
+| NAME-2.1 | READY | READY |
+| NAME-1.1 | READY | READY |
+| PROD-5.8 | READY | READY |
+| PROD-5.3 | READY | READY |
+| DOC-2.3 | READY | READY |
+| CHECK-6.4 | READY | READY |
+| CHECK-6.5 | READY | READY |
+| CHECK-9 | READY | READY |
+| REG-4.15 | OPEN | OPEN |
+| REG-16.2 | READY | READY |
+| TYPE-5 | READY | READY |
+
+<!-- status:end -->
+
 Asked again as: "go through all tasks, one by one, in order and review them. maximum churn/properness". Part K
 went through the tasks in groups and marked many "sound"; this pass reads each row's ledger text (its task, state and
 needs), then the code it touches or the document it cites, and asks of each: (1) does the row's stated need hold;
 (2) is it the end-state design or a structure a later task deletes (the 25 G report's no-interim rule, which Part
-E 35 and 41 apply); (3) does it hold on every platform level 9 makes the project ship on, and against the module
-moves level 9's R18 makes; (4) what checks it. A change made to an earlier part is made in that part and listed
+E 35 and 41 apply); (3) does it hold on every platform the cross-platform plan makes the project ship on, and against the module
+moves the cross-platform plan's R18 makes; (4) what checks it. A change made to an earlier part is made in that part and listed
 here. Nothing was built or run.
 
 ## L1. Findings and what changed, in sequence order
 
 | # | task | what the pass found | changed |
 |---|---|---|---|
-| 1 | the start condition | level 9 now has **R18**, the module graph, built before R6 and partly in the tree: `file_id` and `shard` go to reflection, `Completion`/`Reach`/`BlockCompletion` and `is_truthy_literal` to `syntax`, the mention bits to `checker::mentions`, `set_current_file` takes the shown path, `path_bytes` becomes a crate, `allocator` is one binary module | intro: rows R0 to R18, the start condition and what R18 moves; `File.shown` (H2.2) |
+| 1 | the start condition | the cross-platform plan now has **R18**, the module graph, built before R6 and partly in the tree: `file_id` and `shard` go to reflection, `Completion`/`Reach`/`BlockCompletion` and `is_truthy_literal` to `syntax`, the mention bits to `checker::mentions`, `set_current_file` takes the shown path, `path_bytes` becomes a crate, `allocator` is one binary module | intro: rows R0 to R18, the start condition and what R18 moves; `File.shown` (H2.2) |
 | 2 | the conventions | two gates hold every row that moves code, and the plan named neither: `cargo xtask modgraph` (a `crate` or `module` line in `gates/module-graph.txt`; a module held only by the root is rejected) and `cargo xtask tests` (a renamed, merged or deleted test needs `old -> new` or `old -> REMOVED: reason` in `gates/test-renames/*.txt`). Item 9's test rewrite and VAL-1.3's oracle deletions are the large cases | intro: conventions |
 | 3 | A1, LOAD-2.2's last part | the walk counts, for every directory, the walks that reach it (`Starts::below`, `reaching`), filtering by excluded **name**; a vendor rule that only the listing tells would leave the reach counting a walk that lists nothing there, and the carried-state oracle (`reach_by_ancestors`) would disagree | A1: "The walk's reach follows from the listing" (a vendor directory's own task drops the walks that have the rule; `reaching` and `reach_by_ancestors` make the same cut; covering roots are `Excluded::is_empty()`; the first version's `vendor_child` went with the carried targets, M5d), the tests |
 | 4 | A5a, LOAD-5.4 (new in Part A) | `FileState::ast()` returns `&[]` in release when a file kept no tree; item 9's new API would need an empty-tree constructor for the one case that must not happen. Four readers, all of files that keep trees. It is a type change an end-state invariant needs, not a structure W3 deletes | Part A table and A5a; bookkeeping |
@@ -26,7 +64,7 @@ here. Nothing was built or run.
 | 12 | G3.6, Part E 31 | an error node was said to infer `mixed`; F21 (batch 0, before recovery) makes the error type a kind of `mixed` that every unknown-type guard covers and that records a report was made | error nodes infer `Mixed(Error)` |
 | 13 | B9 and DOC-2.9 | the plan said the comment's offset "is not carried by the parser, so that row adds it"; SYN-3.4 (batch 2) turns `doc_line` into the offset first | B9 |
 | 14 | Part D and Part E | first-pass statements survived against the rulings: "DOC-2.1 is deferred", "batch 5" for names, "R7 lands", "four rows", "Part A's validation", W2's note, W3's open question, the sequence | each corrected or marked superseded |
-| 15 | SYN-4.1, `WATCHED` | the plan said the watch list becomes a compile-time perfect hash; level 9's R18 composes `WATCHED` from three layers' lists (`stub_attributes`, `checker::mentions`, `file_declarations`), which `syntax` cannot see when it compiles | a `const fn` in the caller builds the table |
+| 15 | SYN-4.1, `WATCHED` | the plan said the watch list becomes a compile-time perfect hash; the cross-platform plan's R18 composes `WATCHED` from three layers' lists (`stub_attributes`, `checker::mentions`, `file_declarations`), which `syntax` cannot see when it compiles | a `const fn` in the caller builds the table |
 | 16 | step 1's module order | R18 moves the statement-completion rules into `syntax` | `completion` joins the syntax internals |
 | 17 | J2, OVL/RES/EXT/SUM against C6 to C9 | read against the crate split's own text this time: faithful, with omissions in OVL-3 (the ≈60 narrower-parameter misses and the native-signature-base decision), EXT-1 (the trait's shape: `Name`s, memoized views, `TemplateParam`s, the enum-cases query; two renamed tests), EXT-2 (universal object crates; distance rule), EXT-3 (a used trait's mixins; template binding) and SUM-2 (expression typing) | rows completed |
 | 18 | J3, D1 to D4 against the stage text | D1 (holder storage), D3 (per-node results), D4 (`RecordingNodeCallback`, `isReplayableConvergenceBody`, the `RefCell` channels as observer events) are as J3 says; D2's `syntax::annotations` needed a place in an immutable tree | J3's D2 row: side tables filled at `finish`, and `RemoveUnusedCodeByPhpVersionIdVisitor` a mark |
@@ -135,12 +173,12 @@ neither edit is made. The pass changed nothing that was built, and ran nothing.
 ## L4. What the workflow review found wrong in this part (2026-10-18)
 
 This part is the record of the second pass; the statements below were checked by the workflow review and found
-wrong, and the parts they concern carry the corrections (the M3 id says where it was found). The rows above are
+wrong, and the parts they concern carry the corrections (the finding's id says where it was found). The rows above are
 left as they were written.
 
 | where | said | is | id |
 |---|---|---|---|
-| L1 #1, L1b T0, L2 start condition | level 9 is at R18 and R6 to R17 follow | R0 to R12 and R18 are built at `2c7bf898`; R13 to R17 are open | A-17, S-21, C-01 |
+| L1 #1, L1b T0, L2 start condition | the cross-platform plan is at R18 and R6 to R17 follow | R0 to R12 and R18 are built at `2c7bf898`; R13 to R17 are open | A-17, S-21, C-01 |
 | L1 #4, L1b T6, L2 Part A | A5a has four readers | twelve non-test call sites in six files | A-04 |
 | L1 #7 | what a stat index replaces is "reads and their system calls" in Ir | the ≈60-70 M Ir is read wrappers and two hashes; system calls and I/O are not in Ir | V-11 |
 | L1 #22 | F77 fails the run for any file it refuses | analysed files only; the context half departs from decisions 9 and 15 and waits for a ruling | S-12, C-14 |
