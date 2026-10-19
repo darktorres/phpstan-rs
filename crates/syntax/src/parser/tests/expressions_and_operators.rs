@@ -1195,3 +1195,21 @@ fn instanceof_with_a_static_property_as_the_class_parses() {
         .collect();
     assert_eq!(targets, [true, true, true, true, false]);
 }
+
+#[test]
+fn peeled_walks_a_deeply_nested_grouping_without_recursing() {
+    let depth = 20_000;
+    let src = format!("<?php $x = {}1{};", "(".repeat(depth), ")".repeat(depth));
+    let program = parse(&src);
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected an assignment, got {:?}", program[0].kind);
+    };
+    assert!(matches!(
+        rhs.peeled().kind,
+        ExprKind::Literal(Literal::Int(1))
+    ));
+}
