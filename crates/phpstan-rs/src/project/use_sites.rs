@@ -32,7 +32,9 @@ use rustc_hash::FxHashMap;
 
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::{Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_stmts};
+use syntax::visit::{
+    Visitor, walk_catch_clause, walk_class_def, walk_expr, walk_function_decl, walk_stmts,
+};
 
 use crate::file_id::FileId;
 use crate::shard::{join_map, split_map};
@@ -276,4 +278,116 @@ impl<'ast> Visitor<'ast> for ClassFnRefWalker<'_> {
             walk_expr(self, expr);
         })
     }
+}
+
+/// The class names `stmts` names, each resolved, from every name the syntax
+/// visitor reaches: heritage and traits, attributes, type hints, catch clauses
+/// and expressions, bodies included. An analysed file's names: its bodies are
+/// checked, so each class they name is needed.
+pub(crate) fn class_names_named(stmts: &[Stmt]) -> Vec<String> {
+    class_names_of(stmts, true)
+}
+
+/// The class names `stmts` names outside function bodies: heritage, traits,
+/// attributes, signatures, property types and defaults, constants, and the
+/// top-level code. A context file's names: its bodies run only when called,
+/// and are not checked, so the classes only they name are not needed.
+pub(crate) fn class_names_declared(stmts: &[Stmt]) -> Vec<String> {
+    class_names_of(stmts, false)
+}
+
+fn class_names_of(stmts: &[Stmt], bodies: bool) -> Vec<String> {
+    let mut w = NameWalker {
+        bodies,
+        out: Vec::new(),
+    };
+    walk_stmts(&mut w, stmts);
+    w.out
+}
+
+struct NameWalker {
+    /// Whether a function's body is walked.
+    bodies: bool,
+    out: Vec<String>,
+}
+
+impl<'ast> Visitor<'ast> for NameWalker {
+    fn visit_name(&mut self, name: &'ast QualifiedName) {
+        if let Some(fqn) = name.resolved_class() {
+            self.out.push(fqn.to_string());
+        }
+    }
+
+    fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
+        if self.bodies {
+            walk_function_decl(self, function);
+            return;
+        }
+        for attr in &function.attrs {
+            self.visit_attribute(attr);
+        }
+        for param in &function.params {
+            self.visit_param(param);
+        }
+        if let Some(hint) = &function.return_type {
+            self.visit_type_hint(hint);
+        }
+    }
+}
+
+/// The class names a file's doc comments name, found in their text: every
+/// word of a doc comment, resolved against the file's namespace and imports
+/// as a class name is, each candidate kept. Over-approximates: a word that
+/// is no class name adds only a candidate that names no file. A PHPDoc type
+/// is a reference the checker resolves, so the lazy context lookup follows
+/// it too.
+pub(crate) fn doc_names(source: &str) -> Vec<String> {
+    let mut namespace = String::new();
+    let mut uses: FxHashMap<String, String> = FxHashMap::default();
+    for line in source.lines() {
+        if let Some(rest) = line.strip_prefix("namespace ") {
+            namespace = rest.trim_end_matches(';').trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("use ") {
+            if rest.starts_with("function ") || rest.starts_with("const ") {
+                continue;
+            }
+            let rest = rest.trim_end_matches(';').trim();
+            let (target, alias) = match rest.rsplit_once(" as ") {
+                Some((target, alias)) => (target.trim(), Some(alias.trim())),
+                None => (rest, None),
+            };
+            let short = target.rsplit('\\').next().unwrap_or(target);
+            uses.insert(
+                alias.unwrap_or(short).to_ascii_lowercase(),
+                target.trim_start_matches('\\').to_ascii_lowercase(),
+            );
+        }
+    }
+    let mut names = Vec::new();
+    let mut rest = source;
+    while let Some(start) = rest.find("/**") {
+        let after = &rest[start + 3..];
+        let end = after.find("*/").unwrap_or(after.len());
+        for word in
+            after[..end].split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '\\'))
+        {
+            let word = word.trim_matches('\\');
+            if word.is_empty() || !word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+                continue;
+            }
+            let lower = word.to_ascii_lowercase();
+            if let Some(target) = uses.get(lower.split('\\').next().unwrap_or(&lower)) {
+                names.push(match lower.split_once('\\') {
+                    Some((_, tail)) => format!("{target}\\{tail}"),
+                    None => target.clone(),
+                });
+            }
+            if !namespace.is_empty() {
+                names.push(format!("{}\\{}", namespace.to_ascii_lowercase(), lower));
+            }
+            names.push(lower);
+        }
+        rest = &after[end.min(after.len())..];
+    }
+    names
 }

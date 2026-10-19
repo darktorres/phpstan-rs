@@ -170,6 +170,9 @@ pub struct Session {
     /// found while the analysed files are listed, and the packages
     /// promoted to analysed paths, which are left out of them.
     vendors: Vec<composer::PendingVendor>,
+    /// The name lookup of the vendor contexts, made once the walk first
+    /// needs it (`lazy_context`).
+    lazy: OnceLock<super::lazy_context::LazyContext>,
     promoted: Vec<PathBuf>,
     /// The directory listings that the vendor discovery and the walk share,
     /// held until the listing is walked.
@@ -277,6 +280,14 @@ impl Workers {
     }
 }
 
+/// The class names a file read names, in its syntax.
+fn class_names_read(read: &Read) -> Vec<String> {
+    let Read::Loaded(loaded) = read else {
+        return Vec::new();
+    };
+    loaded.parsed.lazy_names.clone()
+}
+
 /// The parse of a walk's files as the walk lists them. A directory's files
 /// whose roles are final are parsed in one task on the pool, while the walk
 /// lists the rest. The load parses the other files once the walk ends.
@@ -308,8 +319,14 @@ impl StreamParse<'_> {
 impl FinalFiles for StreamParse<'_> {
     fn take<'s>(&'s self, scope: &rayon::Scope<'s>, files: Vec<Listed>) {
         scope.spawn(move |_| {
+            let lazy = self.session.lazy_context();
             let parsed: Vec<(HashedPath, Role, Read)> = files
                 .into_iter()
+                .filter(|file| {
+                    !lazy.is_some_and(|lazy| {
+                        file.role == Role::Context && lazy.is_lazy(file.path.as_path())
+                    })
+                })
                 .map(|file| {
                     let read = self.workers.with(|worker| {
                         self.session.read_indexed(
@@ -1367,6 +1384,7 @@ impl Session {
             scan_dirs,
             scan_files,
             vendors,
+            lazy: OnceLock::new(),
             promoted,
             dir_listings,
             stub_dirs,
@@ -1515,6 +1533,70 @@ impl Session {
     /// The listing, walked on first use and kept for the session. The directory
     /// listings the walk and the vendor discovery read are released once it is
     /// walked.
+    /// The name lookup of the vendor contexts, when context files are read by
+    /// name (`PHPSTAN_RS_LAZY_CONTEXT`). Made when first asked, which waits for
+    /// the vendor discovery, so only a context file's batch asks for it.
+    fn lazy_context(&self) -> Option<&super::lazy_context::LazyContext> {
+        super::lazy_context_enabled().then(|| {
+            self.lazy.get_or_init(|| {
+                super::lazy_context::LazyContext::new(
+                    self.vendors.iter().map(|vendor| vendor.get()),
+                )
+            })
+        })
+    }
+
+    /// Reads the lazy context files that the names of the files read reach. Each
+    /// name goes to the first candidate file that exists; a file that is reached
+    /// is read on the pool, and its own names reach the next files, so the reads
+    /// run as the names are found. Each file is read once, and the files read are
+    /// those reachable from the names, whatever order they are read in. The lazy
+    /// files that no name reaches are left unread.
+    fn load_lazy_context(
+        &self,
+        lazy: &super::lazy_context::LazyContext,
+        project: &Project,
+        combined_files: &[&Listed],
+        slots: &mut [Option<Read>],
+        workers: &Workers,
+        index_use_sites: bool,
+    ) {
+        let context_at: FxHashMap<&Path, usize> = combined_files
+            .iter()
+            .enumerate()
+            .filter(|(_, file)| file.role == Role::Context)
+            .map(|(at, file)| (file.path.as_path(), at))
+            .collect();
+        let pending: FxHashSet<usize> =
+            (0..slots.len()).filter(|&at| slots[at].is_none()).collect();
+        let reach = LazyReach {
+            session: self,
+            lazy,
+            project,
+            combined_files,
+            workers,
+            index_use_sites,
+            context_at,
+            pending,
+            queued: Mutex::default(),
+            read: Mutex::default(),
+        };
+        let seeds: Vec<String> = slots.iter().flatten().flat_map(class_names_read).collect();
+        self.pool.scope(|scope| reach.follow(scope, seeds));
+        let read = reach
+            .read
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner);
+        for (at, read) in read {
+            slots[at] = Some(read);
+        }
+        for slot in slots.iter_mut() {
+            if slot.is_none() {
+                *slot = Some(Read::Unread);
+            }
+        }
+    }
+
     fn listing_of(&self) -> &Listing {
         self.listing_with(&Unstreamed)
     }
@@ -1785,6 +1867,15 @@ impl Session {
         };
         // Only the reader holds the text, so the use sites are indexed here.
         project.index_use_sites(&mut parsed, &text);
+        if super::lazy_context_enabled() {
+            let mut names = match &parsed.ast {
+                Some(ast) if analysed => super::use_sites::class_names_named(ast),
+                Some(ast) => super::use_sites::class_names_declared(ast),
+                None => Vec::new(),
+            };
+            names.extend(super::use_sites::doc_names(&String::from_utf8_lossy(bytes)));
+            parsed.lazy_names = names;
+        }
         let source = keeps_source.then(|| text.into_owned());
         Read::Loaded(Box::new(ReadFile {
             text: FileText {
@@ -2047,7 +2138,16 @@ impl Session {
             })
             .collect();
         debug_assert!(parsed.is_empty(), "the walk hands over only listed files");
-        let deferred: Vec<usize> = (0..slots.len()).filter(|&at| slots[at].is_none()).collect();
+        let lazy = self.lazy_context();
+        let is_lazy_at = |at: usize| {
+            lazy.is_some_and(|lazy| {
+                combined_files[at].role == Role::Context
+                    && lazy.is_lazy(combined_files[at].path.as_path())
+            })
+        };
+        let deferred: Vec<usize> = (0..slots.len())
+            .filter(|&at| slots[at].is_none() && !is_lazy_at(at))
+            .collect();
         // The files are numbered while they parse.
         let (deferred_parsed, numbering): (Vec<(usize, Read)>, _) = pool.install(|| {
             rayon::join(
@@ -2080,6 +2180,16 @@ impl Session {
         });
         for (at, read) in deferred_parsed {
             slots[at] = Some(read);
+        }
+        if let Some(lazy) = lazy {
+            self.load_lazy_context(
+                lazy,
+                &project,
+                &combined_files,
+                &mut slots,
+                &workers,
+                index_use_sites,
+            );
         }
         let mut combined_parsed: Vec<Read> = slots
             .into_iter()
@@ -2114,13 +2224,19 @@ impl Session {
         );
 
         // Context files first, so an analysed file's declaration wins a
-        // name collision.
+        // name collision. A lazy load orders the context files by their
+        // rank, which decides a collision between two context files.
+        let mut context_order: Vec<usize> = (0..context_files.len()).collect();
+        if let Some(lazy) = lazy {
+            context_order.sort_by_key(|&at| (lazy.rank(context_files[at].path.as_path()), at));
+        }
         project.insert_declarations(
             pool,
-            context_files
+            context_order
                 .iter()
-                .zip(&context_parsed)
-                .filter_map(|(file, read)| declaration_of(file.path.as_path(), false, read))
+                .filter_map(|&at| {
+                    declaration_of(context_files[at].path.as_path(), false, &context_parsed[at])
+                })
                 .chain(
                     analyze_files
                         .iter()
@@ -2437,5 +2553,73 @@ pub(crate) fn load_test_files(
 pub(crate) fn load_test_file(project: &mut Project, path: PathBuf, source: &str, analysed: bool) {
     if let Some((path, message)) = load_test_files(project, &[(path, source, analysed)]).first() {
         panic!("{} does not parse: {message}", path.display());
+    }
+}
+
+/// The state of one lazy load: the names are followed as tasks on the pool.
+struct LazyReach<'a> {
+    session: &'a Session,
+    lazy: &'a super::lazy_context::LazyContext,
+    project: &'a Project,
+    combined_files: &'a [&'a Listed],
+    workers: &'a Workers,
+    index_use_sites: bool,
+    /// The context files by path, to their index in `combined_files`.
+    context_at: FxHashMap<&'a Path, usize>,
+    /// The indices of the lazy files not yet read.
+    pending: FxHashSet<usize>,
+    /// The indices of the lazy files whose read is queued.
+    queued: Mutex<FxHashSet<usize>>,
+    /// Each lazy file read, with its index.
+    read: Mutex<Vec<(usize, Read)>>,
+}
+
+impl<'a> LazyReach<'a> {
+    /// Queues a read for each lazy file that one of `names` finds, and for the
+    /// files those reads reach in turn.
+    fn follow<'s>(&'s self, scope: &rayon::Scope<'s>, names: Vec<String>)
+    where
+        'a: 's,
+    {
+        for name in names {
+            let Some(at) = self.find(&name) else {
+                continue;
+            };
+            let first = self
+                .queued
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(at);
+            if !first {
+                continue;
+            }
+            scope.spawn(move |scope| {
+                let read = self.workers.with(|worker| {
+                    self.session.read_indexed(
+                        self.project,
+                        self.combined_files[at],
+                        worker,
+                        true,
+                        self.index_use_sites,
+                    )
+                });
+                let next = class_names_read(&read);
+                self.read
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push((at, read));
+                self.follow(scope, next);
+            });
+        }
+    }
+
+    /// The lazy file a name is found in: the first candidate that exists among
+    /// the context files, if it is one not yet read.
+    fn find(&self, name: &str) -> Option<usize> {
+        self.lazy
+            .candidates(name)
+            .into_iter()
+            .find_map(|path| self.context_at.get(path.as_path()).copied())
+            .filter(|at| self.pending.contains(at))
     }
 }

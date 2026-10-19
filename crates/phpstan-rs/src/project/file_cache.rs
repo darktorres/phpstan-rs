@@ -124,6 +124,7 @@ pub(super) struct CachedFile {
     facts: FileFacts,
     line_index: Arc<LineIndex>,
     class_fn_refs: Option<Vec<(Span, RefTarget)>>,
+    lazy_names: Vec<String>,
 }
 
 impl CachedFile {
@@ -148,6 +149,7 @@ impl CachedFile {
             facts: parsed.facts,
             line_index: Arc::clone(&parsed.line_index),
             class_fn_refs: parsed.class_fn_refs.clone(),
+            lazy_names: parsed.lazy_names.clone(),
         }
     }
 
@@ -179,6 +181,7 @@ impl CachedFile {
             facts: self.facts,
             line_index: self.line_index,
             class_fn_refs: self.class_fn_refs,
+            lazy_names: self.lazy_names,
             owner: None,
         }
     }
@@ -257,7 +260,13 @@ pub(super) fn key(
     let shown_bytes = shown.as_os_str().as_encoded_bytes();
     hasher.write(shown_bytes);
     hasher.write(&(shown_bytes.len() as u64).to_le_bytes());
-    hasher.write(&[u8::from(is_stub), u8::from(index_use_sites)]);
+    // A context file's entry carries the names it names only when it is read
+    // by name, so the mode is part of the key.
+    hasher.write(&[
+        u8::from(is_stub),
+        u8::from(index_use_sites),
+        u8::from(super::lazy_context_enabled()),
+    ]);
     let digest = hasher.finish_128();
     let hex = format!("{digest:032x}");
     Some(Key {
