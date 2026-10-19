@@ -313,12 +313,22 @@ Done:
   the system does, and a line ends at `\n`, `\r\n` or `\r` wherever the code reads
   one. That last part found two older defects: a `//` comment in a CRLF file kept
   its `\r`, and a file of lone `\r` lost its code after the first comment.
+- R14: the stub sources embed the same data on every platform (paths spelled
+  with `/`, a source its checkout wrote with CR LF read as LF), the two items
+  only a debug build reads are built in a debug build only, and the heap
+  profiler walks frame pointers on aarch64 and macOS as well as on x86_64 Linux,
+  with tests that run on every leg.
+- R15: the parallel compiler front end is on every platform; xtask spawns no
+  `touch` or `diff`, reads the peak memory from each platform's `time` and tells
+  engine source by the components of its path; the README says how to verify a
+  download and build on each platform, and the scripts that need Linux say so.
 
 Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
 a run can know: the JSON report's spelling, the disabled server, the SQLite
 path and the include rule. All four are built.
 
-Open: R14 to R17, the rounds after them, and the batch's checks.
+Open: round 3's push (asked first), R16 and R17, the rounds after them, and the
+batch's checks.
 
 ## Documents with no place in the stack
 

@@ -8,12 +8,16 @@
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
   round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
   R5's second follow-up (`7a757a8e`), R7 (`1146b4f6`, `1fe8c8e4`), R8 (`7d5bddd4`, `06486da9`),
-  R9 (`da9e86df`), R10 (`007d827b`), R11 (`a94e27ec`), R12 (`acc33609`) and R13 (`f5e418d6`,
-  `ee903695`, `2c7bf898`, `df4be250`). The rows are built in the order of the table below, one
-  commit each, with a pathspec, since another session shares the checkout. R18 has one commit
-  for each step, R6 has a second for the rule its build found, R7 has a second for the case
-  rule, R8 has a second for the files an environment change re-checks, and R13 has one for the
-  fixture harness, one for four tests' paths, one for the links and one for the line breaks.
+  R9 (`da9e86df`), R10 (`007d827b`), R11 (`a94e27ec`), R12 (`acc33609`), R13 (`f5e418d6`,
+  `ee903695`, `2c7bf898`, `df4be250`), R14 (`92074e5a`, `4ce90ca9`, `08315491`) and R15
+  (`7d7f2ce5`, `04a78a8b`, `b2528e33`). The rows are built in the order of the table below,
+  one commit each, with a pathspec, since another session shares the checkout. R18 has one
+  commit for each step, R6 has a second for the rule its build found, R7 has a second for the
+  case rule, R8 has a second for the files an environment change re-checks, R13 has one for
+  the fixture harness, one for four tests' paths, one for the links and one for the line
+  breaks, R14 has one for the embedded data, one for two debug-only items and one for the heap
+  profiler, and R15 has one for the compiler flags, one for xtask and one for the README and
+  the scripts.
 - **Round 1** runs `d8de9530`, pushed on 2026-10-18 with the user's go-ahead.
   - Extension CI passed on all three systems. The Windows round trip took 1179 ms. At
     `120c990f` it had failed 10 s into the test, waiting for the extension to activate or its
@@ -38,7 +42,7 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** R14, the build scripts. Round 3 follows R14, and its push is asked first.
+- **Next:** round 3, which covers R13 to R15 and whose push is asked first, then R16.
 
 ## Context
 
@@ -193,7 +197,7 @@ CI rounds, each push asked:
 
 - round 1 after R2, the inventory;
 - round 2 after R5, the smoke round trip;
-- round 3 after R13 and R14;
+- round 3 after R13 to R15;
 - round 4 after R16, the bench;
 - round 5 at the end, with the release dry run.
 
@@ -1900,6 +1904,69 @@ are unchanged.
 `build_declarations` (`registry.rs:78`) and `project/declared_classes.rs:62`. Each takes the
 `cfg` of the code that uses it, so the dhat check builds without warnings.
 
+**Built** (`92074e5a`, `4ce90ca9`, `08315491`).
+
+- **The embedded data** (`92074e5a`):
+  - `stub-sources/src/embed.rs` holds the two decisions the build script takes. The script
+    includes the file by path and the crate's tests include it, so both run the same
+    functions. It is under `src/` because `PHPSTAN_RS_SOURCE_HASH` hashes each crate's `src`,
+    `Cargo.toml`, `build.rs` and `index.tsv`, and the hash has to follow it.
+  - `slash_spelling` joins a path's components with `/`: `standard/basic.php` on every
+    platform, as `index.tsv` spells it.
+  - `with_lf_breaks` is the inverse of a checkout's `\n` to `\r\n`: it drops the `\r` of each
+    `\r\n` and nothing else, and gives nothing for a source that holds none. The script embeds
+    that copy, written under `OUT_DIR/lf/`, and every other source from where it lies. The
+    data embedded is then the repository's, whatever `core.autocrlf` did to the checkout, the
+    phpstan-src submodule's stubs included, which `.gitattributes` does not reach.
+  - On Linux the generated file is byte-identical. With every vendored source converted to
+    `\r\n`, the paths, the extensions, the 2,556 sources and the index of a build hash to the
+    value of the LF checkout's.
+  - Tests, in the crate: the slash spelling (and, on Windows, the spelling of a `\` path); the
+    conversion's cases (pairs, a `\n\r\n` run, a `\r\r\n` that keeps its first `\r`, a lone
+    `\r`, and no pair at all); and one that holds the embedded arrays to what every platform
+    embeds: equal lengths, no `\` in a path, every path a `.php` file, and no source with a
+    `\r\n`. The package's `the_checked_in_stub_index_is_up_to_date` compares the index made
+    from the embedded data with `index.tsv`. It failed on Windows in rounds 1 and 2, and
+    runs on every leg.
+- **The two items only a debug build reads** (`4ce90ca9`): `registry::build_declarations` is
+  read by the debug assertion that compares a file's kept declarations with the ones its tree
+  builds, and `project::declared_classes` by the one that compares the classes found beside
+  the declarations with a walk of their own. Each takes the `cfg` of its only user. The gate
+  and dhat profiles have no debug assertions, and built with both warnings. The dhat build is
+  clean now.
+- **The heap profiler's walk** (`08315491`):
+  - `build.rs` names the targets whose frame register and stack bounds the walk reads: x86_64
+    and aarch64, on Linux and on macOS, when the build's flags hold `-C
+    force-frame-pointers=yes`. Any other build, Windows included, unwinds with `backtrace`.
+  - A frame record is the caller's frame pointer, then the return address, on all four
+    targets. The walk reads `rbp` on x86_64 and `x29` on aarch64, and bounds itself with the
+    thread's stack: `pthread_getattr_np` on Linux, and on macOS `pthread_get_stackaddr_np`
+    (the high end) with `pthread_get_stacksize_np`. std keeps frame pointers in its non-leaf
+    functions on these targets (read from the disassembly).
+  - `patches/dhat` is outside the workspace, so it has a lockfile of its own, pinned to the
+    root's versions. `lint`'s lockfile step runs `cargo metadata --locked` on it, and
+    `.gitignore` covers its `target`.
+  - Tests, in the crate, with the flag and without it, so that each walk has them: a backtrace
+    taken under 40 open calls holds a frame for each, on a test thread and on a thread of its
+    own; and, where the walk is built, a thread's stack bounds hold the addresses of its
+    locals. The step `The dhat tests` runs them (`cargo test --locked --lib --manifest-path
+    patches/dhat/Cargo.toml`, with the flag) on the Linux `test` job and on each platform's
+    `platform-test` job, beside R2's `The dhat build` (`cargo check -p phpstan-rs --profile
+    dhat --features dhat-heap`, with the flag) on `platform-check`. The plan's one recorded
+    dhat run on the macOS leg is not made: a test keeps what the run would have shown.
+  - Checked here:
+    - a dhat-heap `check-project` run over a 79-file project gives 65,819 program points,
+      each with a stack from the allocator's frame to the thread's start (`clone3`, or
+      `_start` for the main thread), 23 to 340 frames deep, and the build has no warning;
+    - the crate type-checks with the flag for x86_64 and aarch64 Linux, x86_64 and aarch64
+      macOS, and x86_64 Windows, with the walk built for the first four and not the last;
+    - reading `rsp` for `rbp` fails both backtrace tests.
+- Also checked here: clippy on the workspace, `-D warnings`; the module graph and `arch`;
+  both lockfiles and the dhat one with `--locked`; `cargo deny` and `cargo machete`.
+- Left to the legs: the aarch64 Linux and macOS walks and their tests (no leg runs x86_64
+  macOS, which is type-checked only), the Windows unwinder's, and the embedded data's equality
+  on Windows.
+
 ### R15. Developer tooling
 
 **Change.**
@@ -1924,6 +1991,44 @@ are unchanged.
 - README's "Installing a pre-built binary" verifies the checksum on each platform: `sha256sum -c`
   on Linux, `shasum -a 256 -c` on macOS, and PowerShell's `Get-FileHash` on Windows, whose
   output is compared with the `.sha256` file's hash.
+
+**Built** (`7d7f2ce5`, `04a78a8b`, `b2528e33`).
+
+- **`.cargo/config.toml`** (`7d7f2ce5`): `-Z threads=8` is in a `[target.'cfg(all())']`
+  table, so every host compiles with the parallel front end. x86_64 Linux's table keeps the
+  clang linker and mold. Cargo joins a triple table's flags before a cfg table's, so the flags
+  x86_64 Linux builds with are the same, in the same order (`-C link-arg=-fuse-ld=mold -Z
+  threads=8`), and nothing there is rebuilt.
+- **xtask** (`04a78a8b`):
+  - `touch` is `File::set_modified`, and `diff -u` is the unified diff of `similar` (3.2.0,
+    Apache-2.0, a dependency of xtask alone): the sides labelled `old` and `new`, three lines
+    of context and the no-newline marker, as `diff -u` writes them.
+  - The perf gate's `peak_rss_kb` reads GNU `time -f %M` on Linux, in KB, and BSD `time -l` on
+    macOS, in bytes, from the line that names the maximum resident set size. Windows has
+    neither: the gate says there is no reading, still times the run, and compares no memory.
+  - `arch`'s `is_engine_source` reads the path below `crates/phpstan-rs/src` by its
+    components. The exempt files (`project/session.rs`, `main.rs`, `lsp.rs` and what is below
+    `main/` and `lsp/`) and the `tests` directories matched on `/` alone before.
+  - Tests (xtask's 19): both `time` formats, the diff's format with its markers, `touch` (it
+    moves a file's time to now, leaves its contents and fails on an absent file), and the
+    engine rule for paths built with the platform's separator, with a `\` spelling on Windows.
+- **README and scripts** (`b2528e33`):
+  - "Installing a pre-built binary" verifies the checksum with `sha256sum -c` on Linux and
+    `shasum -a 256 -c` on macOS, and on Windows with PowerShell's `Get-FileHash` compared to
+    the `.sha256` file's hash. The Windows asset is a `.exe.gz`, which `GzipStream` unpacks.
+  - "Building from source" says that the phpstan-src submodule has to be initialised, that
+    the pinned nightly comes from `rust-toolchain.toml`, that x86_64 Linux links with clang
+    and mold, and the command that links with the system linker instead (checked with
+    `cargo build -v`). It says where the stub and per-file caches are on each platform, and
+    the variables that move or turn them off.
+  - Each script that reads `/proc`, records with `perf` or needs either's output says Linux
+    in its usage line: `abab.py`, `cpugrowth.py`, `mimalloc-runs.sh`, `perfdump.py`,
+    `scaling.sh` and `thp-probe.py`.
+- Checked here: clippy on the workspace, `-D warnings`; the xtask tests; the module graph and
+  `arch`; both lockfiles with `--locked`; `cargo deny` (for `similar`) and `cargo machete`.
+- Left to the legs: `touch`, the diff and the engine rule on macOS and Windows, which run
+  with xtask's tests; the macOS reading of `time -l`, whose parser is tested against a report
+  written in that format and not against a Mac; and the PowerShell snippet.
 
 ### R16. `path_bytes` reads Windows paths from their bytes
 
