@@ -4,7 +4,7 @@
 
 None. I1 is a design: the node layout per variant, its budgets, and the assertions that check it. The layout is built by Part B (SYN-1.2, 1.4, 1.5, 1.7, 1.8, in B7's step 2), and the sizes it asserts are checked there. The rows it mentions are owned elsewhere: SYN-3.4 and SYN-4.8 by Part C, DOC-2.9 by Part C's batch 6, and the spike S-12, which decides spans or token indices, by Part E.
 
-Written from `syntax/src/ast.rs` (1,691 lines at `ffa7cccb`, 1,680 when it was read whole), against B3's budgets: `ExprNode` 32 bytes,
+Written from `syntax/src/ast.rs` (1,691 lines at `ffa7cccb`), against B3's budgets: `ExprNode` 32 bytes,
 `StmtNode` 40, no element that needs a drop. The census of step 0 confirms the distributions; it can move a
 field between inline and a side table (I1.7) but not change the shape.
 
@@ -145,7 +145,7 @@ variant with an `ObjectOperator`), builds `Ident<'a>` from an `IdentAt`, and ret
   nearly every parameter) better as a flag and a side table; (3) is `QNameNode` worth inlining for the commonest
   parents (`ClassConstFetch`, `New` of a name); (4) the doc table's density against a per-kind sparse field;
   (5) the distribution of list lengths, which sizes nothing here (`List` is 8 bytes) but sizes the scratch stacks;
-  (6) the tokens-per-node ratio and the kept tree's bytes under the ruled layout (the source it owns is priced
+  (6) the tokens-per-node ratio and the kept tree's bytes under this layout (the source it owns is priced
   here), which spike S-12 needs to decide spans against token indices.
 - A change is accepted when the asserted sizes fall (or stay) and step 2's dump stays byte-equal. It is never
   accepted by weakening an assertion.

@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-Written by hand. Each task is listed in the C1 batch that builds it. The state is the ledger's, as of `a3931d49d`.
+Each task is listed in the C1 batch that builds it. The state is the ledger's, as of `a3931d49d`.
 
 | task | state | batch |
 |---|---|---|
@@ -73,11 +73,11 @@ Read from the 20 G plan's items 10 to 19 (its §10), the ledger's rows, needs an
 (`PROFILE_DRILL_PIWIGO_LEDGER.md` §2 to §13) and the code at `0fb1a4de`. The savings are the 20 G
 report's estimates for the off run (the ledger's "now" is 20.37 G at `8a1ca1e0`; 20.57 G is the 20 G profile's
 `cl-20g`, file cache off with a warm stub cache); PROD-1 to PROD-3 and DOC-1 overtook parts of
-items 13 and 14, so none is a claim. Validation is at the end of each item, as before.
+items 13 and 14, so none is a claim. Validation is at the end of each item.
 
-## C1. The path, in order (the ruled order of Part E's "The sequence this gives"; the second pass made this table agree)
+## C1. The path, in order (the order of Part E's "The sequence this gives")
 
-1. The cross-platform fixes (finished at `a83b1675`; at `c5bec58c` R0 to R15 and R18 were built and R16 and R17 open); then Part A's rows
+1. The cross-platform fixes (finished at `a83b1675`); then Part A's rows
    (A1 to A3, A5, A5a, A7 and A8; A4 is folded into REG-7.5).
 2. Batch 0 (Part E 13 and 22: the oracle tools and the baseline, F10's tests, F20, F21, F77, the level-3 backlog that
    changes a dump, and the seven fixes the crate split's F1 puts first), then item 9: steps 0, 1, 2, then step 3
@@ -91,7 +91,7 @@ items 13 and 14, so none is a claim. Validation is at the end of each item, as b
 | 2 | the lexer, second pass | items 11 and 12: SYN-3.1-3.4 (I3 for 3.2), SYN-4.2-4.10 less 4.5, 4.8 and 4.9 | ≈0.2 G + ≈0.35 G | same files as batch 1; SYN-4.1 shrank (the lexer interns nothing: I2) and is in batch 1; 4.3 needs SYN-3.2, 4.7 needs 4.2 |
 | 3 | parse recovery (in: Part E 11; changes output) | SYN-1.9, Q-10's parser half, SYN-6 (G3); the `php-version` crate with `VersionSet` and `Availability` (Part E 32); F77's diagnostics now come from the tree's `errors()` | none (VAL-2.10 deltas) | after batch 1, so the parse functions are rewritten once; Q-10's version half needs STUB-7.1 (level 2) |
 | 4 | names | S-1 first; item 16 (NAME-2.1-2.3), **then** item 15 (NAME-1.1-1.6), and SYN-4.5 (`ConstName`) | ≈0.1 G + ≈0.6 G; ≈15 MB | names first (Part E 12): products and PHPDoc work are born on `FoldedName` and `ConstName`; NAME-1.4 needs NAME-2.1, so the plan's number order has the needing item first |
-| 4b | the constant lookup | REG-18.4 with CHECK-4.2 (needs `ConstName`; a delta, approved 2026-10-18: M5b) | CHECK-4.2 is 5.1 M Ir | one place for the two rows: after batch 4, before batch 5 (Part E 41 folded CHECK-4.2 into REG-18.4) |
+| 4b | the constant lookup | REG-18.4 with CHECK-4.2 (needs `ConstName`; a delta) | CHECK-4.2 is 5.1 M Ir | one place for the two rows: after batch 4, before batch 5 (Part E 41 folded CHECK-4.2 into REG-18.4) |
 | 5 | a file's products | item 13: PROD-5.8, 5.2, 5.1, 5.3, 5.5, 5.6 (PROD-5.7 is not built: Part E 35), REG-14.1, and CHECK-13 (its rule sees anonymous classes once PROD-5.1 gives them a file-local identity) | ≈0.45 G | three returns to earlier items open here (C3); PROD-5.4 is REG-16.4's to delete; PROD-5.8's record is keyed by `FoldedName` and `ConstName` (batch 4's types), and `RefKey` goes with the dependents machinery in W3 |
 | 6 | PHPDoc | item 14: DOC-2.1 first (F41: Part E 14), then 2.2 to 2.9, with REG-4.10 folded into 2.9; TYPE-5 | ≈0.35 G; the memos' memory | 2.2 needs PROD-5.2 (batch 5), 2.5 needs NAME-1 (batch 4), 2.6 needs 2.1 and 2.3, 2.9 needs the comment's offset (SYN-3.4, batch 2); item 14 closes |
 | 7 | the check's temporaries | item 18's temporaries (the `Message` of I5, CHECK-6.4 to 6.6, 6.9 to 6.12, 6.16, 6.17) and the scratch reuse of CHECK-6.8 and 6.18 (allocations that hold no tree handle) | the temporaries' share of ≈1.6-2.0 G | the inference core and the scopes group are Stage D's (Part E 16): their ≈1.0-1.3 G and ≈0.15-0.25 G arrive with it; F69 and CHECK-9 are D2's (Part E 17), CHECK-4.2 is batch 4b's, and the one-checker-per-worker form of CHECK-6.18 is E7's |
@@ -189,7 +189,7 @@ implicit calls' throw points on the recorders (`record_call_throw_point`, `curre
 `StatementResult` replaces, so by the crate split's Appendix F ("a bug in code a later phase rewrites gets a fixture
 now and its fix as that phase's behaviour commit") and this plan's own rule (K2) they get their fixtures in batch 0
 and are built in D2, and CHECK-9 follows F69 there; CHECK-7's checker half goes to D2 and CHECK-10's operator
-sites to D3 for the same reason (the answer that departs from the first pass, M5). TYPE-5 is batch 6's.
+sites to D3 for the same reason. TYPE-5 is batch 6's.
 CHECK-6.8 and 6.18 reuse allocations that hold no tree reference (the infer cache's slots, scratch vectors of types
 and keys, message buffers) across functions and files; a table that holds a rooted expression (G1's alias maps) is
 cleared at each file and its allocation not kept, so that it does not keep the previous file's tree alive. That is
@@ -244,10 +244,8 @@ closes whole). The final
 validation (VAL-1) follows item 19 and is blocked by nothing but its own tooling (C5, 4). The
 roots of that chain are READY today: **REG-4.2** (exact-spelling accessors; folded
 method keys) and **REG-16.2** (interned identity), then REG-16.3 (the engine), which gates REG-7,
-TYPE-4, REG-16.4 and so LOAD-3.1, CACHE-13.2, LOAD-5.2 and REG-17. Levels 1 to 7 were deferred on
-2026-10-16 "to be reevaluated together"; level 8's READY list runs out at batch 8, so that is when.
-A second session could design REG-16.2/16.3 while batches 5 to 7 are built, as this one is designing
-now. Part D lays out what the wall holds and the order I would propose.
+TYPE-4, REG-16.4 and so LOAD-3.1, CACHE-13.2, LOAD-5.2 and REG-17. Levels 1 to 7 are deferred "to be reevaluated together"; level 8's READY list runs out at batch 8, so that is when.
+Design of REG-16.2 and REG-16.3 can run while batches 5 to 7 are built. Part D lays out what the wall holds and the proposed order.
 
 ## C5. Rulings and risks (the questions; Part E has the current answers)
 

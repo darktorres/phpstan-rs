@@ -196,13 +196,13 @@ depends on the unpacked array's keys and not on syntax) and adds the 7.x set: nu
 (7.1, 7.3), multi-catch (7.1), `object` (7.2), trailing comma in calls (7.3), flexible heredoc
 (7.3), typed properties (7.4), arrow functions (7.4), `??=` (7.4), array spread (7.4), numeric
 separators (7.4), `static`/`mixed` types and `?->` (8.0), `match` (8.0), trailing comma in
-parameters (8.0), enums and `never` and `0o` octals (8.1), the pipe operator (8.5). It is a draft
-from the grammar's history: **the matrix of G3.7 is its authority**, and a row is not final until the
+parameters (8.0), enums and `never` and `0o` octals (8.1), the pipe operator (8.5). The list is provisional:
+**the matrix of G3.7 is its authority**, and a row is not final until the
 images agree with it.
 
 ### G3.6 What readers do with an error (the contract)
 
-- *Checker.* `ExprKind::Error` infers the error type (F21's `Mixed(Error)`, which lands in batch 0: every "is this unknown" guard already covers it, and it records that a report was made), narrows nothing, reports nothing. **What a statement error sets** is stated, because the flag the first draft named does not silence anything: `any_variable_may_exist`
+- *Checker.* `ExprKind::Error` infers the error type (F21's `Mixed(Error)`, which lands in batch 0: every "is this unknown" guard already covers it, and it records that a report was made), narrows nothing, reports nothing. **What a statement error sets:** `any_variable_may_exist`
   (set by `extract()`, `eval` and `include`) is read today only at `builtin_calls.rs:826`, and the diagnostics
   `extract()` and `eval` discard are dropped by `saw_dynamic_var_construct`, which drops every diagnostic of
   the enclosing body (a loss for an editor). So a statement error sets `any_variable_may_exist`, and
@@ -210,8 +210,7 @@ images agree with it.
   nothing, which also changes `include` (it sets the flag and still reports such a read today), a delta for
   VAL-2.10 with its fixture; completion falls through. This is PHPStan's own rule (`canAnyVariableExist()` is true
   at global scope and after an include or `extract()`: `afterExtractCall`), and the stored Piwigo baselines hold no
-  `variable.undefined`, so the oracle should not move. **`extract()` is made precise in the same commit (ruled
-  2026-10-18):** every variable in scope becomes `mixed` and any may exist, and nothing else is dropped, where
+  `variable.undefined`, so the oracle should not move. **`extract()` is made precise in the same commit:** every variable in scope becomes `mixed` and any may exist, and nothing else is dropped, where
   `saw_dynamic_var_construct` truncates every diagnostic of the body (`function_decl.rs`), the ones before the call
   and the ones unrelated to variables included; the two detections also disagree (`\extract(...)` and
   `EXTRACT(...)` set the flag but not the truncation), so one test on the resolved name serves both. `eval` keeps
@@ -240,11 +239,10 @@ images agree with it.
 - *Fixes.* `--fix` and code actions skip a file that has errors.
 - *Reporting.* An analysed file's errors are `phpstanRs.parseError` (level 0, non-ignorable, at the
   error's span, PHP's message) and fail the run. A context file's errors are recorded in the dump and the
-  per-file cache and, as ruled on 2026-10-18, reported as a run-level notice, `phpstanRs.contextParseError`: its
+  per-file cache and reported as a run-level notice, `phpstanRs.contextParseError`: its
   path, line and column and the first error, printed where today's "N file(s) skipped: parse error" count is, with
-  the exit status unchanged and an opt-in switch that makes it fail the run. F77 designed a failing run, which would
-  fail a run for a vendor file the parser refuses; decisions 9 and 15 ("nothing in a context file is reported,
-  since its author is not the user") keep their text and gain one sentence for the notice, which is not a finding
+  the exit status unchanged and an opt-in switch that makes it fail the run. A failing run would fail on a vendor file the parser refuses. Decisions 9 and 15 ("nothing in a context file is reported,
+  since its author is not the user") are read with this notice, which is not a finding
   about the file's code but the report that part of the analysis context is missing (a class it declares may show
   as `class.notFound` elsewhere). A parser panic stays `phpstanRs.internalError`. **The version
   marks are the data the existing rules read:** `check_void_cast` (`cast.voidNotSupported`, `cast.void`) and the
@@ -290,8 +288,8 @@ images agree with it.
    PHP reports (1 for a missing closer) and at least a stated share of the declarations after the damage
    recovered, with per-rule thresholds in the golden dumps; ordinary damage never reaches the 200-error
    stop. The fuzz targets also run 10^6 openers, stray closers at every level, and an unterminated
-   everything. **The bar for checking an analysed file with parse errors (Part E 31, ruled 2026-10-18) is stated
-   here, before the check is built:** over the same corpus, for damage to a single token, the diagnostics that are
+   everything. **The bar for checking an analysed file with parse errors (Part E 31) is stated
+   here:** over the same corpus, for damage to a single token, the diagnostics that are
    new, meaning absent from the undamaged file's own and not parse errors, are none at the 95th percentile of
    damaged files, measured per damage class; a class that misses falls back to parse errors only for the files it
    damages.

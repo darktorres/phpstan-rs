@@ -4,17 +4,15 @@
 
 None. Part G1 and G2 are designs: they decide how the checker holds a tree (G1) and what stored-alias identity means (G2), and they add no ledger row. The ledger rows they touch are owned elsewhere: CHECK-6.18 and CHECK-6.8 by the batch that builds them (Part C, batch 7), SYN-1.2 to SYN-1.10 by Part B. G3 and G4 hold the rows they add.
 
-Written from the code at `30aa2002` (the cross-platform plan's R7 is in; the stack's bookkeeping for it is not).
+Written from the code at `30aa2002`, which has the cross-platform plan's R7.
 G1 and G2 finish item 9's checker side; G3 is the error-node model; G4 is the probe; G5 is item 0.
-Where a design departs from a first-pass text it says so, and G6 lists the edits that follow.
 
 ## G1. How the checker holds a tree (Part F 1)
 
 ### G1 what is stored, and from where (verified)
 
 Everything the checker keeps of a tree comes from
-the tree it is checking (the first draft of this section put a tree lifetime on `Locals`; the workflow review
-showed Stage D deletes it again, G-08, and G1.1 says why it is not there):
+the tree it is checking (G1.1 gives the reason `Locals` has no tree lifetime):
 
 | holder | today | note |
 |---|---|---|
@@ -45,8 +43,7 @@ Walks take and pass handles (`Expr<'_>`, `Stmt<'_>`,
 `Args<'_>` and the rest of Part B's) as parameters and locals, each with its own anonymous lifetime;
 `Checker<'a>` keeps its name and its `impl<'a>` blocks (its `'a` is the registry's, settings' and
 rules' borrow, as now), and `Locals` stays lifetime-free. An expression that must outlive the walk that
-produced it is a `Rooted<Expr>` (item 8). **Why not the check's one lifetime on `Locals`,** which the
-first draft had: Stage D (D1 and D5 of the crate split, CHECK-6.3) replaces alias replay by conditional
+produced it is a `Rooted<Expr>` (item 8). **Why not a lifetime on `Locals`:** Stage D (D1 and D5 of the crate split, CHECK-6.3) replaces alias replay by conditional
 holders created at assignment and "removes the tree from `Locals` altogether", so `Locals<'a>` (415
 mentions in 66 files, the drop-order constraints on about 27 tests, `AstRef` and `checker_for` reshaped)
 would be built in item 9 and unbuilt in Stage D, which the no-interim rule (Part E 35 and 41) refuses.
@@ -123,17 +120,13 @@ the field goes with the bridges in step 2, when the id alone resolves.
 (`navigation.rs` and `signature_help.rs`, which has its own) are request-local
 visitors: each holds `current_function: Option<FunctionDecl<'a>>` (a copy) and `top_level: Stmts<'a>`
 under the walk's own lifetime, and a request clones one `Arc<Ast>` instead of deep-cloning each function
-it walks past. F58's other half is done with it: `record_var_self`, `record_var_read` and `instance` take
+it walks past. It also closes F58's second half: `record_var_self`, `record_var_read` and `instance` take
 a closure and build the `Resolved` (with its rooted `ProbeScope` and class name) only when the anchor
 matches, with a test that one construction happens per request.
 
 ### G1.10 One checker per worker (CHECK-6.18)
 
-With no tree lifetime a `Checker` can outlive a file, so the
- ledger's "one checker per worker, reset for each file" is buildable; the reset is E7's, because E7
- enumerates the per-file, per-function and per-pass field sets it clears, and batch 7 reuses only the
- handle-free scratch (C2 note 7). A table that holds a rooted expression is cleared at each file, so that
- it does not keep the previous file's tree alive.
+With no tree lifetime a `Checker` can outlive a file, so the ledger's "one checker per worker, reset for each file" is buildable. The reset is E7's, because E7 enumerates the per-file, per-function and per-pass field sets it clears, and batch 7 reuses only the handle-free scratch (C2 note 7). A table that holds a rooted expression is cleared at each file, so that it does not keep the previous file's tree alive.
 
 
 ### G1 order

@@ -1,13 +1,10 @@
 # The batch after the cross-platform fixes: the plan (index)
 
-This directory holds the plan written on 2026-10-18 and 2026-10-19, split into one file per part, and one file per section
-where a part was long. The text is the plan as committed in `4837b369` (four documents: `POST_LEVEL_9_PLAN.md`,
-`FLAT_TREE_PLAN.md`, `ENGINE_PLAN.md` and `PLAN_REVIEW_LEDGER.md`), with the intro paragraphs of those documents replaced by
-this index. Section numbers are kept, so a reference such as "Part E 40" or "I4.5" reads the same in every file. Where the
-plan names its own documents (for example "call it `FLAT_TREE_PLAN.md`"), those are the plan's proposals, not the files here.
+This directory holds the plan, split into one file per part, and one file per section where a part was long. Section
+numbers are kept, so a reference such as "Part E 40" or "I4.5" reads the same in every file. Where the plan names its
+own documents (for example "call it `FLAT_TREE_PLAN.md`"), those are the plan's proposals, not the files here.
 
-The plan was approved to start on 2026-10-19 ("commit and start the plan"), as the commit's intro recorded. Where a design
-says it "waits for the user's word", the ruling of 2026-10-18 (Part E, M5) is the answer.
+Part E gives the answer for each open question.
 
 ## Where each part is
 
@@ -36,11 +33,5 @@ says it "waits for the user's word", the ruling of 2026-10-18 (Part E, M5) is th
 | Part H, H4 | [`21-part-h4.md`](21-part-h4.md) |
 | Part H (H5, H6) | [`22-part-h5-h6.md`](22-part-h5-h6.md) |
 | Part J | [`23-part-j.md`](23-part-j.md) |
-| Part M (intro, M1, M2) | [`24-part-m-intro.md`](24-part-m-intro.md) |
-| Part M (M4, M5) | [`31-m4-m5.md`](31-m4-m5.md) |
 
-The ledger, `PROFILE_DRILL_PIWIGO_LEDGER.md`, is the only record of each task's state. The parts name the tasks they depend on; the tables that list tasks are written by hand.
-
-Part B, G1 to G4, G6 and I1 came from the flat-tree document; Part H and J from the engine document; Part M from the ledger
-document. The rest came from the batch document. The split is mechanical: every non-empty line of the four documents is in
-one of these files, apart from the intros they had, which this index replaces.
+The ledger, `PROFILE_DRILL_PIWIGO_LEDGER.md`, is the only record of each task's state. The parts name the tasks they depend on.

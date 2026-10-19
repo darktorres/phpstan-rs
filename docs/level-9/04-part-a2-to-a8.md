@@ -2,7 +2,7 @@
 
 ### Tasks this part owns (A2 to A8)
 
-Written by hand. The state is the ledger's, as of `a3931d49d`.
+The state is the ledger's, as of `a3931d49d`.
 
 | task | state | built by |
 |---|---|---|
@@ -164,8 +164,6 @@ stay filtered to the vendor directory, the path repositories and, after A1's COM
 Composer installed elsewhere, so nothing the walk reads moves in A7; W3's lazy locator finds the class. No interim fix is built for the batch path before W3 (the rule of Part E 35 and 41, which replaces such a fix by the
 locator), and a by-name oracle run carries that noise until then.
 
-**Status (2026-10-19): no lazy read in the tree (ledger Q-16).** After A6, two commits read context files lazily by name, as a follow-up to another task: `910de4507` (a context file is read when a class name or a declaration reaches it, through the classmap and the PSR-4 prefixes) and `d674ac1f0` (a lazy context file is read when a name finds it, or an include names its path). Both were opt-in behind `PHPSTAN_RS_LAZY_CONTEXT=1`. The user asked for them to be reverted until W3, so the tree has no interim read by name, which is what the paragraph above says. The revert, `034f99308`, is not in master's history: a rewrite of `5ce2939d0` as `b9de6dcf1` dropped the lazy commits and the revert together. They were dropped, not reverted, so the tree is correct and master records no revert.
-
 **Tests.** `cargo test -p phpstan-rs-composer`: for each of the 14 vendor trees that carry `vendor/composer/` (A2's
 list) and Piwigo, the keys of `GeneratedEntries` equal the arrays that `php` loads from `autoload_classmap.php`,
 `autoload_psr4.php` and `autoload_namespaces.php` (a script run by `php`, its output compared in the test as data);
@@ -185,12 +183,12 @@ Two kinds of project beyond them autoload from a vendor directory the session ne
 `symplify/easy-coding-standard` autoload a `bootstrap.php` that registers their own `vendor/autoload.php` at runtime, so
 their classes live in a `vendor/` inside the package (`vendor/laravel/vendor/rector/rector/vendor` and
 `vendor/rector-src/vendor/symplify/easy-coding-standard/vendor` in the corpora): the crate split counts 495 phpstan-rs-only
-`class.notFound` in `vendor/rector/rector` alone. **A nested project (COMP-8, added on 2026-10-18 at the user's word):** a
+`class.notFound` in `vendor/rector/rector` alone. **A nested project (COMP-8):** a
 repository that keeps more than one Composer project (a monorepo of packages, or `tools/cs/` with a `composer.json` and a
 `vendor/` of its own) opened as a degrade root has one known root, so its nested projects are analysed with no context
 from their own vendor trees; A1's rule already leaves their vendor directories out of the analysed walk, and nothing loads
 them as context. A configured `paths` entry already has its project, because the nearest manifest above it is its root.
-Counted on the corpora (2026-10-18), with A1's cuts and the root's own manifest left out: Symfony has 211 nested
+Counted on the corpora, with A1's cuts and the root's own manifest left out: Symfony has 211 nested
 manifests, Drupal 66, phpstan-src 68, Laravel 39, Composer 32, rector-src 27, league-flysystem 15 and Psalm 7; the nested
 projects that hold an installed vendor directory are all test fixtures (four in rector-src, two in Composer, one in
 Drupal), so the corpora exercise the finding of the roots and their ownership at scale, and the loading of nested vendor
@@ -250,8 +248,8 @@ directories the scan found are the owner facts that `range_of` reads.
 a bundled class, and the `mixed` that came of it, go (batch and editor). A degrade root over a tree with nested Composer
 projects (editor) gets their vendor classes as context, so those `class.notFound` go as well, their `vendor/autoload.php`
 includes are judged against built trees and not against the outer one's, their files are owned by their own project, and
-the opt-in hygiene rule checks them against their own manifest. The ruling of 2026-10-18 on A1's delta commit (M5d: "agree")
-covers the bundles; the nested projects are COMP-8's, added at the user's word. **Tests.** A fixture package with a bundled
+the opt-in hygiene rule checks them against their own manifest. A1's delta commit
+covers the bundles; the nested projects are COMP-8's. **Tests.** A fixture package with a bundled
 `vendor/composer/`; a package without one costs no read of a bundle; `check-project` over `vendor/laravel` and
 `vendor/rector-src` before and after (A6). For COMP-8, a degrade root with `composer.json` and an installed `vendor/`, and
 `tools/cs/composer.json` with an installed `tools/cs/vendor/` whose `autoload_static.php` lists `Cs\Fixer`, and
@@ -277,7 +275,7 @@ The batch's base is the commit before the first of these rows that lands; every 
 at once so `abab.py` finds them, the worktree removed afterwards), and every "after" is HEAD. The item-0 baseline
 does not exist yet (batch 0 comes after Part A), so this validation compares binaries and the Piwigo digest.
 
-**Result (2026-10-19).** Run on the code at `136945410`, the last of Part A's commits, as `WORK_STACK.md` records: the test suites, the fixtures, the gate build, the Piwigo digest and the vendor trees (`vendor/monolog`, `vendor/laravel`, `vendor/rector-src`) are as the ledger's rows record, and the wall cost of COMP-6's bundled discovery was accepted at option 1. The two commits that came after it and read context files lazily (A7) are not in this validation.
+**Result.** Run on the code at `136945410`, the last of Part A's commits: the test suites, the fixtures, the gate build, the Piwigo digest and the vendor trees (`vendor/monolog`, `vendor/laravel`, `vendor/rector-src`) are as the ledger's rows record, and the wall cost of COMP-6's bundled discovery is accepted at option 1.
 
 - `cargo test --workspace` and `cargo test -p phpstan-rs --test fixtures` (the workspace run skips fixtures); A1, A2,
   A5, A7 and A8 edit `composer` and `syntax`, whose tests run here with the rest.
@@ -294,7 +292,7 @@ does not exist yet (batch 0 comes after Part A), so this validation compares bin
 - **A1's delta on real projects (local, Linux):** the files the degrade walk lists, with their roles, and the
   `classify()` answers for sample paths (a vendor file, a nested project's vendor file, `lib/vendor/`, `.git`), at
   the base and at HEAD, over Piwigo's root and over each of the 14 vendor trees that carry a
-  `vendor/composer/installed.json`; the difference is the delta the user ruled on, and it should be only the
+  `vendor/composer/installed.json`; the difference is the delta of Part E 40, and it should be only the
   `vendor/` directories that are not Composer's and the Composer vendor directories that are not named `vendor`. COMP-7
   adds nothing here, since the one package the corpora install outside its vendor directory is a path repository's
   (Drupal core, promoted), so its fixtures carry it.
@@ -310,7 +308,7 @@ does not exist yet (batch 0 comes after Part A), so this validation compares bin
   not written into §1's off table): `Expr::peeled`, `from_decl` (with the heap block count, A3) and `read_installed`
   inclusive Ir against the base's binary, total beside it. LOAD-9's wall pairs (A2). One heavy job at a time,
   `nice -n 19`.
-- **LOAD-2.8's parts 1 and 2** (`27c3b093` and `53e6f766`) are 125 commits back, so these runs cannot isolate them
+- **LOAD-2.8's parts 1 and 2** (`27c3b093` and `53e6f766`) are outside this batch's range, so these runs cannot isolate them
   (Part E 25): they are two separate callgrind and `abab` comparisons, each commit against its parent (`53e6f766` and
   `6759cc39`), with binaries built in the gate and `dhat` frame-pointer profiles and kept as above.
 
@@ -319,7 +317,6 @@ to DONE with hashes (LOAD-2.2 stays PART until LOAD-7.8 deletes `path_under_excl
 `A1` keeps for `.git` and `node_modules`; REG-14 stays PART; LOAD-9; SYN-1.1; LOAD-5.4; the COMP rows A1, A7 and A8
 close, N6), §1's Ir table, §2.1;
 `WORK_STACK.md` (item 2's bullet goes, LOAD-9 leaves the "Outside the items" line, item 8 keeps 14.1 and 14.3, item 9
-leaves SYN-1.2 onward, item 19 loses LOAD-5.4, state line). LOAD-2.8's row says its parts 1 and 2 are "not measured
-(needs approval)"; the approval is standing, and the separate runs above measure them.
+leaves SYN-1.2 onward, item 19 loses LOAD-5.4, state line). The separate runs above measure LOAD-2.8's parts 1 and 2, which its row lists as not measured.
 
 ---

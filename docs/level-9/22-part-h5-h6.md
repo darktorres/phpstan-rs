@@ -8,7 +8,7 @@ Each is a short build with a measurement and a stated accept and kill. None chan
 each can send one design to its stated alternative. S-1 runs before batch 4, since it decides the name's layout.
 S-2 and S-3 run early too, since the choice of engine is cited by everything from batch 4's rules (H1.5) to the
 wall, and a skeleton is cheap against finding out at W2 that salsa is unfit. **Each spike has a gate point:** S-1,
-S-2 and S-3 before batch 4; S-12 before item 9's step 2; S-4 right after S-3 and before W2's result types (H4.6 already states them); S-5 and
+S-2 and S-3 before batch 4; S-12 before item 9's step 2; S-4 right after S-3 and before W2's result types (H4.6 states them); S-5 and
 S-9 on the S-3 skeleton, before W2 step 2; S-6 before W2 step 3; S-8 with batch 4; S-7 before W3 step 1; S-10
 before W3 step 2; S-11 before W3 step 4. **The measurement rules:** a wall-time accept is G5's wall-time rule
 (`abab` pairs, stated pair count and p-value); "the phase start" is REG-12's gate baseline (`xtask gatetime
@@ -30,7 +30,7 @@ Ir where Ir decides (proposed, stated once, so that no spike sets a rate of its 
 | S-8 | exactness | `Exact`, a result type per class of value, the arch rule; the count of `==` and derived-`PartialEq` sites on `Type` that rely on its semantic equality (H1.5b's stronger form) | a field change makes every result type unequal, once for a tracked field and once for a function result across a case-only edit; a semantic-equal union in another order is unequal | a manual `PartialEq` per result |
 | S-9 | threads | the S-3 skeleton's check phase at 1, 2, 4 and 8 threads against today's | the speedup curve not below today's; memo contention under 5% of CPU; cold-run wall not above today's (S-3) | `lru`/sharding of hot queries; a read-through table per worker |
 | S-10 | probes | `path_is_file` over `ProbeEpoch` on a file with 200 includes, warm, and the distinct probes counted on the corpora | warm `check_file` of an unchanged file verifies with zero stat calls (`strace -f -c`) without an epoch bump, and at most 5 ms for the 200 per bump | the probe's keys batched per directory |
-| S-11 | lazy context loading | the S-3 skeleton with `locate` (H4.1) over `vendor/symfony`, `vendor/monolog` and a package with PSR-0 and one with a classmap, and a link below a PSR-4 directory: list, then read on demand; the files read against today's (all of them); `locate` against Composer's `ClassLoader::findFile` on `php` for every class the old loader found | the files read are those the analysed files reach through `locate`, transitively; the listing costs no more than today's discovery; `locate` agrees with `findFile`; each class the old loader found and no mapping reaches (a link included) is listed as the delta | the case returns to you as a proposed change to decision 14, and the listed files of that package are read eagerly only after that ruling, or the listing is made lazy by directory |
+| S-11 | lazy context loading | the S-3 skeleton with `locate` (H4.1) over `vendor/symfony`, `vendor/monolog` and a package with PSR-0 and one with a classmap, and a link below a PSR-4 directory: list, then read on demand; the files read against today's (all of them); `locate` against Composer's `ClassLoader::findFile` on `php` for every class the old loader found | the files read are those the analysed files reach through `locate`, transitively; the listing costs no more than today's discovery; `locate` agrees with `findFile`; each class the old loader found and no mapping reaches (a link included) is listed as the delta | that case is a proposed change to decision 14, and the listed files of that package are read eagerly only after that decision, or the listing is made lazy by directory |
 | S-12 | spans or token indices (decision 4's last sentence; Part E 3) | a scratch build over the corpus (Piwigo, two vendor projects, the stubs): the nodes of I1 once with `Span` fields and once with token indices, the token arrays a kept tree must then keep (kind plus start offset, about 5 B a token), the exact bytes of a kept tree under each, using the node and token counts of step 0's census, and the readers' hot paths under each (`span()`, an identifier's name, a string's bytes, the infer cache's key) as callgrind Ir over the checker's reads of a tree; the layout of I1 is otherwise held fixed | token indices are chosen only if the bytes they save in the kept trees (net of the token arrays they must keep) reach the exchange rate of this section against the readers' added Ir in the check phase (50 MiB for each 1%, proposed): on trees of the plan's estimated 35 to 60 MB that needs a reader cost near zero, which is why byte spans are the expectation; otherwise byte spans, which B3 to B5 and I1 assume | spans, the measurement recorded as the answer to decision 4's last sentence; tokens, a change confined to B3's `span` fields, the retained token arrays of I2 and `Rooted` |
 
 If S-2 or S-3 fails, the plan's contract (H2.1) is implemented by an engine of our own: memo tables with revision
@@ -57,8 +57,8 @@ None. H6 lists the edits the engine cluster implies in other parts and documents
 - **Part F.** Rows 10, 13, 14 and 15 are designed here. Row 16 (C5's data model) now has its fixed points:
   the corpus as a constant of the database, `locate`, the version range per owning manifest (`range_of`, H2.2).
 - **The ledger.** REG-8.6 is re-specified (H1.3). REG-4.15 loses its span field and REG-4.11 becomes a record over
-  (`Origin`, site) (H1.5a). REG-16.2's and decision 3's "never reused" stand as ruled for `DeclKey` (Part E 38,
-  ruled 2026-10-18), and decision 3's member sentence is refined to PHP's namespaces (H1.4). REG-16.4 needs SYN-1.9. REG-16.5 is the
+  (`Origin`, site) (H1.5a). REG-16.2's and decision 3's "never reused" stand for `DeclKey` (Part E 38),
+  and decision 3's member sentence is refined to PHP's namespaces (H1.4). REG-16.4 needs SYN-1.9. REG-16.5 is the
   event callback plus the provider's trace of first readers (H3.5). PROD-5.4, PROD-5.7 and LOAD-4.7's
   file-references half are marked "deleted by REG-16.4" (H4.8). CACHE-13.2 is H4.6, keyed without the version
   range (Part E 37), and CACHE-9 to CACHE-11's form follows S-4. **CACHE-13.1 and decision 13** still describe a
@@ -70,7 +70,7 @@ None. H6 lists the edits the engine cluster implies in other parts and documents
   follows: its directory, lock, last-use refresh and cross-platform behaviour are H4.4's; `CRASH_REPORTING_PLAN.md` and F2's move of
   `crash_report::cache_dir()` into `project`; `UNSAFE_PLAN.md` (Part E 33: its end state changes only if S-2 finds
   the exception necessary); and `file_cache.rs` with its switches (H4.4).
-- **`CRATE_SPLIT_PLAN.md`,** edited at approval, in the docs commit series of Part E 20: C4's "five levels, each a
+- **`CRATE_SPLIT_PLAN.md`,** edited in the docs commit series of Part E 20: C4's "five levels, each a
   per-class `OnceLock`", "constant reference cycles type as `mixed`" and "a change to any reflection input resets
   every memo" become H3.1, decision 1 and the recorded reads; F1's published snapshots become H4.3's cancellation;
   F2's resolved dependencies, fingerprints and entry sets become H4.4; the crate count and Appendix A's module

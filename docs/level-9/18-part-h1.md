@@ -3,11 +3,9 @@
 
 Part F rows 10, 13, 14 and 15, designed together because each constrains the next. Written from the
 code at `8a1ca1e0` and from the source of **salsa 0.28.5**, the version REG-16.1 measured
-(`~/.cargo/registry/src/index.crates.io-*/salsa-0.28.5`). The ledger's prototype directory
-(`~/.cache/prs-ledger/reg161`) is gone, so everything said here about salsa was read from the crate and
-none of it was run; H5 lists what a run must settle. **H1 is what batch 4 is built to.** H2 to H4 are what
+(`~/.cargo/registry/src/index.crates.io-*/salsa-0.28.5`). Everything said here about salsa was read from the crate, and none of it was run; H5 lists what a run must settle. **H1 is what batch 4 is built to.** H2 to H4 are what
 W2 and W3 build. They are written as a contract (what the code above the engine may rely on), so that
-REG-16.1's choice (done: salsa) stays reversible, with S-2 and S-3 re-testing it and an engine of our own with the
+REG-16.1's choice (salsa) stays reversible, with S-2 and S-3 re-testing it and an engine of our own with the
 same contract as the fallback: only the engine module names salsa (a crate from G1: Part E 33).
 
 ## H1. Identity (Part F 10)
@@ -19,8 +17,8 @@ None. H1 is a design, and its batch-4 build (H1.7) lists rows that Part C's C1 t
 ### H1.0 What the code and the crate showed
 
 1. **Built already:** one process-wide interner, `Name` equality by pointer, no `Borrow<str>`, `FoldedMap`
-   with a stored folded hash (`syntax/src/name.rs`; 25 G C3's steps 1 to 3). 25 G's text still says `Project`
-   owns an interner; it does not. **Not built:** `FoldedName`, `ConstName`, the one-allocation name
+   with a stored folded hash (`syntax/src/name.rs`; 25 G C3's steps 1 to 3). 25 G puts the interner in `Project`;
+   it is process-wide. **Not built:** `FoldedName`, `ConstName`, the one-allocation name
    (NAME-2.1), `Name::short`.
 2. **REG-8.6 cannot be built as written.** "Snapshots own their names ... the project's interner ... `apply`
    sweeps the session interner" needs a second interner, and a second interner makes two allocations of one
@@ -219,7 +217,7 @@ pub struct MemberRef { pub decl: DeclRef, pub member: MemberName }
   source order, nested ones included (PROD-5.1's vectors give the order). It holds no position, so inserting a
   line moves nothing; inserting a duplicate above shifts the later duplicates, which are different declarations
   then.
-- **Member identity refines decision 3** ("a member is (class id, kind, folded name)"; ruled 2026-10-18): PHP
+- **Member identity refines decision 3** ("a member is (class id, kind, folded name)"): PHP
   folds a method's name and not a property's or a class constant's (php 8.5.4: `$a->DOSTUFF()` runs `doStuff`,
   `isset($a->P)` is false while `isset($a->p)` is true, `defined("A::c")` is false while `defined("A::C")` is
   true), so a member is (class's `DeclRef`, `MemberName`), folded for methods and exact for the rest; a
@@ -230,7 +228,7 @@ pub struct MemberRef { pub decl: DeclRef, pub member: MemberName }
   is true for a case), so constants and cases are one kind, and `Foo::BAR` is one read and not two; static and
   instance properties are one kind too ("Cannot redeclare C::$x"); a property and a method may share a name, so
   they stay apart. Only the member sentence of decision 3 changes.
-- **Anonymous classes are file-local, and their identity is the ordinal (ruled 2026-10-18).** They keep the name the ledger and the review give them, from their
+- **Anonymous classes are file-local, and their identity is the ordinal.** They keep the name the ledger gives them, from their
   position: `class@anonymous/{shown path}:{line}[:{i}]` (decision 5, PROD-5.1, SYN-3.4; F33 makes the path the shown
   one, `File.shown`, so no spelling of the project argument reaches a name), and types and messages show it as they
   do today. That name carries a line, so it is a spelling and not an identity: a line inserted above one renames it, and
@@ -248,8 +246,8 @@ pub struct MemberRef { pub decl: DeclRef, pub member: MemberName }
   not followed by a digit and at a space or a bracket, so it fails on `C:/x/a.php` and on a path with a space;
   it peels `:digits[:digits]` from the end of the token instead, with tests for `C:/x/a.php`, a path with a
   space and a file named `a.php:12`. A moved one changes its own file's products and nothing global.
-  **The consumers that see an anonymous class are each decided from an enumeration of the code** (the first list
-  came from a reviewer, and the code has more): `find_dead_classes` skips it already (`!is_anonymous()`);
+  **The consumers that see an anonymous class are each decided from an enumeration of the code**:
+  `find_dead_classes` skips it already (`!is_anonymous()`);
   `find_dead_members` iterates `registry.classes` unfiltered and reports the unused members of an anonymous class
   today (read from the code, not run), so it reads the file's `decls` to keep doing so, with a fixture for an unused
   member of an anonymous class; dead abstract classes and dead enum cases cannot meet one. **Namespace cycles keep
@@ -267,8 +265,8 @@ pub struct MemberRef { pub decl: DeclRef, pub member: MemberName }
   closed-class rule does not apply, an anonymous class being closed by construction; the architecture rules count a
   class's references by span, so an anonymous class's references already go to its enclosing class). Each change is
   a VAL-2.x delta with a fixture. REG-11.13 (diagnostics name it `class@anonymous`) is a display change of its own.
-- **`DeclKey` is immortal and the probes are collectable (ruled 2026-10-18; Part E 38).** `DeclKey` takes
-  `revisions = usize::MAX`, which is decision 3's "is never reused" kept as ruled: a stale id cannot name another
+- **`DeclKey` is immortal and the probes are collectable (Part E 38).** `DeclKey` takes
+  `revisions = usize::MAX`, which is decision 3's "is never reused": a stale id cannot name another
   declaration by construction (salsa's own check on a read is a `debug_assert`, H1.0 7, so a collected slot's stale
   id would read the new occupant silently in a release build), and an immortal key records no creation edge and no
   persisted interned edge. `ClassKey`, `FunctionKey`, `ConstKey`, `GlobalKey` and `MemberKey` are probes by an asked
@@ -355,8 +353,8 @@ Builds: (1) the thin `Name` with its count-based sweep, which is NAME-2.1's and 
 above); (2) `FoldedName`, `ConstName`, the `ArrayKey` rename, and `Type::same_node` and `Exact` (H1.5b); (3)
 NAME-1.1, 1.5, 1.6 and SYN-4.5 (`ConstName`'s record kind); (4) NAME-1.2 over **values, not only maps**: the
 table is of fields, parameters, returns and maps, with one census command and one count (the mentions of a
-`HashMap<String` or `HashSet<String`, std or Fx, outside tests were 181 at `8a1ca1e0`; 187 with tests; the plan
-had carried 209 and 25 G 211; 18 `BTreeMap<String`, 9 `BTreeSet<String` and one `HashMap<Box<str>` sit outside
+`HashMap<String` or `HashSet<String`, std or Fx, outside tests were 181 at `8a1ca1e0`; 187 with tests;
+18 `BTreeMap<String`, 9 `BTreeSet<String` and one `HashMap<Box<str>` sit outside
 that pattern, and `Vec<String>` (290) and `Option<String>` (220) hold identifiers among other text). It **leads
 with the registry's `&str` entry points** (the ledger's cost order), and the compiler lists only those once
 NAME-1.3 deletes `TableKey` and `FoldKey for str`; the value half has no compile-time forcing function, so its

@@ -4,8 +4,8 @@
 
 None. H4 is a design: the batch run and the server (H4.1, H4.2), F1 and F2 reconciled (H4.3, H4.4), probes, persistence (H4.6), and W3's order (H4.7). H4.7 says W3 builds it, so the rows are Part D's W3 rows: REG-16.4, CACHE-13.1, CACHE-13.2, STUB-7.5 and LOAD-3.1, among others. The rows the design names beyond W3 are owned where they are built.
 
-REG-16.4, CACHE-13.2 and the crate split's F1 and F2 are one design: F2's own design was superseded by
-decision 3, and building F1 and then REG-16.4 would build the Session twice. What follows is that one design.
+REG-16.4, CACHE-13.2 and the crate split's F1 and F2 are one design.
+Building F1 and then REG-16.4 would build the Session twice, so what follows is one design.
 
 ### H4.1 The batch run
 
@@ -51,16 +51,16 @@ decision 3, and building F1 and then REG-16.4 would build the Session twice. Wha
      extended with a normalisation test (an entry with a non-ASCII letter looked up in its other normalisation),
      `FileSet` and `shown` are keyed through the rule, and NFC and NFD names are tested on the macOS leg.
    - This is the crate split's "context classes are read on demand through the locators" and the larger win of the
-     engine for a big `vendor/`: a vendor file nothing reaches is never read or parsed. **Decided: W3 builds it,**
-     so the loader is not written eagerly first and rewritten at W4, and STUB-7.5 moves from W4 to W3.
+     engine for a big `vendor/`: a vendor file nothing reaches is never read or parsed. **W3 builds it,**
+     so the loader is not written eagerly first and rewritten at W4, and STUB-7.5 is in W3.
    - Its prerequisite is not built: the generated-file reader keeps paths only (`GeneratedEntries` drops the
      classmap's class names and the PSR prefixes) and `Autoload` has no `psr-0`, so the maps first keep their keys
      and gain PSR-0. That addition to `composer` is A7, ahead of W3: it changes no output, and is tested against the
      generated files' own arrays on `php` (the lookup that reads them is `locate`, W3's, tested against
      `ClassLoader::findFile`).
    - The delta (a vendor class that no autoload mapping reaches becomes unknown) is decision 14's, and **if S-11
-     fails for a package the case returns to you as a proposed change to decision 14; the eager fallback for
-     that package ships only after that ruling.** A lazily reached context file is stat-ed by `file_stamp`
+     fails for a package, that case is a proposed change to decision 14, and the eager fallback
+     for that package waits for that decision.** A lazily reached context file is stat-ed by `file_stamp`
      (H2.2). S-11 measures the listing and the read set.
 4. Check: the analysed files, largest first, in parallel on the pool: `file_diagnostics(file)` runs `check_file`;
    levels resolve on demand on whichever thread asks first.
@@ -99,7 +99,7 @@ completes and only when it differs.
 | `Project` folds in | the file table is `File` and `FileSet` plus the VFS; the registry is `Provider` over the engine; `dependents` is gone; `use_sites` and the escape sets are `file_products.use_sites` and a project query; `pest_config` is a query; `sql` is an input |
 | the VFS | contents from `FileSource` (overlay first); membership decided once, by `classify` (LOAD-1.2, built), for the walk, a file the editor opens and a watched-file event alike; identity is the canonical path (LOAD-1.1, built; one canonical form on every platform, the cross-platform plan's R3); URIs are the cross-platform plan's R5 (RFC 8089 on each platform, an unopened file named in the spelling its client gave the folder), lines and file events F1's text unchanged |
 | panic isolation on the pool | H2.8 |
-| cancellation and the event loop | **changed.** F1 has requests run "against the last published snapshot while an update builds the next". salsa has one current revision: a write cancels the other handles' queries. A request is answered from its handle, and a request cancelled by a write answers `ContentModified` (or is run again by the loop) — rust-analyzer's model. F1's "publish the edited file first, then the open documents, then the rest" is H2.6's order of queries |
+| cancellation and the event loop | F1 has requests run "against the last published snapshot while an update builds the next". salsa has one current revision: a write cancels the other handles' queries. A request is answered from its handle, and a request cancelled by a write answers `ContentModified` (or is run again by the loop) — rust-analyzer's model. F1's "publish the edited file first, then the open documents, then the rest" is H2.6's order of queries |
 | last good AST | **gone with recovery.** The engine needs `parse` to be infallible, so REG-16.4 needs SYN-1.9 (batch 3), which the sequence already has first |
 | `reconfigure` | settings, `FileSet` and `Packages` writes (H4.2) |
 | one Session per root | one `ProjectDb` per root, sharing the pool, the interner and the corpus `Arc` (each database's corpus constant is the same `Arc`) |
@@ -199,7 +199,7 @@ counts the distinct probes on the corpora, requires zero stat calls without a bu
   an overlay's stamp is never a disk stamp, and a result whose reads include one is dropped from the write, not
   trusted (F2 writes back "the results of files whose overlay matches the disk; an overlay's results are never
   cached").
-- **Compaction (Part E 38, ruled 2026-10-18):** interned keys and `File`s of things that no longer exist stay in
+- **Compaction (Part E 38):** interned keys and `File`s of things that no longer exist stay in
   a persisted database, and an immortal `DeclKey` also keeps the memos of a dead declaration. The rule is a size
   ratio: when the keys, dead `File`s included, outnumber the live declarations several times over, the database is
   rebuilt. *At the start of a run* that means the run starts cold and writes a fresh file. *In a server* it means an

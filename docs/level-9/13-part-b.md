@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-Written by hand. Each task is listed in the B7 step that builds it. The state is the ledger's, as of `a3931d49d`. SYN-1.11 and SYN-1.12 are not in the ledger yet: B11 adds them.
+Each task is listed in the B7 step that builds it. The state is the ledger's, as of `a3931d49d`. SYN-1.11 and SYN-1.12 are not in the ledger yet: B11 adds them.
 
 | id | task | state | step |
 |---|---|---|---|
@@ -43,8 +43,8 @@ Three of item 9's rows are scheduled by Part C, not here, so each has one owner.
   strips attributes), `registry::anonymous_class::Namer` (`AnonymousClass::name`) and
   `name_resolution::Resolver` (re-resolves names after the stub pass). They run on a file just
   parsed (`project.rs:parse_with_ignores`, `registry/stubs.rs`).
-- **Readers.** 134 files and 2,452 lines name `ExprKind::`/`StmtKind::` (the ledger counted 2,612
-  sites in 135 files earlier); 486 mentions of `&Expr`/`&Stmt`/`&[Expr]`/`&[Stmt]` (mostly
+- **Readers.** 134 files and 2,452 lines name `ExprKind::`/`StmtKind::` (the ledger counts 2,612
+  sites in 135 files); 486 mentions of `&Expr`/`&Stmt`/`&[Expr]`/`&[Stmt]` (mostly
   parameter types) outside `syntax` in 103 files (28 inside); 51 `Visitor` impls (43 outside
   tests, counted as `impl .. Visitor<..> for`; 52 by a looser pattern) and 3 `VisitorMut` users; about 40 sites that take an argument or item list apart with a
   slice pattern (`let [a, b, ..] = args.as_slice()`); 3,829 lines of parser tests that match the
@@ -75,19 +75,19 @@ Three of item 9's rows are scheduled by Part C, not here, so each has one owner.
   `unsafe` and an `Arc<Ast>` shared by the batch run and the server; immutable after the parse;
   every parse yields a tree (error nodes); an id lives only in products owned with its tree, with a
   debug tag as the backstop; SYN-2's token arrays are designed with it, and "whether nodes keep spans or token
-  indices is settled by a measurement" (decision 4's last sentence and SYN-1.2's text; ruled on 2026-10-18: it
+  indices is settled by a measurement" (decision 4's last sentence and SYN-1.2's text: it
   stands, and spike S-12 is the measurement, made before step 2). The costs it names: the
   match sites read through the tree, and each access has a bounds check. (The workspace denies
   `unsafe_code`, which is why the 20 G plan's `bumpalo` arena, not `Sync`, was dropped.)
 
-## B2. Decisions to rule on before step 1 (first-pass leans; Part E 1 to 9 are the current answers, D1 and D9 changed, and the user ruled on D3 and D4 on 2026-10-18)
+## B2. Decisions before step 1 (the leans of this part; Part E 1 to 9 are the current answers)
 
 | # | question | recommendation | why | the alternative |
 |---|---|---|---|---|
 | D1 | what consumers hold | **`Copy` handles and plain-field views over the stored ids** (`Expr<'a>`, `Stmt<'a>`, `ExprKind<'a>`, `Param<'a>`, list views), carried through the checker's walks, with an expression that must be stored held as a `Rooted<Expr>` (an `Arc<Ast>` and a raw id), so no checker type carries a tree lifetime and a bare id is only a cache key (G1) | the 486 signatures and 2,452 sites change mechanically (`&Expr` → `Expr<'_>`, `.kind` → `.kind()`, `Box` and `clone` vanish); struct destructuring (`let ClosureExpr { params, .. } = …`, 16 sites) survives; a handle cannot outlive its tree where it is borrowed, and a stored one is owned with its tree, which is the decision's "ids live only with their tree" in the type | ids + `Index<ExprId>` on `Ast` (la-arena style): fewer types, but every free function gains an `ast` parameter, and nothing stops an id leaking into a product |
 | D2 | how to migrate | **staged**: step 1 moves every reader to the handle API over the *existing* boxed tree, step 2 swaps the storage behind it | each commit stays green; step 1 is a behaviour-preserving refactor, step 2 is local to `syntax`. **What the split buys is two oracles:** step 1's is the compiler and the readers' tests over about 130 files, step 2's is the canonical dump compared with the baseline taken at the end of step 1 (the boxed tree's), where one change set would have neither for either half. **What is end state and what is scaffolding:** step 1's API (handles, views, list views, `Visitor<'a>`, the dump, the `Ast` container) is the final one and survives; thrown away are the adapter that implements the views over the boxed nodes (step 2 writes the same signatures over the store), the old `Visitor` trait (deleted at the end of step 1, so it lives one step), the legacy-node bridges (B4) and the serial field the legacy nodes carry. The throwaway part is estimated at 1,000 to 1,500 lines, from the sizes of `walk_expr` (181 lines) and `walk_stmt` (120), the 47 + 26 arms of the two `kind()` mappings, about 25 view constructors and 15 list views (not the 400 of the first estimate). The rule that refuses interim work (Part E 35 and 41) is met by the end-state argument: nothing here is a structure the engine deletes, and it is the way the readers reach the final API with an oracle at each half | one change set that flips the type and all 134 files together: no intermediate commit compiles, and the dump baseline would have to be written once against the old nodes and once against the store |
-| D3 | what a node records of position | **decision 4's last sentence stands: a measurement settles it** (spike S-12, before step 2; ruled 2026-10-18). The expectation, and the working assumption of B3 to B5 and I1, is **byte spans** (`Span`, 8 B), as now | token indices would tie every kept tree to its token stream, which the workers reuse as scratch, so a kept tree would keep its own tokens (about 5 B a token, kind plus start offset: about 24 MB for Piwigo's analysed files at ≈4 source bytes a token). Break-even is about 20 B saved per node (≈4 tokens a node on the plan's dhat counts), more than an expression node can shed (32 B against a Zig-style 16 B). Those are estimates, which is why S-12 builds both layouts for the corpus and measures exact bytes and the readers' hot paths. No reader needs trivia between tokens | token indices (a node reads its identifier, string, number or operator from its token, as Zig's do); chosen only if S-12 shows it wins, and then B3's `span` fields become token indices and a kept tree keeps its token arrays |
-| D4 | where payload bytes live | **the ledger's layout, ruled 2026-10-18 with no amendment: the tree owns its source, and a `Text { start, len }` is a range of that source or of a side buffer** (two bits of `len` choose). A plain string, a doc comment and inline HTML are spans of the source: the parser already reads `&src[span]` when it takes a token, so no payload is copied. The side buffers hold the bytes no source has: a `String` for UTF-8 text (a folded doc group, the text the passes and the probe append, the lossy decode of a payload of a source that is not valid UTF-8) and a `Vec<u8>` for string-literal bytes that needed decoding (escapes, heredoc indentation). A source valid as UTF-8 (checked once at load) is held as a `str` where the buffer allows it, so a `&str` view of a doc comment or inline HTML is a boundary-checked slice; where the builder holds the worker's byte buffer instead, a view costs one small-range validation, which the census prices | no payload copies at all (72 K docs and 352 K single-quoted literals allocate today); the tree owns the bytes its spans index, so a span always resolves; a context tree needs no copy of the source, since the builder takes the worker's read buffer by swap and hands it back on `clear`; the lexer's `PhpString`/`Arc<str>` payloads go with SYN-2 | the tree's own text arenas, a copy of every payload in a `String` and a `Vec<u8>` (the plan's first answer): kept trees about 5.6 MB smaller at Piwigo scale, at the price of a copy of every payload and a second kind of text; rejected on 2026-10-18 |
+| D3 | what a node records of position | **decision 4's last sentence stands: a measurement settles it** (spike S-12, before step 2). The expectation, and the working assumption of B3 to B5 and I1, is **byte spans** (`Span`, 8 B), as now | token indices would tie every kept tree to its token stream, which the workers reuse as scratch, so a kept tree would keep its own tokens (about 5 B a token, kind plus start offset: about 24 MB for Piwigo's analysed files at ≈4 source bytes a token). Break-even is about 20 B saved per node (≈4 tokens a node on the plan's dhat counts), more than an expression node can shed (32 B against a Zig-style 16 B). Those are estimates, which is why S-12 builds both layouts for the corpus and measures exact bytes and the readers' hot paths. No reader needs trivia between tokens | token indices (a node reads its identifier, string, number or operator from its token, as Zig's do); chosen only if S-12 shows it wins, and then B3's `span` fields become token indices and a kept tree keeps its token arrays |
+| D4 | where payload bytes live | **the ledger's layout, with no amendment: the tree owns its source, and a `Text { start, len }` is a range of that source or of a side buffer** (two bits of `len` choose). A plain string, a doc comment and inline HTML are spans of the source: the parser already reads `&src[span]` when it takes a token, so no payload is copied. The side buffers hold the bytes no source has: a `String` for UTF-8 text (a folded doc group, the text the passes and the probe append, the lossy decode of a payload of a source that is not valid UTF-8) and a `Vec<u8>` for string-literal bytes that needed decoding (escapes, heredoc indentation). A source valid as UTF-8 (checked once at load) is held as a `str` where the buffer allows it, so a `&str` view of a doc comment or inline HTML is a boundary-checked slice; where the builder holds the worker's byte buffer instead, a view costs one small-range validation, which the census prices | no payload copies at all (72 K docs and 352 K single-quoted literals allocate today); the tree owns the bytes its spans index, so a span always resolves; a context tree needs no copy of the source, since the builder takes the worker's read buffer by swap and hands it back on `clear`; the lexer's `PhpString`/`Arc<str>` payloads go with SYN-2 | the tree's own text arenas, a copy of every payload in a `String` and a `Vec<u8>` (the plan's first answer): kept trees about 5.6 MB smaller at Piwigo scale, at the price of a copy of every payload and a second kind of text; rejected |
 | D5 | names in nodes | **`NameId` into the tree's name table** in step 2 | one refcount increment per *distinct* name per file instead of one per occurrence (≈2 M identifier tokens); no shared-cache-line ping-pong between the 8 workers on common names; nodes lose their drop glue | `Name` in nodes until SYN-2: smaller diff, keeps the atomics |
 | D6 | how the three mutating passes run | **on the builder, before `finish`**: `Ast::into_builder()` gives the vectors back, the pass edits them (compacting a list, replacing a type hint, appending doc text), `finish()` freezes again; `Ast` itself has no `&mut` API. Deleted with STUB-7.3/PROD-5.1 (SYN-1.10) | keeps the interim honest and small; they are the only writers. They are interim under the no-interim rule, since STUB-7.3 needs STUB-7.1 and so cannot precede item 9; B6 sizes and lists them (about 500 lines, and the `Resolver` is not ported) | port the stub-attribute logic into the parser: wasted when STUB-7.3 re-specifies it |
 | D7 | nodes fabricated in the checker | **remove them first** (the sites B6 puts in step 0 become calls on parts; `calls.rs:777` follows in step 1 and the probe in step 2) | an immutable tree cannot host them, and an overlay id space would put a branch on every access | an overlay arena in the checker |
@@ -321,7 +321,7 @@ by a call on parts, a handle or a rooted pair.
 | 4 | SYN-1.9 | `parse` returns tree and errors; error nodes with spans; recovery with Q-10 | later | G3.7's matrix, golden dumps and mutation properties |
 | 5 | SYN-1.10 | passes and `into_builder` go (needs PROD-5.1 and STUB-7.3) | later | `registry-dump` before and after equal for the stub attributes |
 
-**The item's validation, once, at the end of step 3** (Part E 24; the user's cadence, no suite per step): `cargo test
+**The item's validation, once, at the end of step 3** (Part E 24; no suite per step): `cargo test
 --workspace` and the fixtures; `xtask dumps-compare` against the item-0 baseline for the expression types (the whole
 checker moved to handles), the registry dump (unchanged by the item) and O2, and for the commits that touch `lsp`
 (the probe tail, the `Arc<Ast>` holders) the server session and the edit replay; the step 2 dump equality above; the
@@ -403,8 +403,8 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
 
 ## B10. Risks
 
-1. **Stored expressions are rooted, not borrowed.** The first draft put the check's lifetime on `Locals` (415
-   lines in 66 files); Stage D removes the tree from `Locals` again, so G1 keeps `Locals` and `Checker` free of a
+1. **Stored expressions are rooted, not borrowed.** A check lifetime on `Locals` (415
+   lines in 66 files) would be removed again by Stage D, so G1 keeps `Locals` and `Checker` free of a
    tree lifetime and roots the few stored expressions instead: an `Arc` count increment per stored alias
    where the deep clone was, and in step 1 a legacy form of `Rooted` that holds the cloned node (deleted
    with the bridges in step 2).
@@ -414,7 +414,7 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
    `#[inline]`, call it once per node, helpers for the commonest projections (`variable_name()`,
    `string_literal()`, `is_null_literal()`); callgrind at step 2 decides.
 4. **Owned string values.** The checker builds `Type::string_literal` from literals 13 times outside tests (18 with
-   tests; 46 is the count of `Literal::String` mentions, which the first draft read as builds);
+   tests; 46 is the count of `Literal::String` mentions, which are not builds);
    `string_literal_bytes` must intern without allocating or the checker pays an allocation where
    it paid a refcount. A `&str` view of a doc comment or inline HTML is a slice of the tree's source (B3, D4), or of
    its `side_text` when the source is not valid UTF-8; a string literal is bytes, as `PhpString` is now.
@@ -435,8 +435,7 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
 
 - Ledger SYN: SYN-1.2/1.4/1.5/1.7/1.8 get one shared design note pointing at B3-B5; SYN-1.3's text
   becomes "readers read through the handle API (step 1)"; new SYN-1.11 and SYN-1.12; VAL-1.5 notes
-  that the front-end tree dump is delivered by step 1. **No ruled wording of decision 4 changes** (the user ruled on
-  2026-10-18 that both stand): the layout bullet ("a file's `Ast` owns its source ... a string is a span, plus a side
+  that the front-end tree dump is delivered by step 1. **No ruled wording of decision 4 changes** (both stand): the layout bullet ("a file's `Ast` owns its source ... a string is a span, plus a side
   buffer where it needs decoding"), SYN-1.2's "owns its source" and SYN-1.4's "payloads are spans" are what B3 builds,
   and the last sentence ("whether nodes keep spans or token indices is settled by a measurement", SYN-1.2's "settled
   first, by a measurement made with SYN-2's design") is spike S-12, run before step 2. SYN-3.4's anonymous-class
@@ -446,7 +445,7 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
   1.5, 1.7 and 1.8 need SYN-1.3 (SYN-1.8 already needs it); Part N lists every ledger and stack edit the plan implies.
 - `WORK_STACK.md` level 8, item 9: "SYN-1.11, then 1.12 (+1.3), then 1.2/1.4/1.5/1.7/1.8; this design".
 - Write Part B, I1 and the item-9 parts of G1 to G4 (G1's lifetimes, G2's stamp, G3.3's layout, G4a's probe tail) into
-  the repository as `FLAT_TREE_PLAN.md` (the item is too large for the plan's item text) when plan mode ends; Part N
+  the repository as `FLAT_TREE_PLAN.md` (the item is too large for the plan's item text) when this plan is approved; Part N
   says where every other part goes.
 
 ---

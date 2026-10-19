@@ -7,8 +7,7 @@ None. Part F holds designs, not ledger tasks: the designs of G1 to G5, H1 to H4,
 
 What exists: Parts A and B are designed (B has the open points below). The 20 G plan's items 0 to
 19 have designs written at `5fb858c9`. The ledger's rows carry specifications. Level 3's tasks carry
-"Design" paragraphs written at `3eaddbd1`. The crate split plan has designs for C6 to G dated
-2026-09-28. "Needs a design" below means the design is missing or no longer fits; a design that
+"Design" paragraphs written at `3eaddbd1`. The crate split plan has designs for C6 to G. "Needs a design" below means the design is missing or no longer fits; a design that
 exists but needs a read against HEAD is a check, and is listed after the table.
 
 ## Needs a design, in the order the work needs it
@@ -44,7 +43,7 @@ exists but needs a read against HEAD is a check, and is listed after the table.
 
 ## Specified, or waiting on a ruling
 
-- LOAD-7.2's PHPUnit half and the deltas of LOAD-7.6, REG-18.4 and CHECK-11 were ruled on 2026-10-18 (Part E 42):
+- LOAD-7.2's PHPUnit half and the deltas of LOAD-7.6, REG-18.4 and CHECK-11 are settled (Part E 42):
   the PHPUnit half stays ungated, and the three deltas are approved with their conditions. LOAD-7.8's settings are
   each "its phase".
 - REG-17, CHECK-7 and CHECK-8: the semantics are fixed by decisions 9, 17, 1 and 8; their designs

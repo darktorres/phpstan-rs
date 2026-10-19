@@ -79,7 +79,7 @@ it is), and what keeps the contract of H2.1 implementable by another engine.
 3. **Bodies.** `purity` and `property_writes` use `cycle_result` with the impure / `Anything` answer: REG-1's
    rule is that a declaration in or reaching a cycle never leaves it, which is what an immediate fallback
    on every member gives. `inferred_return` and `inferred_throws` (REG-17) use `Fixpoint`: `cycle_initial` is
-   `never`. **Termination is shown, not asserted (ruled 2026-10-18).** A recursive body that wraps its own result
+   `never`. **Termination is shown, not asserted.** A recursive body that wraps its own result
    (`return $n ? [f($n - 1)] : 1;`, a generic or object argument, a closure type) grows one level of nesting per
    iteration while no literal changes; the `types` crate caps union width (64) and shape fields (256) and has no
    depth cap; and salsa does not stop at 200 iterations (`cycle.rs:58`): it panics, in release too, and re-runs
@@ -90,12 +90,12 @@ it is), and what keeps the contract of H2.1 implementable by another engine.
    `types` crate's own generalization (a union past `MAX_UNION_MEMBERS` generalizes by the chain in `union.rs`,
    and the result is a fixed point), the shape-field cap, and two caps that do not exist yet, a nesting depth and
    a generic-argument depth. A literal that stays the same across iterations is kept (`'done'` stays `'done'`),
-   which the first draft's "widen every literal in a recursive position after the first iteration" lost; one that
+   one that
    keeps changing (`$n + 1`) is bounded by the union cap and generalizes to its kind there. A legitimate chain
    therefore takes up to about 66 iterations (64 members, then the generalization), so the safety net, when
    `cycle.iteration()` reaches K, returns the position's top type and is an internal error in a debug build, sits
    just under salsa's cap of 200: it is never expected to fire, and salsa's own cap is never relied on. Decision
-   17's sentence becomes "the iterate is the least fixpoint of the capped operator", with the same intent (an
+   17's wording is "the iterate is the least fixpoint of the capped operator", with the same intent (an
    inferred return keeps the literals its body returns). S-6 adds the nested-wrapper fixture, a mutual-recursion
    fixture entered from each member, and a `$n + 1` fixture whose iteration count it records: if the cost of
    about 66 iterations per member is too high, a lower per-kind literal threshold inside the cycle operator is the
@@ -133,7 +133,7 @@ class as each candidate, an ancestor every candidate has being certain and one t
 | REG-7.10 | `Provider`'s whole-registry iterations over `decl_index`, provenance and level 1 |
 | REG-7.11 | by construction: a trait's members are read from its current declaration every revision |
 | REG-8.1 | input writes: `FileSet`, `File.role`, and in W2 `file_decls` as an input (H3.6); collision policy is `declarations_named` plus candidates |
-| REG-8.2 | superseded by the recorded reads (already so in the ledger) |
+| REG-8.2 | superseded by the recorded reads |
 | REG-8.3 | `file_decls`; `DuplicateClassSites` and `DuplicateFunctionSites` become a query over `decl_index` grouping by exact spelling |
 | REG-8.4 | `Provider`, which a database with no corpus cannot make; no `ReflectionBuilder` exists to be split off |
 | REG-8.5 | the checker reads its file's declaration from `class_decl` and `file_decls`; `redeclared_methods` goes |
@@ -171,8 +171,7 @@ checkpoint** (the dumps are produced where they are cheap and compared there):
    with an ordinal where it had a span: H1.5a) is level 2's construction, so it lands with step 3's level 2; REG-4.11
    (provenance as the only location record) lands after REG-8.5 and REG-10 have removed `is_stub`'s and
    `Origin::Unknown`'s readers.
-6. **REG-11's behaviour fixes,** one commit each after the structural ones, each a delta approved in the plan and
-   fixtured first.
+6. **REG-11's behaviour fixes,** one commit each after the structural ones, each a delta with its fixture first.
 7. **REG-12's gate:** the gated steps' medians, and the test that checking one file resolves no class the file does
    not reach (a count from the event callback, not a guess).
 

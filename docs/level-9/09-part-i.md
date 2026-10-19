@@ -29,8 +29,7 @@ pub struct TokenStream {
 ```
 
 A template or heredoc carries only its kind and its span: its parts are built when the literal is taken, so a skimmed
-body pays for none (the first draft kept an `extras` and a `parts` array, filled at lex time for every template in
-the file, with three cursors that had to move in lockstep through a skim that does not take tokens).
+body pays for none.
 
 | class | the lexer records | the parser's `take` does |
 |---|---|---|
@@ -48,7 +47,7 @@ the file, with three cursors that had to move in lockstep through a skim that do
 | a cast `(int)` | `Cast`, span including the parentheses. **The lexer rule, exactly:** the parentheses hold a case-insensitive cast name between optional spaces or tabs and nothing else (php 8.5.4: `( int )`, `(INT)` and tab-padded forms are casts; a newline or a comment inside is not) | the spelling is `&src[span]` between them, spaces and tabs trimmed (`CastSpelling::from_name`) |
 | everything else | the kind | nothing |
 
-Two deltas follow from the cast rule, each with a fixture and approved on 2026-10-18 (M5b) with the others at batch 1: today
+Two deltas follow from the cast rule, each with a fixture and approved with the others at batch 1: today
 the parser recognises a cast by a three-token lookahead that allows comments and newlines between the tokens, which PHP
 does not; and `foo(string);` lexes as a cast token and is a parse error, as PHP reports it, where it is a call with a
 constant argument today. The oracle excludes `Cast` from its "exact" claims.
@@ -229,7 +228,7 @@ feature, which x86-64 and aarch64 never are.
 
 F41 (`STAGE_B_FIX_REVIEW.md`), DOC-2.1 (the ledger) and C7's grammar item are one piece of work. (Finding numbers
 are ambiguous across the two review files: F40, F41, F51, F61 and F63 exist in both with different content; this part
-cites `STAGE_B_REVIEW` F40, the PHPDoc parsing one, and `STAGE_B_FIX_REVIEW` F41.) Read from `types/src/parse.rs`
+cites `STAGE_B_REVIEW` F40, the PHPDoc parsing one, and `STAGE_B_FIX_REVIEW` F41.) Sources: `types/src/parse.rs`
 (1,429 lines, outline and the keyword table), `phpdoc/src/grammar/ast.rs` (`TypeNode`, 19 variants),
 `phpdoc/src/doc_type.rs` and `registry/type_node.rs`, and the call sites (58 mentions of `parse_written_type`
 in 3 crates, 219 of `parse_type_string`, 156 of them in `types`' own tests).
@@ -289,11 +288,11 @@ in); it stays, being `Display`'s inverse.
 |---|---|
 | `Identifier(w)` | `phpdoc_keyword(w, [])`, else the class of that name as written; `$this`, `self`, `static`, `parent` as now |
 | `Nullable(t)`, `Union`, `Intersection`, `Paren` | the normalizing constructors (`Type::union_of`, `intersect_types`); `?T` is the normalizing union of `T` and `null` (the string parser builds a raw nested union, a delta: flattened), and `?mixed` is `mixed` (tested by `is_mixed()`); **the written width is bounded:** `union_types_many` flattens every operand with `push_member`, a linear scan per member, and runs its passes before `MAX_UNION_MEMBERS` applies, so a written union of n distinct members costs at least n²/2 comparisons, and `eager` `DocType` runs the lowering for every docblock read; the lowering caps the written width at a multiple of the cap and generalizes as the cap does (or dedupes through a hash set before the passes), with a 50,000-member union, a 100,000-deep nest and colliding-name inputs (`FxHasher` does not resist collisions) in I4.5 step 3's inputs and S-1's |
-| `Generic(w, args)` | `phpdoc_keyword(w, lowered args)`, else a generic class reference; `int<a, b>` is a range only for the exact word `int` (the string parser tests `ends_with("int")`, so `Point<1, 2>` becomes a range today, a delta); an argument of a keyword generic is lowered as the type it is, and a wildcard or a variance marker there is accepted as PHPStan does (ruled 2026-10-18): phpdoc-parser turns `*` into `mixed` with bivariant variance and PHPStan's `array`, `list` and the other keyword generics ignore variances, so `array<*, int>` is `array<mixed, int>`; only the class arm used them (`parse_generic_arg`), and today a keyword argument that holds one fails, a delta |
+| `Generic(w, args)` | `phpdoc_keyword(w, lowered args)`, else a generic class reference; `int<a, b>` is a range only for the exact word `int` (the string parser tests `ends_with("int")`, so `Point<1, 2>` becomes a range today, a delta); an argument of a keyword generic is lowered as the type it is, and a wildcard or a variance marker there is accepted as PHPStan does: phpdoc-parser turns `*` into `mixed` with bivariant variance and PHPStan's `array`, `list` and the other keyword generics ignore variances, so `array<*, int>` is `array<mixed, int>`; only the class arm used them (`parse_generic_arg`), and today a keyword argument that holds one fails, a delta |
 | `Wildcard`, `VarianceArg` | for a class generic as `parse_generic_arg` does: any type; call-site variance |
 | `ArrayOf(t)`, `OffsetAccess(b, o)` | `array<t>` (list-ness as the string parser gives it today), the offset-access type with any type as the offset (the string parser read it as a shape key by name, a delta) |
 | `ArrayShape { keyword, fields, sealed, unsealed_type }` | the shape constructors with `list`, `non-empty` and `object` refinements kept (`STAGE_B_REVIEW` F40) |
-| `Callable { keyword, templates, params, return_type }` | `CallableSig` with its own templates marked; **without a return type** (`callable(int)`) the grammar records a PHPDoc syntax error for the missing return type, as phpdoc-parser and PHPStan do (the colon is mandatory there, and the port's `None` branch carries no note that its acceptance is deliberate), and the node is lowered as written, `callable(int): mixed`, so the tag keeps the parameters the author wrote, where the string parser's fallback, a bare `callable`, discarded them (ruled 2026-10-18; the missing-token recovery of G3.2 item 1, applied to PHPDoc); `Closure(...)` is the intersection of `\Closure` and the callable (`parse.rs`), not the bare class |
+| `Callable { keyword, templates, params, return_type }` | `CallableSig` with its own templates marked; **without a return type** (`callable(int)`) the grammar records a PHPDoc syntax error for the missing return type, as phpdoc-parser and PHPStan do (the colon is mandatory there, and the port's `None` branch carries no note that its acceptance is deliberate), and the node is lowered as written, `callable(int): mixed`, so the tag keeps the parameters the author wrote, where the string parser's fallback, a bare `callable`, discarded them (the missing-token recovery of G3.2 item 1, applied to PHPDoc); `Closure(...)` is the intersection of `\Closure` and the callable (`parse.rs`), not the bare class |
 | `IntRange`, `IntLiteral`, `FloatLiteral`, `StringLiteral` | the literal types; a float only from a `FloatLiteral` token |
 | `ConstFetch { class, const_name }` | the constant-fetch type, a trailing `*` kept; `Foo::class` is `class-string<Foo>` (`Type::class_string`, as the string parser has it) |
 | `Conditional { subject, negated, target, if_true, if_false }` | `ConditionalSubject` and the three lowered branches (each branch is the node the grammar built) |
@@ -312,7 +311,7 @@ case-insensitive (`0X1F`, `1E5`, `0B1`), and floats with a fraction or exponent,
 There is no leading-`0` octal in phpdoc-parser (`017` is a plain digit run). The values follow PHP's source
 reading and deliberately differ from PHPStan's `(int)` and `(float)` casts of the lexeme (php 8.5.4: `0x1F` reads
 31, `017` reads 15 and `0b11` reads 3, where `(int)"0x1F"` is 0 and `(int)"017"` is 17); an integer past `i64` is a
-float, as PHP reads such a literal, but `-9223372036854775808` is the int `PHP_INT_MIN` (ruled 2026-10-18): the
+float, as PHP reads such a literal, but `-9223372036854775808` is the int `PHP_INT_MIN`: the
 sign is part of the PHPDoc lexeme, where in PHP source the literal overflows before the minus applies (php 8.5.4:
 the source literal is `float(-9.2233720368547758E+18)` and `(int)"-9223372036854775808"` is
 `int(-9223372036854775808)`), and a float would make `@return -9223372036854775808` reject `PHP_INT_MIN`.
@@ -321,7 +320,7 @@ Consequences, each with a fixture: a class named `Infinity`, `Nan` or `inf` is a
 conditional's branches may hold `\Closure(): int`, `self::A` and `?T` (the first-`:` split gave `class.notFound`).
 The string parser's other known errors: `value-of` and `key-of` of a list (parsing saw only a bare array or
 shape; the lowering lowers the argument as a type, so `value-of<list<int>>` is `int`), and the differences listed
-in I4.2 (each a delta with a fixture, approved on 2026-10-18 with M5b's PHPDoc group; the consequences above are
+in I4.2 (each a delta with a fixture, approved with the PHPDoc-lowering deltas; the consequences above are
 plain bug fixes). `numeric` and `non-decimal-int-string` already have their right types in
 `parse.rs` at this commit, and a bare `class-string` stays a plain `string` by design (the comment there says it
 has nothing to preserve); what needs the name scope is C7's. `TYPE-5` is not part of this: it is its own commit
@@ -336,7 +335,7 @@ after step 5 (below).
   interned (PROD-5.2's `ImportScope`, the template names, the aliases, the `self` names). The key is the pair
   (the interned `Type` itself, which the entry holds so its address cannot be reused, and the interned context's
   id): equality is pointer identity on exact forms and costs 8 bytes, and the value is the whole resolved type.
-  The first draft keyed a 128-bit fingerprint of the node's `exact` hash; that is 64 bits of `FxHasher` from the
+  A key made from a 128-bit fingerprint of the node's `exact` hash would be 64 bits of `FxHasher` from the
   node, so a collision would hand back another type's resolution with no equality check, and `Node.exact` is
   `pub(crate)`. If DOC-2.8's fingerprint is wanted it is a 128-bit hash over the node's structure behind a public
   `Type` API. A test: `\StdClass` and `\stdClass`, `a|b` and `b|a`, and explicit and implicit `mixed` get
@@ -483,7 +482,7 @@ costs what it does now.
 `Display` newtype, a Debug capture); a dropped deferred message is never rendered (a test-only counter in the
 closure); `rewind_to` then `into_diagnostics` gives the diagnostics of the kept passes only; a test of the trait
 path (hosts × findings, the dedup by `rendered`); a targeted test per family between conversion commits, and O2
-(every message and tip byte-identical) once, at the end of batch 7 (the user's cadence: validation at the end of
+(every message and tip byte-identical) once, at the end of batch 7 (validation at the end of
 the item, never per commit). **Estimate, unmeasured:** CHECK-4.1's 22.5 M is for all 55 `offsetAccess` formats; the
 22 the level filter drops are dropped in the finalizer, after the checker returned, and E5 removes them by not
 running the rule, so this step saves about 13.5 M (33 messages, labelled an estimate) and the other 9 M waits for

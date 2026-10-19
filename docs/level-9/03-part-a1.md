@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-Written by hand. The state is the ledger's, as of `a3931d49d`.
+The state is the ledger's, as of `a3931d49d`.
 
 | task | state | built by |
 |---|---|---|
@@ -22,25 +22,23 @@ the cross-platform plan's R7) serve three editor paths and the walk:
 | classifying a path the walk did not list | `Root::contains` (`session.rs`) | no directory below the root has an excluded name |
 
 The Piwigo gate sets `paths`, so none of this runs there; the editor is the only user. Three more places name `vendor`
-and are not part of the floor, and the first version of this section listed none of them: vendor discovery
+and are not part of the floor: vendor discovery
 (`discover_vendor_context`) and `read_installed`, which hard-code it; R8's include lookup, where `Session::resolve` builds
 `trees` and `unbuilt` for each Composer root from `composer_root.join("vendor")`; and the PHPStan-API check
 (`phpstan_api.rs`), which counts a PHPStan class as installed when any component of its file's path is `vendor`.
 
-**Decision 7 (the fixes plan's, ruled 2026-10-17; the ledger's decision 7 is another one).** The three editor uses of the
+**Decision 7 (the fixes plan's; the ledger's decision 7 is another one).** The three editor uses of the
 floor "skip Composer's vendor directory by its resolved path, so a `vendor/` outside Composer is walked", and the `.git` and
 `node_modules` names stay until `exclude_paths` (LOAD-7.8) exists, when the function and the constant go. **The mechanism
-below keeps the decision's rule and adds to it, which changes the decision's wording (ruled on 2026-10-18, M5d:
-"agree").** Both behaviours the decision states hold (Composer's vendor directory is left out; a `vendor/` of the project's
+below keeps the decision's rule and adds to it, which changes the decision's wording.** Both behaviours the decision states hold (Composer's vendor directory is left out; a `vendor/` of the project's
 own code is walked). The rule is kept for the target that a manifest names beside itself, and a directory that Composer
-wrote into is recognised wherever it is, because the path rule alone has a hole that the first version of this section
-accepted as "a limit": a nested project whose vendor directory lies outside its own subtree (a shared `../../vendor`, with
+wrote into is recognised wherever it is, because the path rule alone has a hole: a nested project whose vendor directory lies outside its own subtree (a shared `../../vendor`, with
 a root that has no manifest) is walked as analysed code, thousands of files with diagnostics, where the name rule skipped
-it. The path rule alone was the alternative put to the user (M5d).
+it.
 
 **Two questions, two answers.** Which directories are Composer's, so that the analysed walk leaves them out and a path
 under one is context? And which one is the project's, so that discovery, `read_installed` and the include lookup read it? The
-first version answered both with one resolved path. Today nothing answers either well: `discover_vendor_context`
+one resolved path answers both. Today nothing answers either well: `discover_vendor_context`
 (`composer/src/vendor.rs`) needs `<root>/composer.json` to be a file and `<root>/vendor/composer` a directory,
 `config.vendor-dir` is read nowhere (the crate split's B8 follow-up, `CRATE_SPLIT_PLAN.md`; Part E 40), and a project with
 `"config": {"vendor-dir": "libs"}` has Composer's vendor directory at `libs`, and one with `"libs/vendor"` at a directory
@@ -66,7 +64,7 @@ decision 7 asks. The answers are kept beside the listing (a `OnceLock` per listi
 the oracle read one fact, and a directory changed mid-load changes nothing in this load. What neither clause covers is a
 target that is not a direct child (`libs/vendor`, `../../vendor`) while Composer is still building it: it is walked until
 its marks appear. The price of the marks: a test fixture that copies an installed `vendor/composer/` into the project's own
-tree is left out too. **On the corpora** (checked 2026-10-18), 28
+tree is left out too. **On the corpora**, 28
 directories hold `composer/installed.json`: 24 are named `vendor` and 4 `fake_vendor*`. The name rule, the path rule and this
 rule agree on 23 of them, each with a manifest beside it. They differ on five test fixtures that copy an installed tree and
 have no manifest beside them: the four `fake_vendor*` of Symfony's PhpUnit bridge tests, which only this rule leaves out,
@@ -75,13 +73,13 @@ the Symfony four hold PHP files (16 in all, each with `autoload.php`, `composer/
 marks that the PhpUnit bridge itself looks for); the other fixtures hold `installed.json` and little else. The path rule's
 hole is in none of them, since it comes from a layout the corpora do not have.
 
-*Third-party code that Composer installed outside the vendor directory (COMP-7, added on 2026-10-18 at the user's word).*
+*Third-party code that Composer installed outside the vendor directory (COMP-7).*
 Composer does not put every package under `vendor/`. A custom installer (the `composer/installers` plugin, configured by
 `extra.installer-paths`, which Drupal, WordPress and others use) installs a package where the project asks (`web/core`,
 `web/modules/contrib/token`, `wp-content/plugins/akismet`), and Composer records the directory in `installed.json` as
 `install-path`, the shortest path from `vendor/composer` (`FilesystemRepository::dump`: `findShortestPath($repoDir,
-$path, true)`; `null` for a metapackage, whose installer returns no path; run through the vendored Composer on
-2026-10-18, `/proj/web/core` from `/proj/vendor/composer` gives `../../web/core`, and a directory sharing only `/` gives an
+$path, true)`; `null` for a metapackage, whose installer returns no path; run through the vendored Composer,
+`/proj/web/core` from `/proj/vendor/composer` gives `../../web/core`, and a directory sharing only `/` gives an
 absolute path, which `composer_dir.join` keeps). Neither clause above sees these directories: no
 manifest names them as a vendor directory and Composer wrote nothing into them. Today a degrade root walks them as analysed
 code (the name rule never matched `web/core`: thousands of files with diagnostics), and every mode misses them as
@@ -100,7 +98,7 @@ timing reaches them. A directory that matches an `installer-paths` pattern but i
 clause of the vendor directory has no analogue here. What follows is stated as a limit and tested: the files that a first
 `composer require` creates are analysed until the session is resolved again (the server keeps the first role it gave a
 created file, and `**/*.php` is all it watches), which H4.2's trigger set ends at W3 (a change to `installed.json`
-re-resolves) and a restart does before. **On the corpora** (checked 2026-10-18), the 29 `installed.json` files (the
+re-resolves) and a restart does before. **On the corpora**, the 29 `installed.json` files (the
 corpora's 28, fixtures included, and Piwigo's) list 1,329 packages, and one lies outside its vendor directory: Drupal core's own
 `drupal/core` at `../../core` (type `drupal-core`, a path repository, so promoted and no seed). No corpus holds an
 installer-paths package, so the fixtures carry this clause, written in the shape Composer writes.
@@ -132,8 +130,8 @@ drive letter, a scheme and `://`, or two backslashes, which is Composer's test a
 is the directory Composer builds and may not exist yet, and `installed`, the first candidate that is a Composer vendor
 directory by the test above. `installed` is a later candidate when the first is not built, so that a stray variable, or a
 `vendor-dir` changed and not yet reinstalled, loses no context that a project has today. The session reads the environment
-once and passes it as a value (it is an input of `Packages`, H2.2), so no query reads the process. The rules were run on
-2026-10-18 through the vendored Composer's `Config`, in memory, on eight inputs: `libs` gives `<project>/libs`, `./libs/`
+once and passes it as a value (it is an input of `Packages`, H2.2), so no query reads the process. The rules were run through
+the vendored Composer's `Config`, in memory, on eight inputs: `libs` gives `<project>/libs`, `./libs/`
 gives `<project>/./libs` (Composer does not normalise; the canonical form does), `../vendor`, an absolute value kept, `~/v`
 expanded, the variable beating the manifest, and a relative variable joined to the project directory. PHPStan reads the same
 manifest key and no variable and joins `$root . '/' . trim($dir, '/')`
@@ -234,8 +232,7 @@ it that names it, and no `composer/` holding `installed.json` or `autoload_real.
 it was left out. A Composer vendor directory is left out wherever it is and whatever it is called (`libs/vendor`, a shared
 `../../vendor`, a nested project's, a build copy, a stale install, a link to one); before, only a directory named `vendor`
 was. A fresh `composer install` with the editor open keeps its files context, as the name rule does. A promoted root keeps
-its empty exclusion as today, so its own `vendor/` is not left out. **The delta commit (ruled on 2026-10-18, Part E 40 and
-M5d):** a project whose `config.vendor-dir`, `COMPOSER_VENDOR_DIR` or `COMPOSER` names another directory or file gets its
+its empty exclusion as today, so its own `vendor/` is not left out. **The delta commit (Part E 40):** a project whose `config.vendor-dir`, `COMPOSER_VENDOR_DIR` or `COMPOSER` names another directory or file gets its
 installed packages, its vendor context and its include trees from that directory in the batch run too (it got none, since
 discovery looked for `vendor/composer`), which changes its output; that part is a commit of its own, with its fixture.
 **COMP-7's two commits:** third-party code installed outside the vendor directory is left out of a degrade root's analysed

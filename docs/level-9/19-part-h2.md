@@ -68,12 +68,12 @@ list, since the project has a build-time gate.
   would make each file depend on all of them, so the checker's `self.settings.x` reads become calls on the view
   (mechanical: 114 of them in 34 files of `checker/` today, reaching the leaf flags of the extensions'
   `…Settings<bool>` structs, which are the fields).
-- **The range of a file is its owner's (Part E 42, ruled 2026-10-18).** The owner of a file is the nearest
+- **The range of a file is its owner's (Part E 42).** The owner of a file is the nearest
   ancestor `composer.json`, a fact of each directory's listing: A8's scan finds a degrade root's nested manifests before
   the walk (COMP-8) and `Packages` holds those directories (A1 builds the vendor fact beside it and not this one); a file
   with no owner uses the project root's manifest. `range_of(File)` is a
   tracked projection of `Packages`: the configured range if one is set, else the owner's declared range (Composer's
-  grammar by interval arithmetic, COMP-2), else decision 18's default (open above, ruled 2026-10-18: Part E 40, M5d). It compares equal when the owner's
+  grammar by interval arithmetic, COMP-2), else decision 18's default (open above: Part E 40). It compares equal when the owner's
   range does, so a manifest edit reruns only the files it owns. A declaration's validity is a `VersionSet` that
   does not depend on the range, and the reader intersects it with its own file's range (J1.2); a builtin reading is
   selected with that range (`Readings::over`). A level's memo is keyed by the range only where something it reads
@@ -148,8 +148,8 @@ list, since the project has a build-time gate.
 - **The declaration index.** One tracked query over every eager file's `decl_names` (the `DeclRef`s alone),
   O(all declarations), run again when a declaration is added, removed or renamed and not when a member or a body
   changes: those change `decls` and leave `decl_names` equal, which is why the two are separate fields. It
-  beats the alternative designs on what an edit costs: per-name input slots maintained by the driver (the first
-  design considered) put derived data back into inputs and need a second revision per edit; a whole-index query
+  beats the alternative designs on what an edit costs: per-name input slots maintained by the driver
+  put derived data back into inputs and need a second revision per edit; a whole-index query
   is plain, and the re-running readers (`declarations_named` of the names asked so far, a hash probe each,
   about 374 Ir by REG-16.1's figure) back out at once when their slice is equal. For Piwigo's size that is of
   the order of 10 to 50 ms per edit that adds, removes or renames a declaration, and nothing for any other
@@ -304,7 +304,7 @@ measures contention on shared levels, which REG-16.1 did not.
   stores the outer limit, calls `stacker::grow` and restores `LIMIT` only when `grow` returns normally; stacker's
   `_grow` catches a panic inside the new segment, drops its own guard and resumes the unwind on the old stack,
   which skips the restore, so a later guarded call on that thread could compare against a freed segment's address
-  (the case exists before this plan: `session.rs` wraps the parse in `catch_unwind`). F20's new `stack` crate
+  (the case exists today: `session.rs` wraps the parse in `catch_unwind`). F20's new `stack` crate
   restores `LIMIT` from a drop guard so that it also runs on unwind, with the test F20 lacks: a panic from inside
   a grown segment, caught, then a 100,000-level recursion on the same thread; S-5 repeats it with a `Cancelled`
   unwind.
@@ -319,8 +319,8 @@ measures contention on shared levels, which REG-16.1 did not.
 
 ### H2.9 Memory
 
-- **Which trees are memos.** A tracked `parse` with `lru` for every file, evicted by `trigger_lru_eviction`, was the
-  first cut. It frees every evicted tree on the one thread that evicts, which is the cost LOAD-3.3 measured and
+- **Which trees are memos.** A tracked `parse` with `lru` for every file, evicted by `trigger_lru_eviction`, would
+  free every evicted tree on the one thread that evicts, which is the cost LOAD-3.3 measured and
   removed (−138.6 M Ir and −214 MiB peak when a context tree's drop moved to the worker that built it), and most
   trees are context trees. So a context file's tree is built in the worker's scratch builder inside `file_products`
   and cleared once the products are made (LOAD-3.5): it is freed, if at all, where it was allocated, and it is

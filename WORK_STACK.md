@@ -279,8 +279,8 @@ Spikes S-1 to S-12 (Part H5) run before the designs they settle. Level 8's list 
 reordered until the go.
 
 Part A was the work the user asked for on 2026-10-19. The batch-0 commits listed in
-Part E landed on their own. The opt-in lazy-read commits (`910de4507`, `d674ac1f0`) came from
-a follow-up to another task. The tree has no lazy read, as the user asked, but master's history does not hold their revert: a rewrite dropped the lazy commits with it (ledger Q-16). Part B onward waits for the go.
+Part E landed on their own. The opt-in lazy read that came from a follow-up
+to another task is not in the tree, as the user asked (ledger Q-16). Part B onward waits for the go.
 
 Leftovers from plan mode, to delete when it ends: the helper scripts, backups and
 probes in the scratchpad (`/tmp/claude-1000/-home-torres-projects-phpstan-rs/0fdc40b5-accc-4267-853a-f5ef8f30c07c/scratchpad`),

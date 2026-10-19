@@ -5,29 +5,23 @@
 None. Part N lists the documents and the ledger edits the plan implies (N2 to N6), and it owns no build task. The rows it adds are owned by the parts that build them: the COMP rows by Part A, the SRV and FIX rows by Part E, CHECK-12 by Part D's wall step W7, and CHECK-13 by batch 5 (Part C), which H1.4 decides.
 
 
-Nothing here is done in plan mode. This part consolidates what Parts A, B, E, H, J and M scatter ("the ledger would
+This part consolidates what Parts A, B, E, H and J scatter ("the ledger would
 otherwise keep false"), so that the docs commit series of Part E 20 and the first commits of each batch have one
 list. A ledger row is edited in the commit that builds it, except where a row says "at approval"; an edit of a ruled
-decision's text is made only after the ruling, and the user ruled on 2026-10-18 (M5): the edits below are the
+decision's text is made only once the user has ruled on it: the edits below are the
 ones the rulings imply, and the decisions whose text does not change are named.
 
-## N1. Where the plan's parts go (proposed)
+## N1. Where the plan's parts are
 
-| document | parts | why |
-|---|---|---|
-| `POST_LEVEL_9_PLAN.md` | A, C, D, E, F, G5, I2 to I5, K, L | the batches, their order, the answers and the designs the batches wait for |
-| `FLAT_TREE_PLAN.md` | B, G1 to G4, I1 | item 9 and what it forces on the checker and the probe (B11) |
-| `ENGINE_PLAN.md` | H, J | the engine, the pipeline, and the wall's data models and rows |
-| `PLAN_REVIEW_LEDGER.md` | M | the workflow review's findings |
+The plan is the directory `docs/level-9/`: one file per part, and `README.md` as the index of which file holds each part. The section numbers are kept, so that a reference such as G1.5 or H4.6 stays valid. The first split into `POST_LEVEL_9_PLAN.md`, `FLAT_TREE_PLAN.md` and `ENGINE_PLAN.md` is no longer in separate files. Part M was removed on 2026-10-19: its findings are folded into the parts.
 
-Each keeps its section numbers, so that a reference such as G1.5 or H4.6 stays valid, and opens with a table of where
-the other parts went. The ledger keeps the rows and their states; the plans keep the designs.
+The ledger keeps the rows and their states; the plan keeps the designs.
 
 ## N2. The ledger (`PROFILE_DRILL_PIWIGO_LEDGER.md`)
 
 | row | edit | from |
 |---|---|---|
-| SYN-1.2, 1.4, 1.5, 1.7, 1.8 | one shared design note pointing at `FLAT_TREE_PLAN.md`; need SYN-1.3; no ruled wording changes (ruled 2026-10-18): SYN-1.2's "owns its source" and SYN-1.4's "payloads are spans" are what B3 builds, and SYN-1.2's "settled first, by a measurement" is spike S-12 | B11, Part E 3 and 4 |
+| SYN-1.2, 1.4, 1.5, 1.7, 1.8 | one shared design note pointing at Part B (`13-part-b.md`); need SYN-1.3; no ruled wording changes: SYN-1.2's "owns its source" and SYN-1.4's "payloads are spans" are what B3 builds, and SYN-1.2's "settled first, by a measurement" is spike S-12 | B11, Part E 3 and 4 |
 | SYN-1.3 | text "readers read through the handle API (step 1)"; need SYN-1.12, not SYN-1.2 | B2 D8, B11 |
 | new SYN-1.11, SYN-1.12 | step 0 (the census; the fabricated nodes removed) and step 1's API (handles, views, the dump); SYN-1.12 is needed by SYN-1.3 | B7 |
 | SYN-1.9, SYN-6, Q-10 | the error-node model of G3 (three arms, no member enum; the `incomplete` bit; marks); SYN-6's rows are marks and error kinds; a stray control byte, a NUL byte included, is a validity mark; a context file that fails to parse is a run-level notice that leaves the exit status | G3 |
@@ -44,7 +38,7 @@ the other parts went. The ledger keeps the rows and their states; the plans keep
 | CHECK-6.10, 4.1 | the `Message` of I5 | I5 |
 | CHECK-4.2 | folded into REG-18.4 (batch 4b) | Part E 41 |
 | CHECK-7, 9, 10 | CHECK-9 and CHECK-7's checker half in D2 (after F69), CHECK-10's operator sites in D3, its version table in W4 | Part E 17 |
-| CHECK-11, LOAD-7.6, REG-18.4, LOAD-7.2 | their deltas are approved (2026-10-18) with the conditions of Part E 42: LOAD-7.6's key table is shown before the rename and the PHP range and the activation come from each file's owning manifest, CHECK-11 defines its template renderers, LOAD-7.2's PHPUnit half stays ungated | Part E 42 |
+| CHECK-11, LOAD-7.6, REG-18.4, LOAD-7.2 | their deltas are approved with the conditions of Part E 42: LOAD-7.6's key table is shown before the rename and the PHP range and the activation come from each file's owning manifest, CHECK-11 defines its template renderers, LOAD-7.2's PHPUnit half stays ungated | Part E 42 |
 | REG-14.4 | "passes the parameters on" becomes the predicate | A3 |
 | REG-14.5 | folded into REG-7.5 | A4 |
 | REG-4.9 | built with REG-4.12 | Part D W1 |
@@ -54,7 +48,7 @@ the other parts went. The ledger keeps the rows and their states; the plans keep
 | REG-16.4 | needs SYN-1.9 | H4.3 |
 | REG-16.5 | the event callback plus the provider's trace of first readers | H3.5 |
 | REG-17.x | the layering of H3.8 (the receiver-types query, the inference family) | H3.8 |
-| LOAD-2.2 | stays PART until LOAD-7.8 deletes `path_under_excluded_dir` and the constant; its text, "skip Composer's vendor directory by its resolved path" (the fixes plan's decision 7), becomes "a directory Composer wrote into, or the install directory of a package it put elsewhere" (ruled 2026-10-18, M5d; COMP-7) | A6, A1 |
+| LOAD-2.2 | stays PART until LOAD-7.8 deletes `path_under_excluded_dir` and the constant; its text, "skip Composer's vendor directory by its resolved path" (the fixes plan's decision 7), becomes "a directory Composer wrote into, or the install directory of a package it put elsewhere" (COMP-7) | A6, A1 |
 | REG-18.6 | `phpstan_class_files` is a provenance query, and "a PHPStan class is installed" asks the file's owning package and not a path component called `vendor` (`phpstan_api.rs:268`) | A1 |
 | LOAD-5.1, 5.2, 5.4 | LOAD-5.1 moves to W3 (facts) and E1 (collection); LOAD-5.2 is W3's, needs both LOAD-5.1 and LOAD-3.1; LOAD-5.4 is Part A's "every reader asks `ast_of`" | Part E 39, A5a |
 | LOAD-4.7 | the file-references half "deleted by REG-16.4" | H4.8 |
@@ -64,14 +58,14 @@ the other parts went. The ledger keeps the rows and their states; the plans keep
 | CACHE-13.2 | H4.6; keyed by build, root and config key, the config key without the version range | Part E 37 |
 | CACHE-8; CACHE-9 to 11 | after S-4; the form follows S-4 | Part E 41 |
 | STUB-7.5 | moves to W3; needs the Composer maps to keep their keys, the root's own entries included, and gain PSR-0 (A7) | H4.1 |
-| STUB-7.1, decision 18 | a range keeps exact version-id bounds and is open above when its constraint has no upper bound or none is declared (ruled 2026-10-18): the default is "7.0 to the newest, and later", a gate past `hi` is never, and one inside an open end is in part (`Availability`) | J1.1, Part E 40, M5d |
+| STUB-7.1, decision 18 | a range keeps exact version-id bounds and is open above when its constraint has no upper bound or none is declared: the default is "7.0 to the newest, and later", a gate past `hi` is never, and one inside an open end is in part (`Availability`) | J1.1, Part E 40 |
 | STUB-12.2, 12.4 | behind the pre-8.0 spike; STUB-12.4 includes the `SignatureMapParser` port | J1.4, J2 |
 | STUB-11 and OVL-2 | OVL-2 needs STUB-7.6, not STUB-11's build | J2 |
 | VAL-1.2 to 1.12 | G5's order (the oracle run after the session and the replay); VAL-1.5 is item 9's dump; VAL-1.9's session API is public in `lsp` | Part E 13, G5 |
-| VAL-2.9, 2.10 | the deltas the plan adds, approved on 2026-10-18 (the cast rule, `variable.undefined` after an error, `extract` or `include`, `extract` no longer truncating the body's diagnostics, the lone-CR rule, the interpolation and heredoc-indentation errors, the NUL mark, the anonymous-class consumers of H1.4, `Point<1, 2>`, `callable(int)`, the wildcard and `-9223372036854775808` and the other differences of I4.2 and I4.3, the string lexeme, CHECK-11, REG-18.4 and LOAD-7.6's keys and ranges) | I2 to I4, G3.6 |
+| VAL-2.9, 2.10 | the deltas the plan adds, approved (the cast rule, `variable.undefined` after an error, `extract` or `include`, `extract` no longer truncating the body's diagnostics, the lone-CR rule, the interpolation and heredoc-indentation errors, the NUL mark, the anonymous-class consumers of H1.4, `Point<1, 2>`, `callable(int)`, the wildcard and `-9223372036854775808` and the other differences of I4.2 and I4.3, the string lexeme, CHECK-11, REG-18.4 and LOAD-7.6's keys and ranges) | I2 to I4, G3.6 |
 | new rows | `OVL-1` to `OVL-8`, `RES-1` to `RES-7`, `EXT-1` to `EXT-4`, `SUM-1` to `SUM-3` (J2); a D-row and an E-row per phase of Stage D and E (J3); `COMP-1` to `COMP-8`, `SRV-1` to `SRV-7`, `CHECK-12` and `CHECK-13` (N6) | J2, J3, Part E 40, 22, G3.6, H1.4 |
 
-Ruled decisions whose text changes (ruled on 2026-10-18, M5a): decision 3 (the member sentence only: a method by
+Decisions whose text changes: decision 3 (the member sentence only: a method by
 folded name, a property and a class constant by exact name, an enum case being a class constant), decision 9 (one
 sentence: a context file that fails to parse is reported as a run-level notice that leaves the exit status),
 decision 13 (the racily-clean reference time is the clock reading at the file's own stat, not "the index's own write
@@ -79,7 +73,7 @@ time") and decision 17 (the widening sentence becomes "the iterate is the least 
 H3.3). **No text changes** in decision 4 (both sentences stand: the layout is what B3 builds, and the last sentence
 is spike S-12), in decision 3's "is never reused" (it stands for `DeclKey`, which is immortal), in decision 14 (a
 failed S-11 returns to the user before an eager fallback ships) or in decision 15 ("a context file is not reported"
-gains decision 9's sentence by reference). **Two more texts change, ruled on 2026-10-18 (M5d, "agree"):** the fixes plan's
+gains decision 9's sentence by reference). **Two more texts change:** the fixes plan's
 decision 7 ("by its resolved path" becomes "a directory Composer wrote into, or the install directory of a package it put
 elsewhere") and the ledger's decision 18 ("to the newest version" becomes "and later").
 
@@ -87,7 +81,7 @@ elsewhere") and the ledger's decision 18 ("to the newest version" becomes "and l
 
 Level 8 is reordered: item 0 (batch 0: VAL-1.1; the seven F1 fixes; F10's tests, F77, F20, F21, F69's fixtures; the
 dump-changing level-3 findings and Q-11 follow-ups; the tooling and the baseline) before item 9; item 9 reads
-"SYN-1.11, then 1.12 (+1.3), then 1.2/1.4/1.5/1.7/1.8, then step 3 (LOAD-3.5); `FLAT_TREE_PLAN.md`"; then the
+"SYN-1.11, then 1.12 (+1.3), then 1.2/1.4/1.5/1.7/1.8, then step 3 (LOAD-3.5); the design is Parts B, G1 to G4 and I1"; then the
 batches of C1 in order (tokens, the lexer's second pass, parse recovery with the `php-version` crate, names, the
 constant lookup, products, PHPDoc, the check's temporaries); Part A's rows come first, before item 0. Item 2's bullet
 goes, LOAD-9 leaves "Outside the items", item 8 keeps REG-14.1 and 14.3, item 19 loses LOAD-5.4, the state line is
@@ -100,12 +94,12 @@ Marked in place, each pointing at the section that replaces it: Appendix F's "ea
 memo" (the recorded reads); F1's published snapshots (H4.3's cancellation); F1's text on line starts (the PHP terminator
 rule is applied in the lexer too: I3); F2's resolved dependencies, fingerprints and entry sets (H4.4); §3.9's text
 about the deleted `lsp/workspace_config.rs`; the line (6883-6891) "a file with parse errors is still not analysed",
-superseded (ruled 2026-10-18, Part E 31); G's "26 new packages" count and Appendix A, which gain the engine and `php-version`
+superseded (Part E 31); G's "26 new packages" count and Appendix A, which gain the engine and `php-version`
 (J3); C6 to C9 and D to G gain the rows of J2 and J3. Appendix F's rule ("a bug in code a later phase rewrites gets a
 fixture now and its fix as that phase's behaviour commit") is cited by F69, F5, F6, F45 and F61 (K2). B8's composer
 follow-ups (`config.vendor-dir`, Composer's grammar, `psr-0`, the root package's autoload, a package's bundled `vendor/`)
 point at A1, A7, A8 and Part E 40 once those are built; the clamp of an open upper bound to `MAX_PHP_VERSION` is marked
-superseded (ruled 2026-10-18, M5d's third row).
+superseded.
 
 ## N5. Other documents
 
@@ -118,17 +112,15 @@ engine's two isolation modes (H2.8); the vendor-discovery panic-hook swap is del
 ## N6. The new rows
 
 `COMP-1` `config.vendor-dir` and `COMPOSER_VENDOR_DIR`, resolved as Composer does over candidates, and the recognition of
-a Composer vendor directory by what Composer wrote in it (A1; the delta commit and the mechanism were ruled on 2026-10-18,
-M5d); `COMP-2` Composer's constraint grammar by interval arithmetic (whitespace after an operator, a window inside a
-minor, a bare version as Composer reads it; batch 0), and, apart, exact version-id bounds with an open upper end (J1.1;
-ruled 2026-10-18, M5d); `COMP-3` the process-wide panic hook that `discover_vendor_context` swaps (the crash plan deletes it);
+a Composer vendor directory by what Composer wrote in it (A1); `COMP-2` Composer's constraint grammar by interval arithmetic (whitespace after an operator, a window inside a
+minor, a bare version as Composer reads it; batch 0), and, apart, exact version-id bounds with an open upper end (J1.1); `COMP-3` the process-wide panic hook that `discover_vendor_context` swaps (the crash plan deletes it);
 `COMP-4` `psr-0` in `Autoload` and the generated maps' keys (A7); `COMP-5` the root package's own autoload as context
 (A7's maps keep its entries and W3's locator finds the class); `COMP-6` a package's bundled `vendor/` as context (A8);
 `COMP-7` third-party code that Composer installed outside the vendor directory, left out of a degrade root's analysed walk
 and admitted as context by discovery in every mode (A1: the seeds and the filter, two commits); `COMP-8` the vendor
 contexts of a degrade root's nested Composer projects, found by a scan before the walk, with their owners and `unbuilt`
-(A8). COMP-7 and COMP-8 were added on 2026-10-18 at the user's word ("also (a) and (b)"). All eight were audited against
-the code and the corpora on 2026-10-18 (Part E 40), so each row is written as specified and none as OPEN to be audited. `SRV-1` to `SRV-7` are the seven fixes the crate split's F1 puts first: the debounce thread's stack size
+(A8). COMP-7 and COMP-8 were added as the user's extensions. All eight were audited against
+the code and the corpora (Part E 40), so each row is written as specified and none as OPEN to be audited. `SRV-1` to `SRV-7` are the seven fixes the crate split's F1 puts first: the debounce thread's stack size
 and the scan's parses on the pool; `queue_change` writing `latest_text`; `didClose` restoring the disk's content;
 `--generate-baseline` keeping the entries of files not analysed; `--fix` skipping a file changed since analysis; a
 closed output pipe ending the run quietly; rename refusing qualified names, imports and aliases. Each has its test on

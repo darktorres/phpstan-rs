@@ -2,12 +2,12 @@
 
 ## Tasks this part owns
 
-Written by hand. Each task is listed under the wall step (W1 to W8, the table under "Proposed order") that builds it. The state is the ledger's, as of `a3931d49d`.
+Each task is listed under the wall step (W1 to W8, the table under "Proposed order") that builds it. The state is the ledger's, as of `a3931d49d`.
 
 | step | task | state |
 |---|---|---|
 | W1 | LOAD-7.1 | READY |
-| W1 | LOAD-7.2 | OPEN (its PHPUnit half is ruled ungated) |
+| W1 | LOAD-7.2 | OPEN (its PHPUnit half is ungated) |
 | W1 | LOAD-7.3 | READY |
 | W1 | LOAD-7.4 | READY |
 | W1 | LOAD-7.5 | READY |
@@ -105,9 +105,8 @@ Written by hand. Each task is listed under the wall step (W1 to W8, the table un
 W5 also has the C6 to C10 rows, which are written with the plan's approval and have no ledger IDs yet. The ledger's rows for W5 are REG-15.1 and REG-15.2 above. W7's other rows are written after a re-read (rulings 2 to 4), so the four above are all the ledger rows it owns today.
 
 
-Read from `WORK_STACK.md` (levels 1 to 7), the ledger's REG, STUB, CACHE, CHECK, TYPE, NAME, VAL and Q
-sections, `PROFILE_DRILL_PIWIGO_20G.md` §12, and `CRATE_SPLIT_PLAN.md`'s stages C to G (the plan was
-last edited on 2026-10-18, `c1a7e224`, for the module graph; its stage text dates from 2026-09-28). Nothing here is
+Sources: `WORK_STACK.md` (levels 1 to 7), the ledger's REG, STUB, CACHE, CHECK, TYPE, NAME, VAL and Q
+sections, `PROFILE_DRILL_PIWIGO_20G.md` §12, and `CRATE_SPLIT_PLAN.md`'s stages C to G. Nothing here is
 built or measured. Figures are the ledger's and the
 reports', and "none" means the ledger gives no instruction figure. Steps are W1 to W8 (W for wall),
 so they do not collide with Part B's D1-D9 or the crate split's phases D1-D6.
@@ -116,7 +115,7 @@ so they do not collide with Part B's D1-D9 or the crate split's phases D1-D6.
 
 Level 8's READY list is empty, so the stack's rule ("work the lowest item that has a READY row")
 picks nothing. Level 2 still has READY rows (REG-2, REG-4.2, 4.5, 4.7, 4.9, 4.10, 4.12 to 4.14,
-REG-5, REG-6, REG-16.2 and the Q-11 follow-ups), but levels 1 to 7 were deferred on 2026-10-16 "to
+REG-5, REG-6, REG-16.2 and the Q-11 follow-ups), but levels 1 to 7 are deferred "to
 be reevaluated together". The 20 G plan's unbuilt rows, and what they are worth:
 
 | remaining | needs | worth |
@@ -145,7 +144,7 @@ be reevaluated together". The 20 G plan's unbuilt rows, and what they are worth:
 
 ## Proposed order
 
-First pass. Part E and the review change it in five places: W1 is a correctness backlog and partly runs before
+Part E changes it in five places: W1 is a correctness backlog and partly runs before
 item 9 (Part E 22); W2 lands REG-4.15 with level 2 (H3.6); W3 includes Stage F1 and F2 (19), the six passes' per-file
 facts (39) and STUB-7.5, the lazy Composer locator, which leaves W4 (H4.1); W5 builds C7 on F41's lowering (14);
 W7 includes item 18's reconciled inference core and scopes (16), F69 with CHECK-9 and CHECK-7's checker half (D2) and
@@ -153,7 +152,7 @@ CHECK-10's operator sites (D3).
 
 | step | what | rows, in order | notes |
 |---|---|---|---|
-| W1 | the correctness backlog and the follow-ups that need no engine | the Q-11 follow-ups LOAD-7.1, 7.3-7.7, REG-18.1, 18.5, CHECK-11 (REG-18.4 is batch 4b's: it needs `ConstName`); REG-2 (the gates' inventories); the data-model rows the ledger lists READY with no need: REG-4.5, 4.7, 4.13, 4.14, REG-5, REG-6 (REG-4.9 is REG-4.12's change and is built with it, W2 step 1; REG-4.10 is folded into DOC-2.9, batch 6); level 3's findings | placed in the sequence, not left "between heavy runs": every finding or follow-up that changes a dump goes before the baseline in batch 0, the rest between heavy runs, and a later behaviour-changing commit runs `dumps-compare`, lists its differences and rolls the baseline forward (Part E 22); none depends on the engine; REG-18.2, 18.3 and 18.6 are W2's needs; LOAD-7.6, REG-18.4 and CHECK-11 are deltas the ledger marks READY with no approval in VAL-2.9 or decision 14, approved by the user on 2026-10-18 with the conditions of Part E 42 (LOAD-7.6 is W1's except that its range per owning manifest is designed with W2), and LOAD-7.2's PHPUnit half is ruled: ungated; LOAD-7.5 and the Q-11 table cite `lsp/workspace_config.rs:66` and `:214`, a file LOAD-1.3 deleted: the LSP's lookup is `root.join("phpstan-rs.toml")` in `lsp.rs` (found by that symbol), to correct in the row when it is worked |
+| W1 | the correctness backlog and the follow-ups that need no engine | the Q-11 follow-ups LOAD-7.1, 7.3-7.7, REG-18.1, 18.5, CHECK-11 (REG-18.4 is batch 4b's: it needs `ConstName`); REG-2 (the gates' inventories); the data-model rows the ledger lists READY with no need: REG-4.5, 4.7, 4.13, 4.14, REG-5, REG-6 (REG-4.9 is REG-4.12's change and is built with it, W2 step 1; REG-4.10 is folded into DOC-2.9, batch 6); level 3's findings | placed in the sequence, not left "between heavy runs": every finding or follow-up that changes a dump goes before the baseline in batch 0, the rest between heavy runs, and a later behaviour-changing commit runs `dumps-compare`, lists its differences and rolls the baseline forward (Part E 22); none depends on the engine; REG-18.2, 18.3 and 18.6 are W2's needs; LOAD-7.6, REG-18.4 and CHECK-11 are deltas the ledger marks READY with no approval in VAL-2.9 or decision 14, approved with the conditions of Part E 42 (LOAD-7.6 is W1's except that its range per owning manifest is designed with W2), and LOAD-7.2's PHPUnit half is ruled: ungated; LOAD-7.5 and the Q-11 table cite `lsp/workspace_config.rs:66` and `:214`, a file LOAD-1.3 deleted: the LSP's lookup is `root.join("phpstan-rs.toml")` in `lsp.rs` (found by that symbol), to correct in the row when it is worked |
 | W2 | C4's spine, the engine's roots first | REG-4.2 and REG-4.12, then REG-16.2, REG-16.3, REG-7.1 to 7.12 (7.6 needs REG-18.2 and 18.3; REG-4.15 lands with level 2: H3.6 step 5), REG-8.1 to 8.7 (8.4 needs REG-18.6), REG-9, REG-10, REG-4.11, REG-11, REG-12 | each commit runs `cargo check`, clippy and the touched modules' tests, and the full gate tier, `registry-dump` and O2 run once at W2's stage checkpoint (the crate split's rule: validation at the stage checkpoints you named, not per level or per commit); most rows are approved deltas (VAL-2.9); REG-4.2 and 4.12 meet NAME-1.2's registry entry points (batch 4), so they are written on the `Name`-keyed API |
 | W3 | what the engine opens: the prizes | REG-16.4, then CACHE-13.1 (the stamp, for every file) and CACHE-13.2, STUB-7.5 (the lazy Composer locator, H4.1), LOAD-3.1 (and 3.3's `update_file` half), LOAD-5.1 (the six passes' per-file facts as `file_products` fields, then the use-site index), LOAD-5.2; LOAD-4.7's index half; TYPE-4.1 to 4.4, NAME-2.4; REG-16.5; REG-14.3; CHECK-8 (CHECK-7's checker half is D2's, W7); REG-17 | REG-16.4's listed needs (REG-16.3, SYN-1.2, LOAD-1.4) stop short of REG-7 and REG-8, but LOAD-4.6's text has REG-7 and REG-16.4 together replace `closure_scope` (REG-7 the passes that use it). H3.5 and H4 settle it: REG-8's rows are the inputs and queries it builds on, and REG-9 to REG-12 are W2's |
 | W4 | C5, the stub layer | STUB-7.1, then 7.3 (it opens SYN-1.10; PROD-5.4 is gone with REG-16.4) and 7.6 (CACHE-9/10/11 follow, once CACHE-13.2 has fixed the persistence's format); 7.2, 7.4, 7.7 to 7.11 (7.5 is W3's); the gate 7.12; STUB-8; STUB-12.1 to 12.5; CHECK-10's version table (its operator sites are D3's, W7); STUB-13.1 | STUB-7 needs REG-12 as a parent row, and 7.1, 7.2, 7.4, 7.7, 7.8 and 7.11 list no need of their own; deltas are VAL-2.4, 2.9 and 2.10 |
@@ -189,7 +188,7 @@ CHECK-10's operator sites (D3).
    `check_stmt`/`check_expr` "would be written twice" (Appendix F). The same reasoning applies to item
    18's inference core and its scopes group, which are structure, and to F69 with CHECK-9 and CHECK-7's checker half,
    which sit on the recorders D2 replaces; its temporaries group (CHECK-6.4 to
-   6.12, 6.16, 6.17 and the scratch reuse of 6.18) is local and survives either way. (First-pass reading. Part E 16 and J3 compare §12.10 with
+   6.12, 6.16, 6.17 and the scratch reuse of 6.18) is local and survives either way. (Part E 16 and J3 compare §12.10 with
    D1 to D4 and find one architecture.)
 3. **Stage C is the price of the prizes in three tiers.** W2 and W3 (C4's engine slice) give the
    wall-time and warm-run prizes and TYPE-4. W4 (C5) gives item 6. W5 and W6 (C6 to C10) are what
@@ -197,8 +196,7 @@ CHECK-10's operator sites (D3).
    D to G; REG-7.8 and STUB-7.8 name F1 and E4 only as later clean-ups.
 4. **DOC-2.1 and C7 delete the same grammar.** DOC-2.1's "text grammar" is `types::parse_type_string`
    (the crate split's §1 calls it the second grammar: 219 mentions in 30 files, besides the 58 sites
-   of `parse_written_type`), and C7 deletes `types::parse` with it. (First pass: DOC-2.1 deferred, taken inside C7.
-   Superseded by Part E 14 and I4: F41 builds the lowering in batch 6 and deletes `types::parse` there; C7
+   of `parse_written_type`), and C7 deletes `types::parse` with it. (Superseded by Part E 14 and I4: F41 builds the lowering in batch 6 and deletes `types::parse` there; C7
    then builds the name scope on it.)
 5. **The 20 G plan's end validation will find items 4, 6, 7 and 17's second half unbuilt** if it runs
    after item 19 as written, and VAL-1's tooling (the canonical type printer, `registry-dump`, the

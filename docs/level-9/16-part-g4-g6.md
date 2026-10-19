@@ -98,7 +98,7 @@ identifier, with a keyword and with `{`, a receiver inside a `foreach` body, a c
 
 ## G6. What these designs change elsewhere
 
-- **Part B.** B1's identity list is already corrected. B4's "Where an id may be stored" is replaced
+- **Part B.** B4's "Where an id may be stored" is replaced
   by G1 (handles in walks, `Rooted` for a stored expression, ids only in the infer cache and in `syntax`; a
   step-1 handle is 16 bytes), and B4 gains the `DocText<'a>` view of a statement's leading doc (the `Text` of
   B3 with its tree) that G2 uses. B6's LSP-probe row is replaced by G4a, and its `import` is dropped. B7 step 1
@@ -115,6 +115,6 @@ identifier, with a keyword and with `{`, a receiver inside a `foreach` body, a c
   `Result<_, ParseError>`, and `lsp.rs`'s two `Err` arms, which assume a failed parse (G3.1 makes `parse`
   infallible); `CachedFile`, which gains the error list (G3.6); the ledger rows CHECK-6.18 (G1.10), SYN-1.9,
   Q-10 and SYN-6, and `CRATE_SPLIT_PLAN.md:6883-6891` ("a file with parse errors is still not analysed"), which Part E
-  31 supersedes (ruled on 2026-10-18); and Part E 26, whose "observers replace it later" is now G4b in batch 3.
+  31 supersedes; and Part E 26, whose "observers replace it later" is G4b in batch 3.
 
 ---
