@@ -109,6 +109,11 @@ Three tools, each for what it measures well:
   ./target/dhat/phpstan-rs check-project --config phpstan-rs.toml
   ```
 
+  With frame pointers kept (`RUSTFLAGS="-C force-frame-pointers=yes"`),
+  `patches/dhat` walks them for each call stack, on x86_64 and aarch64, on
+  Linux and macOS. On any other build, Windows included, it unwinds with the
+  platform's unwinder, which is slow for whole stacks.
+
 ## VS Code extension
 
 See [`editors/vscode/README.md`](editors/vscode/README.md).

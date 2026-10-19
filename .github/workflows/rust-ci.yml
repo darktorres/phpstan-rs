@@ -46,6 +46,7 @@ jobs:
         run: |
           cargo metadata --locked --format-version 1 > /dev/null
           cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
+          cargo metadata --locked --format-version 1 --manifest-path patches/dhat/Cargo.toml > /dev/null
       - name: Format
         if: ${{ !cancelled() }}
         run: cargo fmt --all --check
@@ -95,6 +96,13 @@ jobs:
       - uses: ./.github/actions/setup-rust
       - name: Tests
         run: cargo test --workspace --all-targets --no-fail-fast
+      # The heap profiler is a crate of its own, outside the workspace. Its
+      # tests take a backtrace through each walk it has.
+      - name: The dhat tests
+        if: ${{ !cancelled() }}
+        run: cargo test --locked --lib --manifest-path patches/dhat/Cargo.toml
+        env:
+          RUSTFLAGS: -C force-frame-pointers=yes
       # The last run's manifest is the base when that run was an ancestor.
       # A manifest is kept only when its check passed, so a test that went
       # missing is not taken as the next run's base.
@@ -189,6 +197,14 @@ jobs:
       - uses: ./.github/actions/setup-rust
       - name: Tests
         run: cargo test --workspace --all-targets --no-fail-fast
+      # The heap profiler is a crate of its own, outside the workspace. On
+      # the platforms where it walks frame pointers its tests take a
+      # backtrace through that walk; on the rest, through the unwinder.
+      - name: The dhat tests
+        if: ${{ !cancelled() }}
+        run: cargo test --locked --lib --manifest-path patches/dhat/Cargo.toml
+        env:
+          RUSTFLAGS: -C force-frame-pointers=yes
 
   platform-fixtures:
     strategy:

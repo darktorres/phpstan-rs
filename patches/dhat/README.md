@@ -7,8 +7,11 @@ backtraces (`trim_backtraces(None)`) take minutes rather than hours:
 - **Backtraces are taken before the lock** when they are untrimmed, so threads
   unwind in parallel.
 - **Frame pointers are walked** instead of DWARF unwind tables when the build
-  passes `-C force-frame-pointers=yes` on x86_64 (`build.rs`). Other builds
-  unwind with `backtrace` as before.
+  passes `-C force-frame-pointers=yes` on x86_64 or aarch64, on Linux or macOS
+  (`build.rs`). The walk reads `rbp` or `x29`, and bounds itself with the
+  thread's stack from `pthread_getattr_np` on Linux and from
+  `pthread_get_stackaddr_np` and `pthread_get_stacksize_np` on macOS. Other
+  builds, Windows included, unwind with `backtrace` as before.
 - **A backtrace is its return addresses.** Each distinct address is resolved
   once, when the profile is written.
 - **The global peak is recorded lazily.** Each program point copies its counts

@@ -1,5 +1,8 @@
-// Walks frame pointers only when the whole program keeps them: on x86_64,
-// with `-C force-frame-pointers=yes` among the build's flags.
+// Walks frame pointers only where the walk can read the frame records and
+// the thread's stack, and only when the whole program keeps them: on x86_64
+// and aarch64, on Linux and macOS, with `-C force-frame-pointers=yes` among
+// the build's flags. Any other build, Windows included, unwinds with
+// `backtrace`.
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(dhat_frame_pointers)");
     println!("cargo::rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
@@ -19,8 +22,10 @@ fn main() {
                 | "force-frame-pointers=true"
         )
     });
-    let x86_64 = std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|arch| arch == "x86_64");
-    if forced && x86_64 {
+    let target = |name: &str| std::env::var(name).unwrap_or_default();
+    let known = matches!(target("CARGO_CFG_TARGET_OS").as_str(), "linux" | "macos")
+        && matches!(target("CARGO_CFG_TARGET_ARCH").as_str(), "x86_64" | "aarch64");
+    if forced && known {
         println!("cargo::rustc-cfg=dhat_frame_pointers");
     }
 }

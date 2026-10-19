@@ -1,4 +1,6 @@
 /target
+# The patched heap profiler is a crate of its own, outside the workspace.
+/patches/dhat/target
 # Piwigo corpus-run snapshots (checker.md/CLAUDE.md convention): one file
 # per commit hash, so a before/after diff never needs rebuilding an old
 # commit just to re-run it. See .corpus-runs/README.md.

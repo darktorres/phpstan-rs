@@ -1224,10 +1224,11 @@ macro_rules! new_backtrace {
 // `new_backtrace`. The frame for this function will be removed by top frame
 // trimming.
 // Walks the frame-pointer chain: each frame record is the caller's frame
-// pointer followed by the return address into the caller. Built only when the
-// program is compiled with `-C force-frame-pointers=yes` (see `build.rs`); the
-// standard library keeps frame pointers already. A frame pointer outside this
-// thread's stack, or not above the previous one, ends the walk.
+// pointer followed by the return address into the caller, on x86_64 and on
+// aarch64 alike. Built only for the targets `build.rs` names, when the
+// program is compiled with `-C force-frame-pointers=yes`; the standard library
+// keeps frame pointers already. A frame pointer outside this thread's stack,
+// or not above the previous one, ends the walk.
 #[cfg(dhat_frame_pointers)]
 #[inline(never)]
 fn new_backtrace_inner(
@@ -1235,10 +1236,7 @@ fn new_backtrace_inner(
     frames_to_trim: &FxHashMap<usize, TB>,
 ) -> Backtrace {
     let (lo, hi) = stack_bounds();
-    let mut fp: usize;
-    unsafe {
-        std::arch::asm!("mov {}, rbp", out(reg) fp, options(nomem, nostack, preserves_flags));
-    }
+    let mut fp = frame_pointer();
     let mut frames = Vec::with_capacity(64);
     while fp >= lo && fp % 8 == 0 && fp + 16 <= hi && frames.len() < 4096 {
         let (next, ip) = unsafe { (*(fp as *const usize), *((fp + 8) as *const usize)) };
@@ -1290,12 +1288,42 @@ fn new_backtrace_inner(
     Backtrace(frames.into_boxed_slice())
 }
 
+// The frame pointer of the function that calls this one: `rbp` on x86_64 and
+// `x29` on aarch64. Always inlined, so that it is the caller's frame.
+#[cfg(all(dhat_frame_pointers, target_arch = "x86_64"))]
+#[inline(always)]
+fn frame_pointer() -> usize {
+    let fp: usize;
+    unsafe {
+        std::arch::asm!("mov {}, rbp", out(reg) fp, options(nomem, nostack, preserves_flags));
+    }
+    fp
+}
+
+#[cfg(all(dhat_frame_pointers, target_arch = "aarch64"))]
+#[inline(always)]
+fn frame_pointer() -> usize {
+    let fp: usize;
+    unsafe {
+        std::arch::asm!("mov {}, x29", out(reg) fp, options(nomem, nostack, preserves_flags));
+    }
+    fp
+}
+
+#[cfg(all(
+    dhat_frame_pointers,
+    not(any(target_arch = "x86_64", target_arch = "aarch64"))
+))]
+compile_error!("`build.rs` names a target whose frame pointer register `frame_pointer` does not read");
+
 #[cfg(dhat_frame_pointers)]
 thread_local! {
     static STACK_BOUNDS: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
 }
 
-// This thread's stack, `[lo, hi)`, read once per thread.
+// This thread's stack, `[lo, hi)`, read once per thread. When the system does
+// not give it, the bounds are all addresses, and the chain's own shape ends
+// the walk.
 #[cfg(dhat_frame_pointers)]
 fn stack_bounds() -> (usize, usize) {
     STACK_BOUNDS.with(|b| {
@@ -1303,21 +1331,37 @@ fn stack_bounds() -> (usize, usize) {
         if cur.1 != 0 {
             return cur;
         }
-        let mut bounds = (0, usize::MAX);
-        unsafe {
-            let mut attr: libc::pthread_attr_t = std::mem::zeroed();
-            if libc::pthread_getattr_np(libc::pthread_self(), &mut attr) == 0 {
-                let mut addr: *mut libc::c_void = std::ptr::null_mut();
-                let mut size: libc::size_t = 0;
-                if libc::pthread_attr_getstack(&attr, &mut addr, &mut size) == 0 {
-                    bounds = (addr as usize, addr as usize + size);
-                }
-                libc::pthread_attr_destroy(&mut attr);
-            }
-        }
+        let bounds = thread_stack().unwrap_or((0, usize::MAX));
         b.set(bounds);
         bounds
     })
+}
+
+// glibc and musl give a thread's stack through its attributes.
+#[cfg(all(dhat_frame_pointers, target_os = "linux"))]
+fn thread_stack() -> Option<(usize, usize)> {
+    unsafe {
+        let mut attr: libc::pthread_attr_t = std::mem::zeroed();
+        if libc::pthread_getattr_np(libc::pthread_self(), &mut attr) != 0 {
+            return None;
+        }
+        let mut addr: *mut libc::c_void = std::ptr::null_mut();
+        let mut size: libc::size_t = 0;
+        let found = libc::pthread_attr_getstack(&attr, &mut addr, &mut size) == 0;
+        libc::pthread_attr_destroy(&mut attr);
+        found.then(|| (addr as usize, addr as usize + size))
+    }
+}
+
+// macOS gives a thread's stack as its highest address and its size.
+#[cfg(all(dhat_frame_pointers, target_os = "macos"))]
+fn thread_stack() -> Option<(usize, usize)> {
+    unsafe {
+        let thread = libc::pthread_self();
+        let hi = libc::pthread_get_stackaddr_np(thread) as usize;
+        let size = libc::pthread_get_stacksize_np(thread);
+        hi.checked_sub(size).map(|lo| (lo, hi))
+    }
 }
 
 // The symbols of one return address, innermost (inlined) first: each one's
@@ -1965,8 +2009,74 @@ pub fn assert_is_panic<R, F: FnOnce() -> R + std::panic::UnwindSafe>(f: F, expec
 
 #[cfg(test)]
 mod test {
-    use super::trim_path;
+    use super::{Backtrace, FxHashMap, new_backtrace_inner, trim_path};
     use std::path::Path;
+
+    // Opens `depth` calls, then takes a backtrace. The call that opens each
+    // one is not its last act, so none is a tail call.
+    #[inline(never)]
+    fn descend(depth: usize, taken: &mut Option<Backtrace>) {
+        if depth == 0 {
+            *taken = Some(new_backtrace_inner(None, &FxHashMap::default()));
+        } else {
+            descend(depth - 1, taken);
+            std::hint::black_box(depth);
+        }
+    }
+
+    // The same `depth` calls are open from the one call site that opens them,
+    // so a backtrace holds its return address `depth` times.
+    fn assert_sees_each_open_call(depth: usize) {
+        let mut taken = None;
+        descend(depth, &mut taken);
+        let frames = taken.expect("a backtrace was taken").0;
+        let mut seen: FxHashMap<usize, usize> = FxHashMap::default();
+        for &ip in frames.iter() {
+            *seen.entry(ip).or_default() += 1;
+        }
+        let most = seen.values().copied().max().unwrap_or(0);
+        std::assert_eq!(
+            most,
+            depth,
+            "{} frames, the most repeated address {} times",
+            frames.len(),
+            most
+        );
+    }
+
+    #[test]
+    fn a_backtrace_has_a_frame_for_each_open_call() {
+        assert_sees_each_open_call(40);
+    }
+
+    #[test]
+    fn a_backtrace_on_a_thread_of_its_own_has_a_frame_for_each_open_call() {
+        std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(|| assert_sees_each_open_call(40))
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[cfg(dhat_frame_pointers)]
+    #[test]
+    fn a_threads_stack_holds_the_addresses_of_its_locals() {
+        let here = 0u8;
+        let at = &here as *const u8 as usize;
+        let (lo, hi) = super::stack_bounds();
+        std::assert!(lo <= at && at < hi, "{lo:#x} <= {at:#x} < {hi:#x}");
+        std::assert!(hi - lo < 1 << 40, "{lo:#x}..{hi:#x} is not a stack");
+        let spawned = std::thread::spawn(|| {
+            let here = 0u8;
+            let at = &here as *const u8 as usize;
+            (super::stack_bounds(), at)
+        })
+        .join()
+        .unwrap();
+        let ((lo, hi), at) = spawned;
+        std::assert!(lo <= at && at < hi, "{lo:#x} <= {at:#x} < {hi:#x}");
+    }
 
     #[test]
     fn test_trim_path() {
