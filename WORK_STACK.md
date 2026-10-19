@@ -25,6 +25,10 @@ Level 9 is the active level: the cross-platform fixes (`CROSS_PLATFORM_PLAN.md`)
 started on 2026-10-18 above level 8. Work its rows in the plan's order. When it
 finishes, level 8 resumes.
 
+Level 10 is planned, not started: the report viewer (`REPORT_VIEWER_PLAN.md`).
+It starts when level 9 is pushed. Its place against level 8 and the
+post-level-9 documents is open.
+
 Level 8 holds the 20 G plan and the off drill, and its order is in its section
 below: work the lowest item that has a READY row, item 2 as of 2026-10-17
 (LOAD-2.2's last part, decided that day), then item 8.
@@ -338,6 +342,13 @@ path and the include rule. All four are built.
 Open: round 4's result (pushed on 2026-10-18 at `9c555663`), R17's LOAD-8.7 entry
 for the platforms (from the legs' bench), round 5 (asked first) and the batch's
 checks.
+
+### 10. The report viewer — `REPORT_VIEWER_PLAN.md`
+
+Planned on 2026-10-18, not started. The browser feature is ROADMAP Phase 181:
+a local page that browses one analysis's findings. The plan's rows (V1 to V13)
+are built in this checkout, on this branch, after level 9 is pushed. The first
+row measures whether one scan can stand in for a run at each level.
 
 ## Documents with no place in the stack
 
