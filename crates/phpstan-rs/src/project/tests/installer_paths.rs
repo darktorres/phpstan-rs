@@ -202,7 +202,7 @@ fn composer_tree(name: &str) -> (TempDir, PathBuf) {
 }
 
 /// A session over `root` with Composer read, in the editor's degrade mode.
-fn composed(root: &Path) -> Session {
+pub(super) fn composed(root: &Path) -> Session {
     Session::resolve(
         &ConfigFile::empty(),
         None,
