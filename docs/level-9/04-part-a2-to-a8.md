@@ -15,7 +15,7 @@ The state is the ledger's, as of `a3931d49d`.
 | COMP-6 | DONE | A8: `088089ed` |
 | COMP-8 | DONE | A8: `5b76d855` |
 
-A4 has no task of its own (its work is REG-7.5's, OPEN in level 2). A6 is the validation, not a task.
+A6 is the validation, not a task.
 
 **Order.** A2 needs A1's `vendor_location` (its composer commit comes first); A3, A5 and A5a are independent of both.
 
@@ -83,25 +83,6 @@ that step does not touch it again. No behaviour change. Tests: `cargo test -p ph
 Measure: the heap profile's block count at `from_decl` (the 20 G report gives the cost of this row as allocations,
 M10, which an instruction count does not show) and off callgrind, `from_decl` inclusive. The ledger's REG-14.4 text
 ("passes the parameters on") is reworded to the predicate (Part N).
-
-## A4. Folded into REG-7.5 (Part E 41)
-
-`reconcile_with_native` (`decide.rs:13`) is the build-time combination of a PHPDoc type with its native type.
-Decision 8's rule replaces it at the final level: REG-7.5's combination reads the class hierarchy, where `decide.rs:211`
-trusts a class member unjudged because the registry is still being built. Its callers are the passes that REG-7.2
-and 7.5 turn into levels (`function_sig/type_resolution.rs:157`, and `resolve.rs:1274`, `:1305`, `:1340`). Making it
-allocation-free now would be work on code W2 replaces, for 41,085 allocations, so this row is not built on its own.
-What it found is how the replacement is written, and REG-7.5 starts from it: (1) the members are a borrowed slice,
-the union's own (`self.repr()`) or `std::slice::from_ref(&self)`, with no `vec![self]` and no `into_repr`, which
-copies the member list while the type is shared (`lib.rs:337`); (2) the branches that answer without building are
-the doc type inside the native type (the doc type), the native type inside the doc type (the native type) and the
-disjoint pair (the native type), each with no `kept`; (3) every other case builds its result once. Decision 8's rule
-also *intersects* a PHPDoc member that shares values with a native kind (`callable(int): string` on `Closure` is
-`Closure(int): string`, `T` on `Foo` is `T&Foo`) and keeps a native class that no member covers, which today's
-function never adds back; those answers are built, not chosen, and they differ from today's, so the existing
-`reconcile_with_native` cases in `registry/tests/function_signatures.rs` and `phpdoc_inheritance.rs` that decision 8
-keeps carry over as the new function's first tests, one for each branch, and the ones it changes are rewritten as its
-approved deltas.
 
 ## A5. SYN-1.1: `peeled` as a loop
 

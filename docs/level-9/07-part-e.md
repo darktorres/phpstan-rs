@@ -107,7 +107,7 @@ I4.3 that wait for C7's name scope, which the lowering does not have.
    its COMP-7 commits), A2, A3, A5 (SYN-1.1), A5a (LOAD-5.4), A7 (the autoload maps keep
    their keys, the root's own entries included, and gain PSR-0) and A8 (the vendor context of every other Composer root: a
    package's bundled `vendor/` and a degrade root's nested projects, with A1's delta commit), then
-   A6's validation against the batch's base binaries (REG-14.5 is folded into REG-7.5).
+   A6's validation against the batch's base binaries.
 2. Batch 0, in this order: VAL-1.1; the seven fixes the crate split's F1 puts first, each with its test (#22); F10's
    tests and fixture, F77 (analysed files; its context half is a run-level notice that leaves the exit status), F20, F21 and F69's fixtures; every level-3 finding or Q-11 follow-up that changes a dump (W1), with
    the Part E 42 deltas apart (with their conditions, #42), and COMP-2's grammar (#40: it changes a
@@ -118,7 +118,7 @@ I4.3 that wait for C7's name scope, which the lowering does not have.
    (SYN-1.9, Q-10's parser half, SYN-6) with the `php-version` crate (#32); 4 names (S-1 first; item 16, then 15: H1.7)
    with SYN-4.5; 4b the constant lookup (REG-18.4 with CHECK-4.2, #41; a delta, #42); 5 products (item 13,
    without PROD-5.7: #35; PROD-5.1 with file-local anonymous classes and the site table: #34); 6 PHPDoc (F41 first,
-   I4, then DOC-2.2 to 2.9 with REG-4.10 folded into 2.9, then TYPE-5); 7 the check's temporaries (the `Message` of
+   I4, then DOC-2.2 to 2.9 with REG-4.10 in 2.9, then TYPE-5); 7 the check's temporaries (the `Message` of
    I5, CHECK-6.4 to 6.6, 6.9 to 6.12, 6.16, 6.17 and the scratch reuse of 6.8 and 6.18; F69 and CHECK-9 are D2's: #17);
    8 is empty (LOAD-5.4 is Part A's; CACHE-13.1 and the LOAD-5.1 facts are W3's, #15 and #39; CACHE-8 after S-4, #41).
 5. The spikes at their gate points (H5): S-12 before item 9's step 2 (it settles whether B3's nodes hold byte spans

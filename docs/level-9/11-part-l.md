@@ -19,7 +19,6 @@ moves the cross-platform plan's R18 makes; (4) what checks it. A change needed i
 | T1 | A1 | `session.rs:335-394` (`Root::contains`, `unlisted_role`, `classify_unlisted`), `walk.rs:225-462` (`Scope`, `Reach`, `Starts`, `Reaching`, `below`) | the reach tables are part of the design (A1) |
 | T2 | A2 | `composer/lib.rs:92-141` (`PackageContext::load`), `manifest.rs:255-364`, `dir_listings.rs` | holds; `listings` is already a parameter |
 | T3 | A3 | `function_sig.rs:822-842`, `asserts.rs:66-125` | holds |
-| T4 | A4 | `types/decide.rs:1-60`, the four callers | holds |
 | T5 | A5 | `ast.rs:1414-1428` | holds; the guard goes with the recursion (147 callers) |
 | T6 | A5a (LOAD-5.4) | `project.rs:100-234`, `:770-830`, `:962-1000`, `:1812-1876`, `:2606-2626` | holds; all four readers read analysed or retained trees |
 | T7 | A6 | `ITEMS_1_TO_3_FIXES_PLAN.md:1253-1254` | digest and counts match |

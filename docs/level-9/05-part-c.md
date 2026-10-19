@@ -78,7 +78,7 @@ items 13 and 14, so none is a claim. Validation is at the end of each item.
 ## C1. The path, in order (the order of Part E's "The sequence this gives")
 
 1. The cross-platform fixes (finished at `a83b1675`); then Part A's rows
-   (A1 to A3, A5, A5a, A7 and A8; A4 is folded into REG-7.5).
+   (A1 to A3, A5, A5a, A7 and A8).
 2. Batch 0 (Part E 13 and 22: the oracle tools and the baseline, F10's tests, F20, F21, F77, the level-3 backlog that
    changes a dump, and the seven fixes the crate split's F1 puts first), then item 9: steps 0, 1, 2, then step 3
    (LOAD-3.5, the scratch builder, which is item 3's row). Steps 4 and 5 (SYN-1.9, SYN-1.10) come later (batch 3, and
@@ -91,9 +91,9 @@ items 13 and 14, so none is a claim. Validation is at the end of each item.
 | 2 | the lexer, second pass | items 11 and 12: SYN-3.1-3.4 (I3 for 3.2), SYN-4.2-4.10 less 4.5, 4.8 and 4.9 | ≈0.2 G + ≈0.35 G | same files as batch 1; SYN-4.1 shrank (the lexer interns nothing: I2) and is in batch 1; 4.3 needs SYN-3.2, 4.7 needs 4.2 |
 | 3 | parse recovery (in: Part E 11; changes output) | SYN-1.9, Q-10's parser half, SYN-6 (G3); the `php-version` crate with `VersionSet` and `Availability` (Part E 32); F77's diagnostics now come from the tree's `errors()` | none (VAL-2.10 deltas) | after batch 1, so the parse functions are rewritten once; Q-10's version half needs STUB-7.1 (level 2) |
 | 4 | names | S-1 first; item 16 (NAME-2.1-2.3), **then** item 15 (NAME-1.1-1.6), and SYN-4.5 (`ConstName`) | ≈0.1 G + ≈0.6 G; ≈15 MB | names first (Part E 12): products and PHPDoc work are born on `FoldedName` and `ConstName`; NAME-1.4 needs NAME-2.1, so the plan's number order has the needing item first |
-| 4b | the constant lookup | REG-18.4 with CHECK-4.2 (needs `ConstName`; a delta) | CHECK-4.2 is 5.1 M Ir | one place for the two rows: after batch 4, before batch 5 (Part E 41 folded CHECK-4.2 into REG-18.4) |
+| 4b | the constant lookup | REG-18.4 with CHECK-4.2 (needs `ConstName`; a delta) | CHECK-4.2 is 5.1 M Ir | one place for the two rows: after batch 4, before batch 5 |
 | 5 | a file's products | item 13: PROD-5.8, 5.2, 5.1, 5.3, 5.5, 5.6 (PROD-5.7 is not built: Part E 35), REG-14.1, and CHECK-13 (its rule sees anonymous classes once PROD-5.1 gives them a file-local identity) | ≈0.45 G | three returns to earlier items open here (C3); PROD-5.4 is REG-16.4's to delete; PROD-5.8's record is keyed by `FoldedName` and `ConstName` (batch 4's types), and `RefKey` goes with the dependents machinery in W3 |
-| 6 | PHPDoc | item 14: DOC-2.1 first (F41: Part E 14), then 2.2 to 2.9, with REG-4.10 folded into 2.9; TYPE-5 | ≈0.35 G; the memos' memory | 2.2 needs PROD-5.2 (batch 5), 2.5 needs NAME-1 (batch 4), 2.6 needs 2.1 and 2.3, 2.9 needs the comment's offset (SYN-3.4, batch 2); item 14 closes |
+| 6 | PHPDoc | item 14: DOC-2.1 first (F41: Part E 14), then 2.2 to 2.9, with REG-4.10 in 2.9; TYPE-5 | ≈0.35 G; the memos' memory | 2.2 needs PROD-5.2 (batch 5), 2.5 needs NAME-1 (batch 4), 2.6 needs 2.1 and 2.3, 2.9 needs the comment's offset (SYN-3.4, batch 2); item 14 closes |
 | 7 | the check's temporaries | item 18's temporaries (the `Message` of I5, CHECK-6.4 to 6.6, 6.9 to 6.12, 6.16, 6.17) and the scratch reuse of CHECK-6.8 and 6.18 (allocations that hold no tree handle) | the temporaries' share of ≈1.6-2.0 G | the inference core and the scopes group are Stage D's (Part E 16): their ≈1.0-1.3 G and ≈0.15-0.25 G arrive with it; F69 and CHECK-9 are D2's (Part E 17), CHECK-4.2 is batch 4b's, and the one-checker-per-worker form of CHECK-6.18 is E7's |
 | 8 | nothing is left that is not the wall's | LOAD-5.4 moved to Part A (A5a); CACHE-13.1 is W3's, built once as `File.stamp` (Part E 15); CACHE-8 waits for S-4 (Part E 41); LOAD-5.1's six passes' per-file facts are W3's `file_products` fields, and E1 moves their collection onto D6's API (Part E 39); LOAD-5.2 and LOAD-3.1 are W3's (LOAD-5.2 needs both LOAD-5.1 and LOAD-3.1) | – | the decision point of C4 comes after batch 7 |
 | 9 | decision point | – | – | level 8's READY list is empty; what is left is levels 1 to 7 (C4, and Part D) |
@@ -171,7 +171,7 @@ grammar, and `DocType` is eager. Then the memo work (DOC-2.2, 2.4, 2.8), tag eff
 one vector of nodes per docblock (2.7), one product per doc text (2.6) and doc blocks as a per-file product found
 by the comment's offset (2.9). DOC-2.9 needs REG-4.10 (the builder parses each doc comment once), and the two are one
 change: the builder and the checker read a doc comment's block from the file's doc blocks, which is how the builder
-comes to parse it once. So REG-4.10 is folded into DOC-2.9 and does not wait for level 2, and item 14 closes whole.
+comes to parse it once. So REG-4.10 is built with DOC-2.9 and does not wait for level 2, and item 14 closes whole.
 The statement `@var` memo overlaps DOC-2.2, so it is taken after 2.2. TYPE-5 (F14) follows F41 in this batch, as its
 own commit after I4.5 step 5: it is the ledger's rule (the array member takes `K` as `array<K, V>` does), built once
 templates and aliases are marked, and F14's design text, which restricts `K` and drops the array member, is
@@ -257,7 +257,7 @@ Design of REG-16.2 and REG-16.3 can run while batches 5 to 7 are built. Part D l
    be measured (`LineIndex::new` was 270.4 M over 19,211 lexers in the 20 G profile: 63.5 M of per-line `memchr`
    calls, 83.4 M of column tables, 116.3 M of its own, and 7.2 M unattributed; the ledger's later 363.4 M is over
    25,753 builds, stub files included).
-2. **Item 14 closes whole** (Part E 14 undefers DOC-2.1 as F41, and REG-4.10 is folded into DOC-2.9: note 6).
+2. **Item 14 closes whole** (Part E 14 undefers DOC-2.1 as F41, and REG-4.10 is built with DOC-2.9: note 6).
 3. **Order inside batches 4 to 6** (13, 16, 15, 14 against 13, 14, 15, 16): the first leaves no item
    half done and needs no return to a finished item, at the price of leaving the plan's numbering.
 4. **Oracles for items 13 to 16.** Their lines name `registry-dump`, `--dump-expr-types` and the

@@ -50,7 +50,7 @@ None. H6 lists the edits the engine cluster implies in other parts and documents
 - **Part C.** Batch 4 is H1.7, with S-1 and S-2 before it. Batch 5 loses PROD-5.7 and LOAD-4.7's
   file-references half (Part E 35); its PROD-5.1 keeps anonymous classes out of the declaration names and lays out the site table
   that the declarations no longer hold (Part E 34). CACHE-13.1 is the source of `File.stamp` and is built at W3 (Part E 15); CACHE-8
-  waits for S-4 and CHECK-4.2 goes with REG-18.4 (Part E 41), and REG-14.5 is folded into REG-7.5 (A4).
+  waits for S-4 and CHECK-4.2 goes with REG-18.4 (Part E 41).
 - **Part D.** W2 is H3.6; W3 is H4.7, with SYN-1.9 added to REG-16.4's needs; W3's open question ("which parts of
   REG-8 it builds on") is answered by H3.5; STUB-7.5, the lazy Composer locator, moves from W4 to W3 (H4.1).
 - **Part E.** Rows 33 to 42.

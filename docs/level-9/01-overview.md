@@ -16,8 +16,7 @@ ones (rows 16 to 18). Part K records the review by task group, and Part L the se
 where either changed an earlier part, the change is made there. Part N lists the documents and the ledger and stack edits the plan implies.
 
 - **Part A** designs the batch that follows the cross-platform fixes: five rows (`WORK_STACK.md`: item 2's last part, item 8's
-  REG-14.4, item 9's first step, item 19's LOAD-5.4, and LOAD-9), the composer follow-ups A7 and A8 (Part E 40) and
-  REG-14.5, which is folded into REG-7.5.
+  REG-14.4, item 9's first step, item 19's LOAD-5.4, and LOAD-9), the composer follow-ups A7 and A8 (Part E 40).
 - **Part B** designs item 9 (SYN-1: the flat tree) as a staged migration. It needs nine
   decisions settled first (B2, D1 to D9); the three that matter most are D1 (handles and
   views, not bare ids), D2 (staged migration over the boxed tree first) and D3 (what a node

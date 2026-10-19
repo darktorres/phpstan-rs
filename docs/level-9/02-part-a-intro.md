@@ -18,7 +18,7 @@ A task is listed where it is built; the state is the ledger's, as of `a3931d49d`
 | COMP-6 | DONE | A8: `088089ed` |
 | COMP-8 | DONE | A8: `5b76d855` |
 
-A4 has no task of its own: its work is REG-7.5's, which is OPEN in level 2. A6 is the validation, not a task.
+A6 is the validation, not a task.
 
 | # | row | item | what | where |
 |---|---|---|---|---|

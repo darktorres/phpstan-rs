@@ -145,6 +145,24 @@ class as each candidate, an ancestor every candidate has being certain and one t
 | REG-10 | a `TestProject` builder (inline files into a database with the corpus) replaces `Registry::build`'s 188 tests' setup; `Registry::build` and `Origin::Unknown` are deleted |
 | REG-16.5 | salsa's event callback (`WillExecute`, `DidValidateMemoizedValue`, `WillBlockOn`; `event.rs`) counts executions and validations by query; the *asker* of a query is not in the event, so the provider records the first reader of each name itself (S-3) |
 
+### H3.5a REG-7.5's combination at the final level
+
+`reconcile_with_native` (`decide.rs:13`) is the build-time combination of a PHPDoc type with its native type.
+Decision 8's rule replaces it at the final level: REG-7.5's combination reads the class hierarchy, where `decide.rs:211`
+trusts a class member unjudged because the registry is still being built. Its callers are the passes that REG-7.2
+and 7.5 turn into levels (`function_sig/type_resolution.rs:157`, and `resolve.rs:1274`, `:1305`, `:1340`). Making it
+allocation-free now would be work on code W2 replaces, for 41,085 allocations .
+The replacement is written as follows: (1) the members are a borrowed slice,
+the union's own (`self.repr()`) or `std::slice::from_ref(&self)`, with no `vec![self]` and no `into_repr`, which
+copies the member list while the type is shared (`lib.rs:337`); (2) the branches that answer without building are
+the doc type inside the native type (the doc type), the native type inside the doc type (the native type) and the
+disjoint pair (the native type), each with no `kept`; (3) every other case builds its result once. Decision 8's rule
+also *intersects* a PHPDoc member that shares values with a native kind (`callable(int): string` on `Closure` is
+`Closure(int): string`, `T` on `Foo` is `T&Foo`) and keeps a native class that no member covers, which today's
+function never adds back; those answers are built, not chosen, and they differ from today's, so the existing
+`reconcile_with_native` cases in `registry/tests/function_signatures.rs` and `phpdoc_inheritance.rs` that decision 8
+keeps carry over as the new function's first tests, one for each branch, and the ones it changes are rewritten as deltas.
+
 ### H3.6 The order inside W2, and what `file_decls` is until W3
 
 W2 puts the registry on the engine before the pipeline is on it, so in W2 `file_decls(File)` is an **input**: the

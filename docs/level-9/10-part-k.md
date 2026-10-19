@@ -15,9 +15,8 @@ None. Part K reviews the earlier batch plan: its verdicts on each row (K1 and K1
 | 1 | A1, LOAD-2.2's last part | A directory Composer wrote into is recognised from its own listing, a nested project's vendor directory included, and the project's directory is `vendor_location`, over candidates (A1). The install directories of packages Composer put elsewhere are Composer's too (COMP-7). It follows the cross-platform plan's R7 (the case rule on the names) |
 | 2 | A2, LOAD-9 | The listing shortcut for the install path is exact only if `vendor/composer` is a real directory (a linked one is tested); discovery, spawned first, takes the one `vendor_location` answer; `DirListings` is safe to ask from both threads (read) |
 | 3 | A3, REG-14.4 | A predicate `Fn(&str) -> bool`, not `&[Param]`: item 9's step 1 turns the list into a view and the assert code then needs no second change |
-| 4 | A4, REG-14.5 | **folded into REG-7.5** (Part E 41). Decision 8's final-level rule replaces `reconcile_with_native` and both its callers; the function is written there as A4 now describes |
 | 5 | A5, SYN-1.1 | sound (the loop; the guard in `Drop` stays until step 2) |
-| 6 | A6, bookkeeping | sound; one line removed with A4 |
+| 6 | A6, bookkeeping | sound |
 | 7 | VAL-1.1 | sound (`1892b477` exists; the six listed differences are item 0.1's) |
 | 8 | F10 | Already fixed in form. `can_begin_expression` (`parser/expr.rs:211`) lists the tokens that cannot begin an expression, `and`, `or`, `xor`, `instanceof`, `&` and `\|>` among them, since `3b7e4d95` (2026-10-03, after the review's design); `php -l` accepts every shape the finding lists. Unbuilt: the exhaustive allow-list (a new token must be classified), its table test, the seven parser tests and the fixture. Tests and fixture in batch 0; the predicate on SYN-2's `TokenKind` in batch 1 |
 | 9 | F20 | sound; after the cross-platform plan's R10 (which edits `syntax::stack`, and is built) and before item 9, so its lint checks the recursion item 9 writes; its `stack` crate restores `LIMIT` from a drop guard so that it runs on unwind too (H2.8) |
@@ -57,7 +56,7 @@ designed.
 | REG-2 | sound (an `xtask` inventory) |
 | REG-4.5, 4.7, 4.13, 4.14 | sound; flags and options carry no position (H1.5a); 4.14 is H2.7's determinism rule |
 | REG-4.9 | built with REG-4.12: its `Option<&T>` and slices are the `Provider`'s `&'db T` |
-| REG-4.10 | folded into DOC-2.9 (batch 6): the builder parses each doc comment once by reading the file's `doc_blocks` (H2.3) |
+| REG-4.10 | built with DOC-2.9 (batch 6): the builder parses each doc comment once by reading the file's `doc_blocks` (H2.3) |
 | REG-5 | sound; its case delta is F50's |
 | REG-6, REG-18.1, 18.2, 18.3, 18.5, 18.6, CHECK-11 | sound |
 | REG-18.4 | sound; takes CHECK-4.2 (Part E 41) and `ConstName` (H1.2) |
@@ -68,7 +67,7 @@ designed.
 | REG-4.11 | sound; after REG-8.5 and 10 (H3.6 step 5) |
 | REG-16.2 | "never reused" reworded (Part E 38); the ids are named in the engine module only (H1.6) |
 | REG-16.3 | sound; purity and global variables are queries (H2.3, H3.7), further than the row's "run again per revision" |
-| REG-7.1 to 7.5, 7.12 | H3.1; 7.5 is decision 8's rule at the final level and replaces `reconcile_with_native` (A4) |
+| REG-7.1 to 7.5, 7.12 | H3.1; 7.5 is decision 8's rule at the final level and replaces `reconcile_with_native` |
 | REG-7.6 | H3.3 (`cycle_result`; the fallback per constant for the PHPDoc case is S-6's) |
 | REG-7.7 | H3.5 (`ClassDecl` keeps the scratch the row names) |
 | REG-7.8 | `finish_loading` stays until W3, then `Session::load` (H3.5, H4.1) |
