@@ -74,6 +74,10 @@ jobs:
         os: [ubuntu-24.04, macos-26, windows-2025-vs2026]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    # RUSTFLAGS replaces the flags .cargo/config.toml gives, so they are
+    # repeated here as in rust-ci.yml, mold included on the Linux runner.
+    env:
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-24.04' && '-D warnings -Z threads=8 -C link-arg=-fuse-ld=mold' || '-D warnings -Z threads=8' }}
     steps:
       # Windows images check text out with CRLF. .gitattributes keeps this
       # repository's files LF, but not the phpstan-src submodule's stubs,

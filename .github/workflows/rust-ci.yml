@@ -21,6 +21,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # RUSTFLAGS replaces the flags .cargo/config.toml gives every build, so each
+  # value repeats them and adds -D warnings. The x86_64 Linux jobs also link
+  # with mold, as the config does for that target.
+  RUSTFLAGS: -D warnings -Z threads=8
   # The test profile keeps line tables rather than full debug info. A
   # backtrace still names each frame's file and line; a debugger loses its
   # view of local variables.
@@ -30,6 +34,8 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-rust
@@ -88,6 +94,8 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold
     steps:
       # The test-name manifest searches the whole history for its base.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -102,7 +110,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test --locked --lib --manifest-path patches/dhat/Cargo.toml
         env:
-          RUSTFLAGS: -C force-frame-pointers=yes
+          RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold -C force-frame-pointers=yes
       # The last run's manifest is the base when that run was an ancestor.
       # A manifest is kept only when its check passed, so a test that went
       # missing is not taken as the next run's base.
@@ -132,6 +140,8 @@ jobs:
   test-no-default-features:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-rust
@@ -141,6 +151,8 @@ jobs:
   fixtures:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      RUSTFLAGS: -D warnings -Z threads=8 -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-rust
@@ -178,7 +190,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo check -p phpstan-rs --profile dhat --features dhat-heap
         env:
-          RUSTFLAGS: -C force-frame-pointers=yes
+          RUSTFLAGS: -D warnings -Z threads=8 -C force-frame-pointers=yes
 
   platform-test:
     strategy:
@@ -204,7 +216,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test --locked --lib --manifest-path patches/dhat/Cargo.toml
         env:
-          RUSTFLAGS: -C force-frame-pointers=yes
+          RUSTFLAGS: -D warnings -Z threads=8 -C force-frame-pointers=yes
 
   platform-fixtures:
     strategy:
