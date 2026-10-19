@@ -1213,3 +1213,36 @@ fn peeled_walks_a_deeply_nested_grouping_without_recursing() {
         ExprKind::Literal(Literal::Int(1))
     ));
 }
+
+#[test]
+fn bare_yield_before_a_word_or_symbol_operator_parses() {
+    // Each of these passes `php -l`; the bare `yield` ends before the
+    // operator, which then applies to it as to any operand.
+    for expr in [
+        "(yield and $b)",
+        "(yield or $b)",
+        "(yield xor $b)",
+        "(yield & $b)",
+        "(yield |> $b)",
+        "(yield instanceof Foo)",
+    ] {
+        let src = format!("<?php function gen() {{ $x = {expr}; }}");
+        let program = parse(&src);
+        assert!(
+            format!("{program:?}").contains("Yield(None, None)"),
+            "{expr}: expected a bare yield in {program:?}"
+        );
+    }
+}
+
+#[test]
+fn bare_yield_as_a_foreach_subject_parses() {
+    let program = parse("<?php function gen() { foreach ((yield) as $v) {} }");
+    assert!(format!("{program:?}").contains("Yield(None, None)"));
+}
+
+#[test]
+fn yield_with_a_key_and_an_assigned_value_parses() {
+    let program = parse("<?php function gen() { yield $k => $v = 3; }");
+    assert!(format!("{program:?}").contains("Yield(Some("));
+}
