@@ -5,8 +5,10 @@ A task is a row of `PROFILE_DRILL_PIWIGO_LEDGER.md` (`| ID | task | item | state
 A part names a task anywhere in its text: in a heading, a table cell, or prose. A list
 after a prefixed ID names each member of it: `CHECK-6.4 to 6.6, 6.9` names CHECK-6.4,
 CHECK-6.5, CHECK-6.6 and CHECK-6.9; `SRV-1 to SRV-7` names SRV-1 to SRV-7, since a head with
-no minor number takes top-level numbers. The status is the first known state word (OPEN, DONE,
-READY, PART, SUPERSEDED, SKIP, BLOCKED) among the first words of the ledger's state cell.
+no minor number takes top-level numbers. The status is a state word (OPEN, DONE, READY, PART,
+SUPERSEDED, SKIP, BLOCKED) among the first words of the ledger's state cell. A pending word (OPEN,
+READY, PART) there wins over DONE, since a row with work left is not done; otherwise the first state
+word counts.
 A part's table lists the tasks it names and the other parts that name them. The table sits
 between two markers under the part's first heading; running the script again replaces it.
 
@@ -95,6 +97,9 @@ def named(text, rows):
 
 def status_of(state):
     words = re.findall(r"[A-Za-z]+", state)[:8]
+    for word in words:
+        if word in PENDING:
+            return word
     for word in words:
         if word in KNOWN:
             return word

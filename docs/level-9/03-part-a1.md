@@ -4,11 +4,11 @@
 
 ## Status of this part's tasks
 
-From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
-| LOAD-2.2 | DONE | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 04 10 11 12 |
+| LOAD-2.2 | PART | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 04 10 11 12 |
 | LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 02 04 21 22 |
 | LOAD-7.8 | OPEN | OPEN | 04 08 12 31 |
 | LOAD-8.10 | DONE | DONE `9513479b`. **The rule:** a walk hands a directory's files over when it is the one walk of their strongest role … | 04 21 |

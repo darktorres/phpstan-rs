@@ -4,12 +4,12 @@
 
 ## Status of this part's tasks
 
-From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
 | LOAD-2.1 | DONE | DONE `3d2dc7c3`, `08877e58`, `5cca45c1`; the drop is a guard on each file's directories (`walked_by_a_directory`), not … | — |
-| LOAD-2.2 | DONE | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 03 04 10 11 12 |
+| LOAD-2.2 | PART | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 03 04 10 11 12 |
 | LOAD-2.3 | DONE | DONE `07595369`. The configured spelling is not carried: the walk builds every path from its resolved parent, so no … | — |
 | LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 03 04 21 22 |
 | LOAD-2.5 | DONE | DONE `8590ff55`, with two deviations from the design above. Nested roots are not dropped, and the roots are not sorted: … | — |

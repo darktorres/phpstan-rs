@@ -4,12 +4,12 @@
 
 ## Status of this part's tasks
 
-From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
 | LOAD-1.3 | DONE | DONE `c9f6a85c` | 06 |
-| LOAD-2.2 | DONE | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 03 04 10 12 |
+| LOAD-2.2 | PART | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 03 04 10 12 |
 | LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone | 01 02 04 05 07 10 12 |
 | LOAD-7.5 | READY | READY | 06 10 12 |
 | SYN-1.3 | OPEN | OPEN | 07 10 12 13 |

@@ -4,11 +4,11 @@
 
 ## Status of this part's tasks
 
-From the ledger at `b9de6dcf1` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
 
 | task | status | ledger | also in |
 |---|---|---|---|
-| LOAD-2.2 | DONE | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 03 04 11 12 |
+| LOAD-2.2 | PART | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 03 04 11 12 |
 | LOAD-3.1 | OPEN | OPEN | 02 04 05 06 12 19 21 |
 | LOAD-3.3 | PART | PART. **The load: DONE `a5a4d85f`.** In a project built once `keeps_tree` is a function of the role, which LOAD-2.2's … | 05 08 19 |
 | LOAD-3.5 | OPEN | OPEN | 05 12 13 19 |
