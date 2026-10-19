@@ -1314,7 +1314,9 @@ fn frame_pointer() -> usize {
     dhat_frame_pointers,
     not(any(target_arch = "x86_64", target_arch = "aarch64"))
 ))]
-compile_error!("`build.rs` names a target whose frame pointer register `frame_pointer` does not read");
+compile_error!(
+    "`build.rs` names a target whose frame pointer register `frame_pointer` does not read"
+);
 
 #[cfg(dhat_frame_pointers)]
 thread_local! {
@@ -2009,7 +2011,7 @@ pub fn assert_is_panic<R, F: FnOnce() -> R + std::panic::UnwindSafe>(f: F, expec
 
 #[cfg(test)]
 mod test {
-    use super::{Backtrace, FxHashMap, new_backtrace_inner, trim_path};
+    use super::{new_backtrace_inner, trim_path, Backtrace, FxHashMap};
     use std::path::Path;
 
     // Opens `depth` calls, then takes a backtrace. The call that opens each

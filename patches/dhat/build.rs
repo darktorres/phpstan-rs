@@ -24,7 +24,10 @@ fn main() {
     });
     let target = |name: &str| std::env::var(name).unwrap_or_default();
     let known = matches!(target("CARGO_CFG_TARGET_OS").as_str(), "linux" | "macos")
-        && matches!(target("CARGO_CFG_TARGET_ARCH").as_str(), "x86_64" | "aarch64");
+        && matches!(
+            target("CARGO_CFG_TARGET_ARCH").as_str(),
+            "x86_64" | "aarch64"
+        );
     if forced && known {
         println!("cargo::rustc-cfg=dhat_frame_pointers");
     }
