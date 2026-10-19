@@ -14,7 +14,7 @@ same contract as the fallback: only the engine module names salsa (a crate from 
 
 ## Tasks this part owns
 
-None. H1 is a design, and its batch-4 build (H1.7) lists rows that Part C's C1 table already schedules: NAME-1.1 to 1.6, NAME-2.1 to 2.3 and SYN-4.5, all in batch 4. CHECK-13 is decided in H1.4 (anonymous classes reach the class-shape parent-call rules), but no batch table lists it yet, so its build place is open. The row is OPEN and is read against the code when it is worked, as Part N says.
+None. H1 is a design, and its batch-4 build (H1.7) lists rows that Part C's C1 table already schedules: NAME-1.1 to 1.6, NAME-2.1 to 2.3 and SYN-4.5, all in batch 4. CHECK-13 is decided in H1.4 (anonymous classes reach the class-shape parent-call rules), and it is built in batch 5 with PROD-5.1, whose file-local anonymous-class identity its rule needs (Part C's C1 table lists it there).
 
 ### H1.0 What the code and the crate showed
 

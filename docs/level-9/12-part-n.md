@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-None. Part N lists the documents and the ledger edits the plan implies (N2 to N6), and it owns no build task. The rows it adds are owned by the parts that build them: the COMP rows by Part A, the SRV and FIX rows by Part E, CHECK-12 by Part D's wall step W7, and CHECK-13, which H1.4 decides, by no batch yet (its row is OPEN).
+None. Part N lists the documents and the ledger edits the plan implies (N2 to N6), and it owns no build task. The rows it adds are owned by the parts that build them: the COMP rows by Part A, the SRV and FIX rows by Part E, CHECK-12 by Part D's wall step W7, and CHECK-13 by batch 5 (Part C), which H1.4 decides.
 
 
 Nothing here is done in plan mode. This part consolidates what Parts A, B, E, H, J and M scatter ("the ledger would
@@ -135,7 +135,7 @@ closed output pipe ending the run quietly; rename refusing qualified names, impo
 today's code (Part E 22). `CHECK-12` is exact include modelling (the included file's top-level assignments in the
 includer's scope, and its return value as the include's type), built in Stage D on the scope model of D1 and D2, with
 `any_variable_may_exist` as its fallback (G3.6); `CHECK-13` makes the class-shape parent-call rules include anonymous
-classes (H1.4). Both are OPEN rows, each to be read against the code when it is worked.
+classes (H1.4), in batch 5 with PROD-5.1. Both are OPEN rows; CHECK-12 is read against the code when W7 is worked.
 
 ## N7. The comparisons against an old implementation (Part E 13's policy)
 

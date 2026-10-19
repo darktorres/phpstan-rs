@@ -42,6 +42,7 @@ Written by hand. Each task is listed in the C1 batch that builds it. The state i
 | PROD-5.5 | READY | 5 |
 | PROD-5.6 | READY | 5 |
 | REG-14.1 | OPEN | 5 |
+| CHECK-13 | OPEN | 5 |
 | DOC-2.1 | READY (deferred) | 6 |
 | DOC-2.2 | OPEN | 6 |
 | DOC-2.3 | READY | 6 |
@@ -91,7 +92,7 @@ items 13 and 14, so none is a claim. Validation is at the end of each item, as b
 | 3 | parse recovery (in: Part E 11; changes output) | SYN-1.9, Q-10's parser half, SYN-6 (G3); the `php-version` crate with `VersionSet` and `Availability` (Part E 32); F77's diagnostics now come from the tree's `errors()` | none (VAL-2.10 deltas) | after batch 1, so the parse functions are rewritten once; Q-10's version half needs STUB-7.1 (level 2) |
 | 4 | names | S-1 first; item 16 (NAME-2.1-2.3), **then** item 15 (NAME-1.1-1.6), and SYN-4.5 (`ConstName`) | ≈0.1 G + ≈0.6 G; ≈15 MB | names first (Part E 12): products and PHPDoc work are born on `FoldedName` and `ConstName`; NAME-1.4 needs NAME-2.1, so the plan's number order has the needing item first |
 | 4b | the constant lookup | REG-18.4 with CHECK-4.2 (needs `ConstName`; a delta, approved 2026-10-18: M5b) | CHECK-4.2 is 5.1 M Ir | one place for the two rows: after batch 4, before batch 5 (Part E 41 folded CHECK-4.2 into REG-18.4) |
-| 5 | a file's products | item 13: PROD-5.8, 5.2, 5.1, 5.3, 5.5, 5.6 (PROD-5.7 is not built: Part E 35), and REG-14.1 | ≈0.45 G | three returns to earlier items open here (C3); PROD-5.4 is REG-16.4's to delete; PROD-5.8's record is keyed by `FoldedName` and `ConstName` (batch 4's types), and `RefKey` goes with the dependents machinery in W3 |
+| 5 | a file's products | item 13: PROD-5.8, 5.2, 5.1, 5.3, 5.5, 5.6 (PROD-5.7 is not built: Part E 35), REG-14.1, and CHECK-13 (its rule sees anonymous classes once PROD-5.1 gives them a file-local identity) | ≈0.45 G | three returns to earlier items open here (C3); PROD-5.4 is REG-16.4's to delete; PROD-5.8's record is keyed by `FoldedName` and `ConstName` (batch 4's types), and `RefKey` goes with the dependents machinery in W3 |
 | 6 | PHPDoc | item 14: DOC-2.1 first (F41: Part E 14), then 2.2 to 2.9, with REG-4.10 folded into 2.9; TYPE-5 | ≈0.35 G; the memos' memory | 2.2 needs PROD-5.2 (batch 5), 2.5 needs NAME-1 (batch 4), 2.6 needs 2.1 and 2.3, 2.9 needs the comment's offset (SYN-3.4, batch 2); item 14 closes |
 | 7 | the check's temporaries | item 18's temporaries (the `Message` of I5, CHECK-6.4 to 6.6, 6.9 to 6.12, 6.16, 6.17) and the scratch reuse of CHECK-6.8 and 6.18 (allocations that hold no tree handle) | the temporaries' share of ≈1.6-2.0 G | the inference core and the scopes group are Stage D's (Part E 16): their ≈1.0-1.3 G and ≈0.15-0.25 G arrive with it; F69 and CHECK-9 are D2's (Part E 17), CHECK-4.2 is batch 4b's, and the one-checker-per-worker form of CHECK-6.18 is E7's |
 | 8 | nothing is left that is not the wall's | LOAD-5.4 moved to Part A (A5a); CACHE-13.1 is W3's, built once as `File.stamp` (Part E 15); CACHE-8 waits for S-4 (Part E 41); LOAD-5.1's six passes' per-file facts are W3's `file_products` fields, and E1 moves their collection onto D6's API (Part E 39); LOAD-5.2 and LOAD-3.1 are W3's (LOAD-5.2 needs both LOAD-5.1 and LOAD-3.1) | – | the decision point of C4 comes after batch 7 |

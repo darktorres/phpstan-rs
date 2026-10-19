@@ -87,7 +87,7 @@ Written by hand. Each task is listed under the wall step (W1 to W8, the table un
 | W4 | STUB-12.3 | OPEN |
 | W4 | STUB-12.4 | OPEN |
 | W4 | STUB-12.5 | OPEN |
-| W4 | CHECK-10 | OPEN |
+| W4 | CHECK-10 (its version table) | OPEN |
 | W4 | STUB-13.1 | OPEN |
 | W5 | REG-15.1 | OPEN |
 | W5 | REG-15.2 | OPEN |
@@ -96,12 +96,13 @@ Written by hand. Each task is listed under the wall step (W1 to W8, the table un
 | W6 | STUB-13.2 | OPEN (reworded when W3 lands) |
 | W7 | CHECK-9 | READY (its F69 half is FIX-69, in Part E's table) |
 | W7 | CHECK-7 | OPEN (its checker half; a delta, approved) |
+| W7 | CHECK-10 (its operator sites, D3) | OPEN |
 | W7 | CHECK-12 | OPEN |
 | W8 | VAL-1.13 | OPEN |
 | W8 | VAL-1.14 | OPEN |
 | W8 | VAL-1.15 | OPEN |
 
-W5 also has the C6 to C10 rows, which are written with the plan's approval and have no ledger IDs yet. The ledger's rows for W5 are REG-15.1 and REG-15.2 above. W7's other rows are written after a re-read (rulings 2 to 4), so the three above are all the ledger rows it owns today.
+W5 also has the C6 to C10 rows, which are written with the plan's approval and have no ledger IDs yet. The ledger's rows for W5 are REG-15.1 and REG-15.2 above. W7's other rows are written after a re-read (rulings 2 to 4), so the four above are all the ledger rows it owns today.
 
 
 Read from `WORK_STACK.md` (levels 1 to 7), the ledger's REG, STUB, CACHE, CHECK, TYPE, NAME, VAL and Q
@@ -158,7 +159,7 @@ CHECK-10's operator sites (D3).
 | W4 | C5, the stub layer | STUB-7.1, then 7.3 (it opens SYN-1.10; PROD-5.4 is gone with REG-16.4) and 7.6 (CACHE-9/10/11 follow, once CACHE-13.2 has fixed the persistence's format); 7.2, 7.4, 7.7 to 7.11 (7.5 is W3's); the gate 7.12; STUB-8; STUB-12.1 to 12.5; CHECK-10's version table (its operator sites are D3's, W7); STUB-13.1 | STUB-7 needs REG-12 as a parent row, and 7.1, 7.2, 7.4, 7.7, 7.8 and 7.11 list no need of their own; deltas are VAL-2.4, 2.9 and 2.10 |
 | W5 | C6 to C9, then C10 | the rows are written with the plan's approval (Part E 20, J3); then the overlay layer, `TypeNodeResolver` (built on F41's lowering, batch 6, which has already deleted `types::parse`: Part E 14), the extension points, the summaries; REG-15.1 and 15.2 | the plan lists many approved deltas for each |
 | W6 | the embedding | STUB-10.1, then STUB-11; STUB-13.2 (what remains of the stub loader once W3's Session has replaced `Project`; the row is reworded when W3 lands) | the cold-run prize |
-| W7 | Stages D to G | CHECK-9, CHECK-7 (checker half), CHECK-12 above; the rest are written after a re-read (rulings 2 to 4) | the architecture program |
+| W7 | Stages D to G | CHECK-9, CHECK-7 (checker half), CHECK-10 (operator sites), CHECK-12 above; the rest are written after a re-read (rulings 2 to 4) | the architecture program |
 | W8 | VAL-1, then level 1 | the end validation of what was built (VAL-1.13 against VAL-1.12's baseline, VAL-2.9 and 2.10 read as they landed); the roadmap lanes resume | |
 
 ## What bears on the order
