@@ -1095,15 +1095,79 @@ fn check_project_survives_a_file_that_crashes_the_parser() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("undefined variable"), "got: {stdout}");
-    // The file that does not parse is reported as a `parse.error`, and
-    // counted among the files with findings.
-    assert!(stdout.contains("(parse.error)"), "got: {stdout}");
+    // The file that does not parse is reported where the parse fails, and
+    // it counts as checked, its failure being its diagnostic.
+    assert!(stdout.contains("(phpstanRs.parseError)"), "got: {stdout}");
     assert!(
-        stdout.contains("1 file(s) checked, 2 diagnostic(s)"),
+        stdout.contains("2 file(s) checked, 2 diagnostic(s)"),
         "got: {stdout}"
     );
+}
+
+/// A context file that does not parse is a notice on stderr, counted in the
+/// summary, and leaves the exit status alone.
+#[test]
+fn check_project_reports_a_context_file_that_does_not_parse_as_a_notice() {
+    let dir = TempDir::new("context_parse_notice");
+    dir.write(
+        "ctx/Broken.php",
+        "<?php class Shape { function area(: int { return 1; } }",
+    );
+    dir.write("src/Caller.php", "<?php function f(): int { return 1; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg(dir.path().join("src"))
+        .arg("--scan-dir")
+        .arg(dir.path().join("ctx"))
+        .output()
+        .unwrap();
     assert!(
-        stdout.contains("1 file(s) skipped: parse error"),
+        output.status.success(),
+        "a context file that does not parse must not change the exit status, \
+         stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("phpstanRs.parseError: ") && stderr.contains("Broken.php:"),
+        "got stderr: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("1 context file(s) skipped"),
+        "got: {stdout}"
+    );
+    assert!(!stdout.contains("parseError"), "got: {stdout}");
+}
+
+/// `--fail-on-context-error` makes the same context file exit with status 1.
+#[test]
+fn check_project_fails_on_a_context_file_that_does_not_parse_when_asked() {
+    let dir = TempDir::new("context_parse_fail");
+    dir.write(
+        "ctx/Broken.php",
+        "<?php class Shape { function area(: int { return 1; } }",
+    );
+    dir.write("src/Caller.php", "<?php function f(): int { return 1; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg(dir.path().join("src"))
+        .arg("--scan-dir")
+        .arg(dir.path().join("ctx"))
+        .arg("--fail-on-context-error")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("1 context file(s) skipped"),
         "got: {stdout}"
     );
 }

@@ -144,13 +144,6 @@ fn run_fixture(name: &str, expect_file: &Path, stubs: Stubs) -> Result<(), Faile
     if let (Some(dump), Some(text)) = (&dump, &analysis.type_dump) {
         write_type_dump(name, &base, text, &dump.with_extension("types"))?;
     }
-    if analysis.skipped_analyze > 0 {
-        return Err(format!(
-            "{} analysed file(s) failed to parse",
-            analysis.skipped_analyze
-        )
-        .into());
-    }
     if let Some((path, message)) = analysis.check_panics.first() {
         return Err(format!("{} panicked: {message}", path.display()).into());
     }

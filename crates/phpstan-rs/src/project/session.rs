@@ -451,13 +451,13 @@ pub struct Loaded {
     pub project: Project,
     /// The numbers of the analysed files, the largest first.
     analyze_files_by_size: Vec<FileId>,
-    skipped_analyze: usize,
     skipped_context: usize,
     context_loaded: usize,
-    /// The analysed files that do not parse, which are reported.
-    parse_failures: Vec<(FileId, ParseFailure)>,
+    /// The analysed files that do not load, each with the failure that
+    /// reports it.
+    load_failures: Vec<(FileId, LoadFailure)>,
     /// What the lexer skipped over in the loaded files, and the context
-    /// files that do not parse, one line each.
+    /// files that do not load, one line each.
     pub lex_warnings: Vec<String>,
 }
 
@@ -484,9 +484,10 @@ pub struct AnalysisResult {
     results: FxHashMap<FileId, Vec<Diagnostic>>,
     /// The analysed files whose check ran to the end, by the file's number.
     checked_files: FxHashSet<FileId>,
-    /// Analysed files that parsed and checked without an internal error.
+    /// Analysed files that were checked without an internal error. A file
+    /// that does not load is among them, its failure being its diagnostic.
     pub checked: usize,
-    pub skipped_analyze: usize,
+    /// Context files that did not load (see `lex_warnings`).
     pub skipped_context: usize,
     pub context_loaded: usize,
     /// Files whose check panicked, named as the report names them, with the
@@ -798,8 +799,68 @@ enum Read {
     Loaded(Box<ReadFile>),
     /// The text is not PHP.
     Unparsed(ParseFailure),
-    /// The file could not be read, or the parser failed internally.
-    Unread,
+    /// The file could not be read, and why.
+    Unreadable(String),
+    /// The parser panicked, with the panic's message.
+    Panicked(String),
+}
+
+/// The report of a file that did not load: its identifier, and where and
+/// what it says.
+struct LoadFailure {
+    identifier: &'static str,
+    failure: ParseFailure,
+}
+
+impl LoadFailure {
+    /// The failure of a file that does not parse, at the parser's position.
+    fn parse(failure: ParseFailure) -> LoadFailure {
+        LoadFailure {
+            identifier: "phpstanRs.parseError",
+            failure,
+        }
+    }
+
+    /// The failure of a file that cannot be read or whose parse panicked,
+    /// reported at its first line, which is where such a failure has no
+    /// position of its own.
+    fn at_start(identifier: &'static str, message: String) -> LoadFailure {
+        LoadFailure {
+            identifier,
+            failure: ParseFailure {
+                line: 1,
+                col: 1,
+                message,
+            },
+        }
+    }
+
+    /// One line for a context file that did not load, naming the file.
+    fn notice(&self, shown: &Path) -> String {
+        format!(
+            "{}: {}:{}:{}: {}",
+            self.identifier,
+            shown.display(),
+            self.failure.line,
+            self.failure.col,
+            self.failure.message
+        )
+    }
+}
+
+/// The failure of a file that did not load, from what reading it gave.
+fn load_failure_of(read: Read) -> Option<LoadFailure> {
+    match read {
+        Read::Loaded(_) => None,
+        Read::Unparsed(failure) => Some(LoadFailure::parse(failure)),
+        Read::Unreadable(message) => {
+            Some(LoadFailure::at_start("phpstanRs.unreadableFile", message))
+        }
+        Read::Panicked(message) => Some(LoadFailure::at_start(
+            "phpstanRs.internalError",
+            format!("internal error while parsing: {message}"),
+        )),
+    }
 }
 
 /// The declarations of a file that was read, as `Project::insert_declarations`
@@ -811,7 +872,7 @@ fn declaration_of<'a>(
 ) -> Option<(&'a Path, bool, &'a [BuiltDecl])> {
     match read {
         Read::Loaded(file) => Some((path, analyzed, file.parsed.built_decls())),
-        Read::Unparsed(_) | Read::Unread => None,
+        Read::Unparsed(_) | Read::Unreadable(_) | Read::Panicked(_) => None,
     }
 }
 
@@ -1648,8 +1709,8 @@ impl Session {
         let is_stub = listed.stub;
         let analysed = listed.role == Role::Analysed;
         let Worker { names, bytes } = worker;
-        if project.read_into(path, bytes).is_err() {
-            return Read::Unread;
+        if let Err(error) = project.read_into(path, bytes) {
+            return Read::Unreadable(error.to_string());
         }
         let bytes: &[u8] = bytes;
         let content_hash = (project.retain_source || self.keep_digests)
@@ -1688,7 +1749,7 @@ impl Session {
             (true, true) => super::BodyText::AsText,
             (true, false) => super::BodyText::Skipped,
         };
-        let Ok(parsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
+        let parsed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
             Cow::Borrowed(text) => super::parse_file_with_names(
                 path,
                 root,
@@ -1707,8 +1768,9 @@ impl Session {
                 Some(names),
                 analysed,
             ),
-        })) else {
-            return Read::Unread;
+        })) {
+            Ok(parsed) => parsed,
+            Err(payload) => return Read::Panicked(super::panic_message(payload)),
         };
         let mut parsed = match parsed {
             Ok(parsed) => parsed,
@@ -1874,7 +1936,7 @@ impl Session {
                 Read::Unparsed(failure) => {
                     failures.push((file.path.as_path().to_path_buf(), failure.message))
                 }
-                Read::Unread => {}
+                Read::Unreadable(_) | Read::Panicked(_) => {}
             }
         }
         failures
@@ -2095,8 +2157,10 @@ impl Session {
                 )
             }));
         };
+        // A context file that does not load is a notice: the analysed files
+        // that use its declarations are the ones that answer wrongly.
         let mut skipped_context = 0usize;
-        let mut parse_failure_lines = Vec::new();
+        let mut context_failure_lines = Vec::new();
         for ((file, &id), parsed) in context_files
             .iter()
             .zip(context_numbers)
@@ -2109,23 +2173,20 @@ impl Session {
                     note_lex_warnings(path, &parsed);
                     project.insert_numbered_file(id, path, parsed, text, false)
                 }
-                Read::Unparsed(failure) => {
+                failed => {
                     skipped_context += 1;
-                    parse_failure_lines.push(format!(
-                        "warning: {}:{}:{}: {}",
-                        super::shown_path(Some(self.absolute_root.as_path()), path).display(),
-                        failure.line,
-                        failure.col,
-                        failure.message
-                    ));
+                    if let Some(failure) = load_failure_of(failed) {
+                        let shown = super::shown_path(Some(self.absolute_root.as_path()), path);
+                        context_failure_lines.push(failure.notice(shown));
+                    }
                 }
-                Read::Unread => skipped_context += 1,
             }
         }
         // How long each analysed file is, by its place in `analyze_files`.
         let mut analyze_sizes: Vec<usize> = vec![0; analyze_files.len()];
-        let mut skipped_analyze = 0usize;
-        let mut parse_failures = Vec::new();
+        // An analysed file that does not load is still checked: its failure
+        // is its diagnostic.
+        let mut load_failures = Vec::new();
         for (index, ((file, &id), parsed)) in analyze_files
             .iter()
             .zip(analyze_numbers)
@@ -2140,14 +2201,14 @@ impl Session {
                     analyze_sizes[index] = text.len;
                     project.insert_numbered_file(id, path, parsed, text, true)
                 }
-                Read::Unparsed(failure) => {
-                    skipped_analyze += 1;
-                    parse_failures.push((id, failure));
+                failed => {
+                    if let Some(failure) = load_failure_of(failed) {
+                        load_failures.push((id, failure));
+                    }
                 }
-                Read::Unread => skipped_analyze += 1,
             }
         }
-        lex_warnings.extend(parse_failure_lines);
+        lex_warnings.extend(context_failure_lines);
         project.finish_loading_with(&self.stubs);
 
         // Largest files first, so the longest checks don't start last; of
@@ -2161,10 +2222,9 @@ impl Session {
         Ok(Loaded {
             project,
             analyze_files_by_size,
-            skipped_analyze,
             skipped_context,
             context_loaded: context_files.len() - skipped_context,
-            parse_failures,
+            load_failures,
             lex_warnings,
         })
     }
@@ -2175,10 +2235,9 @@ impl Session {
         let Loaded {
             mut project,
             analyze_files_by_size,
-            skipped_analyze,
             skipped_context,
             context_loaded,
-            parse_failures,
+            load_failures,
             lex_warnings,
         } = loaded;
 
@@ -2186,15 +2245,15 @@ impl Session {
 
         let checked_files: FxHashSet<FileId> = checks.per_file.keys().copied().collect();
         let mut results = checks.per_file;
-        // A file that does not parse is reported where it fails: PHP
-        // refuses to run it.
-        for (id, failure) in parse_failures {
+        // A file that does not load is reported where it fails: a parse
+        // error where PHP refuses the text, and the file's start otherwise.
+        for (id, load) in load_failures {
             let at = syntax::span::LineCol {
-                line: failure.line,
-                col: failure.col,
+                line: load.failure.line,
+                col: load.failure.col,
             };
             results.entry(id).or_default().push(
-                DiagnosticBuilder::new(failure.message, Span::default(), 0, "parse.error")
+                DiagnosticBuilder::new(load.failure.message, Span::default(), 0, load.identifier)
                     .non_ignorable()
                     .build_at(syntax::span::Range { start: at, end: at }),
             );
@@ -2207,8 +2266,7 @@ impl Session {
             project,
             results,
             checked_files,
-            checked: analyze_files_by_size.len() - skipped_analyze - checks.check_panics.len(),
-            skipped_analyze,
+            checked: analyze_files_by_size.len() - checks.check_panics.len(),
             skipped_context,
             context_loaded,
             check_panics: checks

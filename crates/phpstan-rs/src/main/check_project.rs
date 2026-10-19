@@ -80,6 +80,12 @@ pub(crate) struct CheckProjectArgs {
     /// `--scan-dir` still works.
     #[arg(long)]
     pub(crate) no_composer: bool,
+    /// Exits with status 1 when a file the analysis reads for context does
+    /// not load: it does not parse, it cannot be read, or its parser
+    /// panicked. Without it a run's status ignores every diagnostic, these
+    /// included, and the report says which files were skipped.
+    #[arg(long)]
+    pub(crate) fail_on_context_error: bool,
     /// The TOML config file (`phpstan-rs.toml`): its keys are what
     /// `--set` sets, and each flag above, when given, overrides the key
     /// it names.
@@ -157,6 +163,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     {
         eprintln!("failed to write type dump {}: {e}", out.display());
     }
+    let context_skipped = args.fail_on_context_error && analysis.skipped_context > 0;
     report(
         &run,
         analysis,
@@ -167,6 +174,9 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     // The process ends here: freeing the project's tables one by one, on
     // this thread, would only delay it.
     std::mem::forget(run);
+    if context_skipped {
+        std::process::exit(1);
+    }
 }
 
 /// Whether the friendly report is written with colour: to a terminal, unless
@@ -206,9 +216,8 @@ fn report(
     format: OutputFormat,
 ) {
     let check_panics = analysis.check_panics.clone();
-    let (checked, skipped_analyze, skipped_context, context_loaded) = (
+    let (checked, skipped_context, context_loaded) = (
         analysis.checked,
-        analysis.skipped_analyze,
         analysis.skipped_context,
         analysis.context_loaded,
     );
@@ -268,13 +277,13 @@ fn report(
     }
 
     // Text is the only format carrying anything beyond raw diagnostics
-    // (the "N more file(s) loaded for context"/"N file(s) skipped"/"N
-    // file(s) errored while checking" prose) - `json`/`checkstyle` exist
+    // (the "N more file(s) loaded for context"/"N context file(s) skipped"/
+    // "N file(s) errored while checking" prose) - `json`/`checkstyle` exist
     // so a CI pipeline can consume clean, uninterrupted structured data
     // on stdout, so they report only the diagnostics themselves (`json`'s
     // own `totals.files_checked` is the one piece of that extra
     // bookkeeping structured output still carries, already reflecting
-    // `checked`'s subtraction of both skipped and panicked files - the
+    // `checked`'s subtraction of panicked files - the
     // rest would need their own stable fields to add without guessing at
     // what a consumer wants, so they're left for a real request rather
     // than invented here).
@@ -321,9 +330,8 @@ fn report(
             if context_loaded > 0 {
                 extras.push(format!("{context_loaded} more file(s) loaded for context"));
             }
-            let skipped_total = skipped_analyze + skipped_context;
-            if skipped_total > 0 {
-                extras.push(format!("{skipped_total} file(s) skipped: parse error"));
+            if skipped_context > 0 {
+                extras.push(format!("{skipped_context} context file(s) skipped"));
             }
             if !check_panics.is_empty() {
                 extras.push(format!(
