@@ -129,7 +129,7 @@ byte on every string-family kind) runs in `Parser::new` in debug builds and is s
 
 **Oracle.** O1, O2 and the token dump; the property test that lexing a file and parsing it equals the old
 streaming parse on every corpus file (the tree dump); a fuzz target that compares the old and new lexer's
-(kind, span) pairs until the old one is deleted (one of the policy's listed exceptions, Part E 13). **Saving:**
+(kind, span) pairs until the old one is deleted (one of the policy's listed exceptions, #13). **Saving:**
 the 20 G figure, about 1.7 G, from the plumbing alone (257 Ir per token, 1.77 G), and what a skimmed region no
 longer interns or decodes, which no one has measured. **Measure, with a threshold:** callgrind of
 `parse_with_ignores` and the existing criterion bench "lex phpstorm-stubs", off and warm, against the base
@@ -142,7 +142,7 @@ a claim.
 ## I3. SYN-3.2's kernel (Part F 8)
 
 Read from `syntax/src/span.rs` (`LineIndex::new`: `memchr_iter` for `\n`, then `Utf8Chunks` for the columns of a
-non-ASCII file) and `wide` 0.7.33's source (`~/.cargo/registry/src/*/wide-0.7.33`), which Part E 10 chose on merit
+non-ASCII file) and `wide` 0.7.33's source (`~/.cargo/registry/src/*/wide-0.7.33`), which #10 chose on merit
 (it is also already in the build through `imbl`).
 
 **What `wide` gives, and what it does not.** `u8x16` has `cmp_eq`, `max`, `min`, saturating add and subtract,
@@ -150,7 +150,7 @@ non-ASCII file) and `wide` 0.7.33's source (`~/.cargo/registry/src/*/wide-0.7.33
 target has it (baseline x86-64), to NEON on aarch64 and to a scalar `[u8; 16]` elsewhere, chosen at compile time
 (`pick!` over `target_feature`). It has **no unsigned greater-than** on `u8x16`, and `u8x32` is real AVX2 only if
 the build enables it, which the baseline build does not. So the kernel is built from equality masks and the sign
-bit, in 16-byte blocks, with no run-time dispatch (Part E 10's answer).
+bit, in 16-byte blocks, with no run-time dispatch (#10's answer).
 
 **The kernel.** One pass over `src` produces the line starts and whether the file is ASCII:
 
@@ -264,7 +264,7 @@ in); it stays, being `Display`'s inverse.
   name (PHPStan's `tryResolvePseudoTypeClassType`), the one scope-dependent part, which C7 does; the rest of
   C7's "PHPDoc keyword types resolve before namespace qualification" is done here, and leaves C7's and RES-1's
   lists.
-- **Entry points** in `phpdoc` (one name across Part E 14, F41 and here): `lower(&TypeNode) -> Type` (names as
+- **Entry points** in `phpdoc` (one name across #14, F41 and here): `lower(&TypeNode) -> Type` (names as
   written, a leading `\` kept: what `parse_written_type` returns), `parse_phpdoc_type(text) -> (Type,
   Vec<ParseError>)` (lex, parse, lower) and `parse_global_type(text)` (the old `parse_type_string`: leading `\`
   stripped). The text entry points return the errors, because a string a user supplied must not turn into the
@@ -363,8 +363,7 @@ after step 5 (below).
 3. `phpdoc::lower`. Its baseline is VAL-1.7's PHPDoc record (batch 0), compared through VAL-1.4's canonical
    printer, so the comparison is exact and the string parser need not stay alive; the per-`TypeNode` comparison
    with `parse_written_type(node.to_source_string())` over the stubs, Piwigo, the vendor projects and the fixtures
-   runs for one stage only if that record cannot see what it finds (one of the policy's listed exceptions, Part E
-   13). Either way the differences of I4.2 and I4.3 are the list the comparison starts from, and each new
+   runs for one stage only if that record cannot see what it finds (one of the policy's listed exceptions, #13). Either way the differences of I4.2 and I4.3 are the list the comparison starts from, and each new
    difference is read and added to it with a fixture.
 4. `DocType` eager; the callers converted module by module; DOC-2.2 on the memo key.
 5. The string parser, its memo and `to_source_string`'s round-trip use deleted; `types::parse` is gone but for
@@ -427,7 +426,7 @@ message!("Parameter #{} ${} of {} expects {}, {} given.", i, &name, &func, &expe
 message!("Offset {dim} might not exist on {container}.")                              // captures too
 ```
 
-- `message!` is a proc-macro in a small `phpstan-rs-macros` crate (a new crate: Part E 32's file set), because a
+- `message!` is a proc-macro in a small `phpstan-rs-macros` crate (a new crate: #32's file set), because a
   `macro_rules!` cannot number its arguments and 464 of the checker's 849 `format!` lines use inline captures
   (`{dim}`, `{key:?}`). It parses the literal, owns every positional and captured argument through `Own` (once,
   at the call: `Type` and `Name` clones are refcount increments), accepts `{x:?}` and width specs (so
@@ -487,5 +486,7 @@ the item, never per commit). **Estimate, unmeasured:** CHECK-4.1's 22.5 M is for
 22 the level filter drops are dropped in the finalizer, after the checker returned, and E5 removes them by not
 running the rule, so this step saves about 13.5 M (33 messages, labelled an estimate) and the other 9 M waits for
 E5; the 37 rules' temporaries (21,919 and 46,005 allocations are two of them); nothing is claimed before a run.
+
+*Left as it is:* the items of I4.3 that wait for C7's name scope, which the lowering does not have.
 
 ---

@@ -156,7 +156,7 @@ SyntaxFeature, span: Span, detail: MarkDetail }`, recorded by the parser where t
 feature, deduplicated by span, sorted. `SyntaxFeature` is the grammar-only subset of `types::PhpFeature`'s
 45 variants plus those below, defined in a leaf crate both `syntax` and `types` depend on (`php-version`:
 `PhpVersion`, `PhpVersions`, `VersionSet`, `Availability`, `SyntaxFeature` with its one threshold table,
-`KNOWN_PHP_VERSIONS`; Part E 32), because the parser is below `types` in the graph; `PhpFeature` in `types`
+`KNOWN_PHP_VERSIONS`; #32), because the parser is below `types` in the graph; `PhpFeature` in `types`
 delegates to it for those variants and keeps the library gates that are not the parser's
 (`PrintfHhSpecifier`, `FilterThrowOnFailureConstant`, `TentativeReturnTypes`, …). A file's validity is the
 `VersionSet` of the known versions every mark accepts (`known_php_versions_where` returns a hull, not a set),
@@ -288,7 +288,7 @@ images agree with it.
    PHP reports (1 for a missing closer) and at least a stated share of the declarations after the damage
    recovered, with per-rule thresholds in the golden dumps; ordinary damage never reaches the 200-error
    stop. The fuzz targets also run 10^6 openers, stray closers at every level, and an unterminated
-   everything. **The bar for checking an analysed file with parse errors (Part E 31) is stated
+   everything. **The bar for checking an analysed file with parse errors (#31) is stated
    here:** over the same corpus, for damage to a single token, the diagnostics that are
    new, meaning absent from the undamaged file's own and not parse errors, are none at the 95th percentile of
    damaged files, measured per damage class; a class that misses falls back to parse errors only for the files it
@@ -305,3 +305,11 @@ span); `SyntaxError`, `errors()` and the infallible signatures with the first-er
 valid input (dump equality); the statement, expression, list, class-body and header rules, each with
 its golden dumps; the `php-version` crate and the marks; the matrix; the readers (G3.6); reporting
 and the editor. (c) SYN-6's rows are marks and error kinds in that table, not a separate pass.
+
+## Decisions
+
+### #31 An analysed file with parse errors: the parseable parts are checked and reported as usual, or only its errors are reported (PHPStan's behaviour)
+
+**Checked (G3.6).** Q-10 asks for one rule for the batch run and the server, and decisions 4 and 15 keep what parses and make the rest unknown (decision 6 says nothing of parse failures); the conservative reads (error nodes infer the error type of F21, a statement error sets `any_variable_may_exist` and `variable.undefined` honours it, a missing name is a zero-width name every reader treats as unknown, nothing reported inside an error node, whole-file opt-in rules off) are what keep it quiet. The editor is where files are broken most, and recovery exists for it (#11). No ruled decision says an analysed file's own findings are reported, and this departs from `CRATE_SPLIT_PLAN.md:6883-6891` ("a file with parse errors is still not analysed (its findings would be noise)"), which #20 supersedes. **The bar is stated before the check is built (G3.7.3):** on the mutation corpus, for damage to a single token, the diagnostics that are new, meaning absent from the undamaged file's own and not parse errors, are none at the 95th percentile of damaged files. A damage class that misses the bar falls back, for the files it damages, to parse errors only, with the registry and navigation keeping the recovered declarations; an unclosed brace that reshapes everything after it is the likely class to miss
+
+*Needed before:* batch 3

@@ -34,9 +34,9 @@ This is the one list of the branch's tasks. The documents the tasks come from st
 | VAL | validation | §13 |
 | MEAS | the measurements that set targets | §14 |
 | Q | not optimizations: open questions and unbuilt policies | §15 |
-| COMP | the composer crate's follow-ups (Part E 40) | §16 |
-| SRV | the seven fixes the crate split's F1 puts first, batch 0 (Part E 22) | §17 |
-| FIX | the stage B fix review's findings that batch 0 takes (F10, F20, F21, F69, F77), with their own ids (Part E 22) | §17 |
+| COMP | the composer crate's follow-ups (plan #40) | §16 |
+| SRV | the seven fixes the crate split's F1 puts first, batch 0 (plan #22) | §17 |
+| FIX | the stage B fix review's findings that batch 0 takes (F10, F20, F21, F69, F77), with their own ids (plan #22) | §17 |
 
 Each area has:
 
@@ -1229,7 +1229,7 @@ The crate split's Stage C is worked on this branch from C4 on. Decision 3 puts i
 | REG-14.2 | Fields read only while their own declaration is checked leave it: `explicit_mixed_hint`, `return_explicit_mixed_hint` | 20 G 8 | DONE by REG-4.8 (`e7b2521f`, `0f32829b`); no such field is left | — |
 | REG-14.3 | **Duplicate parameters** are resolved as a function's parameters are pushed into its file's parameter vector (the last occurrence, at the first one's place); `dedup_versioned_params`' map and order vector go | 20 G 8; decision 3 | OPEN | REG-8.3 (the parameter vector, item 4's `FileDecls`) |
 | REG-14.4 | `from_decl` passes the parameters on, not a `Vec<&str>` of their names: the assert code takes a predicate, `has_param: &dyn Fn(&str) -> bool` (Part A's A3) | 20 G 8 | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all threads: 1,018 M at base and 1,149 M at HEAD (+13%). The predicate's saving is not visible in that figure; the workload differs between the builds (HEAD also reflects the bundled vendor declarations of COMP-6), so the comparison is confounded and the heap-block count was not taken | — |
-| REG-14.5 | `reconcile_with_native` refines a lone member and returns it, with no `Vec` | 20 G 8 | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace goes with it (Part H, H3.5a) | — |
+| REG-14.5 | `reconcile_with_native` refines a lone member and returns it, with no `Vec` | 20 G 8 | FOLDED into REG-7.5 (plan #41): REG-7.5's combination is written without the `Vec`, and the function it would replace goes with it (Part H, H3.5a) | — |
 | REG-15 | Extract `reflection` | split C10 | OPEN | — |
 | REG-15.1 | No module-graph edge is left to the extracted modules. The graph's last two `registry` edges, to `registry::global_vars` and `registry::purity`, are the crate split's C9's, and its C6-C9 remove the others | split C10 | OPEN | REG-12, STUB-7, the crate split's C6-C9 (not tracked here) |
 | REG-15.2 | **The extraction.** `cargo machete` checks the plan's Appendix E rows, and gate 10's engine-I/O rule covers `crates/reflection` | split C10 | OPEN | REG-15.1 |
@@ -1867,7 +1867,7 @@ Kept for the record. None is built from this ledger.
 | Q-13 | A builtin's result before PHP 8.0 when its arguments fail its parameter parsing. Outside `strict_types`, PHP 7 warns and the call yields what the function leaves, `null` unless it sets another value: the result starts as `null` (`ZEND_DO_ICALL`, `Zend/zend_vm_def.h:3993`), and `ZEND_PARSE_PARAMETERS_END` reports and returns (`Zend/zend_API.h:1185-1214`) through `zend_internal_type_error`, which throws a `TypeError` only under `strict_types` (`Zend/zend.c:1577`). A wrong argument count goes the same way (`zend_API.c:211`, `zend.c:1594`). These are php-src 7.4.33's sources (`~/.cache/prs-ledger/php-src-7.4.33/`); PHP 8 throws `TypeError` and `ArgumentCountError` (8.5.4: `strlen([])`, `strlen()`). Decision 10's bound and claims describe a call whose arguments parse, so for STUB-12.2's versions a reading misses that `null`. | decision 10 | DONE (2026-10-15): decision 16 | — |
 | Q-14 | Whether a return that REG-17.1 infers keeps its literal values: `return 'x'` as `'x'` or `string`, `return [1]` as `array{1}` or `list<int>`. The installed body returns exactly those values, and a closure's inferred return keeps them today (`closure_inferred_return_type`, `checker/expr.rs:6625`, unions the return points as they are). But decision 9 lets a body's facts fill only what is undeclared because "the installed body is one version of the code", and a literal is the fact the next version is likeliest to change: a vendor function that returns `'1.2'` today would make a caller's `=== '1.2'` always true. | decision 9 | DONE (2026-10-15): decision 17 | — |
 | Q-15 | The oldest PHP version the builtin knowledge covers. STUB-12.2's dumps of real binaries name none, and decision 6's default range, every version known (when neither the configuration nor Composer names a version), starts there. So it sets what decision 6's in-part availability reports in a project that names no version: every builtin that the oldest version lacks or a later one removed, wherever no guard covers its use. | decision 6 | DONE (2026-10-15): decision 18 | — |
-| Q-16 | The lazy context read: an opt-in read of a context file when the name that reaches it is looked up, behind `PHPSTAN_RS_LAZY_CONTEXT=1` (measured on Piwigo: the same output, with 8.1% fewer instructions). A7 says no interim read of that kind is built before W3, the locator, and Part E 35 and 41 say the same. A follow-up to another task, 2026-10-19 | A7 (04); Part E 35, 41 | DONE in the tree: no lazy code until W3, as the user asked |
+| Q-16 | The lazy context read: an opt-in read of a context file when the name that reaches it is looked up, behind `PHPSTAN_RS_LAZY_CONTEXT=1` (measured on Piwigo: the same output, with 8.1% fewer instructions). A7 says no interim read of that kind is built before W3, the locator, and plan #35 and 41 say the same. A follow-up to another task, 2026-10-19 | A7 (04); plan #35, 41 | DONE in the tree: no lazy code until W3, as the user asked |
 
 ### Q-11: the crate split's C1-C3 follow-ups, read against the code
 
@@ -2151,28 +2151,28 @@ The ids in the first column are the 25 G report's.
 - Each probe build patched the checkout and was reverted after its binary was saved; the gate build made again from the clean tree is byte-identical to the saved one.
 - The results are on the rows, with MEAS-3's in §14 and REG-16.1's in §9's records.
 
-## 16. COMP: the composer crate's follow-ups (Part E 40)
+## 16. COMP: the composer crate's follow-ups (plan #40)
 
 Audited against the code and the corpora on 2026-10-18 (the vendored Composer's `Config` and `Semver` run in memory). The first five were found in the audit of the composer crate; COMP-7 and COMP-8 were added at the user's word on the same day.
 
 | id | task | from | state | needs |
 |---|---|---|---|---|
-| COMP-1 | `config.vendor-dir`, `COMPOSER_VENDOR_DIR` and `COMPOSER` are read as Composer reads them (`Config::get`, `Platform::expandPath`, `realpath`) over the candidates in Composer's order; discovery, `read_installed` and the include trees follow the resolved directory; a directory Composer wrote into is recognised wherever it is | Part E 40; Part A's A1 | DONE `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` (the walk's rule and its tests are `df9640fe` and `c14aa865`). The output change for a project that sets the key is approved (M5d); A6 measures it | — |
-| COMP-2 | Composer's constraint grammar: whitespace after an operator, a window inside one minor, a bare version as Composer reads it, and an open upper bound kept open with exact version-id bounds (decision 18 read as "and later") | Part E 40; J1.1 | OPEN. Not part of Part A; before the baseline (batch 0), since it changes a range and so a dump | — |
-| COMP-3 | the process-wide panic hook that `discover_vendor_context` swaps is deleted, and the other two swap sites share one startup hook with a thread-local "silenced" flag | Part E 40; the crash plan's step 1 | OPEN, before W2 (H2.8's isolation assumes it) | the crash plan's step 1 |
-| COMP-4 | `psr-0` in `Autoload` and the generated maps' keys (the classmap's class names, the PSR prefixes) | Part E 40; STUB-7.5's prerequisite (H4.1) | DONE `2c6f1eec` (Part A's A7): the maps keep their keys, and PSR-0 is read | — |
-| COMP-5 | the root package's own autoload entries as context | Part E 40 | PART: A7's maps keep the root's entries (`2c6f1eec`); the flat lists stay filtered, and the class is found through the maps by W3's lazy locator (STUB-7.5), so no interim fix is built (Part E 35 and 41) | COMP-4; STUB-7.5 (W3) |
-| COMP-6 | a package's bundled `vendor/` (`rector/rector`, `symplify/easy-coding-standard`) is vendor context | Part E 40; Part A's A8 | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's is read. The output change of `vendor/laravel` and `vendor/rector-src` is A6's measure | A1 |
-| COMP-7 | third-party code that Composer installed outside the vendor directory (`installer-paths`: Drupal's `web/core`, WordPress plugins) is left out of a degrade root's analysed walk and admitted as context by discovery in every mode | Part E 40 ("also (a)"); Part A's A1 | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a project that uses a custom installer is ruled (M5d) | A2 (the shared package list) |
-| COMP-8 | a degrade root's nested Composer projects: their vendor contexts, their owners and `unbuilt`, found by a scan before the walk and merged in path order | Part E 40 ("also (b)"); Part A's A8 | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. The configured-`paths` case keeps the nearest-ancestor rule, pending the scan's measure (Part A's A8) | A7, COMP-6 |
+| COMP-1 | `config.vendor-dir`, `COMPOSER_VENDOR_DIR` and `COMPOSER` are read as Composer reads them (`Config::get`, `Platform::expandPath`, `realpath`) over the candidates in Composer's order; discovery, `read_installed` and the include trees follow the resolved directory; a directory Composer wrote into is recognised wherever it is | plan #40; Part A's A1 | DONE `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` (the walk's rule and its tests are `df9640fe` and `c14aa865`). The output change for a project that sets the key is approved (M5d); A6 measures it | — |
+| COMP-2 | Composer's constraint grammar: whitespace after an operator, a window inside one minor, a bare version as Composer reads it, and an open upper bound kept open with exact version-id bounds (decision 18 read as "and later") | plan #40; J1.1 | OPEN. Not part of Part A; before the baseline (batch 0), since it changes a range and so a dump | — |
+| COMP-3 | the process-wide panic hook that `discover_vendor_context` swaps is deleted, and the other two swap sites share one startup hook with a thread-local "silenced" flag | plan #40; the crash plan's step 1 | OPEN, before W2 (H2.8's isolation assumes it) | the crash plan's step 1 |
+| COMP-4 | `psr-0` in `Autoload` and the generated maps' keys (the classmap's class names, the PSR prefixes) | plan #40; STUB-7.5's prerequisite (H4.1) | DONE `2c6f1eec` (Part A's A7): the maps keep their keys, and PSR-0 is read | — |
+| COMP-5 | the root package's own autoload entries as context | plan #40 | PART: A7's maps keep the root's entries (`2c6f1eec`); the flat lists stay filtered, and the class is found through the maps by W3's lazy locator (STUB-7.5), so no interim fix is built (plan #35 and 41) | COMP-4; STUB-7.5 (W3) |
+| COMP-6 | a package's bundled `vendor/` (`rector/rector`, `symplify/easy-coding-standard`) is vendor context | plan #40; Part A's A8 | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's is read. The output change of `vendor/laravel` and `vendor/rector-src` is A6's measure | A1 |
+| COMP-7 | third-party code that Composer installed outside the vendor directory (`installer-paths`: Drupal's `web/core`, WordPress plugins) is left out of a degrade root's analysed walk and admitted as context by discovery in every mode | plan #40 ("also (a)"); Part A's A1 | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a project that uses a custom installer is ruled (M5d) | A2 (the shared package list) |
+| COMP-8 | a degrade root's nested Composer projects: their vendor contexts, their owners and `unbuilt`, found by a scan before the walk and merged in path order | plan #40 ("also (b)"); Part A's A8 | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. The configured-`paths` case keeps the nearest-ancestor rule, pending the scan's measure (Part A's A8) | A7, COMP-6 |
 
-## 17. SRV and FIX: batch 0's fixes on today's code (Part E 22)
+## 17. SRV and FIX: batch 0's fixes on today's code (plan #22)
 
 Built by commits outside Part A, checked on 2026-10-19 against the commit messages. The seven SRV rows are the crate split's F1 fixes, each open at `ffa7cccb` and built by its own commit. The FIX rows are findings of `STAGE_B_FIX_REVIEW.md` that batch 0 takes; FIX-n keeps the review's number n.
 
 | id | task | from | state | needs |
 |---|---|---|---|---|
-| SRV-1 | the debounce thread gets the pool's stack size | crate split F1 (Part E 22) | DONE `4460dee39` | — |
+| SRV-1 | the debounce thread gets the pool's stack size | crate split F1 (plan #22) | DONE `4460dee39` | — |
 | SRV-2 | `queue_change` writes `latest_text`, so an edit is the live buffer when it arrives | crate split F1 | DONE `cfb7b9cb5` | — |
 | SRV-3 | `didClose` restores the disk's content, and an edit taken after the close is not applied | crate split F1 | DONE `9f2fde136` | — |
 | SRV-4 | `--generate-baseline` keeps the entries of the files it did not analyse | crate split F1 | DONE `8d68e6a1a` | — |

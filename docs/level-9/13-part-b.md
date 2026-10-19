@@ -80,12 +80,12 @@ Three of item 9's rows are scheduled by Part C, not here, so each has one owner.
   match sites read through the tree, and each access has a bounds check. (The workspace denies
   `unsafe_code`, which is why the 20 G plan's `bumpalo` arena, not `Sync`, was dropped.)
 
-## B2. Decisions before step 1 (the leans of this part; Part E 1 to 9 are the current answers)
+## B2. Decisions before step 1 (the leans of this part; #1 to 9 are the current answers)
 
 | # | question | recommendation | why | the alternative |
 |---|---|---|---|---|
 | D1 | what consumers hold | **`Copy` handles and plain-field views over the stored ids** (`Expr<'a>`, `Stmt<'a>`, `ExprKind<'a>`, `Param<'a>`, list views), carried through the checker's walks, with an expression that must be stored held as a `Rooted<Expr>` (an `Arc<Ast>` and a raw id), so no checker type carries a tree lifetime and a bare id is only a cache key (G1) | the 486 signatures and 2,452 sites change mechanically (`&Expr` → `Expr<'_>`, `.kind` → `.kind()`, `Box` and `clone` vanish); struct destructuring (`let ClosureExpr { params, .. } = …`, 16 sites) survives; a handle cannot outlive its tree where it is borrowed, and a stored one is owned with its tree, which is the decision's "ids live only with their tree" in the type | ids + `Index<ExprId>` on `Ast` (la-arena style): fewer types, but every free function gains an `ast` parameter, and nothing stops an id leaking into a product |
-| D2 | how to migrate | **staged**: step 1 moves every reader to the handle API over the *existing* boxed tree, step 2 swaps the storage behind it | each commit stays green; step 1 is a behaviour-preserving refactor, step 2 is local to `syntax`. **What the split buys is two oracles:** step 1's is the compiler and the readers' tests over about 130 files, step 2's is the canonical dump compared with the baseline taken at the end of step 1 (the boxed tree's), where one change set would have neither for either half. **What is end state and what is scaffolding:** step 1's API (handles, views, list views, `Visitor<'a>`, the dump, the `Ast` container) is the final one and survives; thrown away are the adapter that implements the views over the boxed nodes (step 2 writes the same signatures over the store), the old `Visitor` trait (deleted at the end of step 1, so it lives one step), the legacy-node bridges (B4) and the serial field the legacy nodes carry. The throwaway part is estimated at 1,000 to 1,500 lines, from the sizes of `walk_expr` (181 lines) and `walk_stmt` (120), the 47 + 26 arms of the two `kind()` mappings, about 25 view constructors and 15 list views (not the 400 of the first estimate). The rule that refuses interim work (Part E 35 and 41) is met by the end-state argument: nothing here is a structure the engine deletes, and it is the way the readers reach the final API with an oracle at each half | one change set that flips the type and all 134 files together: no intermediate commit compiles, and the dump baseline would have to be written once against the old nodes and once against the store |
+| D2 | how to migrate | **staged**: step 1 moves every reader to the handle API over the *existing* boxed tree, step 2 swaps the storage behind it | each commit stays green; step 1 is a behaviour-preserving refactor, step 2 is local to `syntax`. **What the split buys is two oracles:** step 1's is the compiler and the readers' tests over about 130 files, step 2's is the canonical dump compared with the baseline taken at the end of step 1 (the boxed tree's), where one change set would have neither for either half. **What is end state and what is scaffolding:** step 1's API (handles, views, list views, `Visitor<'a>`, the dump, the `Ast` container) is the final one and survives; thrown away are the adapter that implements the views over the boxed nodes (step 2 writes the same signatures over the store), the old `Visitor` trait (deleted at the end of step 1, so it lives one step), the legacy-node bridges (B4) and the serial field the legacy nodes carry. The throwaway part is estimated at 1,000 to 1,500 lines, from the sizes of `walk_expr` (181 lines) and `walk_stmt` (120), the 47 + 26 arms of the two `kind()` mappings, about 25 view constructors and 15 list views (not the 400 of the first estimate). The rule that refuses interim work (#35 and 41) is met by the end-state argument: nothing here is a structure the engine deletes, and it is the way the readers reach the final API with an oracle at each half | one change set that flips the type and all 134 files together: no intermediate commit compiles, and the dump baseline would have to be written once against the old nodes and once against the store |
 | D3 | what a node records of position | **decision 4's last sentence stands: a measurement settles it** (spike S-12, before step 2). The expectation, and the working assumption of B3 to B5 and I1, is **byte spans** (`Span`, 8 B), as now | token indices would tie every kept tree to its token stream, which the workers reuse as scratch, so a kept tree would keep its own tokens (about 5 B a token, kind plus start offset: about 24 MB for Piwigo's analysed files at ≈4 source bytes a token). Break-even is about 20 B saved per node (≈4 tokens a node on the plan's dhat counts), more than an expression node can shed (32 B against a Zig-style 16 B). Those are estimates, which is why S-12 builds both layouts for the corpus and measures exact bytes and the readers' hot paths. No reader needs trivia between tokens | token indices (a node reads its identifier, string, number or operator from its token, as Zig's do); chosen only if S-12 shows it wins, and then B3's `span` fields become token indices and a kept tree keeps its token arrays |
 | D4 | where payload bytes live | **the ledger's layout, with no amendment: the tree owns its source, and a `Text { start, len }` is a range of that source or of a side buffer** (two bits of `len` choose). A plain string, a doc comment and inline HTML are spans of the source: the parser already reads `&src[span]` when it takes a token, so no payload is copied. The side buffers hold the bytes no source has: a `String` for UTF-8 text (a folded doc group, the text the passes and the probe append, the lossy decode of a payload of a source that is not valid UTF-8) and a `Vec<u8>` for string-literal bytes that needed decoding (escapes, heredoc indentation). A source valid as UTF-8 (checked once at load) is held as a `str` where the buffer allows it, so a `&str` view of a doc comment or inline HTML is a boundary-checked slice; where the builder holds the worker's byte buffer instead, a view costs one small-range validation, which the census prices | no payload copies at all (72 K docs and 352 K single-quoted literals allocate today); the tree owns the bytes its spans index, so a span always resolves; a context tree needs no copy of the source, since the builder takes the worker's read buffer by swap and hands it back on `clear`; the lexer's `PhpString`/`Arc<str>` payloads go with SYN-2 | the tree's own text arenas, a copy of every payload in a `String` and a `Vec<u8>` (the plan's first answer): kept trees about 5.6 MB smaller at Piwigo scale, at the price of a copy of every payload and a second kind of text; rejected |
 | D5 | names in nodes | **`NameId` into the tree's name table** in step 2 | one refcount increment per *distinct* name per file instead of one per occurrence (≈2 M identifier tokens); no shared-cache-line ping-pong between the 8 workers on common names; nodes lose their drop glue | `Name` in nodes until SYN-2: smaller diff, keeps the atomics |
@@ -321,7 +321,7 @@ by a call on parts, a handle or a rooted pair.
 | 4 | SYN-1.9 | `parse` returns tree and errors; error nodes with spans; recovery with Q-10 | later | G3.7's matrix, golden dumps and mutation properties |
 | 5 | SYN-1.10 | passes and `into_builder` go (needs PROD-5.1 and STUB-7.3) | later | `registry-dump` before and after equal for the stub attributes |
 
-**The item's validation, once, at the end of step 3** (Part E 24; no suite per step): `cargo test
+**The item's validation, once, at the end of step 3** (#24; no suite per step): `cargo test
 --workspace` and the fixtures; `xtask dumps-compare` against the item-0 baseline for the expression types (the whole
 checker moved to handles), the registry dump (unchanged by the item) and O2, and for the commits that touch `lsp`
 (the probe tail, the `Arc<Ast>` holders) the server session and the edit replay; the step 2 dump equality above; the
@@ -337,7 +337,7 @@ Step 1's module order (any order works, because the bridge functions are free; d
 tests. During step 1 `VisitorMut` and the two builder passes (`stub_attributes::Pass`, `Namer`; the `Resolver` is
 not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A codemod for the two commonest rewrites
 (`.kind` → `.kind()`, `&Expr` → `Expr<'_>`) is used, by span-based text edits and never by reprinting a file
-(Part E 27); it is throwaway.
+(#27); it is throwaway.
 
 ## B8. The dump, and verification
 
@@ -447,5 +447,78 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
 - Write Part B, I1 and the item-9 parts of G1 to G4 (G1's lifetimes, G2's stamp, G3.3's layout, G4a's probe tail) into
   the repository as `FLAT_TREE_PLAN.md` (the item is too large for the plan's item text) when this plan is approved; Part N
   says where every other part goes.
+
+## Decisions
+
+### #1 D1: what consumers hold
+
+**`Copy` handles and views for every walk; a stored expression is a rooted `(Arc<Ast>, id)`.** The tree's lifetime on `Locals` would be 415 mentions in 66 files, `Rc<Expr>` in 11 places. Stage D removes the tree from `Locals` altogether (conditional holders replace alias replay), so that lifetime would be built in item 9 and unbuilt then, which the no-interim rule (35, 41) refuses. So `Locals` and `Checker` take no tree lifetime: the two alias maps and three checker fields hold `Rooted<Expr>`, which is decision 4's "an id lives only in products owned with its tree" in the type, and a bare id is only ever a cache key (G1)
+
+*Needed before:* item 9, step 0
+
+### #2 D2: how to migrate
+
+**Staged,** with the baseline dump taken at the end of step 1, so step 2 is checked byte for byte against the boxed tree's dump; the scaffolding it costs (1,000 to 1,500 lines, D2's row in B2) is argued against the no-interim rule there
+
+*Needed before:* step 0
+
+### #3 D3: position
+
+**Decision 4's last sentence stands: a measurement settles it.** Spike S-12, before step 2, builds both layouts for the corpus: the exact bytes of a kept tree with byte spans against token indices, and the readers' hot paths. The expectation is **byte spans**, which B3 to B5 and I1 assume: a token-indexed tree must keep its tokens (about 5 B a token), which breaks even only at about 20 B saved per node, more than an expression node can shed
+
+*Needed before:* step 0 (the census counts tokens); S-12 before step 2
+
+### #4 D4: payload bytes
+
+**The ledger's layout, with no amendment: the tree owns its source, a string is a span of it, and a side buffer holds the bytes no source has** (decoded strings, folded and synthesized text, the lossy decode of a source that is not valid UTF-8). A `Text` is a range of the source or of a side buffer, two bits of the length choosing. It copies no payload, a span always resolves because the tree owns what it indexes, and a context tree copies no source (the builder takes the worker's read buffer by swap). The arena design (a copy of every payload; kept trees 5.6 MB smaller at Piwigo scale) needed the side buffer too, for the bytes no source has, so it saved one thing and cost a copy of every payload and a second kind of text
+
+*Needed before:* step 0
+
+### #5 D5: names in nodes
+
+**`NameId`** into a per-tree table: one refcount per distinct name, and nodes that are plain data
+
+*Needed before:* step 2
+
+### #6 D6: the mutating passes
+
+**On the builder** until SYN-1.10 deletes the passes and `into_builder` with them; `Ast` never gets a `&mut`
+
+*Needed before:* step 2
+
+### #7 D7: fabricated nodes
+
+**Remove them first:** a tree that cannot be built by hand makes the sites call functions on parts
+
+*Needed before:* step 0
+
+### #8 D8: rows
+
+**Regroup** (SYN-1.3 is step 1; SYN-1.2, 1.4, 1.5, 1.7, 1.8 are step 2; new SYN-1.11 and 1.12)
+
+*Needed before:* step 0
+
+### #9 D9: error nodes
+
+**Not in step 1.** Design the error-node model (what an error node keeps, such as salvaged children, and that it reads as unknown) with SYN-1.9, before step 2 fixes the layout, and add the variants there, so each has a producer, a meaning and tests. A `_ =>` arm for a variant nothing produces decides its meaning by accident
+
+*Needed before:* step 2 (design), batch 3 (variants)
+
+### #24 item 9's validation
+
+**Once, at the end of the item (step 3), at the boundary the user names: the end of each top-level item.** The syntax dump baseline is produced at the end of step 1 (a cheap run that stores output, not a suite) and is compared with step 2's dump at the item's end; the item-0 baseline (expression types, registry, O2), taken from validated code before the item, covers step 1's readers and is compared then too. The suites, the fixtures, the Piwigo oracle and the measurements run once, then (B7).
+
+*Needed before:* step 1
+
+### #27 the step 1 codemod
+
+**Use it, by span-based text edits;** never reprint a file (a `syn` printer drops comments), with `cargo check` as the oracle, one module at a time
+
+*Needed before:* step 1
+
+## Facts the decisions rest on
+
+- `FoldedName` and `ConstName` are not in the code. `Locals` has 415 mentions in 66 files and
+  `Rc<Expr>` sits in 11 places. `wide` comes in through `imbl`.
 
 ---

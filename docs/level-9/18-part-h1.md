@@ -6,7 +6,7 @@ code at `8a1ca1e0` and from the source of **salsa 0.28.5**, the version REG-16.1
 (`~/.cargo/registry/src/index.crates.io-*/salsa-0.28.5`). Everything said here about salsa was read from the crate, and none of it was run; H5 lists what a run must settle. **H1 is what batch 4 is built to.** H2 to H4 are what
 W2 and W3 build. They are written as a contract (what the code above the engine may rely on), so that
 REG-16.1's choice (salsa) stays reversible, with S-2 and S-3 re-testing it and an engine of our own with the
-same contract as the fallback: only the engine module names salsa (a crate from G1: Part E 33).
+same contract as the fallback: only the engine module names salsa (a crate from G1: #33).
 
 ## H1. Identity (Part F 10)
 
@@ -50,7 +50,7 @@ None. H1 is a design, and its batch-4 build (H1.7) lists rows that Part C's C1 t
    and by a `debug_assert_eq!` on the id ("refers to a reused slot", `:932`): in a release build a stale id
    of a slot re-interned this revision reads the new occupant's fields and memos. What keeps a collectable id
    honest is H1.6's rule that none outlives its query or leaves the engine, not salsa; `DeclKey` is immortal
-   (Part E 38), so it needs no such discipline.
+   (#38), so it needs no such discipline.
 8. **salsa's macros emit `unsafe impl` into the using crate** (`salsa-macros/src/db.rs:94`), and the
    workspace has `unsafe_code = "deny"` with `allow`s for PCRE and the allocator only.
 9. **A write needs `&mut` on the database,** cancels every other handle's running queries by unwinding
@@ -199,8 +199,8 @@ pub struct ConstDeclRef { pub file: DeclFile, pub name: ConstName, pub occurrenc
 pub enum MemberName { Method(FoldedName), Property(Name), Constant(Name) }    // PHP folds a method's name only; an enum case is a class constant, one namespace
 pub struct MemberRef { pub decl: DeclRef, pub member: MemberName }
 // in the engine only: salsa interned structs built from the values above, one key per PHP namespace
-#[salsa::interned(persist, revisions = usize::MAX)] struct DeclKey<'db> { decl: DeclRef }   // immortal (Part E 38): never reused, no creation edge
-// the five probes below are collectable: made for names that do not exist too, held by nothing (Part E 38)
+#[salsa::interned(persist, revisions = usize::MAX)] struct DeclKey<'db> { decl: DeclRef }   // immortal (#38): never reused, no creation edge
+// the five probes below are collectable: made for names that do not exist too, held by nothing (#38)
 #[salsa::interned(persist)] struct ClassKey<'db>    { name: FoldedName }   // class-likes: PHP keeps classes, interfaces, traits and enums in one namespace
 #[salsa::interned(persist)] struct FunctionKey<'db> { name: FoldedName }   // functions: another namespace (`class A {}` and `function a() {}` coexist)
 #[salsa::interned(persist)] struct ConstKey<'db>    { name: ConstName }
@@ -265,7 +265,7 @@ pub struct MemberRef { pub decl: DeclRef, pub member: MemberName }
   closed-class rule does not apply, an anonymous class being closed by construction; the architecture rules count a
   class's references by span, so an anonymous class's references already go to its enclosing class). Each change is
   a VAL-2.x delta with a fixture. REG-11.13 (diagnostics name it `class@anonymous`) is a display change of its own.
-- **`DeclKey` is immortal and the probes are collectable (Part E 38).** `DeclKey` takes
+- **`DeclKey` is immortal and the probes are collectable (#38).** `DeclKey` takes
   `revisions = usize::MAX`, which is decision 3's "is never reused": a stale id cannot name another
   declaration by construction (salsa's own check on a read is a `debug_assert`, H1.0 7, so a collected slot's stale
   id would read the new occupant silently in a release build), and an immortal key records no creation edge and no
@@ -361,7 +361,7 @@ NAME-1.3 deletes `TableKey` and `FoldKey for str`; the value half has no compile
 completeness check is a reviewed table with a grep gate on identifier-named `String` fields. The `String` keys
 of the machinery W2 and W3 delete (`ChangedNames`, `Scope`, `reset_scoped`, the guarded sets in `Locals`) are
 converted because NAME-1.3 cannot delete `FoldKey for str` while a caller holds text, which is a type change an
-end-state invariant needs (Part E 35); (5) NAME-1.3, NAME-1.4, NAME-2.2, NAME-2.3. Must not: introduce an id, a
+end-state invariant needs (#35); (5) NAME-1.3, NAME-1.4, NAME-2.2, NAME-2.3. Must not: introduce an id, a
 second interner, a value that holds a position, or a result type whose equality is semantic. NAME-1.2's
 registry entry points are the ones REG-4.12 makes into the `Provider`'s accessors, so REG-4.2 and 4.12 are
 written on `FoldedName`.
@@ -372,3 +372,17 @@ rules of H1.5 are tested where they can be in batch 4: `Exact`, the same-node te
 of H1.2. The test that two `Provenance` values for one class at different lines are equal once the span is out
 moves to the commit that removes the span (REG-4.15, W2 step 5): from batch 5 (PROD-5.1's site table) until then
 declarations hold their spans and the site table at once.
+
+## Decisions
+
+### #18 when to reevaluate
+
+**Now, for the engine's identity model.** Design REG-16.2's ids, REG-8.6's interner ownership and NAME-2's weak tables as one lifecycle before batch 4: names, products and memo keys are built on it. The rest at batch 8
+
+*Needed before:* before batch 4
+
+### #38 REG-16.2's "never reused": keep salsa's collection of interned slots (a stale id panics and invalidates what read it; memory stays bounded), or turn it off with `revisions = usize::MAX` (the literal "never reused", and a table that grows for the life of a server and of the persisted file)
+
+**`DeclKey` is immortal, and the name-probe keys are collectable.** `DeclKey` takes `revisions = usize::MAX`, the literal "never reused" of decision 3, which stays as ruled for declaration ids: a stale id cannot name another declaration, by construction and not by discipline (salsa's own check on a read is a `debug_assert`, so with collection a stale id of a slot re-interned this revision would read the new occupant silently in a release build), and an immortal key records no creation edge. `ClassKey`, `FunctionKey`, `ConstKey`, `GlobalKey` and `MemberKey` are probes by an asked name, made for names that do not exist too (every half-typed identifier asks), and nothing holds them, so immortal would only grow the table; they stay collectable, and H1.6's rule (no id outlives its query or leaves `crates/engine`: an `xtask arch` rule and a release-build test that no engine id appears in a result type) keeps them honest. Only values interned under a LOW-durability query are collected, and creating such a value, not reading it, records the edge. **Two costs of an immortal `DeclKey` are stated and measured in S-3:** a dead declaration's key keeps its memos (the five levels, a full `ClassReflection` among them) until the database is rebuilt, and an anonymous class must not carry its line in the key (E34). **The bound is an in-process compaction (H4.6):** the persisted-file rule fires at the next start, which does nothing for a server open for days, so the server rebuilds its database at idle once the keys outnumber the live declarations several times over. If S-3 finds the retained bytes too large, the fallback is a collectable `DeclKey` and decision 3's sentence amended to "a stale id never names another declaration"
+
+*Needed before:* W2

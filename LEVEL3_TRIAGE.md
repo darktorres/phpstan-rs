@@ -1,6 +1,6 @@
 # Level 3 triage: which open findings still reproduce
 
-Part E 22 of the level 9 plan says whether each open finding of the stage reviews still reproduces is settled by running its
+plan #22 of the level 9 plan says whether each open finding of the stage reviews still reproduces is settled by running its
 probe on the gate binary, not by reading. This file records that run.
 
 ## Method
@@ -15,7 +15,7 @@ probe on the gate binary, not by reading. This file records that run.
 - "Reproduced" means the probe shows the wrong behaviour the review describes. "Fixed" means a commit or a ledger row
   says so and the probe agrees. "Not probed" says why.
 - "Changes a dump": a reproduced finding that changes a diagnostic or an inferred type changes the baseline when fixed, so the
-  plan puts it before the item-0 baseline (Part E 22). A finding that changes only comments, configuration or speed does not.
+  plan puts it before the item-0 baseline (plan #22). A finding that changes only comments, configuration or speed does not.
 
 Not run here: the corpus runs (V1 and V2 of the Stage B review) and the fixture suite (V1 of the Stage C review, FR-86). Both need
 the corpus and a full test run, which were not in this pass.
@@ -158,5 +158,5 @@ The table has 120 rows, counted from the file.
 
 ## Consequence for batch 0
 
-Reproduced findings that change a dump go before the item-0 baseline, as Part E 22 says. The list is every "yes" row marked
+Reproduced findings that change a dump go before the item-0 baseline, as plan #22 says. The list is every "yes" row marked
 Reproduced or Partly above. Each reproduced finding has its own probe, so the fix's test can start from it.

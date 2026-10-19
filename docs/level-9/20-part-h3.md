@@ -178,7 +178,7 @@ checkpoint** (the dumps are produced where they are cheap and compared there):
 1. **REG-4.2 and REG-4.12** on the old storage: exact-spelling accessors, folded keys on `FoldedName`, the
    `Provider` facade over the old maps. `registry-dump` before and after is equal except REG-4.2's approved delta.
 2. **The engine module, shadowing.** Inputs, `decl_index`, `declarations_named`; the `Provider` still answers from
-   the old maps and, in a debug build, compares each answer with the engine's (a listed exception to Part E 13's
+   the old maps and, in a debug build, compares each answer with the engine's (a listed exception to #13's
    policy, deleted with step 3's last level).
 3. **One level at a time** in the order 1, 2 (with REG-7.6 and its needs, REG-18.2 and 18.3), 3, 4, 5, then
    REG-7.12 and REG-7.10: the `Provider` flips that level's answers to the engine, the old pass stays as the debug
@@ -256,3 +256,25 @@ the levels cyclic (`class_final(C)` reads the inference of `C::m`, which reads `
   the same results whichever query of a cyclic fixture is entered first, and on one thread and eight.
 - **What it costs.** `effective_*` are per member and asked per call site; the effective return of a member with a
   fully declared return is one lookup of `class_member`'s return and no inference.
+
+## Decisions
+
+### #33 the engine crate and `unsafe_code`: salsa's macros emit `unsafe impl` into the crate that uses them, which the workspace's `deny` is thought to reject; allow it in `crates/engine` alone, gated, or build an engine of our own with no macro output
+
+**Conditional on S-2, which builds the skeleton first under the workspace's `deny` with no allow.** The macros do emit `unsafe impl` (salsa's `HasStorage`, the `inventory` constructor), but rustc does not normally report most lints, `unsafe_code` among them, for tokens that come from another crate's macro expansion: a probe on the pinned toolchain (an external `macro_rules!` and an external attribute macro emitting `unsafe impl` and `unsafe` blocks, under `#![deny(unsafe_code)]`) compiled without a diagnostic, while the same code written in the crate was rejected. So the exception is probably unnecessary, and the engine keeps the workspace's two (PCRE, the allocator). Only if rustc reports the expansions of salsa's own macros does the engine's module get `allow(unsafe_code)`, with an `xtask arch` check holding its own text at zero `unsafe` tokens and `UNSAFE_PLAN.md`'s end state amended to "everywhere but PCRE, the allocator and the engine's generated code". **Until G1 the engine is a module of the `phpstan-rs` package, not a crate:** `reflection`, `analyser` and `project` are modules of it until C10 and G1, and a crate built at W2 could name none of the types it wraps; it takes a `crate engine` line (between `analyser` and `project`) and a `module engine engine` line in `gates/module-graph.txt`, and G1 extracts it
+
+*Needed before:* W2
+
+### #41 rows whose code a later task replaces: REG-14.5 (`reconcile_with_native`, which REG-7.5's combination replaces), CACHE-8 (the cache `Writer::finish`, which serves the stub caches STUB-11 deletes and a persistence format that S-4 has not chosen), and CHECK-4.2 (the class-constant key, which REG-18.4 re-keys). Build each now for its small interim saving, or fold it into the task that replaces it
+
+**Fold them.** REG-14.5 into REG-7.5 (H3.5a says how the replacement is written), CACHE-8 after S-4 (if the cache's container survives as the persistence's value format its writer is built once, right), CHECK-4.2 into REG-18.4 (batch 4b: it needs `ConstName`, which batch 4 makes, so it is not a filler of W1; its delta is one of #42's). Each saves little (REG-14.5 is 41,085 allocations; CACHE-8 is memory in a cold run only; CHECK-4.2 is 5.1 M Ir), and each would be written twice. REG-14.5 and CACHE-8 wait on the wall as #35 does (REG-7.5 is W2's, and S-4 settles the persistence), so they too come back as READY rows if the wall is dropped. The same rule as #35, and the same line: a type change that an end-state invariant needs is built (NAME-1.2); a new structure or a micro-optimisation of code that goes is not
+
+*Needed before:* Part A; batch 8
+
+*Left as it is (#33):* probably no exception is needed at all; S-2 decides.
+
+## Facts the decisions rest on
+
+- The workspace's `deny(unsafe_code)` very likely does not report the expansions of an external crate's macros (a
+  probe on the pinned toolchain compiled an external `macro_rules!` and an external attribute macro that emit
+  `unsafe` without a diagnostic); salsa's own expansion was not built, which is what S-2 does first.

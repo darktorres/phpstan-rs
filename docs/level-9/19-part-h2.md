@@ -27,7 +27,7 @@ What the code above the engine may rely on, whichever engine is below:
 7. **Determinism:** the same inputs give the same results at any thread count and in any order (B8's
    equalities, tested through G5's dumps).
 
-Built on salsa 0.28.5 in the engine module (Part E 33; a crate from G1). It uses `#[salsa::db]`, `input`,
+Built on salsa 0.28.5 in the engine module (#33; a crate from G1). It uses `#[salsa::db]`, `input`,
 `interned`, `tracked` (with `returns(ref)`, `lru`, `cycle_result`, `cycle_fn` and `cycle_initial`, `heap_size`),
 `Durability`, `Cancelled`, `cancellation_token` and `persist`, and one tracked struct, `FileProducts` (H2.3),
 whose fields are tracked one by one (`tracked_struct.rs`: `update_fields` moves a field's revision only if its
@@ -52,7 +52,7 @@ list, since the project has a build-time gate.
 | `OutputInputs` | singleton | `ignore_errors`, the baseline, the formatters' settings; read only by `analysis` | high |
 | `File` | one per path ever seen | `path` (set once), `shown` (the path as reports spell it, R6's `/` form relative to the report root, set with the path and by the driver when the root changes), `number: FileId` (an opaque handle: nothing is ordered by it, E1-10), `role`, `analysed`, `stamp` (analysed and eager files; a lazily reached context file's is the query `file_stamp`, below), `overlay` | analysed: low; context: medium; configured stubs and the installed PHPStan's files: high |
 | `FileSet` | singleton | the sorted `Vec<File>` that exist now, with the path index that `locate` and the include resolution read, and the index by `shown` that an anonymous class's name is resolved through (H1.4) | low |
-| `Packages` | singleton | Composer roots, autoload maps with their keys (classmap entries, PSR-4 and PSR-0 prefixes with their directories, files), owners, vendor directories, and per Composer root its declared PHP range (`config.platform.php`, else `require.php`) and its required packages (Part E 42) | medium |
+| `Packages` | singleton | Composer roots, autoload maps with their keys (classmap entries, PSR-4 and PSR-0 prefixes with their directories, files), owners, vendor directories, and per Composer root its declared PHP range (`config.platform.php`, else `require.php`) and its required packages (#42) | medium |
 | (`Builtin`) | **not an input** | the stub corpus (`registry::stubs::Corpus`, an `Arc` shared by every database in the process) is a constant of the database: the build identity in a persisted file's key covers any change of it, and a never-changing singleton could not be persisted without a custom codec (salsa asserts that every input a persisted memo reads is `persist`, and a custom `deserialize` gets no database argument) or set again after a restore | – |
 | `SqlSchema` | singleton | the schema file's digest, or a live reflector's fingerprint | medium |
 | `ProbeEpoch` | singleton | a counter the driver bumps when the filesystem, or a live SQL schema, may have changed (H4.5) | low |
@@ -68,12 +68,12 @@ list, since the project has a build-time gate.
   would make each file depend on all of them, so the checker's `self.settings.x` reads become calls on the view
   (mechanical: 114 of them in 34 files of `checker/` today, reaching the leaf flags of the extensions'
   `…Settings<bool>` structs, which are the fields).
-- **The range of a file is its owner's (Part E 42).** The owner of a file is the nearest
+- **The range of a file is its owner's (#42).** The owner of a file is the nearest
   ancestor `composer.json`, a fact of each directory's listing: A8's scan finds a degrade root's nested manifests before
   the walk (COMP-8) and `Packages` holds those directories (A1 builds the vendor fact beside it and not this one); a file
   with no owner uses the project root's manifest. `range_of(File)` is a
   tracked projection of `Packages`: the configured range if one is set, else the owner's declared range (Composer's
-  grammar by interval arithmetic, COMP-2), else decision 18's default (open above: Part E 40). It compares equal when the owner's
+  grammar by interval arithmetic, COMP-2), else decision 18's default (open above: #40). It compares equal when the owner's
   range does, so a manifest edit reruns only the files it owns. A declaration's validity is a `VersionSet` that
   does not depend on the range, and the reader intersects it with its own file's range (J1.2); a builtin reading is
   selected with that range (`Readings::over`). A level's memo is keyed by the range only where something it reads
@@ -84,7 +84,7 @@ list, since the project has a build-time gate.
 - `stamp` says whether the file's content may differ, and what it holds follows decision 13 (CACHE-13.1). On a
   file system known to keep a change time that no program sets (ext4, xfs, btrfs, APFS and the like) it is the
   `stat` tuple, trusted under the racily-clean rule, whose reference time is the clock reading taken at the file's
-  own stat (Part E 15; decision 13's "the index's own write time" does not fit a database written after the whole
+  own stat (#15; decision 13's "the index's own write time" does not fit a database written after the whole
   check); on any other, and on Windows, it is the content hash, so
   the file is read and hashed. Either way the driver bumps it when the content may differ (an overlay changes, or
   the rule distrusts the tuple). The walk takes no `stat` today, so the stamp is new work: for the analysed and
@@ -271,7 +271,7 @@ measures contention on shared levels, which REG-16.1 did not.
 - **Cancellation** is salsa's: a write unwinds other handles' queries with `Cancelled::PendingWrite`, and
   `Database::cancellation_token()` cancels one handle's (`Cancelled::Local`); both unwind by `resume_unwind`,
   without the panic hook. `$/cancelRequest` calls the request's token; F1's `CancellationToken` is that token.
-  A cancelled request answers `ContentModified` or `RequestCancelled` (Part E 36 says which methods the client
+  A cancelled request answers `ContentModified` or `RequestCancelled` (#36 says which methods the client
   retries); a cancelled analysis unit stops and the next revision starts it again. **A local cancel is ignored
   while the thread executes a query with `cycle_result` or `cycle_fn`, and everything nested under it** (salsa
   disables local cancellation there, `function/execute.rs`, because a local cancel would poison the cycle; the
@@ -330,16 +330,26 @@ measures contention on shared levels, which REG-16.1 did not.
   tree when its check ends) is memory only, and item 9 shrinks what it would free from 151 MB (MEAS-2; the
   analysed trees at exit) to the flat tree's size, so whether it is still wanted is S-7's to say, with the cost
   of freeing on another thread; **until S-7 says, W3 builds it as the ledger has it** (LOAD-5.2 needs LOAD-5.1,
-  whose facts W3 builds, and LOAD-3.1; Part E 39), and S-7 chooses between freeing on the checking worker and a
+  whose facts W3 builds, and LOAD-3.1; #39), and S-7 chooses between freeing on the checking worker and a
   bounded eviction, or drops it explicitly in Part D. In the server
-  `parse_analysed` has an `lru` (`set_lru_capacity`), so the batch and the server hold trees alike (Part E 28) and
+  `parse_analysed` has an `lru` (`set_lru_capacity`), so the batch and the server hold trees alike (#28) and
   differ only in the capacity; a tree evicted is parsed again from the overlay or the disk, whose digest
   `file_digest` holds (LOAD-5.3). Eviction never loses cutoff for unchanged inputs (H2.1 3).
 - **Memos.** A class's levels share structure (member maps behind `Arc`; a level stores what it changes), so a
   class costs about its final reflection plus the ancestors' set. `heap_size` is set on the heavy queries so the
   memo bytes are measured, not guessed. The dependency graph is one edge per distinct read of each query: about
   107,000 for Piwigo's checks at the grain of names (REG-16.1's count), 12 bytes each (`QueryEdge`; 8 packed),
-  plus the member reads of H2.4 and the interned-key edges of H1.4, which S-3 counts. **Retained memos (Part E 38):**
+  plus the member reads of H2.4 and the interned-key edges of H1.4, which S-3 counts. **Retained memos (#38):**
   an immortal `DeclKey` keeps the memos of a dead declaration until the database is rebuilt, so `heap_size` also
   measures them over an edit replay, and H4.6's in-process compaction bounds them.
 - **The kill criterion** is REG-12's: peak RSS at or below the phase start.
+
+## Decisions
+
+### #36 the server's snapshot model: salsa cancels a request when a write arrives (the request answers `ContentModified`, or the loop runs it again), where F1 wanted requests to run against the last published snapshot while an update builds the next
+
+**salsa's model**, rust-analyzer's. F1's model needs persistent structures through the whole engine, which is an engine of our own. The visible difference is a request cancelled by a keystroke, and a client retries a `ContentModified` answer only for the methods it lists in `general.staleRequestSupport.retryOnContentModified` (LSP 3.17; semantic tokens and inlay hints in common clients, not hover, completion or definition), so the server reads that capability at `initialize`, runs a request the client will not retry again on the new revision, and answers `ContentModified` only for the retryable ones (H2.8)
+
+*Needed before:* W3
+
+*Left as it is (#36):* what salsa's cancel model costs, which decision 3 already took.

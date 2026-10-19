@@ -46,7 +46,7 @@ rules' borrow, as now), and `Locals` stays lifetime-free. An expression that mus
 produced it is a `Rooted<Expr>` (item 8). **Why not a lifetime on `Locals`:** Stage D (D1 and D5 of the crate split, CHECK-6.3) replaces alias replay by conditional
 holders created at assignment and "removes the tree from `Locals` altogether", so `Locals<'a>` (415
 mentions in 66 files, the drop-order constraints on about 27 tests, `AstRef` and `checker_for` reshaped)
-would be built in item 9 and unbuilt in Stage D, which the no-interim rule (Part E 35 and 41) refuses.
+would be built in item 9 and unbuilt in Stage D, which the no-interim rule (#35 and 41) refuses.
 A rooted value is decision 4's "an id lives only in products owned with its tree", stated in the type;
 Stage D's deletion then touches the two alias maps and three fields, nothing else.
 

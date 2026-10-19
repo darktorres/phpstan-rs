@@ -20,12 +20,12 @@ and set here: the representation, where it sits on the engine, the generator's f
 ### J1.1 Representation
 
 ```rust
-pub struct VersionSet(u32);      // bit i is KNOWN_PHP_VERSIONS[i], append-only; a PhpVersions range is its contiguous case (batch 3, the php-version crate: Part E 32)
+pub struct VersionSet(u32);      // bit i is KNOWN_PHP_VERSIONS[i], append-only; a PhpVersions range is its contiguous case (batch 3, the php-version crate: #32)
 pub enum Availability { Always, Never, InPart }                  // of a VersionSet within a range (batch 3 as well)
 pub struct Readings<T>(SmallVec<[(VersionSet, T); 1]>);          // a value by version set; disjoint; one entry nearly always (STUB-7.1)
 ```
 
-**A range keeps its exact bounds, and its upper end is open when the constraint's is** (Part E 40, COMP-2; this reads
+**A range keeps its exact bounds, and its upper end is open when the constraint's is** (#40, COMP-2; this reads
 decision 18's "to the newest version" as "and later" for the default range).
 `PhpVersions` carries the range as version ids beside its minor hull: `lo` with its patch (`>=8.4.1` is 80401) and `hi`,
 absent when the constraint has no upper bound (`>=8.4.1`, which 282 manifests in the corpora say) or none is declared, and
@@ -57,7 +57,7 @@ site table resolves to a place for go-to-definition into a stub.
   build identity in a persisted file's key. `DeclFile::Builtin(index)` names the file in H1.4's `DeclRef`. Until
   STUB-11 embeds them the same constant is the corpus the run builds from the stub sources (STUB-7.6's layer with
   its per-file parse memo): lazily filled, and a pure function of the sources, so it is a cache and not state.
-- **The range a file reads is its owner's** (`range_of`, H2.2; Part E 42): `effective_range` is a
+- **The range a file reads is its owner's** (`range_of`, H2.2; #42): `effective_range` is a
   query per owning manifest, the configured range, else the owner's `config.platform.php` or `require.php`, else
   7.0 to the newest version narrowed to the versions all the analysed files of that owner compile on (STUB-7.1),
   which reads their `facts.validity`. Only in that last case does an analysed file's mark reach the range; a
@@ -217,14 +217,14 @@ designs above.
 | D4 `NodeCallback` sink, observers, result storage | CHECK-6.1's observer families | D4's interface is the observer API; the PHPStan-API walker and the statement rules are its first families (CHECK-6.1's text) |
 | D5 semantic convergence, one approved delta each | none | as written; the nsrt and rules oracles of gate 12 are the measure |
 | D6 engine APIs: Scope, public `TypeSpecifier`, returned-error `Rule`, derived nodes, Collector, Observer, extension registry, concurrency model, `AnalysisContext`, `InternalRule` deletion | CHECK-6.10, 4.1 | the returned-error `Rule` is I5's `Message`, `RuleError` and `RuleErrorBuilder`; `AnalysisContext` is J2's SUM-1; the extension registry is J2's `Extensions` input; the concurrency model is H2.7 |
-| E1 collectors and project-level rules (reference sites, dead code, architecture, class shapes, circular namespaces, composer hygiene, mock hygiene, unmatched ignores) | LOAD-5.1 | **The facts are W3's, the collection E1's** (Part E 39): LOAD-5.1's per-file facts are `file_products` fields built in W3, and E1 moves their collection onto D6's Collector API and adds its semantic fixes over those fields. The passes do not all land in E1: architecture, class shapes and Composer hygiene are E1 collectors; banned constructs are per-node rules in the rules walk (the crate split calls them "per-file checks, not project-level"); mock hygiene is ext-mockstan's (E4); unmatched ignores are the finalizer's (F1) |
+| E1 collectors and project-level rules (reference sites, dead code, architecture, class shapes, circular namespaces, composer hygiene, mock hygiene, unmatched ignores) | LOAD-5.1 | **The facts are W3's, the collection E1's** (#39): LOAD-5.1's per-file facts are `file_products` fields built in W3, and E1 moves their collection onto D6's Collector API and adds its semantic fixes over those fields. The passes do not all land in E1: architecture, class shapes and Composer hygiene are E1 collectors; banned constructs are per-node rules in the rules walk (the crate split calls them "per-file checks, not project-level"); mock hygiene is ext-mockstan's (E4); unmatched ignores are the finalizer's (F1) |
 | E2 builtins; E3 every diagnostic to `rules` and extension modules; E4 extension modules | none | as written, on D6's API |
 | E5 levels: no rule above the level runs | — | `CheckInputs` holds the level; `Pending.level` and the finalizer's level stage go (I5, F1) |
 | E6 observers for the LSP's presentation | G4 | hover, inlay hints, semantic tokens and completion read D4's per-node results instead of re-running the checker; G4b's node-at-position query is its first user |
 | E7 checker decomposition (the checker's fields' exact sets: 88 field lines at `ffa7cccb`, where the crate split's Appendix C counts 74) | CHECK-6.8, 6.18 | the per-file, per-function and per-pass state sets are D1/D2's; "one checker per worker, reset per file" (CHECK-6.18) is buildable under G1 (a `Checker` takes no tree lifetime), and is E7's because its reset clears exactly the sets E7 enumerates |
-| F1 Session, F2 result cache | REG-16.4, CACHE-13.2 | H4; F1's seven fixed-first commits are batch 0's (Part E 22) |
+| F1 Session, F2 result cache | REG-16.4, CACHE-13.2 | H4; F1's seven fixed-first commits are batch 0's (#22) |
 | F3 formatters, F4 binary, F5 language features | none | as written; F5 reads D4's results |
-| G1 extraction | — | the list gains `engine` (a module of the package until here, with its `crate engine` line between `analyser` and `project`, H3.1, Part E 33); `php-version` is a crate already (batch 3, Part E 32), so it belongs among G's "crates already", and the crate split's "26 new packages" count is corrected; Appendix A's module assignments and Appendix E's third-party rows gain `salsa`, `triomphe` and `wide` |
+| G1 extraction | — | the list gains `engine` (a module of the package until here, with its `crate engine` line between `analyser` and `project`, H3.1, #33); `php-version` is a crate already (batch 3, #32), so it belongs among G's "crates already", and the crate split's "26 new packages" count is corrected; Appendix A's module assignments and Appendix E's third-party rows gain `salsa`, `triomphe` and `wide` |
 
 **Conventions every Stage D and E commit obeys:** tree-derived values are handles in walks and `Rooted` where one
 must be stored, and no bare id is held outside `syntax`, the infer cache and the probe module (G1); **no value that
@@ -236,11 +236,25 @@ engine handles that record the read (J2).
 **Order.** Part D's stands: W5 (C6 to C9), W6 (STUB-11, STUB-13), then W7 (Stages D to G). Stage D is written on the
 final reflection API, and C8 changes what the handlers call (the tri-state relation, the extension points) and C9
 what they read for purity and globals, so starting D before them would write those calls twice. LOAD-5.1's facts
-are W3's and their collection moves into E1 (Part E 39).
+are W3's and their collection moves into E1 (#39).
 
-**Ledger rows to write** in the docs commit series of Part E 20: OVL, RES, EXT and SUM (J2), with the
+**Ledger rows to write** in the docs commit series of #20: OVL, RES, EXT and SUM (J2), with the
 needs above; a D-row and an E-row per phase of Stage D and E that the plan lists, each citing its plan section and
 the oracle counts it carries; CHECK-6.1 to 6.3, 6.7, 6.13 to 6.15 re-pointed to "built by D1 to D4"; LOAD-5.1
 re-pointed to W3 (facts) and E1 (collection); and the corrections of H6.
+
+## Decisions
+
+### #16 item 18
+
+**Reconcile, build once, as Stage D.** §12.10 ("PHPStan's `NodeScopeResolver`... record and replay") and D3 and D4 (`RecordingNodeCallback`, per-node results) are one architecture; D1 and CHECK-6.3 both specify the scope's storage; CHECK-6.2 is D2's `StatementResult`. The crate split builds the layers bottom-up, so the engine goes on the final reflection API, and the 25 G report's own no-interim rule (its §10.7) says not to build what the traversal replaces. So CHECK-6.1, 6.2, 6.3, 6.7, 6.13 to 6.15 (and the LOAD-5.1 passes that need CHECK-6.1) go to Stage D, reconciled first; batch 7 is the temporaries, with 6.10 and 4.1's message type designed as D6's `RuleErrorBuilder`. The cost: §12.10's ≈1.0-1.3 G and the slots' ≈0.15-0.25 G arrive with Stage D
+
+*Needed before:* batch 7
+
+## Facts the decisions rest on
+
+- §12.10 of the 25 G report and the crate split's D3 and D4 describe the same port of PHPStan's
+  `NodeScopeResolver`, down to record and replay. The 25 G audits adopted a no-interim rule (its
+  §10.7).
 
 ---

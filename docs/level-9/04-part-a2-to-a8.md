@@ -63,7 +63,7 @@ symlinked package (path repository), a symlinked `vendor/v`, a symlinked `vendor
 `vendor/composer`, a missing package directory, an unlisted one, an interior `..`, a `./name` package, a null
 `install-path`, a non-plain Windows name (`aux`, on the Windows leg) and an incomplete listing, the new
 `read_installed` gives, for every package, `std::fs::canonicalize` of its directory: explicit expectations, with
-no copy of the old function kept as an oracle (Part E 13). The same expectation runs over the real
+no copy of the old function kept as an oracle (#13). The same expectation runs over the real
 `installed.json` files of the 14 vendor trees that carry one (amphp, composer, doctrine-collections, doctrine-orm,
 drupal, guzzle, laravel, league-commonmark, league-flysystem, monolog, psalm, reactphp-http, rector-src, symfony)
 and Piwigo's.
@@ -124,12 +124,12 @@ trees. The test that can fail is a build-once project whose context file keeps n
 The change is a type change that an end-state invariant needs (a reader cannot be handed a tree that is not
 there), not a structure the engine deletes: `ast_of` is the shape of `parse_analysed`'s accessor.
 
-## A7. The autoload maps keep their keys and gain PSR-0 (Part E 40; STUB-7.5's prerequisite)
+## A7. The autoload maps keep their keys and gain PSR-0 (#40; STUB-7.5's prerequisite)
 
 **Now.** `Autoload` (`composer/src/manifest.rs`, line 29) has `psr4`, `classmap`, `files` and `excluded` and no `psr-0`;
 `GeneratedEntries { files, dirs }` (`vendor.rs`, line 237) reads `autoload_namespaces.php` (PSR-0) as `Reading::Dirs`
 and keeps no prefix or class key: the classmap's class names and both PSR prefixes are dropped, so the lazy locator
-`locate` (H4.1, STUB-7.5, W3) would have nothing to look a class up by. The ledger has no row for it (Part E 40).
+`locate` (H4.1, STUB-7.5, W3) would have nothing to look a class up by. The ledger has no row for it (#40).
 
 **Change.** `Autoload` gains `psr0` (prefix to directories, with Composer's PSR-0 rule for `_` in the class part)
 beside `psr4`. `GeneratedEntries` keeps the classmap's class-to-file entries and the PSR-4 and PSR-0 prefix-to-
@@ -142,7 +142,7 @@ delta.
 today, so `check-project <named file>` does not know a class of the project that no analysed file names (the crate split
 counts 1,253 of the Piwigo oracle's 1,855 phpstan-rs-only `class.notFound` naming a `Piwigo\` class). Only the flat lists
 stay filtered to the vendor directory, the path repositories and, after A1's COMP-7 commit, the install directories of packages
-Composer installed elsewhere, so nothing the walk reads moves in A7; W3's lazy locator finds the class. No interim fix is built for the batch path before W3 (the rule of Part E 35 and 41, which replaces such a fix by the
+Composer installed elsewhere, so nothing the walk reads moves in A7; W3's lazy locator finds the class. No interim fix is built for the batch path before W3 (the rule of #35 and 41, which replaces such a fix by the
 locator), and a by-name oracle run carries that noise until then.
 
 **Tests.** `cargo test -p phpstan-rs-composer`: for each of the 14 vendor trees that carry `vendor/composer/` (A2's
@@ -208,13 +208,13 @@ among them). The results are merged after the known roots, in path order of the 
 root does, so that its `require 'vendor/autoload.php'` is not judged). Nothing depends on thread count or timing: the roots
 are a function of the tree, the order is by path, and the merge happens before the walk.
 *What the roots change elsewhere.* (i) Ownership: a file under a nested project is owned by that project (`Root(i)`; the
-deepest manifest wins in `PackageIndex`), which gives Part E 42's "owner = nearest ancestor `composer.json`" its data, and
+deepest manifest wins in `PackageIndex`), which gives #42's "owner = nearest ancestor `composer.json`" its data, and
 `check_composer_hygiene`, which runs once for each manifest of the index (`session.rs`: `for root in 0..manifests().len()`),
 now checks a nested project's files against its own manifest where the outer one's was read; the rule is opt-in, the change
 is a delta for a project that enables it, and the per-call setup that does not depend on the root (the declaring files in
 path order, the class and function maps) is built once. (ii) `phpstan_api_check_enabled` is the OR over the roots, as the
 `|=` of the loop already makes it for several configured roots; the PHP range (`composer_php_versions`) and the extension
-activation (`root_manifest`) stay the session root's until LOAD-7.6 reads the owners (Part E 42). (iii) A name that two
+activation (`root_manifest`) stay the session root's until LOAD-7.6 reads the owners (#42). (iii) A name that two
 roots' vendor trees declare is two context declarations of one name, which the registry resolves as it resolves any
 duplicate today (decision 11's candidates at W2; at W3 `locate` over the asking file's own owner's maps binds each file to
 its own project's autoload), so until then a file may see the declaration of another project. (iv) A configured `paths`
@@ -273,7 +273,7 @@ does not exist yet (batch 0 comes after Part A), so this validation compares bin
 - **A1's delta on real projects (local, Linux):** the files the degrade walk lists, with their roles, and the
   `classify()` answers for sample paths (a vendor file, a nested project's vendor file, `lib/vendor/`, `.git`), at
   the base and at HEAD, over Piwigo's root and over each of the 14 vendor trees that carry a
-  `vendor/composer/installed.json`; the difference is the delta of Part E 40, and it should be only the
+  `vendor/composer/installed.json`; the difference is the delta of #40, and it should be only the
   `vendor/` directories that are not Composer's and the Composer vendor directories that are not named `vendor`. COMP-7
   adds nothing here, since the one package the corpora install outside its vendor directory is a path repository's
   (Drupal core, promoted), so its fixtures carry it.
@@ -290,7 +290,7 @@ does not exist yet (batch 0 comes after Part A), so this validation compares bin
   inclusive Ir against the base's binary, total beside it. LOAD-9's wall pairs (A2). One heavy job at a time,
   `nice -n 19`.
 - **LOAD-2.8's parts 1 and 2** (`27c3b093` and `53e6f766`) are outside this batch's range, so these runs cannot isolate them
-  (Part E 25): they are two separate callgrind and `abab` comparisons, each commit against its parent (`53e6f766` and
+  (#25): they are two separate callgrind and `abab` comparisons, each commit against its parent (`53e6f766` and
   `6759cc39`), with binaries built in the gate and `dhat` frame-pointer profiles and kept as above.
 
 Bookkeeping when it lands (the full list of ledger and `WORK_STACK.md` edits the plan implies is Part N): ledger rows
@@ -298,5 +298,19 @@ to DONE with hashes (LOAD-2.2 is DONE at `4f3d5c29`, which deletes `path_under_e
 close, N6), §1's Ir table, §2.1;
 `WORK_STACK.md` (item 2's bullet goes, LOAD-9 leaves the "Outside the items" line, item 8 keeps 14.1 and 14.3, item 9
 leaves SYN-1.2 onward, item 19 loses LOAD-5.4, state line). The separate runs above measure LOAD-2.8's parts 1 and 2, which its row lists as not measured.
+
+## Decisions
+
+### #25 LOAD-2.8's parts 1 and 2
+
+**Measure.** Builds are pre-approved and the ledger claims nothing unmeasured: callgrind and `abab` at `27c3b093` and `53e6f766` against their parents
+
+*Needed before:* Part A bookkeeping
+
+### #40 the composer crate's B8 follow-ups sit in `CRATE_SPLIT_PLAN.md:1840-1880` and in no ledger row (Q-11 audited C1 to C3 only): `config.vendor-dir`, Composer's constraint grammar (whitespace after an operator; an open upper bound running to PHPStan's `MAX_PHP_VERSION`), the process-wide panic hook that `discover_vendor_context` swaps while it parses (`vendor.rs:134`), `psr-0` in `Autoload` and the generated maps' keys, the root package's own autoload as context, a package's bundled `vendor/` as context. Also whether `COMPOSER_VENDOR_DIR` is honoured beside `config.vendor-dir`; and two that the re-audit of the same day added: third-party code that Composer installs outside the vendor directory, and the vendor contexts of a degrade root's nested Composer projects
+
+**Each audited against the code (read-only, as Q-11 did, with the vendored Composer's `Semver` and `Config` run in memory and a scan of the 1,594 manifests under `vendor/`); the rows are written (Part N lists them, one COMP row each).** **COMP-1, `config.vendor-dir`, `COMPOSER_VENDOR_DIR` and `COMPOSER`:** read nowhere today; discovery, `read_installed` and R8's `vendor_trees` hard-code `vendor`, and four places join `composer.json` where Composer's `Factory::getComposerFile` (and PHPStan) take the file from `COMPOSER`. A1 resolves them as Composer's `Config` does (PHPStan joins the key to the root, `$root . '/' . trim($dir, '/')` (`ComposerHelper.php:77`), so it misreads an absolute value) over candidates in Composer's order, the first installed one winning, so no project loses context it has today; the variable is honoured wherever it names an installed directory and is an input of `Packages`, so a persisted database made under another environment is not trusted. **The batch-output commit and A1's mechanism for the skip are in A1.** (a directory Composer wrote into, not a path a manifest resolves: the wording of the fixes plan's decision 7). **COMP-2, Composer's constraint grammar** (confirmed on the corpora): 5 of 1,594 manifests write a space after an operator (`>= 7`, `>= 8.1`), which `satisfies` rejects, so they get no range; `declared_php_versions` probes patches 0 and 99 of each minor, so a window inside one (`>=8.0.2, <8.0.15`) gets none where Composer accepts 8.0.5; and a bare `8.1` is `==8.1.0.0` in Composer, not any 8.1.x. The fix ports Composer's grammar with interval arithmetic and intersects the intervals with each minor's, instead of probing; it changes a range and so a dump, and goes before the baseline (batch 0). **The upper end:** the crate split's text clamps an open upper bound to PHPStan's `MAX_PHP_VERSION` (80699), and 282 manifests say `>=8.4.1`; runtime truth is open above, so code gated on a later version is possible and not dead (keep all possibilities when unknown), and the corpora already hold such guards (`>= 80600` in Symfony's `polyfill-php86` and Guzzle, `< 90000` in var-dumper and Composer). A range keeps its exact version-id bounds (J1.1), the upper end absent when the constraint has none or no range is declared, and declaration guards read them. This reads decision 18's "to the newest version" as "and later", which is decision 18's amended reading; the grammar half needed no change. **COMP-3, the panic hook:** discovery's swap is deleted, since the parse is infallible after G3 and needs no catch there (A2 adds no second user of it), and the other two swap sites (`check_project.rs` and `check_paths_isolating_panics`) get one hook installed at startup that consults a thread-local "silenced" flag, because a swap of the global hook is not thread-safe and its windows overlap once discovery runs beside the manifest load (A2) or per root (H4.3); that is the crash plan's step 1, done before W2 so that H2.8's isolation can assume it. **COMP-4, `psr-0` and the maps' keys:** `Autoload` has no `psr-0` and `GeneratedEntries` drops the classmap keys and the PSR prefixes (STUB-7.5's prerequisite, H4.1); A7 adds them ahead of W3. **COMP-5, the root package's own autoload as context:** confirmed (the crate split counts 1,253 of the by-name Piwigo oracle's 1,855 phpstan-rs-only `class.notFound` naming a `Piwigo\` class); discovery drops the root's entries because they lie below `$baseDir` and outside `vendor/`, A7's maps keep them and W3's lazy locator finds the class, so no interim fix is built (the rule of #35 and #41). **COMP-6, a package's bundled `vendor/`:** confirmed (`rector/rector` and `symplify/easy-coding-standard`); A1's test finds them and the same discovery reads them (A8, in Part A: W3's locator needs the nested maps too and does not replace the work). **COMP-7, third-party code installed outside the vendor directory:** a custom installer (`composer/installers`, `extra.installer-paths`: Drupal's `web/core` and contrib modules, WordPress plugins) installs packages where the project asks, and `installed.json` records each (`install-path`; `null` for a metapackage: the vendored Composer's `FilesystemRepository::dump` was read), yet nothing recognised them: a degrade root walked them as analysed code, and discovery dropped their autoload entries as first-party, so no mode had them as context. A1's third clause leaves the install directories of a known root's non-path-repository packages out of a degrade root's analysed walk (the seeds), and discovery's filter admits their entries in every mode (a delta commit of its own). One of the 1,329 packages in the corpora's 29 `installed.json` files lies outside its vendor directory and it is a path repository's (Drupal core), so the fixtures carry the clause; a match of an `installer-paths` pattern proves no package, so a fresh install's files are analysed until the session is resolved again (stated and tested). **COMP-8, the vendor contexts of a degrade root's nested Composer projects:** a degrade root has one known root, so a monorepo's packages and a `tools/cs/` project with a vendor of its own are analysed with no context from it (the corpora hold 7 to 211 nested manifests each, and fixtures with installed vendors). A8's scan finds them before the walk, because the walk tags owners and decides roles from the immutable `PackageIndex` and the seeds, loads them in parallel and merges them in path order; their manifest directories are the owner facts that H2.2's `range_of` reads; configured `paths` keep the nearest-ancestor rule unless the scan measures below the gate's noise. PHPStan does not read the variable, which is not a reason (the project is judged on runtime truth)
+
+*Needed before:* A1 (the skip rule, the resolution and COMP-7; the delta commits are ruled); A7 (the maps); A8 (COMP-6 and COMP-8); COMP-2's grammar (batch 0, before the baseline); the rest before W3
 
 ---

@@ -40,7 +40,7 @@ it.
 under one is context? And which one is the project's, so that discovery, `read_installed` and the include lookup read it? The
 one resolved path answers both. Today nothing answers either well: `discover_vendor_context`
 (`composer/src/vendor.rs`) needs `<root>/composer.json` to be a file and `<root>/vendor/composer` a directory,
-`config.vendor-dir` is read nowhere (the crate split's B8 follow-up, `CRATE_SPLIT_PLAN.md`; Part E 40), and a project with
+`config.vendor-dir` is read nowhere (the crate split's B8 follow-up, `CRATE_SPLIT_PLAN.md`; #40), and a project with
 `"config": {"vendor-dir": "libs"}` has Composer's vendor directory at `libs`, and one with `"libs/vendor"` at a directory
 two levels down, so the name test is wrong for them in both directions.
 
@@ -167,7 +167,7 @@ missing or does not read, need those two assignments evaluated (string literals,
 and `.`), with the vendor directory's parent kept only for a file without such a head. The generated cache keeps the head
 with the entries, so its key (the file's bytes) still holds.
 
-**The owning manifest is not A1's.** A file's owner for H2.2's range and the activation (Part E 42) is the nearest ancestor
+**The owning manifest is not A1's.** A file's owner for H2.2's range and the activation (#42) is the nearest ancestor
 that holds a `composer.json`, a second fact of the same listing: A8's scan finds a degrade root's nested manifests before
 the walk, `PackageIndex` holds them and the walk tags each file with its owner from it (COMP-8), and W2 reads the same
 directories into `Packages`; A1 builds the vendor fact only.
@@ -232,7 +232,7 @@ it that names it, and no `composer/` holding `installed.json` or `autoload_real.
 it was left out. A Composer vendor directory is left out wherever it is and whatever it is called (`libs/vendor`, a shared
 `../../vendor`, a nested project's, a build copy, a stale install, a link to one); before, only a directory named `vendor`
 was. A fresh `composer install` with the editor open keeps its files context, as the name rule does. A promoted root keeps
-its empty exclusion as today, so its own `vendor/` is not left out. **The delta commit (Part E 40):** a project whose `config.vendor-dir`, `COMPOSER_VENDOR_DIR` or `COMPOSER` names another directory or file gets its
+its empty exclusion as today, so its own `vendor/` is not left out. **The delta commit (#40):** a project whose `config.vendor-dir`, `COMPOSER_VENDOR_DIR` or `COMPOSER` names another directory or file gets its
 installed packages, its vendor context and its include trees from that directory in the batch run too (it got none, since
 discovery looked for `vendor/composer`), which changes its output; that part is a commit of its own, with its fixture.
 **COMP-7's two commits:** third-party code installed outside the vendor directory is left out of a degrade root's analysed

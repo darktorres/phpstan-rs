@@ -27,7 +27,7 @@ A6 is the validation, not a task.
 | 3 | REG-14.4 | 8 | `from_decl` passes the parameters on, not a `Vec<&str>` of names | `registry/function_sig.rs`, `function_sig/asserts.rs` |
 | 4 | SYN-1.1 | 9, step 1 | `Expr::peeled` becomes a loop | `crates/syntax/src/ast.rs:1417` |
 | 5 | LOAD-5.4 | 19 | no reader gets an empty file: `FileState::ast` goes, so item 9's API needs no empty tree (A5a) | `project.rs`, `project/{architecture,banned,class_shape,composer_hygiene,mock_hygiene}.rs` |
-| 6 | the composer follow-up of Part E 40 (a COMP row) | none | the autoload maps keep their keys, the root package's own entries included (COMP-5's data), and gain PSR-0, which STUB-7.5's lazy locator needs (A7); no output moves | `crates/composer/src/manifest.rs`, `vendor.rs` |
+| 6 | the composer follow-up of #40 (a COMP row) | none | the autoload maps keep their keys, the root package's own entries included (COMP-5's data), and gain PSR-0, which STUB-7.5's lazy locator needs (A7); no output moves | `crates/composer/src/manifest.rs`, `vendor.rs` |
 | 7 | COMP-6 and COMP-8 | none | the vendor context of every other Composer root: a package's bundled `vendor/` (COMP-6) and, in a degrade root, a nested project's (COMP-8), found by A1's test (A8); a delta, with A1's | `crates/composer/src/lib.rs`, `vendor.rs`, `project/session.rs`, `project/walk.rs` |
 
 Why these rows: item 2 has only this part open (LOAD-2.1 and 2.3 to 2.8 are in).
@@ -44,7 +44,15 @@ admission reads, and the admission comes first, so that no commit leaves a class
 (a role of analysed wins over the context one); A3, A5 and A5a are independent of them and of each other. Validation,
 once, after the last of them (A6). Four answers of the audit are built in:
 A1's mechanism for the skip, which changes the wording of the fixes plan's decision 7; A1's commit that makes discovery,
-`read_installed` and the include lookup follow `config.vendor-dir`, `COMPOSER_VENDOR_DIR` and `COMPOSER` (Part E 40), a
-delta; A8, a delta of the same kind; and the PHP range's open upper end (J1.1), which is not Part A's; Part E 35 leaves
+`read_installed` and the include lookup follow `config.vendor-dir`, `COMPOSER_VENDOR_DIR` and `COMPOSER` (#40), a
+delta; A8, a delta of the same kind; and the PHP range's open upper end (J1.1), which is not Part A's; #35 leaves
 three rows unbuilt. The two extensions added with them are A1's third clause and its discovery filter (COMP-7) and A8's
 scan (COMP-8); each has a delta commit of its own. A6 runs with all of them.
+
+## Decisions
+
+### #23 Part A's validation
+
+**Once, after the last row,** against binaries built at the batch's base commit and the Piwigo digest (A6): the item-0 baseline does not exist yet, since batch 0 comes after Part A. The rows are independent; none changes Piwigo's or `vendor/monolog`'s output, and A1's editor delta, its `config.vendor-dir` commit and A8 are read separately (A6)
+
+*Needed before:* Part A

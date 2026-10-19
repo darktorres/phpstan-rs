@@ -7,16 +7,16 @@ None. The overview names no task of its own: each part's own table lists the row
 The plan is written from the code at `0fb1a4de` (Parts A to F), `30aa2002` (G) and `8a1ca1e0` (H to J); the review passes re-read the code at `52844b07` and `ffa7cccb`. Line numbers
 are hints from those commits and the tree moves, so a citation is found by the symbol it names; "the fixes plan's R7"
 is `ITEMS_1_TO_3_FIXES_PLAN.md` (ledger LOAD-8.7) and "the cross-platform plan's R7" is `CROSS_PLATFORM_PLAN.md`.
-Part A is built and validated (its status is in Part A's intro, `02`). Nothing from Part B onward is built by this plan. The batch-0 fixes already in the tree are listed in Part E. Part C (what follows item 9) and Part D (what follows that:
-levels 1 to 7) are at the end, and Part E gives the answer for every pending decision,
-by number. Where Parts B to D differ from Part E, Part E governs.
+Part A is built and validated (its status is in Part A's intro, `02`). Nothing from Part B onward is built by this plan. The batch-0 fixes already in the tree are listed in the README's batch 0 rows. Part C (what follows item 9) and Part D (what follows that:
+levels 1 to 7) are at the end. Each pending decision is answered in the part that owns the design it changes, under its number
+(`#n`), and the README indexes them.
 Part F lists what needed designing; Part G holds the designs of its rows 1 to 4 and 6, Part H the engine cluster
 (rows 10, 13 to 15), Part I the designs the batches wait for (rows 5, 7, 8, 11, 12) and Part J the wall's later
 ones (rows 16 to 18). Part K records the review by task group, and Part L the second pass by ledger row;
 where either changed an earlier part, the change is made there. Part N lists the documents and the ledger and stack edits the plan implies.
 
 - **Part A** designs the batch that follows the cross-platform fixes: five rows (`WORK_STACK.md`: item 2's last part, item 8's
-  REG-14.4, item 9's first step, item 19's LOAD-5.4, and LOAD-9), the composer follow-ups A7 and A8 (Part E 40).
+  REG-14.4, item 9's first step, item 19's LOAD-5.4, and LOAD-9), the composer follow-ups A7 and A8 (#40).
 - **Part B** designs item 9 (SYN-1: the flat tree) as a staged migration. It needs nine
   decisions settled first (B2, D1 to D9); the three that matter most are D1 (handles and
   views, not bare ids), D2 (staged migration over the boxed tree first) and D3 (what a node
@@ -64,5 +64,16 @@ the `gates` job of `rust-ci.yml` (Linux only, `ubuntu-24.04`) lists its steps on
 and any other cheap gate (F20's recursion lint) is added in two places, `gate_steps` and a step of the `gates` job. A
 heavy tool (the dumps, the baseline, the `oracle` profile run) stays local: it needs the frozen Piwigo checkout and a
 quiet machine, and a dump spells paths and diagnostics as its platform does.
+
+## Decisions
+
+Churn and effort are not weighed: each answer is what is correct and complete. Each answer is in the part that owns the
+design it changes, and no two parts answer the same question differently. The rulings (the nine decisions, the deltas of #42
+and the audit's answers) are carried by their answers. The other answers are the plan's, on the same footing: the most
+proper course for each.
+
+Decisions in force: the fixes plan's decisions 1 to 7 and the ledger's decisions 1 to 18, which the plan cites by number. Gates, not decisions: the go, and the start condition in the overview. Batch
+numbers are the order of the README's "The sequence". An answer that departs from a decision's wording says so.
+
 
 ---

@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-None. Part F holds designs, not ledger tasks: the designs of G1 to G5, H1 to H4, I1 to I5 and J1 to J3, and the list of what still needs one. Each ledger task those designs serve is owned by the part that builds it (batch 0 by Part E, the wall by Part D, and so on).
+None. Part F holds designs, not ledger tasks: the designs of G1 to G5, H1 to H4, I1 to I5 and J1 to J3, and the list of what still needs one. Each ledger task those designs serve is owned by the part that builds it (batch 0 by the README's batch 0 rows, the wall by Part D, and so on).
 
 
 What exists: Parts A and B are designed (B has the open points below). The 20 G plan's items 0 to
@@ -14,17 +14,17 @@ exists but needs a read against HEAD is a check, and is listed after the table.
 
 | # | design | what exists | what is missing | needed before |
 |---|---|---|---|---|
-| 1 | How the checker holds a tree (Part E 1). **Designed: G1** | B4's rule for ids in checker state; `Checker<'a>` borrows registry and settings, `Locals` has no lifetime, `Checker::new` has 30 call sites, `Rc<Expr>` sits in 11 places | whether `Locals` and the checker take a tree lifetime or root what they store (rooted: Stage D deletes the lifetime again); the rooted form for an expression kept past its walk; skimmed bodies' short-lived trees; the infer cache key | item 9, step 1 (it fixes the API's signatures) |
+| 1 | How the checker holds a tree (#1). **Designed: G1** | B4's rule for ids in checker state; `Checker<'a>` borrows registry and settings, `Locals` has no lifetime, `Checker::new` has 30 call sites, `Rc<Expr>` sits in 11 places | whether `Locals` and the checker take a tree lifetime or root what they store (rooted: Stage D deletes the lifetime again); the rooted form for an expression kept past its walk; skimmed bodies' short-lived trees; the infer cache key | item 9, step 1 (it fixes the API's signatures) |
 | 2 | Stored-alias identity. **Designed: G2** | `Rc::ptr_eq` merge tests on the condition and query-builder aliases (`control_flow.rs:446`, `:478`), meaning "both branches inherited this very store"; the `@var` memo keyed by a doc text's address (`var_tag_types.rs:290`) | whether the stored value keeps instance identity (a store stamp, or an `Rc` around the handle) or takes the node's identity, which would be a semantic change; the memo's new key | step 1 |
 | 3 | The error-node model. **Designed: G3** | decisions 4 and 15; Q-10, SYN-1.9 and SYN-6 as needs; F77's reporting design | what an error node keeps (salvaged children) and how readers treat it; recovery points on the token stream; marks for versions; how the registry gets "an entry of unknown shape" | step 2 (layout); the rest before batch 3 |
-| 4 | The probe as a checker entry point (Part E 26). **Designed: G4** | the current probe (`completion.rs`: synthetic statements, sentinel spans) shared with hover through `probe_receiver_type` | the entry point's inputs and outputs (a statement prefix, an expression handle from another tree), the hover path, static and script scopes | step 2 |
+| 4 | The probe as a checker entry point (#26). **Designed: G4** | the current probe (`completion.rs`: synthetic statements, sentinel spans) shared with hover through `probe_receiver_type` | the entry point's inputs and outputs (a statement prefix, an expression handle from another tree), the hover path, static and script scopes | step 2 |
 | 5 | Node layout per variant. **Designed: I1** (the census confirms it) | B3's shape and size limits | which of the 47 expression and 26 statement kinds are inline or in side tables, and the nested lists' layouts; it needs step 0's census | step 2, after step 0 |
-| 6 | Item 0's tooling plan (Part E 13). **Designed: G5** | 20 G item 0: the printer, `registry-dump`, the expression-types dump, O2, the session, the edit replay | a refresh against HEAD (the registry's shape moved: templates, flags), the baseline procedure at a current commit, what is kept and for how long | batch 0 |
+| 6 | Item 0's tooling plan (#13). **Designed: G5** | 20 G item 0: the printer, `registry-dump`, the expression-types dump, O2, the session, the edit replay | a refresh against HEAD (the registry's shape moved: templates, flags), the baseline procedure at a current commit, what is kept and for how long | batch 0 |
 | 7 | Item 10's token payloads under decision 4. **Designed: I2** | 20 G item 10: `TokenStream` with payloads as `&'a Name` and `&'a [u8]` into an arena | the arena was dropped (it is not `Sync`): payloads become ids into the builder's tables, which grow while the lexer runs, so references into them cannot be held | batch 1 |
-| 8 | SYN-3.2's kernel (Part E 10). **Designed: I3** | SYN-3.1's two types; the old SSE2 and AVX2 plan | the fused newline and non-ASCII kernel on `wide`: block size, tails, line-terminator rules, the `memchr` oracle | batch 2 |
+| 8 | SYN-3.2's kernel (#10). **Designed: I3** | SYN-3.1's two types; the old SSE2 and AVX2 plan | the fused newline and non-ASCII kernel on `wide`: block size, tails, line-terminator rules, the `memchr` oracle | batch 2 |
 | 9 | Parse recovery as a whole. **Designed: G3.4, G3.8** | (3) | the recovery algorithm; the load's failure reporting (F77); the editor's rule for a failed parse (`Project::update_from` parses before it unindexes, so a failed parse leaves the file's registry entries as they were) | batch 3 |
-| 10 | The engine's identity model (Part E 18). **Designed: H1** | decision 3; REG-16.1's measurement; REG-16.2 and REG-8.6 as rows; NAME-2's weak tables | ids, interners and their lifecycle as one design; the API of `FoldedName`, `ConstName` and `ArrayKey`; NAME-2.1's thin name (a spike) | batch 4 |
-| 11 | The single grammar's lowering (Part E 14). **Designed: I4** | F41's design (a `TypeNode` to `Type` lowering, the string parser deleted), DOC-2.1's (`phpdoc::lower`), C7's list | where the lowering lives (F41 moves the grammar to its own crate if `types` cannot depend on `phpdoc`), `parse_phpdoc_type`, how DOC-2.2's memo keys over it | batch 6 |
+| 10 | The engine's identity model (#18). **Designed: H1** | decision 3; REG-16.1's measurement; REG-16.2 and REG-8.6 as rows; NAME-2's weak tables | ids, interners and their lifecycle as one design; the API of `FoldedName`, `ConstName` and `ArrayKey`; NAME-2.1's thin name (a spike) | batch 4 |
+| 11 | The single grammar's lowering (#14). **Designed: I4** | F41's design (a `TypeNode` to `Type` lowering, the string parser deleted), DOC-2.1's (`phpdoc::lower`), C7's list | where the lowering lives (F41 moves the grammar to its own crate if `types` cannot depend on `phpdoc`), `parse_phpdoc_type`, how DOC-2.2's memo keys over it | batch 6 |
 | 12 | The rule message type. **Designed: I5** | CHECK-6.10 and 4.1; the crate split's D6 `RuleErrorBuilder` | one lazy message type that is also D6's | batch 7 |
 | 13 | The engine. **Designed: H2** | decision 3 (principles); REG-16.1 (cost of a query: 374 Ir, 67 per name per file) | the queries and their keys; read recording through REG-4.12's accessors (they are one design); early cutoff; threads and the pool (REG-16.1 did not measure queries on several threads); cancellation; panics (REG-7.9); cycles; revisions in a batch run | W2 |
 | 14 | REG-7 and REG-8 as engine queries. **Designed: H3** | rows 7.1 to 7.12, 8.1 to 8.7 | each level's query, key and cutoff, on (13) | W2, after (13) |
@@ -43,7 +43,7 @@ exists but needs a read against HEAD is a check, and is listed after the table.
 
 ## Specified, or waiting on a ruling
 
-- LOAD-7.2's PHPUnit half and the deltas of LOAD-7.6, REG-18.4 and CHECK-11 are settled (Part E 42):
+- LOAD-7.2's PHPUnit half and the deltas of LOAD-7.6, REG-18.4 and CHECK-11 are settled (#42):
   the PHPUnit half stays ungated, and the three deltas are approved with their conditions. LOAD-7.8's settings are
   each "its phase".
 - REG-17, CHECK-7 and CHECK-8: the semantics are fixed by decisions 9, 17, 1 and 8; their designs
@@ -123,3 +123,16 @@ the printers destructure everything: a new field is a compile error in the dump,
 dump that costs minutes on Piwigo is acceptable; one that differs between runs is a finding to triage
 (engine or dump). Nothing here gates on Piwigo alone: each dump runs over the vendor projects and the
 fixtures too.
+
+## Decisions
+
+### #13 oracle tools
+
+**Item 0 first.** Between Part A and item 9, in G5's order: read HEAD against the last validated state (VAL-1.1), build the canonical type printer (1.4, after F21), the full-field O2 (1.8), `registry-dump` (1.6), the expression-types dump and the PHPDoc record (1.7), the server session (1.9) and the edit replay (1.10) and the memory profile (1.11); run the `oracle` profile once over all of them (1.2, which includes the replay, so it comes after it); retire the debug oracles (1.3, which also shrinks item 9's reader set); take the baseline (1.12). VAL-1.5 is item 9's dump. The 20 G plan designed it so (oracles are dumps), Piwigo's 581 diagnostics are a weak oracle for exact refactors, and the rule is not to gate on Piwigo. **The policy on old implementations:** no row keeps one alive as a standing test; a comparison against the implementation being replaced is allowed for one stage where a dump cannot see the difference (every `Provider` answer for every name, H3.6 steps 2 and 3; I4.5 step 3 only if the PHPDoc record cannot see what a per-`TypeNode` comparison finds; I2's comparison of the old and new lexer's (kind, span) pairs), each is listed in Part N with the commit that deletes it, and A2 keeps none
+
+*Needed before:* batch 0
+
+## Facts the decisions rest on
+
+- The 20 G plan's §9 makes the oracles dumps.
+  `FileBodies` still keeps statements in debug builds for the old oracles.

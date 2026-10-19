@@ -269,7 +269,7 @@ Order, as the plan sets it:
    VAL-1.10), the baseline (VAL-1.12), F69's fixtures (FIX-69), F77's record of a context
    file's failure in the dump and the per-file cache (FIX-77; the dump needs VAL-1.8), COMP-2's
    grammar, and the level-3 findings that change a dump: W1's rows are READY and none is built,
-   and the level-3 triage by probe is run: `LEVEL3_TRIAGE.md` has 120 rows, 60 of which reproduce and change a dump (Part E 22). Then item 9, the flat tree, steps 0 to 3, with spike
+   and the level-3 triage by probe is run: `LEVEL3_TRIAGE.md` has 120 rows, 60 of which reproduce and change a dump (plan #22). Then item 9, the flat tree, steps 0 to 3, with spike
    S-12 before step 2.
 3. Part C's batches (tokens, the lexer, parse recovery, names, products, PHPDoc, the
    check's temporaries), then the wall (Part D), whose engine is Parts H and J (`docs/level-9/18-part-h1.md` to `23-part-j.md`).
@@ -278,7 +278,7 @@ Spikes S-1 to S-12 (Part H5) run before the designs they settle. Level 8's list 
 reordered until the go.
 
 Part A was the work the user asked for on 2026-10-19. The batch-0 commits listed in
-Part E landed on their own. The opt-in lazy read that came from a follow-up
+The batch-0 commits listed in the level 9 README landed on their own. The opt-in lazy read that came from a follow-up
 to another task is not in the tree, as the user asked (ledger Q-16). Part B onward waits for the go.
 
 Leftovers from plan mode, to delete when it ends: the helper scripts, backups and

@@ -75,7 +75,7 @@ What this pass read and found as the plan has it (so that a "sound" in Part K ha
 - **Batch 0.** F10's symptom is fixed and its design, an exhaustive predicate on the token, belongs on SYN-2's `TokenKind`; F20's is a `stack` crate
   and a recursion lint (after R10, which edits the guard); F21's is `Repr::Mixed(MixedKind, …)`, so G5's printers come
   after it; F57's arrow body and ternary error are in the parser. VAL-1.1 to 1.15's needs agree with G5's tool order,
-  and VAL-1.3 (the oracles go) shrinks item 9's reader set as Part E 13 says.
+  and VAL-1.3 (the oracles go) shrinks item 9's reader set as #13 says.
 - **Item 9.** The fabricated nodes exist where B1 says (`expr.rs:6054`, `:6071`, and the `NodeId::SYNTHETIC` test at
   `:4523`; `var_tag_types.rs:537`; `completion.rs:310-326`). The parser backtracks in one place only, the body skim's
   token pushback (`parser/functions.rs:219`), which the whole-file stream replaces by a cursor probe, so G3's "no node

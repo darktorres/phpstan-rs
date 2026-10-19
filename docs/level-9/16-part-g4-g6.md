@@ -114,7 +114,19 @@ identifier, with a keyword and with `{`, a receiver inside a `foreach` body, a c
   handles with item 9 (D6 later redefines the trait); `Project::update_file*`, which return
   `Result<_, ParseError>`, and `lsp.rs`'s two `Err` arms, which assume a failed parse (G3.1 makes `parse`
   infallible); `CachedFile`, which gains the error list (G3.6); the ledger rows CHECK-6.18 (G1.10), SYN-1.9,
-  Q-10 and SYN-6, and `CRATE_SPLIT_PLAN.md:6883-6891` ("a file with parse errors is still not analysed"), which Part E
-  31 supersedes; and Part E 26, whose "observers replace it later" is G4b in batch 3.
+  Q-10 and SYN-6, and `CRATE_SPLIT_PLAN.md:6883-6891` ("a file with parse errors is still not analysed"), which #31 supersedes; and #26, whose "observers replace it later" is G4b in batch 3.
+
+## Decisions
+
+### #26 the LSP completion probe
+
+**Neither import nor text:** a checker entry point that takes a statement prefix of the last-good function and the receiver as an expression handle from another tree. Today the receiver comes from the live buffer (`parse_standalone_expr`) and the function from the last-good AST, spliced with sentinel spans and `NodeId::SYNTHETIC`. Handles evaluate across trees, so no synthetic nodes, no import API and no text splice. **It is throwaway on purpose:** step 2 makes the tree immutable, so the probe must change then, and recovery cannot come first because it is built on the layout step 2 fixes (G3.3); a window with no completion is worse than a small tail (about a hundred and fifty lines), and batch 3's node-at-position query on the request's own parse (G4b) deletes the tail and the last-good tree with no fallback kept. Observers (E6, F5) replace the re-run later
+
+*Needed before:* step 2
+
+## Facts the decisions rest on
+
+- The probe splices a receiver parsed from the live buffer into the last-good function
+  (`completion.rs`, `build_probe_scope`).
 
 ---

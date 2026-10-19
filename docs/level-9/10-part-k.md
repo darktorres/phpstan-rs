@@ -32,10 +32,10 @@ None. Part K reviews the earlier batch plan: its verdicts on each row (K1 and K1
 | 19 | batch 2, SYN-3.1 to 3.4, SYN-4.1 to 4.10 | sound; SYN-3.3 is not an interim (SYN-3.1 gives a context file no columns); SYN-4.1's lookup half goes (the lexer interns nothing); SYN-4.5 moves to batch 4, since it is `ConstName` |
 | 20 | batch 3, SYN-1.9, Q-10, SYN-6, F77 | sound |
 | 21 | batch 4, NAME-2.1 to 2.3, NAME-1.1 to 1.6 | NAME-2.2's weak pairs are for the type tables, and names are held strongly and swept (H1.3); NAME-1.2 converts the `String` keys of the machinery W2 and W3 delete, because NAME-1.3 cannot delete `FoldKey for str` otherwise; NAME-1.5's hash must not depend on chunking (S-1) |
-| 22 | batch 5, PROD-5.1 to 5.3, 5.5, 5.6, 5.8 | **PROD-5.5 keyed by ordinal, not span** (H1.5a); PROD-5.4 is deleted by REG-16.4; PROD-5.7 not built (Part E 35) |
+| 22 | batch 5, PROD-5.1 to 5.3, 5.5, 5.6, 5.8 | **PROD-5.5 keyed by ordinal, not span** (H1.5a); PROD-5.4 is deleted by REG-16.4; PROD-5.7 not built (#35) |
 | 23 | batch 6, DOC-2.1 to 2.9, TYPE-5 | TYPE-5 is its own commit after I4.5 step 5 (it is the ledger's rule; F14's design text is superseded), never inside the behaviour-exact `phpdoc_keyword` extraction; the extraction also completes the keyword table |
-| 24 | batch 7, the check's temporaries | sound; CHECK-6.8 and 6.18 reuse only what holds no tree handle (G1); CHECK-4.2 goes with REG-18.4 (Part E 41) |
-| 25 | batch 8, LOAD-5.4, CACHE-13.1, CACHE-8 | CACHE-13.1's stamp follows decision 13 (the stat tuple on known file systems, the content hash on Windows and elsewhere); **CACHE-8 waits for S-4** (Part E 41). The moves of LOAD-5.4 to Part A and CACHE-13.1 to W3 (Part E 15) leave batch 8 empty |
+| 24 | batch 7, the check's temporaries | sound; CHECK-6.8 and 6.18 reuse only what holds no tree handle (G1); CHECK-4.2 goes with REG-18.4 (#41) |
+| 25 | batch 8, LOAD-5.4, CACHE-13.1, CACHE-8 | CACHE-13.1's stamp follows decision 13 (the stat tuple on known file systems, the content hash on Windows and elsewhere); **CACHE-8 waits for S-4** (#41). The moves of LOAD-5.4 to Part A and CACHE-13.1 to W3 (#15) leave batch 8 empty |
 | 26 | spikes S-1 to S-11 | S-1 gains the hash contract; S-3 the member grain; S-6 the mixed-strategy cycles; S-7 follows K3; S-11 is added |
 | 27 | W1, the fillers | LOAD-7.3 follows the cross-platform plan's R6 and R7 (one matcher; `report_path` and the case rule are its inputs) |
 | 28 | W2, REG-4.2, 4.12, 4.15, 16.2, 16.3, 7.1 to 7.12, 8.1 to 8.7, 9 to 12 | H3.6 covers REG-4.15, REG-4.11 and REG-11; REG-17 has its layering (H3.8); salsa's cycle rule is stated (H3.3) |
@@ -59,13 +59,13 @@ designed.
 | REG-4.10 | built with DOC-2.9 (batch 6): the builder parses each doc comment once by reading the file's `doc_blocks` (H2.3) |
 | REG-5 | sound; its case delta is F50's |
 | REG-6, REG-18.1, 18.2, 18.3, 18.5, 18.6, CHECK-11 | sound |
-| REG-18.4 | sound; takes CHECK-4.2 (Part E 41) and `ConstName` (H1.2) |
-| LOAD-7.1, 7.4 to 7.7 | sound; 7.3 follows the cross-platform plan's R6 and R7; 7.2's PHPUnit half is ungated (Part E 42); 7.8 is each setting's phase |
+| REG-18.4 | sound; takes CHECK-4.2 (#41) and `ConstName` (H1.2) |
+| LOAD-7.1, 7.4 to 7.7 | sound; 7.3 follows the cross-platform plan's R6 and R7; 7.2's PHPUnit half is ungated (#42); 7.8 is each setting's phase |
 | REG-4.2 | sound (H1.2: `FoldedName` keys; two names differing in case are one name, so two declarations become `Many` and a duplicate report) |
 | REG-4.12 | sound (H2.4: about 280 sites become `Provider` calls; the grain of a read is the query that answers it) |
-| REG-4.15 | its span field withdrawn (H1.5a, Part E 34) |
+| REG-4.15 | its span field withdrawn (H1.5a, #34) |
 | REG-4.11 | sound; after REG-8.5 and 10 (H3.6 step 5) |
-| REG-16.2 | "never reused" reworded (Part E 38); the ids are named in the engine module only (H1.6) |
+| REG-16.2 | "never reused" reworded (#38); the ids are named in the engine module only (H1.6) |
 | REG-16.3 | sound; purity and global variables are queries (H2.3, H3.7), further than the row's "run again per revision" |
 | REG-7.1 to 7.5, 7.12 | H3.1; 7.5 is decision 8's rule at the final level and replaces `reconcile_with_native` |
 | REG-7.6 | H3.3 (`cycle_result`; the fallback per constant for the PHPDoc case is S-6's) |
@@ -81,11 +81,11 @@ designed.
 | REG-11.1 to 11.16 | H3.6 step 6; 11.14 is superseded; 11.4 and 11.5 are F75 and F35, F55 |
 | REG-12 | H3.6 step 7; its "resolves no class the file does not reach" is a count from the event callback |
 | REG-16.4 | H4.1, H4.7; trees per K3; needs SYN-1.9 |
-| CACHE-13.2 | H4.6; keyed per config key (Part E 37); the stamp follows decision 13 |
+| CACHE-13.2 | H4.6; keyed per config key (#37); the stamp follows decision 13 |
 | CACHE-9 to 11 | after S-4; one format bump |
 | LOAD-3.1, 3.3's `update_file` half | H2.9: a tree is kept by (role, open): `parse_analysed` for an analysed file, under `lru` in the server; a context file's is never kept |
-| LOAD-4.7's index half, PROD-5.4, PROD-5.7 | deleted by REG-16.4 (H4.8, Part E 35) |
-| LOAD-5.1 | E1's collectors (Part E 39); the use-site index is `file_products.use_sites` |
+| LOAD-4.7's index half, PROD-5.4, PROD-5.7 | deleted by REG-16.4 (H4.8, #35) |
+| LOAD-5.1 | E1's collectors (#39); the use-site index is `file_products.use_sites` |
 | LOAD-5.2 | memory only; S-7 decides (K3) |
 | TYPE-4.1 to 4.4, NAME-2.4 | H2.6: the memo is cleared by the first access in a later revision |
 | REG-14.3 | after REG-8.3 (`FileDecls`' parameter vector) |
@@ -123,14 +123,14 @@ review's own order between heavy runs.
 | F35, F50, F55 (Stage C F4), F75, F78, Stage B D1 | REG-4.2, REG-5, REG-11.4 and 11.5, REG-8.3, REG-7.5 | fixture now, fix in W1 and W2 |
 | F76 | REG-7.10 (namespace cycles) | W2 |
 | F58 | G1.9 and G4a (no per-function clone; the `Resolved` is built only when the anchor matches, in both walkers) | resolved by the design |
-| F33 (anonymous class names, infer cache assumption) | Part E 34, G1.5, H1.4 | the name is the shown path and the line, as its design states (`File.shown`, H2.2); the infer cache's context epoch and the env-gated recompute-on-hit assertion are G1.5's |
+| F33 (anonymous class names, infer cache assumption) | #34, G1.5, H1.4 | the name is the shown path and the line, as its design states (`File.shown`, H2.2); the infer cache's context epoch and the env-gated recompute-on-hit assertion are G1.5's |
 | F30 (Stage C F8) | REG-4.15's builder | fixture now |
 | Stage C F1 | decision 11, REG-8.1 | W2 |
 | Stage C F5, F6, F7 | REG-11.10 (F5, fixed), REG-18 and J1 (F6, F7) | W1, W4 |
 | Stage C F2, F3 | LOAD-7.3 and 7.4, STUB-7.3 | W1, W4 |
 | Stage C F9, F10, F12 | LOAD-7.6, LOAD-7.7 | W1 |
 | Stage C F11 | VAL-1.3, REG-8.5 | batch 0, W2 |
-| F74 | the composer follow-ups of Part E 40 | with them |
+| F74 | the composer follow-ups of #40 | with them |
 | Stage B "Typed purity", D2 | REG-17.4 and SUM-3, REG-11.6 and EXT-2 | W2, W5 |
 | the comments (F24, F34, F37, F43, F51, F59, F80, F88, Stage C F13) and the fixtures (F23) | none | any gap; F23 before the baseline |
 | everything else (F2 to F6, F9, F11 to F13, F15 to F17, F25 to F32, F36, F38 to F40, F42 to F49, F52 to F56, F60 to F73, F79, F81 to F87, F89; Stage B W1, C2, M1, CMP-1, DF-1 to DF-7) | none | in the review's own order, F4 first |
@@ -146,5 +146,13 @@ shrinks what it frees from 151 MB (MEAS-2), and S-7 decides whether bounding the
 builds LOAD-5.2 as the ledger has it until S-7 says otherwise: H2.9). REG-16.4's phrase "a tree is a parse result the
 engine evicts" holds for the analysed trees and not for context trees, so the ledger's wording differs from this
 design, and the user should confirm the wording.
+
+## Decisions
+
+### #22 level 3 and the Q-11 follow-ups
+
+**A correctness backlog, not fillers (changed).** Triage the findings first (Part K2: about 115 are distinct; F57, Stage C's O1 and F5 are built), by running each probe on the gate binary. F10's symptom is fixed (`can_begin_expression`'s list, `3b7e4d95`), so its parser tests and fixture go before item 9's baseline, which must not encode a parser bug, and its exhaustive predicate waits for SYN-2's `TokenKind`; F20 before item 9 (after the cross-platform plan's R10), so its lint checks the recursion that item 9 writes; F21 before the canonical printers; F41 in batch 6; F77 in batch 0, before item 9's baseline (its design needs no recovery, an analysed file's diagnostic and exit status are the final ones, and a parser rewrite that newly refuses a file then shows in O2; batch 3 feeds it from `errors()`). **F77's context-file half** (`phpstanRs.contextParseError`, run-level, failing the run) is new user-visible behaviour that decisions 9 and 15 ("nothing in a context file is reported") do not give, so, decisions 9 and 15 keep their text and gain one sentence: a context file that fails to parse is reported as a run-level notice (its path, line and column, and the first error; `phpstanRs.contextParseError`), printed where today's "N file(s) skipped: parse error" count is, and it leaves the exit status as it is; an opt-in switch makes it fail the run. Batch 0 builds the notice and records the failure (the count and the first error per file) in the dump; F69's fixtures now, F69 and CHECK-9 in D2 (17); **the seven fixes the crate split's F1 puts first** (the debounce thread's stack size and the scan's parses on the pool, `queue_change` writing `latest_text`, `didClose` restoring the disk's content, `--generate-baseline` keeping the entries of files not analysed, `--fix` skipping a file changed since analysis, a closed output pipe ending the run quietly, rename refusing qualified names, imports and aliases) end the server, lose data or corrupt files on today's code, are independent of everything here and are all still open at `ffa7cccb` (read in the code), so they are commits of batch 0, each with its test, and rows of the ledger and `WORK_STACK.md` (Part N), not part of W3. **Where each finding sits is a place in the sequence, not "between heavy runs":** every finding or follow-up that changes a dump goes before the baseline; the rest in the review's own order (F4 first), fixture first where a later phase rewrites the code (K2 names which); a later commit that changes behaviour runs `dumps-compare`, lists its differences as its delta and rolls the baseline forward
+
+*Needed before:* batch 0
 
 ---
