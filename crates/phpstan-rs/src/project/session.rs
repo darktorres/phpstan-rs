@@ -18,7 +18,7 @@ use rayon::prelude::*;
 
 use composer::dir_listings::DirListings;
 use composer::hashed_path::HashedPath;
-use composer::layout::Layout;
+use composer::layout::{Layout, VendorLocation};
 use composer::vendor::VendorPath;
 use config::ConfigFile;
 use serde::Deserialize;
@@ -675,6 +675,18 @@ fn composer_roots(dirs: &[PathBuf], root: &Path, layout: &Layout<'_>) -> Vec<Pat
     roots
 }
 
+/// The tree the include lookup reads for a Composer project: the vendor
+/// directory Composer built, else the resolved one when it is there, marked
+/// or not. `None` is a vendor directory that is not there yet.
+fn include_tree(location: &VendorLocation) -> Option<PathBuf> {
+    location.installed.clone().or_else(|| {
+        location
+            .resolved
+            .is_dir()
+            .then(|| location.resolved.clone())
+    })
+}
+
 /// A file read and parsed: its text, as the insert keeps it, and its parse.
 struct ReadFile {
     text: FileText,
@@ -956,8 +968,8 @@ impl Session {
         let mut unbuilt: Vec<PathBuf> = Vec::new();
         for composer_root in &composer_roots {
             let location = layout.vendor_location(composer_root);
-            match &location.installed {
-                Some(installed) => vendor_trees.push(installed.clone()),
+            match include_tree(&location) {
+                Some(tree) => vendor_trees.push(tree),
                 None if layout.has_manifest(composer_root) => {
                     unbuilt.push(location.resolved.clone());
                 }
@@ -1079,8 +1091,8 @@ impl Session {
                         ));
                     }
                     let location = layout.vendor_location(&dir);
-                    match &location.installed {
-                        Some(installed) => vendor_trees.push(installed.clone()),
+                    match include_tree(&location) {
+                        Some(tree) => vendor_trees.push(tree),
                         None => unbuilt.push(location.resolved.clone()),
                     }
                     phpstan_api_check_enabled |= package.requires_phpstan();
