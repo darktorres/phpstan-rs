@@ -11,8 +11,9 @@ file; the level's own documents keep the record. Per-item progress stays in
 the level's own documents; this file holds only the order, the tasks still
 open and the pointers.
 
-State as of 2026-10-18, `791a57c6` on branch `callgrind-20g`. Counts below were
-read from the files on 2026-10-17. This file covers this branch only.
+State as of 2026-10-19, `25cf2a7f` on branch `master` (named `callgrind-20g` until
+2026-10-18). Counts below were read from the files on 2026-10-17. This file covers
+this branch only.
 
 ## Where to resume
 
@@ -21,22 +22,24 @@ together later. Their sections below keep the content they had that day. The one
 exception is level 7's designs, which are rows of the 20 G plan and are worked in
 level 8's order; DOC-2.1 stays deferred.
 
-Level 9 is the active level: the cross-platform fixes (`CROSS_PLATFORM_PLAN.md`),
-started on 2026-10-18 above level 8. Work its rows in the plan's order. When it
-finishes, level 8 resumes.
+Level 8 is the active level again. It holds the 20 G plan and the off drill, and
+its order is in its section below: work the lowest item that has a READY row, item
+2 as of 2026-10-17 (LOAD-2.2's last part, decided that day), then item 8.
 
 Level 10 is planned, not started: the report viewer (`REPORT_VIEWER_PLAN.md`).
-It starts when level 9 is pushed. Its place against level 8 and the
-post-level-9 documents is open.
+Level 9's code is pushed, so the condition for its start holds. Its place against
+level 8 and the post-level-9 documents is open.
 
-Level 8 holds the 20 G plan and the off drill, and its order is in its section
-below: work the lowest item that has a READY row, item 2 as of 2026-10-17
-(LOAD-2.2's last part, decided that day), then item 8.
+Level 9 has been used twice, and both uses are finished.
 
-The previous level 9 finished on 2026-10-17: the fixes for the costs that the
-attribution of the 20 G plan's items 1 to 3 found (`ITEMS_1_TO_3_FIXES_PLAN.md`).
-Every row is in and the batch's checks passed; the plan and the ledger's LOAD-8
-keep the record.
+- The fixes for the costs that the attribution of the 20 G plan's items 1 to 3
+  found (`ITEMS_1_TO_3_FIXES_PLAN.md`) finished on 2026-10-17: every row is in and
+  the batch's checks passed. The plan and the ledger's LOAD-8 keep the record.
+- The cross-platform fixes (`CROSS_PLATFORM_PLAN.md`) finished on 2026-10-19: every
+  row is built and pushed, and the CI legs of Linux, macOS and Windows pass. The
+  plan keeps the record, and the ledger's LOAD-8.7 section has the platforms'
+  figures. The release workflow's changes (R2) have not run on a runner: the user
+  dropped its dispatch, so the next run of the workflow is their first.
 
 ## The stack
 
@@ -267,82 +270,6 @@ The off-run rows still open:
   E9 (CHECK-5, folded into CHECK-6.16) and E12 (CACHE-7) are SKIP; D3, D6, C7 and
   C8 are decided.
 
-### 9. The cross-platform fixes — `CROSS_PLATFORM_PLAN.md`
-
-Started on 2026-10-18, above level 8. The user corrected the claim that the project
-targets Linux only: `release.yml` ships Linux, macOS and Windows binaries, but the
-tests run on Linux alone, and the code read at `791a57c6` is scoped to Linux in
-paths, PHP-visible values, runtime behaviour, tests and build scripts. The plan's
-rows are built in the order of its table. Windows, macOS and aarch64 Linux are
-verified on CI legs, and each push is asked first.
-
-Done:
-
-- R0 to R5: the lockfile, the CLI test, the CI legs, the canonical form without
-  Windows' verbatim prefix, prefixes hashed, ordered and owned by their kind, and
-  URIs read and written by each platform's grammar.
-- Rounds 1 to 3. Their failures are classed in the plan's R2, with the rows they
-  extend.
-- R18, level 2's work pulled forward. The gates job's module graph failed with
-  27 problems that predate the plan, and the user chose to fix them in this
-  batch. The forbidden edges are refactored away, and the graph passes. The
-  job's later steps first ran in round 2, and their four failures are fixed too.
-- R5's round-2 follow-up: a file's diagnostics are cleared on the URI they were
-  sent on.
-- R6: reports name a file with `/` in the machine formats, and a `\` in
-  configured path text names a separator and a name's own `\` on every platform.
-- R6's corrections, R5's second follow-up (a disabled server does nothing the
-  editor can see) and R7: configured paths are relative to the config file and
-  read a `\` both ways, the SQLite file is read-only and must exist, and
-  configured path text follows the case rule of the root's directory.
-- R8: an include is reported only when no run could find its file. Its text is read
-  in a Unix and a Windows world and looked up in PHP's order, against the declared
-  `include_path` and `working_dirs`, Composer's `include-path`, and what the code
-  sets with `set_include_path()`, `ini_set()`, `ini_alter()` and `chdir()`. A
-  candidate outside the project, or below a `vendor` that `composer install` has
-  not built, counts as found.
-- R9: discovery names no file for bytes that are not UTF-8 where a path is text, and
-  asks the system for a name its directory's listing lacks, which finds it where the
-  disk folds case.
-- R10: the command runs on a thread with `WORKER_STACK_SIZE`, so the stack the system
-  gives the main thread (1 MiB on Windows) no longer decides how often a walk grows.
-- R11: the caches are in each platform's cache directory (`dirs`), so they are on
-  where `HOME` is unset, and an entry's last use is refreshed through a handle that
-  can set it on Windows.
-- R12: the coloured friendly report is written through `anstream`, which turns on a
-  Windows console's virtual-terminal processing or translates the escapes. It has
-  not been seen on a console: the CI legs' stdout is a pipe.
-- R13: the tests run on every platform. Directory links are junctions on Windows
-  and symbolic links elsewhere, the fixture harness and four tests spell a path as
-  the system does, and a line ends at `\n`, `\r\n` or `\r` wherever the code reads
-  one. That last part found two older defects: a `//` comment in a CRLF file kept
-  its `\r`, and a file of lone `\r` lost its code after the first comment.
-- R14: the stub sources embed the same data on every platform (paths spelled
-  with `/`, a source its checkout wrote with CR LF read as LF), the two items
-  only a debug build reads are built in a debug build only, and the heap
-  profiler walks frame pointers on aarch64 and macOS as well as on x86_64 Linux,
-  with tests that run on every leg.
-- R15: the parallel compiler front end is on every platform; xtask spawns no
-  `touch` or `diff`, reads the peak memory from each platform's `time` and tells
-  engine source by the components of its path; the README says how to verify a
-  download and build on each platform, and the scripts that need Linux say so.
-- Round 3's fixes. The include rule reads the project's own paths in each world's
-  spelling, which nine Windows fixtures needed, and a report names the path as the
-  machine's own world reads it. The docs and benches checks of the lint job, the
-  macOS stack bound and a Windows test of the backslash are fixed.
-- R16: `path_bytes` reads Windows paths from their bytes, with a bench of each
-  query against `Path` that the platform legs run. MinGW and wine run the Windows
-  tests here (`scripts/winrun.sh`), which found two defects of the reader before
-  the legs ran and reproduced round 3's Windows failures to check their fix.
-
-Decided with the user on 2026-10-18 (the plan's decisions 5 to 8), each from what
-a run can know: the JSON report's spelling, the disabled server, the SQLite
-path and the include rule. All four are built.
-
-Open: round 4's result (pushed on 2026-10-18 at `9c555663`), R17's LOAD-8.7 entry
-for the platforms (from the legs' bench), round 5 (asked first) and the batch's
-checks.
-
 ### 10. The report viewer — `REPORT_VIEWER_PLAN.md`
 
 Planned on 2026-10-18, not started. The browser feature is ROADMAP Phase 181:
@@ -355,6 +282,7 @@ row measures whether one scan can stand in for a run at each level.
 Standalone research and plans; none blocks anything. Still at the repository root:
 
 - `CRASH_REPORTING_PLAN.md`
+- `CROSS_PLATFORM_PLAN.md` (level 9, finished on 2026-10-19; the ledger's LOAD-8.7)
 - `ITEMS_1_TO_3_FIXES_PLAN.md` (level 9, finished on 2026-10-17; the ledger's LOAD-8)
 - `MAGO_ARCHITECTURE_COMPARISON.md`
 - `MASTER_REIMPLEMENTATION_LEDGER.md` (level 6, dropped)
