@@ -1,9 +1,10 @@
 # The code scoped to Linux: the cross-platform fixes
 
-## State (2026-10-18)
+## State (2026-10-19)
 
-- **The plan is approved** (2026-10-18), with the decisions below. `WORK_STACK.md`'s level 9
-  tracks it.
+- **The plan is finished** (2026-10-19): every row is built and checked, and `WORK_STACK.md`
+  no longer lists it. It was approved on 2026-10-18 with the decisions below, and
+  `WORK_STACK.md`'s level 9 tracked it until it finished.
 - **Built:** R0 (`4f6bc51a`), R1 (`ce593a47`), R2 (`d8de9530`), R3 (`d360a4df`), R4
   (`c6902324`), R5 (`52844b07`), R18 (eight commits, `0e908059` to `80b3bbd9`), R5's
   round-2 follow-up (`8d81da46`), R6 (`2526323b`, `3350adbd`), R6's corrections (`daca16d5`),
@@ -11,8 +12,10 @@
   R9 (`da9e86df`), R10 (`007d827b`), R11 (`a94e27ec`), R12 (`acc33609`), R13 (`f5e418d6`,
   `ee903695`, `2c7bf898`, `df4be250`), R14 (`92074e5a`, `4ce90ca9`, `08315491`) and R15
   (`7d7f2ce5`, `04a78a8b`, `b2528e33`), round 3's four fixes (`bdc49385`, `ccb312b4`,
-  `9e1f8ec9`, `e45a69c0`) and R16 (`9c555663`). The rows are built in the order of the table
-  below, one commit each, with a pathspec, since another session shares the checkout. R18 has one
+  `9e1f8ec9`, `e45a69c0`), R16 (`9c555663`), the bench step's fix (`ac11d513`) and R17's
+  records (`86ffa076`, `e000675c`, `952461b2`, `25cf2a7f`). The rows are built in the order
+  of the table below, one commit each, with a pathspec, since another session shares the
+  checkout. R18 has one
   commit for each step, R6 has a second for the rule its build found, R7 has a second for the
   case rule, R8 has a second for the files an environment change re-checks, R13 has one for
   the fixture harness, one for four tests' paths, one for the links and one for the line
@@ -43,7 +46,25 @@
     `path_bytes`' two mixes and 9 fixtures). Each failure is classed in R2's "Round 3's
     result", with the rows it extends: R6, R8, R10, R14 and R16.
 - **Round 4** runs `9c555663`, pushed on 2026-10-18 with the user's go-ahead: round 3's fixes,
-  R16 and its bench step on the three platform legs.
+  R16 and its bench step on the three platform legs (run 39190452953, which GitHub started
+  again on the same commit when the branch was renamed).
+  - Rust CI passed in every job but one step: `The path_bytes bench` failed on the three
+    platform-test legs. `cargo bench -p phpstan-rs-path-bytes -- --warm-up-time 1 ...` passed
+    criterion's flags to the lib's test harness as well, which refuses them; `ac11d513` runs
+    the bench target alone.
+  - Lint, the tests, the fixtures, clippy and the heap profiler's build passed on every
+    platform. On the MSVC build the tests passed, R16's 15 `path_bytes` tests and the link
+    tests among them, and the fixtures passed, so round 3's nine include fixtures are fixed.
+- **Round 4b** runs `63546707`, pushed on 2026-10-18 with the user's go-ahead: the bench step's
+  fix, R17's records and every dependency at its latest release (run 39190477354).
+  - Rust CI passed in all 13 jobs, the bench step on the three legs included, and Extension CI
+    on all three systems. The round trip took 1394 ms on Windows, 3487 ms on macOS and
+    856 ms on Linux.
+  - The runners' bench figures are in the ledger's LOAD-8.7 section.
+- **Round 4c** runs `fc7de119`, pushed on 2026-10-18 with the user's go-ahead: the lockfile
+  and Renovate commits after round 4b (the probe-vendor lockfile and the lint step that checks
+  it, the comparator matrix's locks, the PHP images' digests). Rust CI passed in all 13 jobs
+  (run 39191952825) and Extension CI on all three systems (run 39191952768).
 - **The module graph is fixed in this batch** (the user's decision with round 2's push): R18,
   built before R6. The 20 forbidden edges are refactored away, not listed as exceptions, and
   the graph passes. Round 2 reached the gates job's later steps, and R18 fixes their four
@@ -52,8 +73,13 @@
   and the JSON report's spelling, the disabled server, the SQLite path and the include rule.
   The user's instruction was to take the most proper design of each from what a run can know,
   with no weight on the size of the change or on what PHPStan does.
-- **Next:** round 4's result, then round 5 with the end-of-batch checks, whose push is asked
-  first. R17's records are written while round 4 runs.
+- **The end-of-batch checks on Linux passed** (Verification, below).
+- **Round 5 is dropped** (the user's decision, 2026-10-19): the release workflow's dispatch
+  for all five targets is not run. R2's changes to `release.yml` (the native aarch64 Linux
+  leg, the x86_64 macOS binary under Rosetta, the run of each packaged binary, the
+  checksum's `shasum` fallback) have not run on a runner, so the workflow's next run, a
+  `v*` tag push or a dispatch, is their first.
+- **Next:** level 8 resumes.
 
 ## Context
 
@@ -213,7 +239,7 @@ CI rounds, each push asked:
 - round 2 after R5, the smoke round trip;
 - round 3 after R13 to R15;
 - round 4 after R16, the bench;
-- round 5 at the end, with the release dry run.
+- round 5 at the end, with the release dry run (dropped, 2026-10-19).
 
 ## Rows
 
@@ -1938,7 +1964,8 @@ are unchanged.
 
     The time is the same in each (39 ms for the corpus). The lexer's `memchr3` for a comment's
     end and the docblock splitting are not counted apart: the batch's callgrind run counts the
-    sum.
+    sum. That run (`fc7de119`, off) is 39.7 M instructions cheaper than the base's, and the
+    saving is this row's (Verification, below).
   - **Corpora.** Seven vendored corpora (guzzle, amphp, reactphp-http, phpstan-strict-rules,
     composer, doctrine-collections and wordpress: 6,142 PHP files, 43,886 diagnostics),
     checked as they are, with every line break written `\r\n`, and with every line break
@@ -2197,22 +2224,21 @@ go into LOAD-8.7; no load-level Windows figure exists.
   `x86_64-pc-windows-gnu`; the lint job's other steps; both lockfiles and the dhat one with
   `--locked`; `cargo deny` and `cargo machete` (the bench's `criterion` is a dev-dependency
   already in the tree).
-- Left to the legs: the MSVC build's run of the 15 tests, the links, and the timings on the
-  runners.
+- Run on the legs: the MSVC build's 15 tests and the links pass (round 4's run), and the
+  timings on the runners are in the ledger's LOAD-8.7 section (round 4b's run).
 
 ### R17. The records
 
-(Written while round 4 runs; each item's state is in the list.)
-
 - `path_bytes`' module doc: which platforms read bytes, and how Windows' grammar differs.
   Done with R16.
-- LOAD-8.7:
+- LOAD-8.7, in the ledger (`952461b2`, `25cf2a7f`):
   - −126.7 M is Linux's, by callgrind;
-  - macOS takes the same code, unmeasured;
-  - Windows has R16's per-call bench.
-- The memory `project-is-cross-platform`: the legs now test all three platforms.
+  - macOS and aarch64 Linux take the same code, and have the runners' per-call times;
+  - Windows has R16's per-call times on the runner and under wine, and no load-level figure.
+- The memory `project-is-cross-platform`: the legs now test all three platforms. Done.
 - `WORK_STACK.md`: level 9 for this plan when it starts (the plan is copied to
   `CROSS_PLATFORM_PLAN.md`). It is deleted when the plan finishes, and level 8 resumes.
+  Done on 2026-10-19: the plan is listed among the documents with no place in the stack.
 
 ## Verification
 
@@ -2244,7 +2270,33 @@ Builds and runs need no approval. One heavy job at a time, under `nice -n 19`, w
 
 - every leg green: clippy, the tests and the fixtures on Windows, macOS and aarch64 Linux;
 - the smoke round trip on Windows;
-- `release.yml` by `workflow_dispatch` for all five targets, every binary run once (asked).
+- `release.yml` by `workflow_dispatch` for all five targets, every binary run once. Not run:
+  the user dropped it on 2026-10-19.
+
+**End-of-batch result** (`fc7de119`, 2026-10-19; every dependency at its latest release is in it).
+
+- The workspace tests (2,369), the fixtures (3,847) and the runtime oracle pass. The oracle
+  executes 56 fixtures and skips 60, whose five PHP images are not pulled here.
+- `check-project vendor/monolog`: the output of HEAD, sorted, and its stderr (empty) are
+  identical to `df4be250`'s, the last binary whose output was checked, with the file cache
+  off, cold and warm. A warm run writes no cache file. Against `8a1ca1e0` the output differs by
+  R8's six `fileNotFound` lines and the count that follows (20,111 to 20,105 diagnostics), and
+  by nothing else.
+- The Piwigo oracle: 171,439 bytes, sha256 `8ff144c3…`, with the caches off and warm, an empty
+  stderr and no cache file written by the warm run.
+- The off-mode callgrind run (the `dhat` profile with frame pointers, 20 threads against the
+  base's 19, the extra one being R10's command thread): 20,333,362,853 instructions against
+  `8a1ca1e0`'s 20,373,086,199, which is 39.7 M fewer (−0.195 %), with the oracle's output.
+  That is outside the ±20 M spread, on the cheaper side.
+  - R13's line-break rules are the cause. In the largest differences by function, `str::lines`
+    (48.9 M) and core's `memchr_aligned` (62.4 M of 84.9 M) are gone from the docblock
+    splitting; memchr's AVX2 searches (+36.7 M), `syntax::span::line_break_len` (+7.3 M) and
+    the splitting inlined into `phpdoc::docblock::parse` (+14.9 M) take their place.
+  - R13 counted its `LineIndex` scan alone (+12.2 M) and left the lexer's `memchr3` and the
+    docblock splitting to this run. The other movers among the largest forty are moved or
+    renamed code (`path_bytes` in its crate, the include visitors) and sums within 8 M.
+- Every leg passed on `fc7de119`: Rust CI (run 39191952825, 13 jobs) and Extension CI (run
+  39191952768, three systems). The smoke round trip passed on Windows.
 
 ## Not in this plan (checked)
 
