@@ -21,22 +21,24 @@ impl Relation<'_> {
     /// `exact` false (a delta, canonicalizing or ignoring case), only what
     /// no such option changes is decided.
     pub fn comparator_equal(&self, expected: &Type, actual: &Type, exact: bool) -> TrinaryLogic {
-        let mut any_yes = false;
-        let mut any_no = false;
-        for e in expected.union_members().iter() {
-            for a in actual.union_members().iter() {
-                match self.comparator_equal_member(e, a, exact) {
-                    TrinaryLogic::Yes => any_yes = true,
-                    TrinaryLogic::No => any_no = true,
-                    TrinaryLogic::Maybe => return TrinaryLogic::Maybe,
+        stack::guard(|| {
+            let mut any_yes = false;
+            let mut any_no = false;
+            for e in expected.union_members().iter() {
+                for a in actual.union_members().iter() {
+                    match self.comparator_equal_member(e, a, exact) {
+                        TrinaryLogic::Yes => any_yes = true,
+                        TrinaryLogic::No => any_no = true,
+                        TrinaryLogic::Maybe => return TrinaryLogic::Maybe,
+                    }
                 }
             }
-        }
-        match (any_yes, any_no) {
-            (true, false) => TrinaryLogic::Yes,
-            (false, true) => TrinaryLogic::No,
-            _ => TrinaryLogic::Maybe,
-        }
+            match (any_yes, any_no) {
+                (true, false) => TrinaryLogic::Yes,
+                (false, true) => TrinaryLogic::No,
+                _ => TrinaryLogic::Maybe,
+            }
+        })
     }
 
     /// `current` where the comparator finds it `equal` to `expected`: a
@@ -78,59 +80,61 @@ impl Relation<'_> {
     }
 
     fn comparator_equal_member(&self, e: &Type, a: &Type, exact: bool) -> TrinaryLogic {
-        // `BcMath\Number` compares with ints and numeric strings.
-        if self.may_be_class(e, "BcMath\\Number") || self.may_be_class(a, "BcMath\\Number") {
-            return TrinaryLogic::Maybe;
-        }
-        let (eo, ao) = (e.is_object(), a.is_object());
-        if eo.yes() && ao.yes() {
-            return self.objects_equal(e, a);
-        }
-        if eo.yes() || ao.yes() {
-            let (object, other) = if eo.yes() { (e, a) } else { (a, e) };
-            // A string and an object with `__toString` compare as strings.
-            if !other.is_string().no() && self.may_have_to_string(object) {
+        stack::guard(|| {
+            // `BcMath\Number` compares with ints and numeric strings.
+            if self.may_be_class(e, "BcMath\\Number") || self.may_be_class(a, "BcMath\\Number") {
                 return TrinaryLogic::Maybe;
             }
-            return if other.is_object().no() {
-                TrinaryLogic::No
-            } else {
-                TrinaryLogic::Maybe
-            };
-        }
-        if !eo.no() || !ao.no() {
-            return TrinaryLogic::Maybe;
-        }
-        let (ea, aa) = (e.is_array(), a.is_array());
-        if ea.yes() && aa.yes() {
-            return self.arrays_equal(e, a, exact);
-        }
-        if ea.yes() || aa.yes() {
-            let other = if ea.yes() { a } else { e };
-            return if other.is_array().no() {
-                TrinaryLogic::No
-            } else {
-                TrinaryLogic::Maybe
-            };
-        }
-        if !is_scalar_or_null(e) || !is_scalar_or_null(a) {
-            return TrinaryLogic::Maybe;
-        }
-        if !exact {
-            return TrinaryLogic::Maybe;
-        }
-        // Two strings compare byte for byte; other scalars as PHP 8's `==`
-        // does, a string against a non-bool as strings.
-        if e.is_string().yes() && a.is_string().yes() {
-            return if e.is_single_value() && a.is_single_value() {
-                TrinaryLogic::from_bool(e == a)
-            } else if self.narrow(e, a).is_never() {
-                TrinaryLogic::No
-            } else {
-                TrinaryLogic::Maybe
-            };
-        }
-        self.loose_equal(e, a, Some(PhpVersion::new(8, 0)))
+            let (eo, ao) = (e.is_object(), a.is_object());
+            if eo.yes() && ao.yes() {
+                return self.objects_equal(e, a);
+            }
+            if eo.yes() || ao.yes() {
+                let (object, other) = if eo.yes() { (e, a) } else { (a, e) };
+                // A string and an object with `__toString` compare as strings.
+                if !other.is_string().no() && self.may_have_to_string(object) {
+                    return TrinaryLogic::Maybe;
+                }
+                return if other.is_object().no() {
+                    TrinaryLogic::No
+                } else {
+                    TrinaryLogic::Maybe
+                };
+            }
+            if !eo.no() || !ao.no() {
+                return TrinaryLogic::Maybe;
+            }
+            let (ea, aa) = (e.is_array(), a.is_array());
+            if ea.yes() && aa.yes() {
+                return self.arrays_equal(e, a, exact);
+            }
+            if ea.yes() || aa.yes() {
+                let other = if ea.yes() { a } else { e };
+                return if other.is_array().no() {
+                    TrinaryLogic::No
+                } else {
+                    TrinaryLogic::Maybe
+                };
+            }
+            if !is_scalar_or_null(e) || !is_scalar_or_null(a) {
+                return TrinaryLogic::Maybe;
+            }
+            if !exact {
+                return TrinaryLogic::Maybe;
+            }
+            // Two strings compare byte for byte; other scalars as PHP 8's `==`
+            // does, a string against a non-bool as strings.
+            if e.is_string().yes() && a.is_string().yes() {
+                return if e.is_single_value() && a.is_single_value() {
+                    TrinaryLogic::from_bool(e == a)
+                } else if self.narrow(e, a).is_never() {
+                    TrinaryLogic::No
+                } else {
+                    TrinaryLogic::Maybe
+                };
+            }
+            self.loose_equal(e, a, Some(PhpVersion::new(8, 0)))
+        })
     }
 
     fn objects_equal(&self, e: &Type, a: &Type) -> TrinaryLogic {
@@ -150,41 +154,44 @@ impl Relation<'_> {
     }
 
     fn arrays_equal(&self, e: &Type, a: &Type, exact: bool) -> TrinaryLogic {
-        if let (Some((el, eh)), Some((al, ah))) = (e.count_range(), a.count_range())
-            && (eh.is_some_and(|h| h < al) || ah.is_some_and(|h| h < el))
-        {
-            return TrinaryLogic::No;
-        }
-        let (Some((es, _)), Some((as_, _))) = (shape_parts(e), shape_parts(a)) else {
-            return TrinaryLogic::Maybe;
-        };
-        let constant = |s: &crate::Shape| s.is_sealed() && s.fields().iter().all(|f| !f.optional);
-        if !constant(es) || !constant(as_) {
-            return TrinaryLogic::Maybe;
-        }
-        // Every key on both sides, each value compared as a pair.
-        if es.fields().len() != as_.fields().len()
-            || es
-                .fields()
-                .iter()
-                .any(|f| !as_.fields().iter().any(|g| g.key == f.key))
-        {
-            return TrinaryLogic::No;
-        }
-        let mut out = TrinaryLogic::Yes;
-        for f in es.fields() {
-            let g = as_
-                .fields()
-                .iter()
-                .find(|g| g.key == f.key)
-                .expect("key sets are equal");
-            match self.comparator_equal(&f.ty, &g.ty, exact) {
-                TrinaryLogic::No => return TrinaryLogic::No,
-                TrinaryLogic::Maybe => out = TrinaryLogic::Maybe,
-                TrinaryLogic::Yes => {}
+        stack::guard(|| {
+            if let (Some((el, eh)), Some((al, ah))) = (e.count_range(), a.count_range())
+                && (eh.is_some_and(|h| h < al) || ah.is_some_and(|h| h < el))
+            {
+                return TrinaryLogic::No;
             }
-        }
-        out
+            let (Some((es, _)), Some((as_, _))) = (shape_parts(e), shape_parts(a)) else {
+                return TrinaryLogic::Maybe;
+            };
+            let constant =
+                |s: &crate::Shape| s.is_sealed() && s.fields().iter().all(|f| !f.optional);
+            if !constant(es) || !constant(as_) {
+                return TrinaryLogic::Maybe;
+            }
+            // Every key on both sides, each value compared as a pair.
+            if es.fields().len() != as_.fields().len()
+                || es
+                    .fields()
+                    .iter()
+                    .any(|f| !as_.fields().iter().any(|g| g.key == f.key))
+            {
+                return TrinaryLogic::No;
+            }
+            let mut out = TrinaryLogic::Yes;
+            for f in es.fields() {
+                let g = as_
+                    .fields()
+                    .iter()
+                    .find(|g| g.key == f.key)
+                    .expect("key sets are equal");
+                match self.comparator_equal(&f.ty, &g.ty, exact) {
+                    TrinaryLogic::No => return TrinaryLogic::No,
+                    TrinaryLogic::Maybe => out = TrinaryLogic::Maybe,
+                    TrinaryLogic::Yes => {}
+                }
+            }
+            out
+        })
     }
 
     /// Whether a value of `ty` may be an instance of `class`; never when

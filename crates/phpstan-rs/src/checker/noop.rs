@@ -49,24 +49,28 @@ fn is_local_assign_target(target: &Expr) -> bool {
 /// anonymous class's body doesn't run by being constructed, so it
 /// doesn't count.
 fn expr_side_effects(e: &Expr) -> Effects {
-    struct Strongest(Effects);
-    impl<'ast> Visitor<'ast> for Strongest {
-        fn visit_expr(&mut self, e: &'ast Expr) {
-            if self.0 == Effects::Some {
-                return;
+    stack::guard(|| {
+        struct Strongest(Effects);
+        impl<'ast> Visitor<'ast> for Strongest {
+            fn visit_expr(&mut self, e: &'ast Expr) {
+                stack::guard(|| {
+                    if self.0 == Effects::Some {
+                        return;
+                    }
+                    self.0 = std::cmp::max(self.0, own_side_effects(e));
+                    walk_expr_in_scope(self, e);
+                })
             }
-            self.0 = std::cmp::max(self.0, own_side_effects(e));
-            walk_expr_in_scope(self, e);
         }
-    }
-    let mut strongest = Strongest(Effects::None);
-    strongest.visit_expr(e);
-    strongest.0
+        let mut strongest = Strongest(Effects::None);
+        strongest.visit_expr(e);
+        strongest.0
+    })
 }
 
 /// `e`'s own effects, not its operands'.
 fn own_side_effects(e: &Expr) -> Effects {
-    match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _)
             if is_local_assign_target(target) =>
         {
@@ -104,7 +108,7 @@ fn own_side_effects(e: &Expr) -> Effects {
             _,
         ) => Effects::Some,
         _ => Effects::None,
-    }
+    })
 }
 
 impl<'a> Checker<'a> {

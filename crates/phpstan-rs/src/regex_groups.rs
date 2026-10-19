@@ -579,11 +579,13 @@ impl Scanner {
     /// own literal contribution is the union of every branch's own set,
     /// `None` if any branch isn't literal.
     fn scan_alternation(&mut self) -> Option<AtomResult> {
-        let mut branches: Vec<AtomResult> = vec![self.scan_branch()?];
-        while self.eat('|') {
-            branches.push(self.scan_branch()?);
-        }
-        Some(self.combine_branches(branches))
+        stack::guard(|| {
+            let mut branches: Vec<AtomResult> = vec![self.scan_branch()?];
+            while self.eat('|') {
+                branches.push(self.scan_branch()?);
+            }
+            Some(self.combine_branches(branches))
+        })
     }
 
     /// `(?|branch ('|' branch)*)` - PCRE's own "branch reset" group:
@@ -608,19 +610,21 @@ impl Scanner {
     /// here, this has no way to know whether a number it's about to
     /// reuse collides with a sibling branch's own.
     fn scan_branch_reset_alternation(&mut self) -> Option<AtomResult> {
-        let start_number = self.next_number;
-        let mut max_number = start_number;
-        let mut branches: Vec<AtomResult> = Vec::new();
-        loop {
-            self.next_number = start_number;
-            branches.push(self.scan_branch()?);
-            max_number = max_number.max(self.next_number);
-            if !self.eat('|') {
-                break;
+        stack::guard(|| {
+            let start_number = self.next_number;
+            let mut max_number = start_number;
+            let mut branches: Vec<AtomResult> = Vec::new();
+            loop {
+                self.next_number = start_number;
+                branches.push(self.scan_branch()?);
+                max_number = max_number.max(self.next_number);
+                if !self.eat('|') {
+                    break;
+                }
             }
-        }
-        self.next_number = max_number;
-        Some(self.combine_branches(branches))
+            self.next_number = max_number;
+            Some(self.combine_branches(branches))
+        })
     }
 
     /// Shared by `scan_alternation` and `scan_branch_reset_alternation`:
@@ -703,100 +707,102 @@ impl Scanner {
     /// genuinely empty branch, matching real PCRE's own "an empty
     /// alternative always captures the empty string" semantics.
     fn scan_branch(&mut self) -> Option<AtomResult> {
-        let mut handles = Vec::new();
-        let mut literal_values: Option<Vec<String>> = Some(vec![String::new()]);
-        let mut min_len: u64 = 0;
-        let mut digits_only = true;
-        loop {
-            self.skip_free_spacing();
-            match self.peek() {
-                None | Some('|') | Some(')') => break,
-                _ => {}
-            }
-            let atom = self.scan_atom()?;
-            self.skip_free_spacing();
-            let quantifier = self.maybe_consume_quantifier();
-            if let Some((min, _)) = quantifier
-                && min == 0
-            {
-                for &idx in &atom.handles {
-                    self.groups[idx].optional = true;
-                    if !self.groups[idx]
-                        .parent
-                        .is_some_and(|p| atom.handles.contains(&p))
-                    {
-                        self.groups[idx].own_optional = true;
+        stack::guard(|| {
+            let mut handles = Vec::new();
+            let mut literal_values: Option<Vec<String>> = Some(vec![String::new()]);
+            let mut min_len: u64 = 0;
+            let mut digits_only = true;
+            loop {
+                self.skip_free_spacing();
+                match self.peek() {
+                    None | Some('|') | Some(')') => break,
+                    _ => {}
+                }
+                let atom = self.scan_atom()?;
+                self.skip_free_spacing();
+                let quantifier = self.maybe_consume_quantifier();
+                if let Some((min, _)) = quantifier
+                    && min == 0
+                {
+                    for &idx in &atom.handles {
+                        self.groups[idx].optional = true;
+                        if !self.groups[idx]
+                            .parent
+                            .is_some_and(|p| atom.handles.contains(&p))
+                        {
+                            self.groups[idx].own_optional = true;
+                        }
+                        // Broad, deliberately using `atom.handles` (not
+                        // `atom.direct_group`) - real PHPStan's own
+                        // `inOptionalAlternation()`, confirmed to do real
+                        // work via `/(?:(a)|(b))?/` still unioning in a bare
+                        // `{0: subject}` possibility even though every
+                        // branch already has a group. This is a *different*
+                        // signal than `in_optional_quantification` below,
+                        // scoped to the whole alternation, not one group.
+                        if let Some((alt_id, _)) = self.groups[idx].alternation
+                            && !self
+                                .alternation_wrapped_in_optional_quantifier
+                                .contains(&alt_id)
+                        {
+                            self.alternation_wrapped_in_optional_quantifier.push(alt_id);
+                        }
                     }
-                    // Broad, deliberately using `atom.handles` (not
-                    // `atom.direct_group`) - real PHPStan's own
-                    // `inOptionalAlternation()`, confirmed to do real
-                    // work via `/(?:(a)|(b))?/` still unioning in a bare
-                    // `{0: subject}` possibility even though every
-                    // branch already has a group. This is a *different*
-                    // signal than `in_optional_quantification` below,
-                    // scoped to the whole alternation, not one group.
-                    if let Some((alt_id, _)) = self.groups[idx].alternation
-                        && !self
-                            .alternation_wrapped_in_optional_quantifier
-                            .contains(&alt_id)
-                    {
-                        self.alternation_wrapped_in_optional_quantifier.push(alt_id);
+                    // Narrow, using `atom.direct_group` - see
+                    // `RegexCaptureGroup::in_optional_quantification`'s own
+                    // doc comment for why this must not use `atom.handles`.
+                    if let Some(idx) = atom.direct_group {
+                        self.groups[idx].in_optional_quantification = true;
                     }
                 }
-                // Narrow, using `atom.direct_group` - see
-                // `RegexCaptureGroup::in_optional_quantification`'s own
-                // doc comment for why this must not use `atom.handles`.
-                if let Some(idx) = atom.direct_group {
-                    self.groups[idx].in_optional_quantification = true;
+                // "Repeated more than once" disables constant typing for
+                // *that specific group* (mirrors real PHPStan's own
+                // `allowConstantTypes`'s `repeatedMoreThanOnce`) - only the
+                // group's own already-computed `literal_values` is cleared;
+                // `optional` is an orthogonal concern, untouched here.
+                if let Some((_, max)) = quantifier
+                    && max.is_none_or(|m| m > 1)
+                {
+                    for &idx in &atom.handles {
+                        self.groups[idx].literal_values = None;
+                    }
                 }
+                let contributed = match quantifier {
+                    None => atom.literal_values,
+                    // PCRE binds a quantifier following `\Q...\E` only to
+                    // the block's last character, never the whole block -
+                    // this scanner treats the block as one indivisible atom,
+                    // so cross-producting it as a whole would be wrong; bail
+                    // rather than guess.
+                    Some(_) if atom.is_quoted_block => None,
+                    Some((_, None)) => None, // unbounded - min/max both required
+                    Some((min, Some(max))) => atom
+                        .literal_values
+                        .and_then(|lits| repeat_literals(&lits, min, max)),
+                };
+                literal_values = concat_literals(literal_values, contributed);
+                // Same "binds to the quoted block's last character only" fact
+                // as the literal-value cross-product just above applies here
+                // too - staying with the safe, fully-unknown default
+                // (`0`/`false`) for that one atom rather than guessing at
+                // the more intricate length this would actually produce.
+                let (contributed_min_len, contributed_digits_only) = match quantifier {
+                    None => (atom.min_len, atom.digits_only),
+                    Some(_) if atom.is_quoted_block => (0, false),
+                    Some((min, _)) => (atom.min_len.saturating_mul(min), atom.digits_only),
+                };
+                min_len = min_len.saturating_add(contributed_min_len);
+                digits_only &= contributed_digits_only;
+                handles.extend(atom.handles);
             }
-            // "Repeated more than once" disables constant typing for
-            // *that specific group* (mirrors real PHPStan's own
-            // `allowConstantTypes`'s `repeatedMoreThanOnce`) - only the
-            // group's own already-computed `literal_values` is cleared;
-            // `optional` is an orthogonal concern, untouched here.
-            if let Some((_, max)) = quantifier
-                && max.is_none_or(|m| m > 1)
-            {
-                for &idx in &atom.handles {
-                    self.groups[idx].literal_values = None;
-                }
-            }
-            let contributed = match quantifier {
-                None => atom.literal_values,
-                // PCRE binds a quantifier following `\Q...\E` only to
-                // the block's last character, never the whole block -
-                // this scanner treats the block as one indivisible atom,
-                // so cross-producting it as a whole would be wrong; bail
-                // rather than guess.
-                Some(_) if atom.is_quoted_block => None,
-                Some((_, None)) => None, // unbounded - min/max both required
-                Some((min, Some(max))) => atom
-                    .literal_values
-                    .and_then(|lits| repeat_literals(&lits, min, max)),
-            };
-            literal_values = concat_literals(literal_values, contributed);
-            // Same "binds to the quoted block's last character only" fact
-            // as the literal-value cross-product just above applies here
-            // too - staying with the safe, fully-unknown default
-            // (`0`/`false`) for that one atom rather than guessing at
-            // the more intricate length this would actually produce.
-            let (contributed_min_len, contributed_digits_only) = match quantifier {
-                None => (atom.min_len, atom.digits_only),
-                Some(_) if atom.is_quoted_block => (0, false),
-                Some((min, _)) => (atom.min_len.saturating_mul(min), atom.digits_only),
-            };
-            min_len = min_len.saturating_add(contributed_min_len);
-            digits_only &= contributed_digits_only;
-            handles.extend(atom.handles);
-        }
-        Some(AtomResult {
-            handles,
-            literal_values,
-            is_quoted_block: false,
-            direct_group: None,
-            min_len,
-            digits_only,
+            Some(AtomResult {
+                handles,
+                literal_values,
+                is_quoted_block: false,
+                direct_group: None,
+                min_len,
+                digits_only,
+            })
         })
     }
 
@@ -873,70 +879,72 @@ impl Scanner {
 
     /// `atom := group | class | escape | literal`.
     fn scan_atom(&mut self) -> Option<AtomResult> {
-        match self.peek()? {
-            '(' => {
-                self.pos += 1;
-                self.scan_group()
-            }
-            '[' => {
-                let digits_only = self.scan_character_class()?;
-                Some(AtomResult {
-                    handles: Vec::new(),
-                    literal_values: None,
-                    is_quoted_block: false,
-                    direct_group: None,
-                    // A well-formed `[...]` (a leading `]` is always a
-                    // literal member, never an empty class - real PCRE
-                    // fact) always matches exactly one character when it
-                    // matches at all.
-                    min_len: 1,
-                    digits_only,
-                })
-            }
-            '\\' => self.scan_escape_atom(),
-            // Zero-width assertions - never consume a character,
-            // unconditionally, so contributing the empty string is a
-            // known fact, not a guess, regardless of the `i` modifier
-            // (there's no case to fold in an empty string).
-            '^' | '$' => {
-                self.pos += 1;
-                Some(AtomResult::literal(String::new()))
-            }
-            // The wildcard - consumes exactly one character, just not a
-            // knowably-literal or knowably-digit one.
-            '.' => {
-                self.pos += 1;
-                Some(AtomResult {
-                    handles: Vec::new(),
-                    literal_values: None,
-                    is_quoted_block: false,
-                    direct_group: None,
-                    min_len: 1,
-                    digits_only: false,
-                })
-            }
-            c => {
-                self.pos += 1;
-                if self.literal_globally_suppressed {
-                    // Case folding never turns a digit into a non-digit
-                    // or vice versa (digits have no case), and never
-                    // changes how many characters this contributes - so
-                    // `min_len`/`digits_only` stay knowable even though
-                    // the *exact* literal value doesn't (see
-                    // `AtomResult::digits_only`'s own doc comment).
+        stack::guard(|| {
+            match self.peek()? {
+                '(' => {
+                    self.pos += 1;
+                    self.scan_group()
+                }
+                '[' => {
+                    let digits_only = self.scan_character_class()?;
+                    Some(AtomResult {
+                        handles: Vec::new(),
+                        literal_values: None,
+                        is_quoted_block: false,
+                        direct_group: None,
+                        // A well-formed `[...]` (a leading `]` is always a
+                        // literal member, never an empty class - real PCRE
+                        // fact) always matches exactly one character when it
+                        // matches at all.
+                        min_len: 1,
+                        digits_only,
+                    })
+                }
+                '\\' => self.scan_escape_atom(),
+                // Zero-width assertions - never consume a character,
+                // unconditionally, so contributing the empty string is a
+                // known fact, not a guess, regardless of the `i` modifier
+                // (there's no case to fold in an empty string).
+                '^' | '$' => {
+                    self.pos += 1;
+                    Some(AtomResult::literal(String::new()))
+                }
+                // The wildcard - consumes exactly one character, just not a
+                // knowably-literal or knowably-digit one.
+                '.' => {
+                    self.pos += 1;
                     Some(AtomResult {
                         handles: Vec::new(),
                         literal_values: None,
                         is_quoted_block: false,
                         direct_group: None,
                         min_len: 1,
-                        digits_only: c.is_ascii_digit(),
+                        digits_only: false,
                     })
-                } else {
-                    Some(AtomResult::literal(c.to_string()))
+                }
+                c => {
+                    self.pos += 1;
+                    if self.literal_globally_suppressed {
+                        // Case folding never turns a digit into a non-digit
+                        // or vice versa (digits have no case), and never
+                        // changes how many characters this contributes - so
+                        // `min_len`/`digits_only` stay knowable even though
+                        // the *exact* literal value doesn't (see
+                        // `AtomResult::digits_only`'s own doc comment).
+                        Some(AtomResult {
+                            handles: Vec::new(),
+                            literal_values: None,
+                            is_quoted_block: false,
+                            direct_group: None,
+                            min_len: 1,
+                            digits_only: c.is_ascii_digit(),
+                        })
+                    } else {
+                        Some(AtomResult::literal(c.to_string()))
+                    }
                 }
             }
-        }
+        })
     }
 
     /// Consumes a character class's interior, given `self.pos` already
@@ -1203,193 +1211,203 @@ impl Scanner {
     /// `(`. Peeks for a following `?` to distinguish a real numbered
     /// capturing group from every other `(?...)` shape.
     fn scan_group(&mut self) -> Option<AtomResult> {
-        self.depth += 1;
-        let result = if self.depth > MAX_GROUP_DEPTH {
-            None
-        } else {
-            stack::guard(|| self.scan_group_inner())
-        };
-        self.depth -= 1;
-        result
+        stack::guard(|| {
+            self.depth += 1;
+            let result = if self.depth > MAX_GROUP_DEPTH {
+                None
+            } else {
+                stack::guard(|| self.scan_group_inner())
+            };
+            self.depth -= 1;
+            result
+        })
     }
 
     fn scan_group_inner(&mut self) -> Option<AtomResult> {
-        if self.peek() != Some('?') {
-            return self.finish_capturing_group(None);
-        }
-        self.pos += 1; // the `?`
-        match self.peek() {
-            Some(':') => {
-                self.pos += 1;
-                self.finish_non_capturing_group()
+        stack::guard(|| {
+            if self.peek() != Some('?') {
+                return self.finish_capturing_group(None);
             }
-            Some('|') => {
-                self.pos += 1;
-                self.finish_branch_reset_group()
-            }
-            Some('=') | Some('!') => {
-                self.pos += 1;
-                self.finish_lookaround()
-            }
-            Some('<') if matches!(self.peek_at(1), Some('=') | Some('!')) => {
-                self.pos += 2;
-                self.finish_lookaround()
-            }
-            Some('<') => {
-                self.pos += 1;
-                let name = self.scan_name_until('>')?;
-                self.finish_capturing_group(Some(name))
-            }
-            Some('\'') => {
-                self.pos += 1;
-                let name = self.scan_name_until('\'')?;
-                self.finish_capturing_group(Some(name))
-            }
-            Some('P') => match self.peek_at(1) {
-                Some('<') => {
+            self.pos += 1; // the `?`
+            match self.peek() {
+                Some(':') => {
+                    self.pos += 1;
+                    self.finish_non_capturing_group()
+                }
+                Some('|') => {
+                    self.pos += 1;
+                    self.finish_branch_reset_group()
+                }
+                Some('=') | Some('!') => {
+                    self.pos += 1;
+                    self.finish_lookaround()
+                }
+                Some('<') if matches!(self.peek_at(1), Some('=') | Some('!')) => {
                     self.pos += 2;
+                    self.finish_lookaround()
+                }
+                Some('<') => {
+                    self.pos += 1;
                     let name = self.scan_name_until('>')?;
                     self.finish_capturing_group(Some(name))
                 }
-                Some('=') | Some('>') => {
-                    // Named backreference / subroutine call - atomic, no
-                    // handle, no recursion, not literal (a backreference
-                    // depends on a runtime capture, never statically
-                    // known).
+                Some('\'') => {
+                    self.pos += 1;
+                    let name = self.scan_name_until('\'')?;
+                    self.finish_capturing_group(Some(name))
+                }
+                Some('P') => match self.peek_at(1) {
+                    Some('<') => {
+                        self.pos += 2;
+                        let name = self.scan_name_until('>')?;
+                        self.finish_capturing_group(Some(name))
+                    }
+                    Some('=') | Some('>') => {
+                        // Named backreference / subroutine call - atomic, no
+                        // handle, no recursion, not literal (a backreference
+                        // depends on a runtime capture, never statically
+                        // known).
+                        self.consume_atomic_to_close_paren()?;
+                        Some(AtomResult::opaque())
+                    }
+                    _ => None, // unrecognized `(?P...` shape
+                },
+                Some('#') => {
+                    // A comment - consume verbatim to the first `)` (PCRE
+                    // comments cannot contain a literal `)` at all, even
+                    // escaped, so no escape handling is needed here).
+                    // Zero-width, so contributes `""` like `^`/`$` do -
+                    // `AtomResult::opaque()`'s own `None` literal_values
+                    // would otherwise wrongly break literal enumeration for
+                    // a branch merely containing a comment (`(a(?#x)b)`
+                    // really is always `"ab"`).
+                    loop {
+                        match self.advance() {
+                            None => return None,
+                            Some(')') => return Some(AtomResult::literal(String::new())),
+                            Some(_) => {}
+                        }
+                    }
+                }
+                Some('(') => None, // a conditional group - bail the whole parse
+                Some(c) if c.is_ascii_digit() || matches!(c, '+' | '-' | '&' | 'R') => {
+                    // Recursion/subroutine-call forms: (?R), (?1), (?+1),
+                    // (?-1), (?&name) - atomic, no handle, no recursion (per
+                    // PCRE these never contain further parens), not literal
+                    // (dynamic, like a backreference).
                     self.consume_atomic_to_close_paren()?;
                     Some(AtomResult::opaque())
                 }
-                _ => None, // unrecognized `(?P...` shape
-            },
-            Some('#') => {
-                // A comment - consume verbatim to the first `)` (PCRE
-                // comments cannot contain a literal `)` at all, even
-                // escaped, so no escape handling is needed here).
-                // Zero-width, so contributes `""` like `^`/`$` do -
-                // `AtomResult::opaque()`'s own `None` literal_values
-                // would otherwise wrongly break literal enumeration for
-                // a branch merely containing a comment (`(a(?#x)b)`
-                // really is always `"ab"`).
-                loop {
-                    match self.advance() {
-                        None => return None,
-                        Some(')') => return Some(AtomResult::literal(String::new())),
-                        Some(_) => {}
+                Some(c) if "imsxuJU-".contains(c) => {
+                    let mods_start = self.pos;
+                    while matches!(self.peek(), Some(m) if "imsxuJU-".contains(m)) {
+                        self.pos += 1;
+                    }
+                    let mods: String = self.chars[mods_start..self.pos].iter().collect();
+                    if mods.contains('x') || mods.contains('J') {
+                        // Continuing under this scanner's normal rules when
+                        // the pattern is actually meant to switch modes
+                        // partway through would silently produce a wrong
+                        // group count, not just an unsupported one.
+                        return None;
+                    }
+                    // An inline `i` modifier (scoped `(?i:...)` or bare,
+                    // "rest of branch" `(?i)`) makes literal tracking unsafe
+                    // from here on - PCRE scopes this precisely to the
+                    // modifier's own body/branch remainder, but this scanner
+                    // suppresses literal tracking for the rest of the whole
+                    // pattern instead of building exact scoping for such a
+                    // rarely used construct - coarser, but never wrong.
+                    if mods.contains('i') {
+                        self.literal_globally_suppressed = true;
+                    }
+                    if self.eat(':') {
+                        self.finish_non_capturing_group()
+                    } else if self.eat(')') {
+                        // A bare `(?i)` - zero-width, same reasoning as the
+                        // `(?#...)` comment case just above.
+                        Some(AtomResult::literal(String::new()))
+                    } else {
+                        None
                     }
                 }
+                _ => None, // a malformed or unrecognized `(?X...)` shape
             }
-            Some('(') => None, // a conditional group - bail the whole parse
-            Some(c) if c.is_ascii_digit() || matches!(c, '+' | '-' | '&' | 'R') => {
-                // Recursion/subroutine-call forms: (?R), (?1), (?+1),
-                // (?-1), (?&name) - atomic, no handle, no recursion (per
-                // PCRE these never contain further parens), not literal
-                // (dynamic, like a backreference).
-                self.consume_atomic_to_close_paren()?;
-                Some(AtomResult::opaque())
-            }
-            Some(c) if "imsxuJU-".contains(c) => {
-                let mods_start = self.pos;
-                while matches!(self.peek(), Some(m) if "imsxuJU-".contains(m)) {
-                    self.pos += 1;
-                }
-                let mods: String = self.chars[mods_start..self.pos].iter().collect();
-                if mods.contains('x') || mods.contains('J') {
-                    // Continuing under this scanner's normal rules when
-                    // the pattern is actually meant to switch modes
-                    // partway through would silently produce a wrong
-                    // group count, not just an unsupported one.
-                    return None;
-                }
-                // An inline `i` modifier (scoped `(?i:...)` or bare,
-                // "rest of branch" `(?i)`) makes literal tracking unsafe
-                // from here on - PCRE scopes this precisely to the
-                // modifier's own body/branch remainder, but this scanner
-                // suppresses literal tracking for the rest of the whole
-                // pattern instead of building exact scoping for such a
-                // rarely used construct - coarser, but never wrong.
-                if mods.contains('i') {
-                    self.literal_globally_suppressed = true;
-                }
-                if self.eat(':') {
-                    self.finish_non_capturing_group()
-                } else if self.eat(')') {
-                    // A bare `(?i)` - zero-width, same reasoning as the
-                    // `(?#...)` comment case just above.
-                    Some(AtomResult::literal(String::new()))
-                } else {
-                    None
-                }
-            }
-            _ => None, // a malformed or unrecognized `(?X...)` shape
-        }
+        })
     }
 
     fn finish_capturing_group(&mut self, name: Option<String>) -> Option<AtomResult> {
-        let number = self.next_number;
-        self.next_number += 1;
-        let idx = self.groups.len();
-        let parent = self.enclosing_groups.last().copied();
-        self.groups.push(RegexCaptureGroup {
-            number,
-            name,
-            optional: false,
-            own_optional: false,
-            parent,
-            literal_values: None,
-            top_level: parent.is_none(),
-            in_optional_quantification: false,
-            alternation: None,
-            forced_empty: false,
-            fallback: RegexGroupFallback::Unknown,
-        });
-        self.enclosing_groups.push(idx);
-        let body = self.scan_alternation();
-        self.enclosing_groups.pop();
-        let body = body?;
-        if !self.eat(')') {
-            return None;
-        }
-        self.groups[idx].literal_values = body.literal_values.clone();
-        // Computed unconditionally (not only when `literal_values` ends
-        // up `None`) - `group_leaf_type` is the one that decides literal
-        // enumeration always wins when both are available, so there's
-        // no need to duplicate that priority check here too.
-        self.groups[idx].fallback = if body.min_len == 0 {
-            RegexGroupFallback::Unknown
-        } else if body.digits_only {
-            RegexGroupFallback::NumericString
-        } else {
-            RegexGroupFallback::NonEmptyString
-        };
-        let mut handles = vec![idx];
-        handles.extend(body.handles);
-        Some(AtomResult {
-            handles,
-            literal_values: body.literal_values,
-            is_quoted_block: false,
-            direct_group: Some(idx),
-            min_len: body.min_len,
-            digits_only: body.digits_only,
+        stack::guard(|| {
+            let number = self.next_number;
+            self.next_number += 1;
+            let idx = self.groups.len();
+            let parent = self.enclosing_groups.last().copied();
+            self.groups.push(RegexCaptureGroup {
+                number,
+                name,
+                optional: false,
+                own_optional: false,
+                parent,
+                literal_values: None,
+                top_level: parent.is_none(),
+                in_optional_quantification: false,
+                alternation: None,
+                forced_empty: false,
+                fallback: RegexGroupFallback::Unknown,
+            });
+            self.enclosing_groups.push(idx);
+            let body = self.scan_alternation();
+            self.enclosing_groups.pop();
+            let body = body?;
+            if !self.eat(')') {
+                return None;
+            }
+            self.groups[idx].literal_values = body.literal_values.clone();
+            // Computed unconditionally (not only when `literal_values` ends
+            // up `None`) - `group_leaf_type` is the one that decides literal
+            // enumeration always wins when both are available, so there's
+            // no need to duplicate that priority check here too.
+            self.groups[idx].fallback = if body.min_len == 0 {
+                RegexGroupFallback::Unknown
+            } else if body.digits_only {
+                RegexGroupFallback::NumericString
+            } else {
+                RegexGroupFallback::NonEmptyString
+            };
+            let mut handles = vec![idx];
+            handles.extend(body.handles);
+            Some(AtomResult {
+                handles,
+                literal_values: body.literal_values,
+                is_quoted_block: false,
+                direct_group: Some(idx),
+                min_len: body.min_len,
+                digits_only: body.digits_only,
+            })
         })
     }
 
     fn finish_non_capturing_group(&mut self) -> Option<AtomResult> {
-        let body = self.scan_alternation()?;
-        if !self.eat(')') {
-            return None;
-        }
-        Some(body)
+        stack::guard(|| {
+            let body = self.scan_alternation()?;
+            if !self.eat(')') {
+                return None;
+            }
+            Some(body)
+        })
     }
 
     /// `(?|...)` - see `scan_branch_reset_alternation`'s own doc comment
     /// for the numbering semantics; the construct itself is never a
     /// capturing group (mirrors `finish_non_capturing_group`).
     fn finish_branch_reset_group(&mut self) -> Option<AtomResult> {
-        let body = self.scan_branch_reset_alternation()?;
-        if !self.eat(')') {
-            return None;
-        }
-        Some(body)
+        stack::guard(|| {
+            let body = self.scan_branch_reset_alternation()?;
+            if !self.eat(')') {
+                return None;
+            }
+            Some(body)
+        })
     }
 
     /// A lookahead/lookbehind (`(?=...)`, `(?!...)`, `(?<=...)`,
@@ -1403,20 +1421,22 @@ impl Scanner {
     /// really is `'a'` if it participates) - only this construct's own
     /// contribution is forced.
     fn finish_lookaround(&mut self) -> Option<AtomResult> {
-        let body = self.scan_alternation()?;
-        if !self.eat(')') {
-            return None;
-        }
-        Some(AtomResult {
-            handles: body.handles,
-            literal_values: Some(vec![String::new()]),
-            is_quoted_block: false,
-            direct_group: None,
-            // Same forcing as `literal_values` just above, same reason:
-            // zero-width, so this construct's own contribution is always
-            // the empty string, never its interior's real shape.
-            min_len: 0,
-            digits_only: true,
+        stack::guard(|| {
+            let body = self.scan_alternation()?;
+            if !self.eat(')') {
+                return None;
+            }
+            Some(AtomResult {
+                handles: body.handles,
+                literal_values: Some(vec![String::new()]),
+                is_quoted_block: false,
+                direct_group: None,
+                // Same forcing as `literal_values` just above, same reason:
+                // zero-width, so this construct's own contribution is always
+                // the empty string, never its interior's real shape.
+                min_len: 0,
+                digits_only: true,
+            })
         })
     }
 

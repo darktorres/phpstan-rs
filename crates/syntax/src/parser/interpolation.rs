@@ -178,7 +178,7 @@ impl Parser<'_> {
 /// with property fetches, method or static calls, and offsets chained on
 /// it (`$a->b[0]->c()`, `$f()`, `$c::$p`).
 fn is_variable_chain(e: &Expr) -> bool {
-    match &e.kind {
+    stack::guard(|| match &e.kind {
         ExprKind::Variable(_) | ExprKind::DynamicVariable(_) => true,
         ExprKind::PropertyAccess(base, ..)
         | ExprKind::MethodCall(base, ..)
@@ -191,5 +191,5 @@ fn is_variable_chain(e: &Expr) -> bool {
         | ExprKind::StaticCall(StaticTarget::Expr(base), ..)
         | ExprKind::DynamicStaticCall(StaticTarget::Expr(base), ..) => is_variable_chain(base),
         _ => false,
-    }
+    })
 }

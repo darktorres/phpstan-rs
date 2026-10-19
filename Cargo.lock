@@ -1712,6 +1712,7 @@ dependencies = [
 name = "phpstan-rs-config"
 version = "0.1.0"
 dependencies = [
+ "phpstan-rs-stack",
  "serde",
  "toml",
 ]
@@ -1742,6 +1743,7 @@ name = "phpstan-rs-phpdoc"
 version = "0.1.0"
 dependencies = [
  "hotpath",
+ "phpstan-rs-stack",
  "phpstan-rs-syntax",
  "phpstan-rs-types",
  "rustc-hash",

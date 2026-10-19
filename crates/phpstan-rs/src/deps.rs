@@ -313,7 +313,7 @@ impl<'ast> Visitor<'ast> for Collector {
     /// every other name - the class of a `new`, a static access, an
     /// `instanceof` - as what each is.
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        match &expr.kind {
+        stack::guard(|| match &expr.kind {
             ExprKind::Name(name) => self.add_name(name, NameKind::Constant),
             ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
                 if let ExprKind::Name(name) = &callee.kind {
@@ -329,7 +329,7 @@ impl<'ast> Visitor<'ast> for Collector {
                 walk_args(self, args);
             }
             _ => walk_expr(self, expr),
-        }
+        })
     }
 
     /// Every class reference in declarations' `extends`/`implements`/`use`,

@@ -18,64 +18,92 @@ use crate::ast::*;
 /// node's children.
 pub trait Visitor<'ast> {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        walk_stmt(self, stmt);
+        stack::guard(|| {
+            walk_stmt(self, stmt);
+        })
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        walk_expr(self, expr);
+        stack::guard(|| {
+            walk_expr(self, expr);
+        })
     }
 
     /// A named function or a method's function (a closure is an
     /// `ExprKind::Closure`).
     fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
-        walk_function_decl(self, function);
+        stack::guard(|| {
+            walk_function_decl(self, function);
+        })
     }
 
     /// A class, interface, trait or enum declaration statement.
     fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
-        walk_class_decl(self, class);
+        stack::guard(|| {
+            walk_class_decl(self, class);
+        })
     }
 
     /// A class-like's definition: a declaration's or an anonymous
     /// class's.
     fn visit_class_def(&mut self, class: &'ast ClassDef) {
-        walk_class_def(self, class);
+        stack::guard(|| {
+            walk_class_def(self, class);
+        })
     }
 
     fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
-        walk_method_decl(self, method);
+        stack::guard(|| {
+            walk_method_decl(self, method);
+        })
     }
 
     fn visit_property_decl(&mut self, property: &'ast PropertyDecl) {
-        walk_property_decl(self, property);
+        stack::guard(|| {
+            walk_property_decl(self, property);
+        })
     }
 
     fn visit_class_const(&mut self, constant: &'ast ClassConst) {
-        walk_class_const(self, constant);
+        stack::guard(|| {
+            walk_class_const(self, constant);
+        })
     }
 
     fn visit_enum_case(&mut self, case: &'ast EnumCase) {
-        walk_enum_case(self, case);
+        stack::guard(|| {
+            walk_enum_case(self, case);
+        })
     }
 
     fn visit_param(&mut self, param: &'ast Param) {
-        walk_param(self, param);
+        stack::guard(|| {
+            walk_param(self, param);
+        })
     }
 
     fn visit_property_hooks(&mut self, hooks: &'ast PropertyHooks) {
-        walk_property_hooks(self, hooks);
+        stack::guard(|| {
+            walk_property_hooks(self, hooks);
+        })
     }
 
     fn visit_attribute(&mut self, attribute: &'ast Attribute) {
-        walk_attribute(self, attribute);
+        stack::guard(|| {
+            walk_attribute(self, attribute);
+        })
     }
 
     fn visit_arg(&mut self, arg: &'ast Arg) {
-        walk_arg(self, arg);
+        stack::guard(|| {
+            walk_arg(self, arg);
+        })
     }
 
     fn visit_type_hint(&mut self, hint: &'ast TypeHint) {
-        walk_type_hint(self, hint);
+        stack::guard(|| {
+            walk_type_hint(self, hint);
+        })
     }
 
     /// A class, function or constant name as written, with its
@@ -86,23 +114,31 @@ pub trait Visitor<'ast> {
     fn visit_closure_use(&mut self, _closure_use: &'ast ClosureUse) {}
 
     fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
-        walk_catch_clause(self, clause);
+        stack::guard(|| {
+            walk_catch_clause(self, clause);
+        })
     }
 
     fn visit_switch_case(&mut self, case: &'ast SwitchCase) {
-        walk_switch_case(self, case);
+        stack::guard(|| {
+            walk_switch_case(self, case);
+        })
     }
 
     /// One `elseif` of an `if` chain.
     fn visit_elseif(&mut self, elseif: &'ast ElseIf) {
-        walk_elseif(self, elseif);
+        stack::guard(|| {
+            walk_elseif(self, elseif);
+        })
     }
 }
 
 pub fn walk_stmts<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmts: &'ast [Stmt]) {
-    for stmt in stmts {
-        v.visit_stmt(stmt);
-    }
+    stack::guard(|| {
+        for stmt in stmts {
+            v.visit_stmt(stmt);
+        }
+    })
 }
 
 pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
@@ -226,17 +262,19 @@ pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
 }
 
 fn walk_static_target<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, target: &'ast StaticTarget) {
-    match target {
+    stack::guard(|| match target {
         StaticTarget::Name(name) => v.visit_name(name),
         StaticTarget::Expr(e) => v.visit_expr(e),
-    }
+    })
 }
 
 /// Each of a call's arguments, through `visit_arg`.
 pub fn walk_args<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, args: &'ast [Arg]) {
-    for arg in args {
-        v.visit_arg(arg);
-    }
+    stack::guard(|| {
+        for arg in args {
+            v.visit_arg(arg);
+        }
+    })
 }
 
 pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
@@ -421,98 +459,112 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
 }
 
 pub fn walk_function_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, f: &'ast FunctionDecl) {
-    for attr in &f.attrs {
-        v.visit_attribute(attr);
-    }
-    for param in &f.params {
-        v.visit_param(param);
-    }
-    if let Some(hint) = &f.return_type {
-        v.visit_type_hint(hint);
-    }
-    walk_stmts(v, f.body_stmts());
+    stack::guard(|| {
+        for attr in &f.attrs {
+            v.visit_attribute(attr);
+        }
+        for param in &f.params {
+            v.visit_param(param);
+        }
+        if let Some(hint) = &f.return_type {
+            v.visit_type_hint(hint);
+        }
+        walk_stmts(v, f.body_stmts());
+    })
 }
 
 pub fn walk_class_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast ClassDecl) {
-    v.visit_class_def(&c.def);
+    stack::guard(|| {
+        v.visit_class_def(&c.def);
+    })
 }
 
 pub fn walk_class_def<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast ClassDef) {
-    for attr in &c.attrs {
-        v.visit_attribute(attr);
-    }
-    for name in c.extends.iter().chain(&c.implements) {
-        v.visit_name(name);
-    }
-    for trait_use in &c.trait_uses {
-        for name in &trait_use.traits {
+    stack::guard(|| {
+        for attr in &c.attrs {
+            v.visit_attribute(attr);
+        }
+        for name in c.extends.iter().chain(&c.implements) {
             v.visit_name(name);
         }
-        for alias in &trait_use.adaptations.aliases {
-            if let Some(name) = &alias.trait_name {
+        for trait_use in &c.trait_uses {
+            for name in &trait_use.traits {
                 v.visit_name(name);
             }
-        }
-        for precedence in &trait_use.adaptations.precedences {
-            v.visit_name(&precedence.trait_name);
-            for name in &precedence.instead_of {
-                v.visit_name(name);
+            for alias in &trait_use.adaptations.aliases {
+                if let Some(name) = &alias.trait_name {
+                    v.visit_name(name);
+                }
+            }
+            for precedence in &trait_use.adaptations.precedences {
+                v.visit_name(&precedence.trait_name);
+                for name in &precedence.instead_of {
+                    v.visit_name(name);
+                }
             }
         }
-    }
-    if let Some(hint) = &c.backing_type {
-        v.visit_type_hint(hint);
-    }
-    for constant in &c.consts {
-        v.visit_class_const(constant);
-    }
-    for case in &c.enum_cases {
-        v.visit_enum_case(case);
-    }
-    for property in &c.properties {
-        v.visit_property_decl(property);
-    }
-    for method in &c.methods {
-        v.visit_method_decl(method);
-    }
+        if let Some(hint) = &c.backing_type {
+            v.visit_type_hint(hint);
+        }
+        for constant in &c.consts {
+            v.visit_class_const(constant);
+        }
+        for case in &c.enum_cases {
+            v.visit_enum_case(case);
+        }
+        for property in &c.properties {
+            v.visit_property_decl(property);
+        }
+        for method in &c.methods {
+            v.visit_method_decl(method);
+        }
+    })
 }
 
 pub fn walk_method_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, m: &'ast MethodDecl) {
-    v.visit_function_decl(&m.function);
+    stack::guard(|| {
+        v.visit_function_decl(&m.function);
+    })
 }
 
 pub fn walk_property_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, p: &'ast PropertyDecl) {
-    for attr in &p.attrs {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &p.type_hint {
-        v.visit_type_hint(hint);
-    }
-    if let Some(default) = &p.default {
-        v.visit_expr(default);
-    }
-    if let Some(hooks) = &p.hooks {
-        v.visit_property_hooks(hooks);
-    }
+    stack::guard(|| {
+        for attr in &p.attrs {
+            v.visit_attribute(attr);
+        }
+        if let Some(hint) = &p.type_hint {
+            v.visit_type_hint(hint);
+        }
+        if let Some(default) = &p.default {
+            v.visit_expr(default);
+        }
+        if let Some(hooks) = &p.hooks {
+            v.visit_property_hooks(hooks);
+        }
+    })
 }
 
 pub fn walk_class_const<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast ClassConst) {
-    for attr in &c.attrs {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &c.type_hint {
-        v.visit_type_hint(hint);
-    }
-    v.visit_expr(&c.value);
+    stack::guard(|| {
+        for attr in &c.attrs {
+            v.visit_attribute(attr);
+        }
+        if let Some(hint) = &c.type_hint {
+            v.visit_type_hint(hint);
+        }
+        v.visit_expr(&c.value);
+    })
 }
 
 pub fn walk_enum_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast EnumCase) {
-    for attr in &c.attrs {
-        v.visit_attribute(attr);
-    }
-    if let Some(value) = &c.value {
-        v.visit_expr(value);
-    }
+    stack::guard(|| {
+        for attr in &c.attrs {
+            v.visit_attribute(attr);
+        }
+        if let Some(value) = &c.value {
+            v.visit_expr(value);
+        }
+    })
 }
 
 /// A type hint's class names, each through `visit_name`.
@@ -530,66 +582,80 @@ pub fn walk_type_hint<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, hint: &'ast Ty
 }
 
 pub fn walk_param<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, p: &'ast Param) {
-    for attr in &p.attrs {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &p.type_hint {
-        v.visit_type_hint(hint);
-    }
-    if let Some(default) = &p.default {
-        v.visit_expr(default);
-    }
-    if let Some(hooks) = &p.hooks {
-        v.visit_property_hooks(hooks);
-    }
+    stack::guard(|| {
+        for attr in &p.attrs {
+            v.visit_attribute(attr);
+        }
+        if let Some(hint) = &p.type_hint {
+            v.visit_type_hint(hint);
+        }
+        if let Some(default) = &p.default {
+            v.visit_expr(default);
+        }
+        if let Some(hooks) = &p.hooks {
+            v.visit_property_hooks(hooks);
+        }
+    })
 }
 
 fn walk_hook_body<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, body: &'ast PropertyHookBody) {
-    match body {
+    stack::guard(|| match body {
         PropertyHookBody::Arrow(e) => v.visit_expr(e),
         PropertyHookBody::Block(stmts) => walk_stmts(v, stmts),
         PropertyHookBody::Abstract => {}
-    }
+    })
 }
 
 pub fn walk_property_hooks<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, h: &'ast PropertyHooks) {
-    for hook in h.iter() {
-        for attr in &hook.attrs {
-            v.visit_attribute(attr);
+    stack::guard(|| {
+        for hook in h.iter() {
+            for attr in &hook.attrs {
+                v.visit_attribute(attr);
+            }
+            if let Some(param) = &hook.param {
+                v.visit_param(param);
+            }
+            walk_hook_body(v, &hook.body);
         }
-        if let Some(param) = &hook.param {
-            v.visit_param(param);
-        }
-        walk_hook_body(v, &hook.body);
-    }
+    })
 }
 
 pub fn walk_attribute<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, a: &'ast Attribute) {
-    v.visit_name(&a.name);
-    walk_args(v, &a.args);
+    stack::guard(|| {
+        v.visit_name(&a.name);
+        walk_args(v, &a.args);
+    })
 }
 
 pub fn walk_arg<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, arg: &'ast Arg) {
-    v.visit_expr(&arg.value);
+    stack::guard(|| {
+        v.visit_expr(&arg.value);
+    })
 }
 
 pub fn walk_catch_clause<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast CatchClause) {
-    for name in &c.types {
-        v.visit_name(name);
-    }
-    walk_stmts(v, &c.body);
+    stack::guard(|| {
+        for name in &c.types {
+            v.visit_name(name);
+        }
+        walk_stmts(v, &c.body);
+    })
 }
 
 pub fn walk_elseif<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, e: &'ast ElseIf) {
-    v.visit_expr(&e.cond);
-    v.visit_stmt(&e.body);
+    stack::guard(|| {
+        v.visit_expr(&e.cond);
+        v.visit_stmt(&e.body);
+    })
 }
 
 pub fn walk_switch_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast SwitchCase) {
-    if let Some(test) = &c.test {
-        v.visit_expr(test);
-    }
-    walk_stmts(v, &c.body);
+    stack::guard(|| {
+        if let Some(test) = &c.test {
+            v.visit_expr(test);
+        }
+        walk_stmts(v, &c.body);
+    })
 }
 
 /// Visits the children of `expr` that run in its own scope: none of a
@@ -597,11 +663,11 @@ pub fn walk_switch_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Swi
 /// own), and of an anonymous class only its constructor arguments (its body
 /// is its own scope).
 pub fn walk_expr_in_scope<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
-    match &expr.kind {
+    stack::guard(|| match &expr.kind {
         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {}
         ExprKind::NewAnonymousClass(class) => walk_args(v, &class.args),
         _ => walk_expr(v, expr),
-    }
+    })
 }
 
 /// Whether `pred` holds for `stmt` or a statement nested in it within the
@@ -614,14 +680,16 @@ pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> 
     }
     impl<'ast, F: FnMut(&'ast Stmt) -> bool> Visitor<'ast> for Search<F> {
         fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-            if self.found {
-                return;
-            }
-            if (self.pred)(stmt) {
-                self.found = true;
-                return;
-            }
-            walk_stmt(self, stmt);
+            stack::guard(|| {
+                if self.found {
+                    return;
+                }
+                if (self.pred)(stmt) {
+                    self.found = true;
+                    return;
+                }
+                walk_stmt(self, stmt);
+            })
         }
         fn visit_expr(&mut self, _: &'ast Expr) {}
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
@@ -644,19 +712,23 @@ pub fn any_expr_in_body<'ast>(stmts: &'ast [Stmt], pred: impl FnMut(&'ast Expr) 
     }
     impl<'ast, F: FnMut(&'ast Expr) -> bool> Visitor<'ast> for Search<F> {
         fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-            if !self.found {
-                walk_stmt(self, stmt);
-            }
+            stack::guard(|| {
+                if !self.found {
+                    walk_stmt(self, stmt);
+                }
+            })
         }
         fn visit_expr(&mut self, expr: &'ast Expr) {
-            if self.found {
-                return;
-            }
-            if (self.pred)(expr) {
-                self.found = true;
-                return;
-            }
-            walk_expr_in_scope(self, expr);
+            stack::guard(|| {
+                if self.found {
+                    return;
+                }
+                if (self.pred)(expr) {
+                    self.found = true;
+                    return;
+                }
+                walk_expr_in_scope(self, expr);
+            })
         }
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_def(&mut self, _: &'ast ClassDef) {}
@@ -677,14 +749,16 @@ pub fn any_expr_in_scope<'ast>(expr: &'ast Expr, pred: impl FnMut(&'ast Expr) ->
     }
     impl<'ast, F: FnMut(&'ast Expr) -> bool> Visitor<'ast> for Search<F> {
         fn visit_expr(&mut self, expr: &'ast Expr) {
-            if self.found {
-                return;
-            }
-            if (self.pred)(expr) {
-                self.found = true;
-                return;
-            }
-            walk_expr_in_scope(self, expr);
+            stack::guard(|| {
+                if self.found {
+                    return;
+                }
+                if (self.pred)(expr) {
+                    self.found = true;
+                    return;
+                }
+                walk_expr_in_scope(self, expr);
+            })
         }
     }
     let mut search = Search { pred, found: false };
@@ -770,81 +844,115 @@ pub fn body_contains_yield(stmts: &[Stmt]) -> bool {
 /// node's children.
 pub trait VisitorMut {
     fn visit_stmt(&mut self, stmt: &mut Stmt) {
-        walk_stmt_mut(self, stmt);
+        stack::guard(|| {
+            walk_stmt_mut(self, stmt);
+        })
     }
 
     fn visit_expr(&mut self, expr: &mut Expr) {
-        walk_expr_mut(self, expr);
+        stack::guard(|| {
+            walk_expr_mut(self, expr);
+        })
     }
 
     /// A named function or a method's function (a closure is an
     /// `ExprKind::Closure`).
     fn visit_function_decl(&mut self, function: &mut FunctionDecl) {
-        walk_function_decl_mut(self, function);
+        stack::guard(|| {
+            walk_function_decl_mut(self, function);
+        })
     }
 
     /// A class, interface, trait or enum declaration statement.
     fn visit_class_decl(&mut self, class: &mut ClassDecl) {
-        walk_class_decl_mut(self, class);
+        stack::guard(|| {
+            walk_class_decl_mut(self, class);
+        })
     }
 
     /// A class-like's definition: a declaration's or an anonymous
     /// class's.
     fn visit_class_def(&mut self, class: &mut ClassDef) {
-        walk_class_def_mut(self, class);
+        stack::guard(|| {
+            walk_class_def_mut(self, class);
+        })
     }
 
     fn visit_method_decl(&mut self, method: &mut MethodDecl) {
-        walk_method_decl_mut(self, method);
+        stack::guard(|| {
+            walk_method_decl_mut(self, method);
+        })
     }
 
     fn visit_property_decl(&mut self, property: &mut PropertyDecl) {
-        walk_property_decl_mut(self, property);
+        stack::guard(|| {
+            walk_property_decl_mut(self, property);
+        })
     }
 
     fn visit_class_const(&mut self, constant: &mut ClassConst) {
-        walk_class_const_mut(self, constant);
+        stack::guard(|| {
+            walk_class_const_mut(self, constant);
+        })
     }
 
     fn visit_enum_case(&mut self, case: &mut EnumCase) {
-        walk_enum_case_mut(self, case);
+        stack::guard(|| {
+            walk_enum_case_mut(self, case);
+        })
     }
 
     fn visit_param(&mut self, param: &mut Param) {
-        walk_param_mut(self, param);
+        stack::guard(|| {
+            walk_param_mut(self, param);
+        })
     }
 
     fn visit_property_hooks(&mut self, hooks: &mut PropertyHooks) {
-        walk_property_hooks_mut(self, hooks);
+        stack::guard(|| {
+            walk_property_hooks_mut(self, hooks);
+        })
     }
 
     fn visit_attribute(&mut self, attribute: &mut Attribute) {
-        walk_attribute_mut(self, attribute);
+        stack::guard(|| {
+            walk_attribute_mut(self, attribute);
+        })
     }
 
     fn visit_arg(&mut self, arg: &mut Arg) {
-        walk_arg_mut(self, arg);
+        stack::guard(|| {
+            walk_arg_mut(self, arg);
+        })
     }
 
     fn visit_type_hint(&mut self, _hint: &mut TypeHint) {}
 
     fn visit_catch_clause(&mut self, clause: &mut CatchClause) {
-        walk_catch_clause_mut(self, clause);
+        stack::guard(|| {
+            walk_catch_clause_mut(self, clause);
+        })
     }
 
     fn visit_switch_case(&mut self, case: &mut SwitchCase) {
-        walk_switch_case_mut(self, case);
+        stack::guard(|| {
+            walk_switch_case_mut(self, case);
+        })
     }
 
     fn visit_elseif(&mut self, elseif: &mut ElseIf) {
-        walk_elseif_mut(self, elseif);
+        stack::guard(|| {
+            walk_elseif_mut(self, elseif);
+        })
     }
 }
 
 pub fn walk_stmts_mut<V: VisitorMut + ?Sized>(v: &mut V, stmts: &mut [Stmt]) {
-    for stmt in stmts {
-        v.visit_stmt(stmt);
-    }
+    stack::guard(|| {
+        for stmt in stmts {
+            v.visit_stmt(stmt);
+        }
+    })
 }
 
 pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
@@ -972,15 +1080,19 @@ pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
 }
 
 fn walk_static_target_mut<V: VisitorMut + ?Sized>(v: &mut V, target: &mut StaticTarget) {
-    if let StaticTarget::Expr(e) = target {
-        v.visit_expr(e);
-    }
+    stack::guard(|| {
+        if let StaticTarget::Expr(e) = target {
+            v.visit_expr(e);
+        }
+    })
 }
 
 fn walk_args_mut<V: VisitorMut + ?Sized>(v: &mut V, args: &mut [Arg]) {
-    for arg in args {
-        v.visit_arg(arg);
-    }
+    stack::guard(|| {
+        for arg in args {
+            v.visit_arg(arg);
+        }
+    })
 }
 
 pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
@@ -1159,140 +1271,168 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
 }
 
 pub fn walk_function_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, f: &mut FunctionDecl) {
-    for attr in f.attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    for param in f.params.iter_mut() {
-        v.visit_param(param);
-    }
-    if let Some(hint) = &mut f.return_type {
-        v.visit_type_hint(hint);
-    }
-    if let Some(body) = &mut f.body {
-        walk_stmts_mut(v, std::sync::Arc::make_mut(&mut body.stmts).as_mut_slice());
-    }
+    stack::guard(|| {
+        for attr in f.attrs.iter_mut() {
+            v.visit_attribute(attr);
+        }
+        for param in f.params.iter_mut() {
+            v.visit_param(param);
+        }
+        if let Some(hint) = &mut f.return_type {
+            v.visit_type_hint(hint);
+        }
+        if let Some(body) = &mut f.body {
+            walk_stmts_mut(v, std::sync::Arc::make_mut(&mut body.stmts).as_mut_slice());
+        }
+    })
 }
 
 pub fn walk_class_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut ClassDecl) {
-    v.visit_class_def(&mut c.def);
+    stack::guard(|| {
+        v.visit_class_def(&mut c.def);
+    })
 }
 
 pub fn walk_class_def_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut ClassDef) {
-    for attr in c.attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &mut c.backing_type {
-        v.visit_type_hint(hint);
-    }
-    for constant in c.consts.iter_mut() {
-        v.visit_class_const(constant);
-    }
-    for case in c.enum_cases.iter_mut() {
-        v.visit_enum_case(case);
-    }
-    for property in c.properties.iter_mut() {
-        v.visit_property_decl(property);
-    }
-    for method in c.methods.iter_mut() {
-        v.visit_method_decl(method);
-    }
+    stack::guard(|| {
+        for attr in c.attrs.iter_mut() {
+            v.visit_attribute(attr);
+        }
+        if let Some(hint) = &mut c.backing_type {
+            v.visit_type_hint(hint);
+        }
+        for constant in c.consts.iter_mut() {
+            v.visit_class_const(constant);
+        }
+        for case in c.enum_cases.iter_mut() {
+            v.visit_enum_case(case);
+        }
+        for property in c.properties.iter_mut() {
+            v.visit_property_decl(property);
+        }
+        for method in c.methods.iter_mut() {
+            v.visit_method_decl(method);
+        }
+    })
 }
 
 pub fn walk_method_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, m: &mut MethodDecl) {
-    v.visit_function_decl(&mut m.function);
+    stack::guard(|| {
+        v.visit_function_decl(&mut m.function);
+    })
 }
 
 pub fn walk_property_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, p: &mut PropertyDecl) {
-    for attr in p.attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &mut p.type_hint {
-        v.visit_type_hint(hint);
-    }
-    if let Some(default) = &mut p.default {
-        v.visit_expr(default);
-    }
-    if let Some(hooks) = &mut p.hooks {
-        v.visit_property_hooks(hooks);
-    }
+    stack::guard(|| {
+        for attr in p.attrs.iter_mut() {
+            v.visit_attribute(attr);
+        }
+        if let Some(hint) = &mut p.type_hint {
+            v.visit_type_hint(hint);
+        }
+        if let Some(default) = &mut p.default {
+            v.visit_expr(default);
+        }
+        if let Some(hooks) = &mut p.hooks {
+            v.visit_property_hooks(hooks);
+        }
+    })
 }
 
 pub fn walk_class_const_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut ClassConst) {
-    for attr in c.attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &mut c.type_hint {
-        v.visit_type_hint(hint);
-    }
-    v.visit_expr(&mut c.value);
+    stack::guard(|| {
+        for attr in c.attrs.iter_mut() {
+            v.visit_attribute(attr);
+        }
+        if let Some(hint) = &mut c.type_hint {
+            v.visit_type_hint(hint);
+        }
+        v.visit_expr(&mut c.value);
+    })
 }
 
 pub fn walk_enum_case_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut EnumCase) {
-    for attr in c.attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    if let Some(value) = &mut c.value {
-        v.visit_expr(value);
-    }
+    stack::guard(|| {
+        for attr in c.attrs.iter_mut() {
+            v.visit_attribute(attr);
+        }
+        if let Some(value) = &mut c.value {
+            v.visit_expr(value);
+        }
+    })
 }
 
 pub fn walk_param_mut<V: VisitorMut + ?Sized>(v: &mut V, p: &mut Param) {
-    for attr in p.attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &mut p.type_hint {
-        v.visit_type_hint(hint);
-    }
-    if let Some(default) = &mut p.default {
-        v.visit_expr(default);
-    }
-    if let Some(hooks) = &mut p.hooks {
-        v.visit_property_hooks(hooks);
-    }
+    stack::guard(|| {
+        for attr in p.attrs.iter_mut() {
+            v.visit_attribute(attr);
+        }
+        if let Some(hint) = &mut p.type_hint {
+            v.visit_type_hint(hint);
+        }
+        if let Some(default) = &mut p.default {
+            v.visit_expr(default);
+        }
+        if let Some(hooks) = &mut p.hooks {
+            v.visit_property_hooks(hooks);
+        }
+    })
 }
 
 fn walk_hook_body_mut<V: VisitorMut + ?Sized>(v: &mut V, body: &mut PropertyHookBody) {
-    match body {
+    stack::guard(|| match body {
         PropertyHookBody::Arrow(e) => v.visit_expr(e),
         PropertyHookBody::Block(stmts) => walk_stmts_mut(v, stmts),
         PropertyHookBody::Abstract => {}
-    }
+    })
 }
 
 pub fn walk_property_hooks_mut<V: VisitorMut + ?Sized>(v: &mut V, h: &mut PropertyHooks) {
-    for hook in h.iter_mut() {
-        for attr in hook.attrs.iter_mut() {
-            v.visit_attribute(attr);
+    stack::guard(|| {
+        for hook in h.iter_mut() {
+            for attr in hook.attrs.iter_mut() {
+                v.visit_attribute(attr);
+            }
+            if let Some(param) = &mut hook.param {
+                v.visit_param(param);
+            }
+            walk_hook_body_mut(v, &mut hook.body);
         }
-        if let Some(param) = &mut hook.param {
-            v.visit_param(param);
-        }
-        walk_hook_body_mut(v, &mut hook.body);
-    }
+    })
 }
 
 pub fn walk_attribute_mut<V: VisitorMut + ?Sized>(v: &mut V, a: &mut Attribute) {
-    walk_args_mut(v, &mut a.args);
+    stack::guard(|| {
+        walk_args_mut(v, &mut a.args);
+    })
 }
 
 pub fn walk_arg_mut<V: VisitorMut + ?Sized>(v: &mut V, arg: &mut Arg) {
-    v.visit_expr(&mut arg.value);
+    stack::guard(|| {
+        v.visit_expr(&mut arg.value);
+    })
 }
 
 pub fn walk_catch_clause_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut CatchClause) {
-    walk_stmts_mut(v, &mut c.body);
+    stack::guard(|| {
+        walk_stmts_mut(v, &mut c.body);
+    })
 }
 
 pub fn walk_elseif_mut<V: VisitorMut + ?Sized>(v: &mut V, e: &mut ElseIf) {
-    v.visit_expr(&mut e.cond);
-    v.visit_stmt(&mut e.body);
+    stack::guard(|| {
+        v.visit_expr(&mut e.cond);
+        v.visit_stmt(&mut e.body);
+    })
 }
 
 pub fn walk_switch_case_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut SwitchCase) {
-    if let Some(test) = &mut c.test {
-        v.visit_expr(test);
-    }
-    walk_stmts_mut(v, &mut c.body);
+    stack::guard(|| {
+        if let Some(test) = &mut c.test {
+            v.visit_expr(test);
+        }
+        walk_stmts_mut(v, &mut c.body);
+    })
 }
 
 #[cfg(test)]

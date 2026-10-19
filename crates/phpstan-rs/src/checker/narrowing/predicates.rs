@@ -22,14 +22,16 @@ use types::Type;
 /// what lets `is_int($x['k'] ?? null)` see `$x['k']`'s own true type
 /// (`int|null`), not the coalesce result's already-narrower one.
 pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
-    let e = e.peeled();
-    stack::guard(|| match &e.kind {
-        ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
-            if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
-        {
-            narrowing_infer_target(lhs)
-        }
-        _ => e,
+    stack::guard(|| {
+        let e = e.peeled();
+        stack::guard(|| match &e.kind {
+            ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
+                if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
+            {
+                narrowing_infer_target(lhs)
+            }
+            _ => e,
+        })
     })
 }
 
@@ -246,15 +248,19 @@ impl<'a> Checker<'a> {
         cond: &'e Expr,
         locals: &Locals,
     ) -> Option<(LocalKey, Type, &'e Expr)> {
-        let cond = cond.peeled();
-        stack::guard(|| match &cond.kind {
-            ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
-                let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
-                let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
-                (lk == rk).then(|| (lk, self.relation().union(lt, rt), le))
-            }
-            ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner, locals),
-            _ => None,
+        stack::guard(|| {
+            let cond = cond.peeled();
+            stack::guard(|| match &cond.kind {
+                ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
+                    let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
+                    let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
+                    (lk == rk).then(|| (lk, self.relation().union(lt, rt), le))
+                }
+                ExprKind::Unary(UnaryOp::Not, inner) => {
+                    self.or_chain_narrowing_target(inner, locals)
+                }
+                _ => None,
+            })
         })
     }
 }

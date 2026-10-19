@@ -125,45 +125,47 @@ fn tarjan_sccs(graph: &FxHashMap<String, Vec<String>>) -> Vec<Vec<String>> {
 
     impl State<'_> {
         fn visit(&mut self, v: &str) {
-            let idx = self.counter;
-            self.counter += 1;
-            self.index.insert(v.to_string(), idx);
-            self.lowlink.insert(v.to_string(), idx);
-            self.stack.push(v.to_string());
-            self.on_stack.insert(v.to_string());
+            stack::guard(|| {
+                let idx = self.counter;
+                self.counter += 1;
+                self.index.insert(v.to_string(), idx);
+                self.lowlink.insert(v.to_string(), idx);
+                self.stack.push(v.to_string());
+                self.on_stack.insert(v.to_string());
 
-            if let Some(neighbors) = self.graph.get(v) {
-                for w in neighbors.clone() {
-                    if !self.index.contains_key(&w) {
-                        self.visit(&w);
-                        let w_low = self.lowlink[&w];
-                        let v_low = self.lowlink[v];
-                        if w_low < v_low {
-                            self.lowlink.insert(v.to_string(), w_low);
-                        }
-                    } else if self.on_stack.contains(&w) {
-                        let w_idx = self.index[&w];
-                        let v_low = self.lowlink[v];
-                        if w_idx < v_low {
-                            self.lowlink.insert(v.to_string(), w_idx);
+                if let Some(neighbors) = self.graph.get(v) {
+                    for w in neighbors.clone() {
+                        if !self.index.contains_key(&w) {
+                            self.visit(&w);
+                            let w_low = self.lowlink[&w];
+                            let v_low = self.lowlink[v];
+                            if w_low < v_low {
+                                self.lowlink.insert(v.to_string(), w_low);
+                            }
+                        } else if self.on_stack.contains(&w) {
+                            let w_idx = self.index[&w];
+                            let v_low = self.lowlink[v];
+                            if w_idx < v_low {
+                                self.lowlink.insert(v.to_string(), w_idx);
+                            }
                         }
                     }
                 }
-            }
 
-            if self.lowlink[v] == self.index[v] {
-                let mut component = Vec::new();
-                loop {
-                    let w = self.stack.pop().expect("v itself is always on the stack");
-                    self.on_stack.remove(&w);
-                    let is_v = w == v;
-                    component.push(w);
-                    if is_v {
-                        break;
+                if self.lowlink[v] == self.index[v] {
+                    let mut component = Vec::new();
+                    loop {
+                        let w = self.stack.pop().expect("v itself is always on the stack");
+                        self.on_stack.remove(&w);
+                        let is_v = w == v;
+                        component.push(w);
+                        if is_v {
+                            break;
+                        }
                     }
+                    self.sccs.push(component);
                 }
-                self.sccs.push(component);
-            }
+            })
         }
     }
 

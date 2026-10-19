@@ -341,34 +341,38 @@ impl<'a> Checker<'a> {
     }
 
     fn is_risky_log_expr(&self, e: &Expr, locals: &Locals) -> bool {
-        let e = e.peeled();
-        stack::guard(|| match &e.kind {
-            ExprKind::Binary(BinOp::Concat, l, r) => {
-                self.is_risky_log_expr(l, locals) || self.is_risky_log_expr(r, locals)
-            }
-            ExprKind::Interpolated(parts) => parts.iter().any(|part| {
-                !matches!(part.kind, ExprKind::Literal(Literal::String(_)))
-                    && self.is_risky_value(part, locals)
-            }),
-            _ => false,
+        stack::guard(|| {
+            let e = e.peeled();
+            stack::guard(|| match &e.kind {
+                ExprKind::Binary(BinOp::Concat, l, r) => {
+                    self.is_risky_log_expr(l, locals) || self.is_risky_log_expr(r, locals)
+                }
+                ExprKind::Interpolated(parts) => parts.iter().any(|part| {
+                    !matches!(part.kind, ExprKind::Literal(Literal::String(_)))
+                        && self.is_risky_value(part, locals)
+                }),
+                _ => false,
+            })
         })
     }
 
     fn is_risky_value(&self, e: &Expr, locals: &Locals) -> bool {
-        if matches!(e.kind, ExprKind::Literal(_)) {
-            return false;
-        }
-        let ty = match &e.kind {
-            ExprKind::Variable(name) => locals
-                .native_var(name)
-                .cloned()
-                .unwrap_or_else(|| self.infer_expr(e, locals)),
-            ExprKind::Binary(BinOp::Concat, ..) | ExprKind::Interpolated(_) => {
-                return self.is_risky_log_expr(e, locals);
+        stack::guard(|| {
+            if matches!(e.kind, ExprKind::Literal(_)) {
+                return false;
             }
-            _ => self.infer_expr(e, locals),
-        };
-        !self.is_safe_log_value(&ty)
+            let ty = match &e.kind {
+                ExprKind::Variable(name) => locals
+                    .native_var(name)
+                    .cloned()
+                    .unwrap_or_else(|| self.infer_expr(e, locals)),
+                ExprKind::Binary(BinOp::Concat, ..) | ExprKind::Interpolated(_) => {
+                    return self.is_risky_log_expr(e, locals);
+                }
+                _ => self.infer_expr(e, locals),
+            };
+            !self.is_safe_log_value(&ty)
+        })
     }
 
     fn is_safe_log_value(&self, ty: &Type) -> bool {

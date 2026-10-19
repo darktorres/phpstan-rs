@@ -62,7 +62,7 @@ impl<'ast> Visitor<'ast> for Scope {
     fn visit_class_def(&mut self, _: &'ast ClassDef) {}
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        match &stmt.kind {
+        stack::guard(|| match &stmt.kind {
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
             StmtKind::While { body, .. }
             | StmtKind::DoWhile { body, .. }
@@ -139,7 +139,7 @@ impl<'ast> Visitor<'ast> for Scope {
                 self.gotos.push((name.name.clone(), placement));
             }
             _ => walk_stmt(self, stmt),
-        }
+        })
     }
 }
 

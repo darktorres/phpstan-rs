@@ -170,20 +170,22 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         fn collect(ty: &Type, out: &mut Vec<Type>) {
-            if let Some(sig) = ty.callable_sig() {
-                if !sig.templates.is_empty() {
-                    out.push(ty.clone());
+            stack::guard(|| {
+                if let Some(sig) = ty.callable_sig() {
+                    if !sig.templates.is_empty() {
+                        out.push(ty.clone());
+                    }
+                    for p in &sig.params {
+                        collect(&p.ty, out);
+                    }
+                    collect(&sig.return_type, out);
+                    return;
                 }
-                for p in &sig.params {
-                    collect(&p.ty, out);
-                }
-                collect(&sig.return_type, out);
-                return;
-            }
-            let _ = ty.map_children(&mut |c| {
-                collect(c, out);
-                c.clone()
-            });
+                let _ = ty.map_children(&mut |c| {
+                    collect(c, out);
+                    c.clone()
+                });
+            })
         }
         let mut callables = Vec::new();
         collect(ty, &mut callables);

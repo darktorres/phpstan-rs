@@ -1666,7 +1666,7 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
 /// ...`, `$x = &...`) binds.
 fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
     fn collect(target: &Expr, out: &mut Vec<String>) {
-        match &target.kind {
+        stack::guard(|| match &target.kind {
             ExprKind::Variable(name) => out.push(name.to_string()),
             ExprKind::Destructure(items, _) => {
                 for target in items.iter().filter_map(|item| item.target.as_ref()) {
@@ -1674,7 +1674,7 @@ fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
                 }
             }
             _ => {}
-        }
+        })
     }
     let mut out = Vec::new();
     if let StmtKind::Expression(e) = kind

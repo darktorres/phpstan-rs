@@ -182,29 +182,32 @@ impl<'a, F: FnMut(Declaration<'a>, &NameContext, &[GuardTerm<'a>])> Declarations
     /// Walks the `if` chain: each branch's body under its own condition
     /// and the negation of every one before it.
     fn if_chain(&mut self, if_stmt: &'a IfStmt) {
-        let was = std::mem::replace(&mut self.conditional, true);
-        let mark = self.guards.len();
-        let mut branches: Vec<(&'a Expr, &'a Stmt)> = vec![(&if_stmt.cond, &if_stmt.then_branch)];
-        branches.extend(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)));
-        for (expr, body) in branches {
-            self.visit_expr(expr);
-            self.guards.push(GuardTerm::Condition {
-                expr,
-                negated: false,
-            });
-            self.visit_stmt(body);
-            self.guards.pop();
-            // Every later branch runs only when this one's condition failed.
-            self.guards.push(GuardTerm::Condition {
-                expr,
-                negated: true,
-            });
-        }
-        if let Some(else_branch) = &if_stmt.else_branch {
-            self.visit_stmt(else_branch);
-        }
-        self.guards.truncate(mark);
-        self.conditional = was;
+        stack::guard(|| {
+            let was = std::mem::replace(&mut self.conditional, true);
+            let mark = self.guards.len();
+            let mut branches: Vec<(&'a Expr, &'a Stmt)> =
+                vec![(&if_stmt.cond, &if_stmt.then_branch)];
+            branches.extend(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)));
+            for (expr, body) in branches {
+                self.visit_expr(expr);
+                self.guards.push(GuardTerm::Condition {
+                    expr,
+                    negated: false,
+                });
+                self.visit_stmt(body);
+                self.guards.pop();
+                // Every later branch runs only when this one's condition failed.
+                self.guards.push(GuardTerm::Condition {
+                    expr,
+                    negated: true,
+                });
+            }
+            if let Some(else_branch) = &if_stmt.else_branch {
+                self.visit_stmt(else_branch);
+            }
+            self.guards.truncate(mark);
+            self.conditional = was;
+        })
     }
 }
 

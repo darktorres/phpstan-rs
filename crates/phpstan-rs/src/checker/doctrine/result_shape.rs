@@ -207,57 +207,62 @@ fn field_ref_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
 /// localizes to `Mixed` for this one item, never a whole-query failure).
 /// Aggregates: see `aggregate_type`.
 fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) -> Type {
-    match &item.kind {
-        SelectItemKind::Field(r) => field_ref_type(checker, aliases, r).unwrap_or(Type::mixed()),
-        SelectItemKind::Aggregate { func, operand } => {
-            aggregate_type(checker, aliases, *func, operand.as_ref())
+    stack::guard(|| {
+        match &item.kind {
+            SelectItemKind::Field(r) => {
+                field_ref_type(checker, aliases, r).unwrap_or(Type::mixed())
+            }
+            SelectItemKind::Aggregate { func, operand } => {
+                aggregate_type(checker, aliases, *func, operand.as_ref())
+            }
+            SelectItemKind::Case {
+                then_arms,
+                else_arm,
+            } => {
+                let arm_types = then_arms
+                    .iter()
+                    .chain(else_arm.iter())
+                    .map(|r| field_ref_type(checker, aliases, r).unwrap_or(Type::mixed()));
+                // `then_arms` always has at least one entry (168c's own
+                // `parse_case` requires at least one `WHEN ... THEN ...`
+                // before accepting `END`), so this always has a first
+                // element to reduce from.
+                arm_types
+                    .union_all_with(&checker.relation())
+                    .unwrap_or(Type::mixed())
+            }
+            // Real Doctrine constructs the named class from the query's own
+            // positional results directly - exact once the class is named,
+            // regardless of whether this project can otherwise resolve it
+            // (the same leniency an ordinary `new UnknownClass()` expression
+            // already gets elsewhere in this project's own type system).
+            SelectItemKind::New(class) => checker.class_type_named(class),
+            // A custom, project-registered DQL function - `Mixed` when this project's own
+            // `[[doctrine_custom_functions]]` config doesn't declare it,
+            // exactly like real `phpstan-doctrine`'s identical config
+            // dependency for the same reason (see `doctrine_functions`'s own
+            // module doc comment).
+            SelectItemKind::Custom(name) => checker
+                .settings
+                .doctrine_custom_functions
+                .get(&name.to_ascii_lowercase())
+                .map(|kind| doctrine_custom_function_type(*kind))
+                .unwrap_or(Type::mixed()),
+            // A scalar subquery - its own
+            // `FROM`/`JOIN` scope is entirely independent of the outer
+            // query's own `aliases` map (only an uncorrelated subquery is
+            // recognized at all - see `dql`'s own module doc comment), so
+            // its inner items resolve against their own, freshly-built
+            // alias map, then reuse the identical single-scalar-column
+            // requirement `getSingleColumnResult()`/`getSingleScalarResult()`
+            // (168f) already have - a scalar subquery is only valid DQL
+            // when it resolves to exactly one scalar column.
+            SelectItemKind::Subquery(inner_chain, inner_items) => {
+                single_scalar_column_type(checker, inner_chain, inner_items)
+                    .unwrap_or(Type::mixed())
+            }
         }
-        SelectItemKind::Case {
-            then_arms,
-            else_arm,
-        } => {
-            let arm_types = then_arms
-                .iter()
-                .chain(else_arm.iter())
-                .map(|r| field_ref_type(checker, aliases, r).unwrap_or(Type::mixed()));
-            // `then_arms` always has at least one entry (168c's own
-            // `parse_case` requires at least one `WHEN ... THEN ...`
-            // before accepting `END`), so this always has a first
-            // element to reduce from.
-            arm_types
-                .union_all_with(&checker.relation())
-                .unwrap_or(Type::mixed())
-        }
-        // Real Doctrine constructs the named class from the query's own
-        // positional results directly - exact once the class is named,
-        // regardless of whether this project can otherwise resolve it
-        // (the same leniency an ordinary `new UnknownClass()` expression
-        // already gets elsewhere in this project's own type system).
-        SelectItemKind::New(class) => checker.class_type_named(class),
-        // A custom, project-registered DQL function - `Mixed` when this project's own
-        // `[[doctrine_custom_functions]]` config doesn't declare it,
-        // exactly like real `phpstan-doctrine`'s identical config
-        // dependency for the same reason (see `doctrine_functions`'s own
-        // module doc comment).
-        SelectItemKind::Custom(name) => checker
-            .settings
-            .doctrine_custom_functions
-            .get(&name.to_ascii_lowercase())
-            .map(|kind| doctrine_custom_function_type(*kind))
-            .unwrap_or(Type::mixed()),
-        // A scalar subquery - its own
-        // `FROM`/`JOIN` scope is entirely independent of the outer
-        // query's own `aliases` map (only an uncorrelated subquery is
-        // recognized at all - see `dql`'s own module doc comment), so
-        // its inner items resolve against their own, freshly-built
-        // alias map, then reuse the identical single-scalar-column
-        // requirement `getSingleColumnResult()`/`getSingleScalarResult()`
-        // (168f) already have - a scalar subquery is only valid DQL
-        // when it resolves to exactly one scalar column.
-        SelectItemKind::Subquery(inner_chain, inner_items) => {
-            single_scalar_column_type(checker, inner_chain, inner_items).unwrap_or(Type::mixed())
-        }
-    }
+    })
 }
 
 /// An aggregate select item's value. `COUNT` is always `int<0, max>`.
@@ -442,10 +447,12 @@ pub(crate) fn single_scalar_column_type(
     chain: &QueryBuilderChain,
     items: &[SelectItem],
 ) -> Option<Type> {
-    let [item] = items else { return None };
-    let aliases = build_alias_map(checker, chain);
-    let ty = select_item_type(checker, &aliases, item);
-    (!ty.is_object().yes()).then_some(ty)
+    stack::guard(|| {
+        let [item] = items else { return None };
+        let aliases = build_alias_map(checker, chain);
+        let ty = select_item_type(checker, &aliases, item);
+        (!ty.is_object().yes()).then_some(ty)
+    })
 }
 
 /// Whether some member of `ty` is an object (an entity or value object).

@@ -8,9 +8,11 @@ use crate::ast::*;
 use crate::php_string::PhpString;
 
 pub fn print_expr(e: &Expr) -> String {
-    let mut out = String::new();
-    write_expr(&mut out, e);
-    out
+    stack::guard(|| {
+        let mut out = String::new();
+        write_expr(&mut out, e);
+        out
+    })
 }
 
 /// `print_expr`, cut to its first line with a trailing `…` when the
@@ -125,41 +127,45 @@ fn write_list<T>(out: &mut String, items: &[T], mut write: impl FnMut(&mut Strin
 }
 
 fn write_args(out: &mut String, args: &[Arg]) {
-    out.push('(');
-    write_list(out, args, |out, arg| {
-        if let Some(name) = &arg.name {
-            out.push_str(name);
-            out.push_str(": ");
-        }
-        if arg.spread {
-            out.push_str("...");
-        }
-        write_expr(out, &arg.value);
-    });
-    out.push(')');
+    stack::guard(|| {
+        out.push('(');
+        write_list(out, args, |out, arg| {
+            if let Some(name) = &arg.name {
+                out.push_str(name);
+                out.push_str(": ");
+            }
+            if arg.spread {
+                out.push_str("...");
+            }
+            write_expr(out, &arg.value);
+        });
+        out.push(')');
+    })
 }
 
 fn write_params(out: &mut String, params: &[Param]) {
-    out.push('(');
-    write_list(out, params, |out, p| {
-        if let Some(ty) = &p.type_hint {
-            out.push_str(&ty.to_string());
-            out.push(' ');
-        }
-        if p.by_ref {
-            out.push('&');
-        }
-        if p.variadic {
-            out.push_str("...");
-        }
-        out.push('$');
-        out.push_str(&p.name);
-        if let Some(default) = &p.default {
-            out.push_str(" = ");
-            write_expr(out, default);
-        }
-    });
-    out.push(')');
+    stack::guard(|| {
+        out.push('(');
+        write_list(out, params, |out, p| {
+            if let Some(ty) = &p.type_hint {
+                out.push_str(&ty.to_string());
+                out.push(' ');
+            }
+            if p.by_ref {
+                out.push('&');
+            }
+            if p.variadic {
+                out.push_str("...");
+            }
+            out.push('$');
+            out.push_str(&p.name);
+            if let Some(default) = &p.default {
+                out.push_str(" = ");
+                write_expr(out, default);
+            }
+        });
+        out.push(')');
+    })
 }
 
 fn write_return_type(out: &mut String, return_type: Option<&TypeHint>) {
@@ -172,36 +178,38 @@ fn write_return_type(out: &mut String, return_type: Option<&TypeHint>) {
 /// A member name after `->`/`?->`: bare when it's a plain name, `$x` for
 /// a variable, braced otherwise.
 fn write_member_name(out: &mut String, name: &Expr) {
-    match &name.kind {
+    stack::guard(|| match &name.kind {
         ExprKind::Variable(_) => write_expr(out, name),
         _ => {
             out.push('{');
             write_expr(out, name);
             out.push('}');
         }
-    }
+    })
 }
 
 fn write_interpolated_parts(out: &mut String, parts: &[Expr], delimiter: u8) {
-    for part in parts {
-        match &part.kind {
-            ExprKind::Literal(Literal::String(s)) => {
-                write_double_quoted_bytes(out, s.as_bytes(), delimiter)
-            }
-            _ => {
-                out.push('{');
-                write_expr(out, part);
-                out.push('}');
+    stack::guard(|| {
+        for part in parts {
+            match &part.kind {
+                ExprKind::Literal(Literal::String(s)) => {
+                    write_double_quoted_bytes(out, s.as_bytes(), delimiter)
+                }
+                _ => {
+                    out.push('{');
+                    write_expr(out, part);
+                    out.push('}');
+                }
             }
         }
-    }
+    })
 }
 
 fn write_static_target(out: &mut String, target: &StaticTarget) {
-    match target {
+    stack::guard(|| match target {
         StaticTarget::Name(n) => out.push_str(n),
         StaticTarget::Expr(inner) => write_expr(out, inner),
-    }
+    })
 }
 
 fn write_expr(out: &mut String, e: &Expr) {
@@ -209,369 +217,371 @@ fn write_expr(out: &mut String, e: &Expr) {
 }
 
 fn write_expr_unguarded(out: &mut String, e: &Expr) {
-    match &e.kind {
-        ExprKind::Literal(lit) => match lit {
-            Literal::Int(n) => out.push_str(&n.to_string()),
-            Literal::Float(f) => write_float(out, *f),
-            Literal::String(s) => write_php_string(out, s),
-            Literal::Bool(true) => out.push_str("true"),
-            Literal::Bool(false) => out.push_str("false"),
-            Literal::Null => out.push_str("null"),
-        },
-        ExprKind::Variable(name) => {
-            out.push('$');
-            out.push_str(name);
-        }
-        ExprKind::DynamicVariable(inner) => {
-            out.push_str("${");
-            write_expr(out, inner);
-            out.push('}');
-        }
-        ExprKind::ArrayLiteral(items) => {
-            out.push('[');
-            write_list(out, items, |out, item| {
-                if item.spread {
-                    out.push_str("...");
-                }
-                if let Some(key) = &item.key {
-                    write_expr(out, key);
-                    out.push_str(" => ");
-                }
-                if item.by_ref {
-                    out.push('&');
-                }
-                write_expr(out, &item.value);
-            });
-            out.push(']');
-        }
-        ExprKind::Destructure(items, syntax) => {
-            let is_list = *syntax == DestructureSyntax::List;
-            out.push_str(if is_list { "list(" } else { "[" });
-            write_list(out, items, |out, item| {
-                if let Some(key) = &item.key {
-                    write_expr(out, key);
-                    out.push_str(" => ");
-                }
-                if item.by_ref {
-                    out.push('&');
-                }
-                if let Some(target) = &item.target {
-                    write_expr(out, target);
-                }
-            });
-            // `[$a, ]` has one item, so a skipped last slot needs the
-            // comma that marks it.
-            if items.last().is_some_and(|item| item.target.is_none()) {
-                out.push(',');
+    stack::guard(|| {
+        match &e.kind {
+            ExprKind::Literal(lit) => match lit {
+                Literal::Int(n) => out.push_str(&n.to_string()),
+                Literal::Float(f) => write_float(out, *f),
+                Literal::String(s) => write_php_string(out, s),
+                Literal::Bool(true) => out.push_str("true"),
+                Literal::Bool(false) => out.push_str("false"),
+                Literal::Null => out.push_str("null"),
+            },
+            ExprKind::Variable(name) => {
+                out.push('$');
+                out.push_str(name);
             }
-            out.push(if is_list { ')' } else { ']' });
-        }
-        ExprKind::Unary(op, operand) => {
-            let (prefix, suffix) = match op {
-                UnaryOp::Neg => ("-", ""),
-                UnaryOp::Plus => ("+", ""),
-                UnaryOp::Not => ("!", ""),
-                UnaryOp::BitNot => ("~", ""),
-                UnaryOp::PreInc => ("++", ""),
-                UnaryOp::PreDec => ("--", ""),
-                UnaryOp::PostInc => ("", "++"),
-                UnaryOp::PostDec => ("", "--"),
-            };
-            out.push_str(prefix);
-            write_expr(out, operand);
-            out.push_str(suffix);
-        }
-        ExprKind::Binary(op, l, r) => {
-            write_expr(out, l);
-            out.push(' ');
-            out.push_str(binary_operator(op));
-            out.push(' ');
-            write_expr(out, r);
-        }
-        ExprKind::Assign(target, value) => {
-            write_expr(out, target);
-            out.push_str(" = ");
-            write_expr(out, value);
-        }
-        ExprKind::AssignRef(target, value) => {
-            write_expr(out, target);
-            out.push_str(" =& ");
-            write_expr(out, value);
-        }
-        ExprKind::CompoundAssign(op, target, value) => {
-            write_expr(out, target);
-            out.push(' ');
-            out.push_str(binary_operator(op));
-            out.push_str("= ");
-            write_expr(out, value);
-        }
-        ExprKind::Ternary(cond, then, otherwise) => {
-            write_expr(out, cond);
-            match then {
-                Some(then) => {
-                    out.push_str(" ? ");
-                    write_expr(out, then);
-                    out.push_str(" : ");
-                }
-                None => out.push_str(" ?: "),
+            ExprKind::DynamicVariable(inner) => {
+                out.push_str("${");
+                write_expr(out, inner);
+                out.push('}');
             }
-            write_expr(out, otherwise);
-        }
-        ExprKind::Call(callee, args) => {
-            write_expr(out, callee);
-            write_args(out, args);
-        }
-        ExprKind::Isset(operands) => {
-            out.push_str("isset(");
-            for (i, operand) in operands.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                write_expr(out, operand);
-            }
-            out.push(')');
-        }
-        ExprKind::Empty(operand) => {
-            out.push_str("empty(");
-            write_expr(out, operand);
-            out.push(')');
-        }
-        ExprKind::Print(inner) => {
-            out.push_str("print ");
-            write_expr(out, inner);
-        }
-        ExprKind::Include(kind, path) => {
-            out.push_str(kind.as_str());
-            out.push(' ');
-            write_expr(out, path);
-        }
-        ExprKind::Exit(kind, args) => {
-            out.push_str(kind.as_str());
-            if let Some(args) = args {
-                write_args(out, args);
-            }
-        }
-        ExprKind::Eval(code) => {
-            out.push_str("eval(");
-            write_expr(out, code);
-            out.push(')');
-        }
-        ExprKind::New(class, args) => {
-            out.push_str("new ");
-            write_expr(out, class);
-            write_args(out, args);
-        }
-        ExprKind::PropertyAccess(object, name, nullsafe) => {
-            write_expr(out, object);
-            out.push_str(if nullsafe.is_nullsafe() { "?->" } else { "->" });
-            out.push_str(name);
-        }
-        ExprKind::MethodCall(object, name, args, nullsafe) => {
-            write_expr(out, object);
-            out.push_str(if nullsafe.is_nullsafe() { "?->" } else { "->" });
-            out.push_str(name);
-            write_args(out, args);
-        }
-        ExprKind::DynamicPropertyAccess(object, name, operator) => {
-            write_expr(out, object);
-            out.push_str(if operator.is_nullsafe() { "?->" } else { "->" });
-            write_member_name(out, name);
-        }
-        ExprKind::DynamicMethodCall(object, name, args, operator) => {
-            write_expr(out, object);
-            out.push_str(if operator.is_nullsafe() { "?->" } else { "->" });
-            write_member_name(out, name);
-            write_args(out, args);
-        }
-        ExprKind::ClassConstFetch(target, name) => {
-            write_static_target(out, target);
-            out.push_str("::");
-            out.push_str(name);
-        }
-        ExprKind::ClassNameFetch(target) => {
-            write_static_target(out, target);
-            out.push_str("::class");
-        }
-        ExprKind::StaticPropertyFetch(target, name) => {
-            write_static_target(out, target);
-            out.push_str("::$");
-            out.push_str(name);
-        }
-        ExprKind::DynamicStaticPropertyFetch(target, name) => {
-            write_static_target(out, target);
-            out.push_str("::${");
-            write_expr(out, name);
-            out.push('}');
-        }
-        ExprKind::DynamicClassConstFetch(target, name) => {
-            write_static_target(out, target);
-            out.push_str("::{");
-            write_expr(out, name);
-            out.push('}');
-        }
-        ExprKind::DynamicStaticCall(target, name, args) => {
-            write_static_target(out, target);
-            out.push_str("::");
-            write_member_name(out, name);
-            write_args(out, args);
-        }
-        ExprKind::StaticCall(target, member, args) => {
-            write_static_target(out, target);
-            out.push_str("::");
-            out.push_str(member);
-            write_args(out, args);
-        }
-        ExprKind::Index(base, index) => {
-            write_expr(out, base);
-            out.push('[');
-            if let Some(index) = index {
-                write_expr(out, index);
-            }
-            out.push(']');
-        }
-        ExprKind::Name(n) => out.push_str(n),
-        ExprKind::Instanceof(value, target) => {
-            write_expr(out, value);
-            out.push_str(" instanceof ");
-            match target {
-                InstanceofTarget::Name(n) => out.push_str(n),
-                InstanceofTarget::Expr(inner) => write_expr(out, inner),
-            }
-        }
-        ExprKind::Cast(cast, operand) => {
-            out.push('(');
-            out.push_str(cast.keyword());
-            out.push_str(") ");
-            write_expr(out, operand);
-        }
-        ExprKind::Grouping(inner) => {
-            out.push('(');
-            write_expr(out, inner);
-            out.push(')');
-        }
-        ExprKind::ErrorSuppress(inner) => {
-            out.push('@');
-            write_expr(out, inner);
-        }
-        ExprKind::Clone(object, overrides) => match overrides {
-            Some(overrides) => {
-                out.push_str("clone(");
-                write_expr(out, object);
-                out.push_str(", ");
-                write_expr(out, overrides);
-                out.push(')');
-            }
-            None => {
-                out.push_str("clone ");
-                write_expr(out, object);
-            }
-        },
-        ExprKind::FirstClassCallable(call) => {
-            let printed = print_expr(call);
-            out.push_str(printed.strip_suffix("()").unwrap_or(&printed));
-            out.push_str("(...)");
-        }
-        ExprKind::ShellExec(cmd) => {
-            out.push('`');
-            match &cmd.kind {
-                ExprKind::Interpolated(parts) => write_interpolated_parts(out, parts, b'`'),
-                ExprKind::Literal(Literal::String(s)) => {
-                    write_double_quoted_bytes(out, s.as_bytes(), b'`')
-                }
-                _ => write_expr(out, cmd),
-            }
-            out.push('`');
-        }
-        ExprKind::Throw(inner) => {
-            out.push_str("throw ");
-            write_expr(out, inner);
-        }
-        ExprKind::NewAnonymousClass(class) => {
-            out.push_str("new class");
-            if !class.args.is_empty() {
-                write_args(out, &class.args);
-            }
-            out.push_str("\n{\n}");
-        }
-        ExprKind::Yield(key, value) => {
-            out.push_str("yield");
-            if let Some(key) = key {
-                out.push(' ');
-                write_expr(out, key);
-                out.push_str(" =>");
-            }
-            if let Some(value) = value {
-                out.push(' ');
-                write_expr(out, value);
-            }
-        }
-        ExprKind::YieldFrom(inner) => {
-            out.push_str("yield from ");
-            write_expr(out, inner);
-        }
-        ExprKind::Interpolated(parts) => {
-            out.push('"');
-            write_interpolated_parts(out, parts, b'"');
-            out.push('"');
-        }
-        ExprKind::Closure(closure) => {
-            let ClosureExpr {
-                params,
-                uses,
-                is_static,
-                by_ref,
-                return_type,
-                ..
-            } = &**closure;
-            if *is_static {
-                out.push_str("static ");
-            }
-            out.push_str("function ");
-            if *by_ref {
-                out.push('&');
-            }
-            write_params(out, params);
-            if !uses.is_empty() {
-                out.push_str(" use (");
-                write_list(out, uses, |out, u| {
-                    if u.by_ref {
+            ExprKind::ArrayLiteral(items) => {
+                out.push('[');
+                write_list(out, items, |out, item| {
+                    if item.spread {
+                        out.push_str("...");
+                    }
+                    if let Some(key) = &item.key {
+                        write_expr(out, key);
+                        out.push_str(" => ");
+                    }
+                    if item.by_ref {
                         out.push('&');
                     }
-                    out.push('$');
-                    out.push_str(&u.name);
+                    write_expr(out, &item.value);
                 });
+                out.push(']');
+            }
+            ExprKind::Destructure(items, syntax) => {
+                let is_list = *syntax == DestructureSyntax::List;
+                out.push_str(if is_list { "list(" } else { "[" });
+                write_list(out, items, |out, item| {
+                    if let Some(key) = &item.key {
+                        write_expr(out, key);
+                        out.push_str(" => ");
+                    }
+                    if item.by_ref {
+                        out.push('&');
+                    }
+                    if let Some(target) = &item.target {
+                        write_expr(out, target);
+                    }
+                });
+                // `[$a, ]` has one item, so a skipped last slot needs the
+                // comma that marks it.
+                if items.last().is_some_and(|item| item.target.is_none()) {
+                    out.push(',');
+                }
+                out.push(if is_list { ')' } else { ']' });
+            }
+            ExprKind::Unary(op, operand) => {
+                let (prefix, suffix) = match op {
+                    UnaryOp::Neg => ("-", ""),
+                    UnaryOp::Plus => ("+", ""),
+                    UnaryOp::Not => ("!", ""),
+                    UnaryOp::BitNot => ("~", ""),
+                    UnaryOp::PreInc => ("++", ""),
+                    UnaryOp::PreDec => ("--", ""),
+                    UnaryOp::PostInc => ("", "++"),
+                    UnaryOp::PostDec => ("", "--"),
+                };
+                out.push_str(prefix);
+                write_expr(out, operand);
+                out.push_str(suffix);
+            }
+            ExprKind::Binary(op, l, r) => {
+                write_expr(out, l);
+                out.push(' ');
+                out.push_str(binary_operator(op));
+                out.push(' ');
+                write_expr(out, r);
+            }
+            ExprKind::Assign(target, value) => {
+                write_expr(out, target);
+                out.push_str(" = ");
+                write_expr(out, value);
+            }
+            ExprKind::AssignRef(target, value) => {
+                write_expr(out, target);
+                out.push_str(" =& ");
+                write_expr(out, value);
+            }
+            ExprKind::CompoundAssign(op, target, value) => {
+                write_expr(out, target);
+                out.push(' ');
+                out.push_str(binary_operator(op));
+                out.push_str("= ");
+                write_expr(out, value);
+            }
+            ExprKind::Ternary(cond, then, otherwise) => {
+                write_expr(out, cond);
+                match then {
+                    Some(then) => {
+                        out.push_str(" ? ");
+                        write_expr(out, then);
+                        out.push_str(" : ");
+                    }
+                    None => out.push_str(" ?: "),
+                }
+                write_expr(out, otherwise);
+            }
+            ExprKind::Call(callee, args) => {
+                write_expr(out, callee);
+                write_args(out, args);
+            }
+            ExprKind::Isset(operands) => {
+                out.push_str("isset(");
+                for (i, operand) in operands.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    write_expr(out, operand);
+                }
                 out.push(')');
             }
-            write_return_type(out, return_type.as_deref());
-            out.push_str(" {\n}");
-        }
-        ExprKind::ArrowFn(arrow) => {
-            let ArrowFnExpr {
-                params,
-                body,
-                is_static,
-                by_ref,
-                return_type,
-                ..
-            } = &**arrow;
-            if *is_static {
-                out.push_str("static ");
+            ExprKind::Empty(operand) => {
+                out.push_str("empty(");
+                write_expr(out, operand);
+                out.push(')');
             }
-            out.push_str("fn");
-            if *by_ref {
-                out.push('&');
+            ExprKind::Print(inner) => {
+                out.push_str("print ");
+                write_expr(out, inner);
             }
-            write_params(out, params);
-            write_return_type(out, return_type.as_deref());
-            out.push_str(" => ");
-            write_expr(out, body);
+            ExprKind::Include(kind, path) => {
+                out.push_str(kind.as_str());
+                out.push(' ');
+                write_expr(out, path);
+            }
+            ExprKind::Exit(kind, args) => {
+                out.push_str(kind.as_str());
+                if let Some(args) = args {
+                    write_args(out, args);
+                }
+            }
+            ExprKind::Eval(code) => {
+                out.push_str("eval(");
+                write_expr(out, code);
+                out.push(')');
+            }
+            ExprKind::New(class, args) => {
+                out.push_str("new ");
+                write_expr(out, class);
+                write_args(out, args);
+            }
+            ExprKind::PropertyAccess(object, name, nullsafe) => {
+                write_expr(out, object);
+                out.push_str(if nullsafe.is_nullsafe() { "?->" } else { "->" });
+                out.push_str(name);
+            }
+            ExprKind::MethodCall(object, name, args, nullsafe) => {
+                write_expr(out, object);
+                out.push_str(if nullsafe.is_nullsafe() { "?->" } else { "->" });
+                out.push_str(name);
+                write_args(out, args);
+            }
+            ExprKind::DynamicPropertyAccess(object, name, operator) => {
+                write_expr(out, object);
+                out.push_str(if operator.is_nullsafe() { "?->" } else { "->" });
+                write_member_name(out, name);
+            }
+            ExprKind::DynamicMethodCall(object, name, args, operator) => {
+                write_expr(out, object);
+                out.push_str(if operator.is_nullsafe() { "?->" } else { "->" });
+                write_member_name(out, name);
+                write_args(out, args);
+            }
+            ExprKind::ClassConstFetch(target, name) => {
+                write_static_target(out, target);
+                out.push_str("::");
+                out.push_str(name);
+            }
+            ExprKind::ClassNameFetch(target) => {
+                write_static_target(out, target);
+                out.push_str("::class");
+            }
+            ExprKind::StaticPropertyFetch(target, name) => {
+                write_static_target(out, target);
+                out.push_str("::$");
+                out.push_str(name);
+            }
+            ExprKind::DynamicStaticPropertyFetch(target, name) => {
+                write_static_target(out, target);
+                out.push_str("::${");
+                write_expr(out, name);
+                out.push('}');
+            }
+            ExprKind::DynamicClassConstFetch(target, name) => {
+                write_static_target(out, target);
+                out.push_str("::{");
+                write_expr(out, name);
+                out.push('}');
+            }
+            ExprKind::DynamicStaticCall(target, name, args) => {
+                write_static_target(out, target);
+                out.push_str("::");
+                write_member_name(out, name);
+                write_args(out, args);
+            }
+            ExprKind::StaticCall(target, member, args) => {
+                write_static_target(out, target);
+                out.push_str("::");
+                out.push_str(member);
+                write_args(out, args);
+            }
+            ExprKind::Index(base, index) => {
+                write_expr(out, base);
+                out.push('[');
+                if let Some(index) = index {
+                    write_expr(out, index);
+                }
+                out.push(']');
+            }
+            ExprKind::Name(n) => out.push_str(n),
+            ExprKind::Instanceof(value, target) => {
+                write_expr(out, value);
+                out.push_str(" instanceof ");
+                match target {
+                    InstanceofTarget::Name(n) => out.push_str(n),
+                    InstanceofTarget::Expr(inner) => write_expr(out, inner),
+                }
+            }
+            ExprKind::Cast(cast, operand) => {
+                out.push('(');
+                out.push_str(cast.keyword());
+                out.push_str(") ");
+                write_expr(out, operand);
+            }
+            ExprKind::Grouping(inner) => {
+                out.push('(');
+                write_expr(out, inner);
+                out.push(')');
+            }
+            ExprKind::ErrorSuppress(inner) => {
+                out.push('@');
+                write_expr(out, inner);
+            }
+            ExprKind::Clone(object, overrides) => match overrides {
+                Some(overrides) => {
+                    out.push_str("clone(");
+                    write_expr(out, object);
+                    out.push_str(", ");
+                    write_expr(out, overrides);
+                    out.push(')');
+                }
+                None => {
+                    out.push_str("clone ");
+                    write_expr(out, object);
+                }
+            },
+            ExprKind::FirstClassCallable(call) => {
+                let printed = print_expr(call);
+                out.push_str(printed.strip_suffix("()").unwrap_or(&printed));
+                out.push_str("(...)");
+            }
+            ExprKind::ShellExec(cmd) => {
+                out.push('`');
+                match &cmd.kind {
+                    ExprKind::Interpolated(parts) => write_interpolated_parts(out, parts, b'`'),
+                    ExprKind::Literal(Literal::String(s)) => {
+                        write_double_quoted_bytes(out, s.as_bytes(), b'`')
+                    }
+                    _ => write_expr(out, cmd),
+                }
+                out.push('`');
+            }
+            ExprKind::Throw(inner) => {
+                out.push_str("throw ");
+                write_expr(out, inner);
+            }
+            ExprKind::NewAnonymousClass(class) => {
+                out.push_str("new class");
+                if !class.args.is_empty() {
+                    write_args(out, &class.args);
+                }
+                out.push_str("\n{\n}");
+            }
+            ExprKind::Yield(key, value) => {
+                out.push_str("yield");
+                if let Some(key) = key {
+                    out.push(' ');
+                    write_expr(out, key);
+                    out.push_str(" =>");
+                }
+                if let Some(value) = value {
+                    out.push(' ');
+                    write_expr(out, value);
+                }
+            }
+            ExprKind::YieldFrom(inner) => {
+                out.push_str("yield from ");
+                write_expr(out, inner);
+            }
+            ExprKind::Interpolated(parts) => {
+                out.push('"');
+                write_interpolated_parts(out, parts, b'"');
+                out.push('"');
+            }
+            ExprKind::Closure(closure) => {
+                let ClosureExpr {
+                    params,
+                    uses,
+                    is_static,
+                    by_ref,
+                    return_type,
+                    ..
+                } = &**closure;
+                if *is_static {
+                    out.push_str("static ");
+                }
+                out.push_str("function ");
+                if *by_ref {
+                    out.push('&');
+                }
+                write_params(out, params);
+                if !uses.is_empty() {
+                    out.push_str(" use (");
+                    write_list(out, uses, |out, u| {
+                        if u.by_ref {
+                            out.push('&');
+                        }
+                        out.push('$');
+                        out.push_str(&u.name);
+                    });
+                    out.push(')');
+                }
+                write_return_type(out, return_type.as_deref());
+                out.push_str(" {\n}");
+            }
+            ExprKind::ArrowFn(arrow) => {
+                let ArrowFnExpr {
+                    params,
+                    body,
+                    is_static,
+                    by_ref,
+                    return_type,
+                    ..
+                } = &**arrow;
+                if *is_static {
+                    out.push_str("static ");
+                }
+                out.push_str("fn");
+                if *by_ref {
+                    out.push('&');
+                }
+                write_params(out, params);
+                write_return_type(out, return_type.as_deref());
+                out.push_str(" => ");
+                write_expr(out, body);
+            }
+            ExprKind::Match { subject, .. } => {
+                out.push_str("match (");
+                write_expr(out, subject);
+                out.push_str(") {\n}");
+            }
         }
-        ExprKind::Match { subject, .. } => {
-            out.push_str("match (");
-            write_expr(out, subject);
-            out.push_str(") {\n}");
-        }
-    }
+    })
 }
 
 #[cfg(test)]

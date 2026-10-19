@@ -511,7 +511,7 @@ impl<'a> Walker<'a> {
     /// have any component literally named `vendor`" is an exact, simpler
     /// equivalent for every case that matters here.
     fn is_phpstan_code(&self, scope_namespace: &str, target_fqn: &str) -> bool {
-        is_phpstan_code(scope_namespace, target_fqn, self.registry)
+        stack::guard(|| is_phpstan_code(scope_namespace, target_fqn, self.registry))
     }
 
     /// `ApiInstanceofTypeRule`, direct port - a wholly

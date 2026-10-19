@@ -266,10 +266,12 @@ fn walk_nodes(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    for node in nodes {
-        state = walk_node(node, state, ctx, declaring_class);
-    }
-    state
+    stack::guard(|| {
+        for node in nodes {
+            state = walk_node(node, state, ctx, declaring_class);
+        }
+        state
+    })
 }
 
 fn walk_events(
@@ -278,10 +280,12 @@ fn walk_events(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    for event in events {
-        state = apply(event, state, ctx, declaring_class);
-    }
-    state
+    stack::guard(|| {
+        for event in events {
+            state = apply(event, state, ctx, declaring_class);
+        }
+        state
+    })
 }
 
 /// An `if` chain from `branches[0]` on: the condition, its body, then the
@@ -295,37 +299,39 @@ fn walk_if_chain(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    let [branch, rest @ ..] = branches else {
-        return match else_body {
-            Some((flow, _)) => walk_nodes(flow, state, ctx, declaring_class),
-            None => state,
+    stack::guard(|| {
+        let [branch, rest @ ..] = branches else {
+            return match else_body {
+                Some((flow, _)) => walk_nodes(flow, state, ctx, declaring_class),
+                None => state,
+            };
         };
-    };
-    let state_after_cond = walk_events(&branch.cond, state, ctx, declaring_class);
-    let then_terminates = branch.terminates;
-    let then_state = walk_nodes(&branch.body, state_after_cond.clone(), ctx, declaring_class);
-    if rest.is_empty() && else_body.is_none() {
-        return if then_terminates {
-            state_after_cond
-        } else {
-            intersect(then_state, &state_after_cond)
-        };
-    }
-    let else_terminates = else_body.is_some_and(|(_, terminates)| *terminates)
-        && rest.iter().all(|branch| branch.terminates);
-    let else_state = walk_if_chain(
-        rest,
-        else_body,
-        state_after_cond.clone(),
-        ctx,
-        declaring_class,
-    );
-    match (then_terminates, else_terminates) {
-        (true, true) => state_after_cond,
-        (true, false) => else_state,
-        (false, true) => then_state,
-        (false, false) => intersect(then_state, &else_state),
-    }
+        let state_after_cond = walk_events(&branch.cond, state, ctx, declaring_class);
+        let then_terminates = branch.terminates;
+        let then_state = walk_nodes(&branch.body, state_after_cond.clone(), ctx, declaring_class);
+        if rest.is_empty() && else_body.is_none() {
+            return if then_terminates {
+                state_after_cond
+            } else {
+                intersect(then_state, &state_after_cond)
+            };
+        }
+        let else_terminates = else_body.is_some_and(|(_, terminates)| *terminates)
+            && rest.iter().all(|branch| branch.terminates);
+        let else_state = walk_if_chain(
+            rest,
+            else_body,
+            state_after_cond.clone(),
+            ctx,
+            declaring_class,
+        );
+        match (then_terminates, else_terminates) {
+            (true, true) => state_after_cond,
+            (true, false) => else_state,
+            (false, true) => then_state,
+            (false, false) => intersect(then_state, &else_state),
+        }
+    })
 }
 
 fn walk_node(
@@ -334,99 +340,101 @@ fn walk_node(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    match node {
-        Flow::Events(events) => walk_events(events, state, ctx, declaring_class),
-        Flow::If(chain) => walk_if_chain(
-            &chain.branches,
-            chain.else_body.as_ref(),
-            state,
-            ctx,
-            declaring_class,
-        ),
-        // `while`/`for`/`foreach` may run their own body zero times, and
-        // more than once: what is true at the head of the loop is what is
-        // true on entry and at the end of every pass, found by passes until
-        // nothing more is lost.
-        Flow::While { cond, body } => {
-            let state_after_cond = walk_events(cond, state, ctx, declaring_class);
-            loop_head(state_after_cond, ctx, |head, ctx| {
-                walk_nodes(body, head, ctx, declaring_class)
-            })
-        }
-        Flow::For { before, body, step } => {
-            state = walk_events(before, state, ctx, declaring_class);
-            loop_head(state, ctx, |head, ctx| {
-                let body_end = walk_nodes(body, head, ctx, declaring_class);
-                walk_events(step, body_end, ctx, declaring_class)
-            })
-        }
-        Flow::Foreach { subject, body } => {
-            let state_after_subject = walk_events(subject, state, ctx, declaring_class);
-            loop_head(state_after_subject, ctx, |head, ctx| {
-                walk_nodes(body, head, ctx, declaring_class)
-            })
-        }
-        // A case that does not end with a `break` or a `return` passes its
-        // state into the next, as PHP does. What is true after the switch is
-        // what is true at the end of each case that leaves it: by a `break`,
-        // or by falling off the end of the last.
-        Flow::Switch { subject, cases } => {
-            let base = walk_events(subject, state, ctx, declaring_class);
-            let mut exits: Option<PropertyInitState> = None;
-            let mut running: Option<PropertyInitState> = None;
-            for (
-                at,
-                Case {
-                    test,
-                    body,
-                    completion,
-                },
-            ) in cases.iter().enumerate()
-            {
-                let direct = walk_events(test, base.clone(), ctx, declaring_class);
-                let entry = match running.take() {
-                    Some(passed) => intersect(direct, &passed),
-                    None => direct,
-                };
-                let case_end = walk_nodes(body, entry, ctx, declaring_class);
-                let leaves_by_break = completion.jumps & (BREAK_HERE | CONTINUE_HERE) != 0;
-                let is_last = at + 1 == cases.len();
-                if leaves_by_break || (is_last && !completion.terminates) {
-                    exits = Some(match exits {
-                        Some(acc) => intersect(acc, &case_end),
-                        None => case_end.clone(),
-                    });
+    stack::guard(|| {
+        match node {
+            Flow::Events(events) => walk_events(events, state, ctx, declaring_class),
+            Flow::If(chain) => walk_if_chain(
+                &chain.branches,
+                chain.else_body.as_ref(),
+                state,
+                ctx,
+                declaring_class,
+            ),
+            // `while`/`for`/`foreach` may run their own body zero times, and
+            // more than once: what is true at the head of the loop is what is
+            // true on entry and at the end of every pass, found by passes until
+            // nothing more is lost.
+            Flow::While { cond, body } => {
+                let state_after_cond = walk_events(cond, state, ctx, declaring_class);
+                loop_head(state_after_cond, ctx, |head, ctx| {
+                    walk_nodes(body, head, ctx, declaring_class)
+                })
+            }
+            Flow::For { before, body, step } => {
+                state = walk_events(before, state, ctx, declaring_class);
+                loop_head(state, ctx, |head, ctx| {
+                    let body_end = walk_nodes(body, head, ctx, declaring_class);
+                    walk_events(step, body_end, ctx, declaring_class)
+                })
+            }
+            Flow::Foreach { subject, body } => {
+                let state_after_subject = walk_events(subject, state, ctx, declaring_class);
+                loop_head(state_after_subject, ctx, |head, ctx| {
+                    walk_nodes(body, head, ctx, declaring_class)
+                })
+            }
+            // A case that does not end with a `break` or a `return` passes its
+            // state into the next, as PHP does. What is true after the switch is
+            // what is true at the end of each case that leaves it: by a `break`,
+            // or by falling off the end of the last.
+            Flow::Switch { subject, cases } => {
+                let base = walk_events(subject, state, ctx, declaring_class);
+                let mut exits: Option<PropertyInitState> = None;
+                let mut running: Option<PropertyInitState> = None;
+                for (
+                    at,
+                    Case {
+                        test,
+                        body,
+                        completion,
+                    },
+                ) in cases.iter().enumerate()
+                {
+                    let direct = walk_events(test, base.clone(), ctx, declaring_class);
+                    let entry = match running.take() {
+                        Some(passed) => intersect(direct, &passed),
+                        None => direct,
+                    };
+                    let case_end = walk_nodes(body, entry, ctx, declaring_class);
+                    let leaves_by_break = completion.jumps & (BREAK_HERE | CONTINUE_HERE) != 0;
+                    let is_last = at + 1 == cases.len();
+                    if leaves_by_break || (is_last && !completion.terminates) {
+                        exits = Some(match exits {
+                            Some(acc) => intersect(acc, &case_end),
+                            None => case_end.clone(),
+                        });
+                    }
+                    if !completion.terminates {
+                        running = Some(case_end);
+                    }
                 }
-                if !completion.terminates {
-                    running = Some(case_end);
+                exits.unwrap_or(base)
+            }
+            Flow::Try {
+                body,
+                catches,
+                finally,
+            } => {
+                // Matches `checker/stmt.rs`'s existing `StmtKind::Try`
+                // handling: each catch clause starts from a clone of the try
+                // body's completed end state, not a conservative "could have
+                // thrown before any statement" entry.
+                let try_end = walk_nodes(body, state, ctx, declaring_class);
+                let mut branch_states = vec![try_end.clone()];
+                for catch in catches.iter() {
+                    branch_states.push(walk_nodes(catch, try_end.clone(), ctx, declaring_class));
                 }
+                let mut merged = branch_states
+                    .into_iter()
+                    .reduce(|acc, s| intersect(acc, &s))
+                    .unwrap_or_default();
+                if let Some(finally_body) = finally {
+                    merged = walk_nodes(finally_body, merged, ctx, declaring_class);
+                }
+                merged
             }
-            exits.unwrap_or(base)
         }
-        Flow::Try {
-            body,
-            catches,
-            finally,
-        } => {
-            // Matches `checker/stmt.rs`'s existing `StmtKind::Try`
-            // handling: each catch clause starts from a clone of the try
-            // body's completed end state, not a conservative "could have
-            // thrown before any statement" entry.
-            let try_end = walk_nodes(body, state, ctx, declaring_class);
-            let mut branch_states = vec![try_end.clone()];
-            for catch in catches.iter() {
-                branch_states.push(walk_nodes(catch, try_end.clone(), ctx, declaring_class));
-            }
-            let mut merged = branch_states
-                .into_iter()
-                .reduce(|acc, s| intersect(acc, &s))
-                .unwrap_or_default();
-            if let Some(finally_body) = finally {
-                merged = walk_nodes(finally_body, merged, ctx, declaring_class);
-            }
-            merged
-        }
-    }
+    })
 }
 
 /// The state at the head of a loop whose entry state is `entry` and whose
@@ -461,61 +469,63 @@ fn apply(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    match event {
-        Event::Read(name, span) => {
-            if ctx.candidates.contains(name.as_str()) && !state.contains(name.as_str()) {
-                ctx.premature_reads.push((name.to_string(), *span));
+    stack::guard(|| {
+        match event {
+            Event::Read(name, span) => {
+                if ctx.candidates.contains(name.as_str()) && !state.contains(name.as_str()) {
+                    ctx.premature_reads.push((name.to_string(), *span));
+                }
+                state
             }
-            state
-        }
-        Event::Write(name) => {
-            state.insert(name.to_string());
-            state
-        }
-        Event::Unset(name) => {
-            if !ctx.unset_reads_via_get {
-                state = state.without(name.as_str());
+            Event::Write(name) => {
+                state.insert(name.to_string());
+                state
             }
-            state
-        }
-        Event::Call(Call { receiver, name }) => {
-            let registry = ctx.checker.registry;
-            let target = match receiver {
-                // A fluent setter chain (`$this->setChannel(...)
-                // ->setUsername(...)`) is still `$this` while every link
-                // returns `self` or `static`. Virtual dispatch: always
-                // against `checked_class` (the original, most-derived
-                // class), never `declaring_class`.
-                CallReceiver::This(chain) => {
-                    let still_this = chain.iter().all(|link| {
-                        registry
-                            .lookup_method(&ctx.checked_class, link)
-                            .is_some_and(|sig| sig.return_type_native().is_self_reference())
-                    });
-                    if !still_this {
-                        return state;
+            Event::Unset(name) => {
+                if !ctx.unset_reads_via_get {
+                    state = state.without(name.as_str());
+                }
+                state
+            }
+            Event::Call(Call { receiver, name }) => {
+                let registry = ctx.checker.registry;
+                let target = match receiver {
+                    // A fluent setter chain (`$this->setChannel(...)
+                    // ->setUsername(...)`) is still `$this` while every link
+                    // returns `self` or `static`. Virtual dispatch: always
+                    // against `checked_class` (the original, most-derived
+                    // class), never `declaring_class`.
+                    CallReceiver::This(chain) => {
+                        let still_this = chain.iter().all(|link| {
+                            registry
+                                .lookup_method(&ctx.checked_class, link)
+                                .is_some_and(|sig| sig.return_type_native().is_self_reference())
+                        });
+                        if !still_this {
+                            return state;
+                        }
+                        registry.lookup_method_with_owner(&ctx.checked_class, name)
                     }
-                    registry.lookup_method_with_owner(&ctx.checked_class, name)
-                }
-                // `parent::` is lexical, not virtual: the immediate parent
-                // of whichever class the *current* code is written in.
-                CallReceiver::ParentKeyword => {
-                    registry.lookup_ancestor_method_with_owner(declaring_class, name)
-                }
-                // `self::` is lexical too (no late static binding), unlike
-                // `static::`: the class the code is written in, walking
-                // that class's own ancestors from there.
-                CallReceiver::SelfKeyword => {
-                    registry.lookup_method_with_owner(declaring_class, name)
-                }
-                // Late static binding: virtual, exactly like `$this->`.
-                CallReceiver::StaticKeyword => {
-                    registry.lookup_method_with_owner(&ctx.checked_class, name)
-                }
-            };
-            absorb_resolved(target, name, state, ctx)
+                    // `parent::` is lexical, not virtual: the immediate parent
+                    // of whichever class the *current* code is written in.
+                    CallReceiver::ParentKeyword => {
+                        registry.lookup_ancestor_method_with_owner(declaring_class, name)
+                    }
+                    // `self::` is lexical too (no late static binding), unlike
+                    // `static::`: the class the code is written in, walking
+                    // that class's own ancestors from there.
+                    CallReceiver::SelfKeyword => {
+                        registry.lookup_method_with_owner(declaring_class, name)
+                    }
+                    // Late static binding: virtual, exactly like `$this->`.
+                    CallReceiver::StaticKeyword => {
+                        registry.lookup_method_with_owner(&ctx.checked_class, name)
+                    }
+                };
+                absorb_resolved(target, name, state, ctx)
+            }
         }
-    }
+    })
 }
 
 /// Recursively walks into an already-resolved call target's flow, seeded
@@ -530,17 +540,19 @@ fn absorb_resolved(
     state: PropertyInitState,
     ctx: &mut PropertyInitCtx,
 ) -> PropertyInitState {
-    let Some((owner, sig)) = resolved else {
-        return state;
-    };
-    let Some(flow) = ctx.checker.bodies.init_flow(sig.provenance()) else {
-        return state;
-    };
-    let key = (owner.to_ascii_lowercase(), method_name.to_ascii_lowercase());
-    if !ctx.visiting.insert(key.clone()) {
-        return state;
-    }
-    let result = walk_nodes(&flow.nodes, state, ctx, &owner);
-    ctx.visiting.remove(&key);
-    result
+    stack::guard(|| {
+        let Some((owner, sig)) = resolved else {
+            return state;
+        };
+        let Some(flow) = ctx.checker.bodies.init_flow(sig.provenance()) else {
+            return state;
+        };
+        let key = (owner.to_ascii_lowercase(), method_name.to_ascii_lowercase());
+        if !ctx.visiting.insert(key.clone()) {
+            return state;
+        }
+        let result = walk_nodes(&flow.nodes, state, ctx, &owner);
+        ctx.visiting.remove(&key);
+        result
+    })
 }

@@ -591,19 +591,21 @@ impl<'a> Lexer<'a> {
     /// that holds `@phpstan-ignore` is noted, and so are the names the
     /// file's facts hold.
     fn next_raw(&mut self) -> (Token, Span, Option<String>) {
-        let token = self.next_token();
-        let raw = self.pending_keyword_raw.take();
-        let span = self.span(self.last_token_start, self.pos);
-        match &token {
-            Token::DocComment(text) => {
-                if has_ignore_marker(text.as_bytes()) {
-                    self.mark_ignore(self.last_token_start, text, true);
+        stack::guard(|| {
+            let token = self.next_token();
+            let raw = self.pending_keyword_raw.take();
+            let span = self.span(self.last_token_start, self.pos);
+            match &token {
+                Token::DocComment(text) => {
+                    if has_ignore_marker(text.as_bytes()) {
+                        self.mark_ignore(self.last_token_start, text, true);
+                    }
                 }
+                Token::Eof => {}
+                _ => self.settle_marks(self.last_token_start),
             }
-            Token::Eof => {}
-            _ => self.settle_marks(self.last_token_start),
-        }
-        (token, span, raw)
+            (token, span, raw)
+        })
     }
 
     /// The next token that is not a doc comment, with the doc comments
@@ -664,50 +666,52 @@ impl<'a> Lexer<'a> {
     }
 
     fn run(&mut self) -> Vec<(Token, Span, Option<String>)> {
-        self.run_lexed().into_spanned()
+        stack::guard(|| self.run_lexed().into_spanned())
     }
 
     fn run_lexed(&mut self) -> Lexed {
-        // A real PHP file averages well under one token per 4 source
-        // bytes (identifiers/keywords/string contents are usually several
-        // bytes each, and whitespace/comments between tokens contribute
-        // to `src.len()` without adding a token at all) - this is a
-        // deliberately generous estimate, not a tight one, so the common
-        // case needs zero of `Vec::push`'s own amortized-growth
-        // reallocations instead of the ~log2(n) a bare `Vec::new()` would
-        // pay for a file with thousands of tokens.
-        let estimate = self.src.len() / 4;
-        let mut tokens: Vec<Token> = Vec::with_capacity(estimate);
-        let mut spans: Vec<Span> = Vec::with_capacity(estimate);
-        let mut keyword_raw: Vec<(usize, String)> = Vec::new();
-        let mut docs: Vec<LexedDoc> = Vec::new();
-        loop {
-            let (token, span, raw) = self.next_raw();
-            if let Token::DocComment(text) = token {
-                docs.push(LexedDoc {
-                    before: tokens.len(),
-                    text,
-                    span,
-                });
-                continue;
+        stack::guard(|| {
+            // A real PHP file averages well under one token per 4 source
+            // bytes (identifiers/keywords/string contents are usually several
+            // bytes each, and whitespace/comments between tokens contribute
+            // to `src.len()` without adding a token at all) - this is a
+            // deliberately generous estimate, not a tight one, so the common
+            // case needs zero of `Vec::push`'s own amortized-growth
+            // reallocations instead of the ~log2(n) a bare `Vec::new()` would
+            // pay for a file with thousands of tokens.
+            let estimate = self.src.len() / 4;
+            let mut tokens: Vec<Token> = Vec::with_capacity(estimate);
+            let mut spans: Vec<Span> = Vec::with_capacity(estimate);
+            let mut keyword_raw: Vec<(usize, String)> = Vec::new();
+            let mut docs: Vec<LexedDoc> = Vec::new();
+            loop {
+                let (token, span, raw) = self.next_raw();
+                if let Token::DocComment(text) = token {
+                    docs.push(LexedDoc {
+                        before: tokens.len(),
+                        text,
+                        span,
+                    });
+                    continue;
+                }
+                let done = matches!(token, Token::Eof);
+                if let Some(raw) = raw {
+                    keyword_raw.push((tokens.len(), raw));
+                }
+                tokens.push(token);
+                spans.push(span);
+                if done {
+                    break;
+                }
             }
-            let done = matches!(token, Token::Eof);
-            if let Some(raw) = raw {
-                keyword_raw.push((tokens.len(), raw));
+            Lexed {
+                tokens,
+                spans,
+                keyword_raw,
+                docs,
+                line_index: Arc::clone(&self.line_index),
             }
-            tokens.push(token);
-            spans.push(span);
-            if done {
-                break;
-            }
-        }
-        Lexed {
-            tokens,
-            spans,
-            keyword_raw,
-            docs,
-            line_index: Arc::clone(&self.line_index),
-        }
+        })
     }
 
     pub fn tokenize(self) -> Vec<Token> {
@@ -752,71 +756,73 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_token(&mut self) -> Token {
-        if !self.in_php {
+        stack::guard(|| {
+            if !self.in_php {
+                self.last_token_start = self.pos;
+                return self.lex_inline_html();
+            }
+
+            self.skip_whitespace_and_comments();
             self.last_token_start = self.pos;
-            return self.lex_inline_html();
-        }
 
-        self.skip_whitespace_and_comments();
-        self.last_token_start = self.pos;
+            if self.pos >= self.src.len() {
+                return Token::Eof;
+            }
 
-        if self.pos >= self.src.len() {
-            return Token::Eof;
-        }
-
-        // What a token is is settled by its first byte: one jump on its
-        // class, and the tests that read more of the source are asked only
-        // where the class fits. The rare forms are in functions of their
-        // own, off the hot path.
-        match BYTE_CLASS[usize::from(self.peek())] {
-            ByteClass::IdentStart => self.lex_word(),
-            ByteClass::Digit => self.lex_number(),
-            ByteClass::Dot => {
-                if self.peek_at(1).is_ascii_digit() {
-                    self.lex_number()
-                } else {
-                    self.lex_operator()
+            // What a token is is settled by its first byte: one jump on its
+            // class, and the tests that read more of the source are asked only
+            // where the class fits. The rare forms are in functions of their
+            // own, off the hot path.
+            match BYTE_CLASS[usize::from(self.peek())] {
+                ByteClass::IdentStart => self.lex_word(),
+                ByteClass::Digit => self.lex_number(),
+                ByteClass::Dot => {
+                    if self.peek_at(1).is_ascii_digit() {
+                        self.lex_number()
+                    } else {
+                        self.lex_operator()
+                    }
                 }
-            }
-            ByteClass::Dollar => self.lex_dollar(),
-            ByteClass::Quote1 => self.lex_single_quoted(),
-            ByteClass::Quote2 => self.lex_double_quoted(),
-            ByteClass::Backtick => self.lex_backtick(),
-            ByteClass::Lt => {
-                if self.starts_with(b"<<<") {
-                    self.lex_heredoc()
-                } else {
-                    self.lex_operator()
+                ByteClass::Dollar => self.lex_dollar(),
+                ByteClass::Quote1 => self.lex_single_quoted(),
+                ByteClass::Quote2 => self.lex_double_quoted(),
+                ByteClass::Backtick => self.lex_backtick(),
+                ByteClass::Lt => {
+                    if self.starts_with(b"<<<") {
+                        self.lex_heredoc()
+                    } else {
+                        self.lex_operator()
+                    }
                 }
-            }
-            ByteClass::Slash => {
-                if self.starts_with(b"/**") {
-                    self.lex_doc_comment()
-                } else {
-                    self.lex_operator()
+                ByteClass::Slash => {
+                    if self.starts_with(b"/**") {
+                        self.lex_doc_comment()
+                    } else {
+                        self.lex_operator()
+                    }
                 }
-            }
-            ByteClass::Question => {
-                if self.starts_with(b"?>") {
-                    self.lex_close_tag()
-                } else {
-                    self.lex_operator()
+                ByteClass::Question => {
+                    if self.starts_with(b"?>") {
+                        self.lex_close_tag()
+                    } else {
+                        self.lex_operator()
+                    }
                 }
-            }
-            ByteClass::Hash => {
-                // A general attribute group - `skip_whitespace_and_comments`
-                // deliberately leaves this un-consumed (see its own
-                // comment) so it reaches here as a real token instead of
-                // being skipped.
-                if self.starts_with(b"#[") {
-                    self.pos += 2;
-                    Token::AttributeStart
-                } else {
-                    self.lex_operator()
+                ByteClass::Hash => {
+                    // A general attribute group - `skip_whitespace_and_comments`
+                    // deliberately leaves this un-consumed (see its own
+                    // comment) so it reaches here as a real token instead of
+                    // being skipped.
+                    if self.starts_with(b"#[") {
+                        self.pos += 2;
+                        Token::AttributeStart
+                    } else {
+                        self.lex_operator()
+                    }
                 }
+                ByteClass::Operator => self.lex_operator(),
             }
-            ByteClass::Operator => self.lex_operator(),
-        }
+        })
     }
 
     /// `?>`: PHP mode ends, and the tag stands for a statement terminator.
@@ -837,23 +843,25 @@ impl<'a> Lexer<'a> {
     /// `${$name}`) or `$$name` (the brace-less form, equivalent to
     /// `${$name}`; the inner `$name` becomes its own Variable token next).
     fn lex_dollar(&mut self) -> Token {
-        let next = self.peek_at(1);
-        if is_ident_start(next) {
-            self.pos += 1;
-            let s = self.lex_ident_raw();
-            return Token::Variable(self.name(&s));
-        }
-        match next {
-            b'{' => {
-                self.pos += 2;
-                Token::DollarBrace
-            }
-            b'$' => {
+        stack::guard(|| {
+            let next = self.peek_at(1);
+            if is_ident_start(next) {
                 self.pos += 1;
-                Token::Dollar
+                let s = self.lex_ident_raw();
+                return Token::Variable(self.name(&s));
             }
-            _ => self.lex_operator(),
-        }
+            match next {
+                b'{' => {
+                    self.pos += 2;
+                    Token::DollarBrace
+                }
+                b'$' => {
+                    self.pos += 1;
+                    Token::Dollar
+                }
+                _ => self.lex_operator(),
+            }
+        })
     }
 
     /// A token that starts with an identifier byte: a keyword or a name,
@@ -864,73 +872,77 @@ impl<'a> Lexer<'a> {
     /// otherwise be lexed as its own single-letter name, leaving the
     /// string dangling.
     fn lex_word(&mut self) -> Token {
-        let c = self.peek();
-        if (c == b'b' || c == b'B')
-            && (matches!(self.peek_at(1), b'\'' | b'"')
-                || self.src[self.pos + 1..].starts_with(b"<<<"))
-        {
-            self.pos += 1;
-            return self.next_token();
-        }
-        let span = self.lex_ident_span();
-        if let Some(kw) = Keyword::try_from_bytes(&self.src[span.clone()]) {
-            // Stash the raw source spelling out of band, but only when
-            // it actually differs from `kw`'s own canonical (always-
-            // lowercase) spelling - `take_name_segment` already falls
-            // back to `kw.as_str().to_string()` for a `None` here, so the
-            // overwhelmingly common canonically-spelled case (`class`,
-            // `function`, `public`, ...) needs no allocation at all.
-            self.pending_keyword_raw = if &self.src[span.clone()] == kw.as_str().as_bytes() {
-                None
-            } else {
-                Some(self.slice(span).into_owned())
-            };
-            return Token::Keyword(kw);
-        }
-        let s = self.slice(span);
-        Token::Identifier(self.identifier_name(&s))
+        stack::guard(|| {
+            let c = self.peek();
+            if (c == b'b' || c == b'B')
+                && (matches!(self.peek_at(1), b'\'' | b'"')
+                    || self.src[self.pos + 1..].starts_with(b"<<<"))
+            {
+                self.pos += 1;
+                return self.next_token();
+            }
+            let span = self.lex_ident_span();
+            if let Some(kw) = Keyword::try_from_bytes(&self.src[span.clone()]) {
+                // Stash the raw source spelling out of band, but only when
+                // it actually differs from `kw`'s own canonical (always-
+                // lowercase) spelling - `take_name_segment` already falls
+                // back to `kw.as_str().to_string()` for a `None` here, so the
+                // overwhelmingly common canonically-spelled case (`class`,
+                // `function`, `public`, ...) needs no allocation at all.
+                self.pending_keyword_raw = if &self.src[span.clone()] == kw.as_str().as_bytes() {
+                    None
+                } else {
+                    Some(self.slice(span).into_owned())
+                };
+                return Token::Keyword(kw);
+            }
+            let s = self.slice(span);
+            Token::Identifier(self.identifier_name(&s))
+        })
     }
 
     fn lex_inline_html(&mut self) -> Token {
-        // A leading `#!` line is skipped, as the CLI does, not inline HTML.
-        if self.pos == 0 && self.starts_with(b"#!") {
-            while self.pos < self.src.len() && self.peek() != b'\n' {
+        stack::guard(|| {
+            // A leading `#!` line is skipped, as the CLI does, not inline HTML.
+            if self.pos == 0 && self.starts_with(b"#!") {
+                while self.pos < self.src.len() && self.peek() != b'\n' {
+                    self.pos += 1;
+                }
+                self.pos = (self.pos + 1).min(self.src.len());
+            }
+            let start = self.pos;
+            while self.pos < self.src.len()
+                && !self.starts_with_ignore_case("<?php")
+                && !self.starts_with(b"<?=")
+            {
                 self.pos += 1;
             }
-            self.pos = (self.pos + 1).min(self.src.len());
-        }
-        let start = self.pos;
-        while self.pos < self.src.len()
-            && !self.starts_with_ignore_case("<?php")
-            && !self.starts_with(b"<?=")
-        {
-            self.pos += 1;
-        }
-        let html = lossy(&self.src[start..self.pos]);
+            let html = lossy(&self.src[start..self.pos]);
 
-        if self.starts_with_ignore_case("<?php") {
-            self.pos += 5;
-            self.in_php = true;
-        } else if self.starts_with(b"<?=") {
-            // The HTML before it is its own token; `<?=` is left for the
-            // next call, which surfaces it as `echo`.
-            if !html.is_empty() {
-                return Token::InlineHtml(self.interner.str(&html));
+            if self.starts_with_ignore_case("<?php") {
+                self.pos += 5;
+                self.in_php = true;
+            } else if self.starts_with(b"<?=") {
+                // The HTML before it is its own token; `<?=` is left for the
+                // next call, which surfaces it as `echo`.
+                if !html.is_empty() {
+                    return Token::InlineHtml(self.interner.str(&html));
+                }
+                self.pos += 3;
+                self.in_php = true;
+                // `<?=` is shorthand for `echo `; surface it as the keyword so
+                // the parser can treat it identically to an echo statement.
+                return Token::Keyword(Keyword::Echo);
             }
-            self.pos += 3;
-            self.in_php = true;
-            // `<?=` is shorthand for `echo `; surface it as the keyword so
-            // the parser can treat it identically to an echo statement.
-            return Token::Keyword(Keyword::Echo);
-        }
 
-        if html.is_empty() {
-            if self.pos >= self.src.len() {
-                return Token::Eof;
+            if html.is_empty() {
+                if self.pos >= self.src.len() {
+                    return Token::Eof;
+                }
+                return self.next_token();
             }
-            return self.next_token();
-        }
-        Token::InlineHtml(self.interner.str(&html))
+            Token::InlineHtml(self.interner.str(&html))
+        })
     }
 
     /// Advances past a single- or double-quoted string literal starting
@@ -1018,15 +1030,17 @@ impl<'a> Lexer<'a> {
     /// all of it as one (`1e`, `0x`, `1__0`, `1_`): the rest is an
     /// unexpected identifier to PHP.
     fn check_numeric_token(&mut self, start: usize) {
-        if is_numeric_token(&self.src[start..self.pos]) {
-            return;
-        }
-        let span = self.span(start, self.pos);
-        self.warnings.push(LexWarning {
-            span,
-            message: "syntax error, unexpected identifier".to_string(),
-            is_error: true,
-        });
+        stack::guard(|| {
+            if is_numeric_token(&self.src[start..self.pos]) {
+                return;
+            }
+            let span = self.span(start, self.pos);
+            self.warnings.push(LexWarning {
+                span,
+                message: "syntax error, unexpected identifier".to_string(),
+                is_error: true,
+            });
+        })
     }
 
     /// A numeric literal's digit run with PHP's `_` digit separators
@@ -1062,89 +1076,91 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_number(&mut self) -> Token {
-        let start = self.pos;
-        let mut is_float = false;
+        stack::guard(|| {
+            let start = self.pos;
+            let mut is_float = false;
 
-        if self.peek() == b'0' && (self.peek_at(1) == b'x' || self.peek_at(1) == b'X') {
-            self.pos += 2;
-            while self.peek().is_ascii_hexdigit() || self.peek() == b'_' {
-                self.pos += 1;
+            if self.peek() == b'0' && (self.peek_at(1) == b'x' || self.peek_at(1) == b'X') {
+                self.pos += 2;
+                while self.peek().is_ascii_hexdigit() || self.peek() == b'_' {
+                    self.pos += 1;
+                }
+                self.check_numeric_token(start);
+                let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
+                return radix_literal(&text, 16);
             }
-            self.check_numeric_token(start);
-            let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
-            return radix_literal(&text, 16);
-        }
 
-        if self.peek() == b'0' && (self.peek_at(1) == b'b' || self.peek_at(1) == b'B') {
-            self.pos += 2;
-            while self.peek() == b'0' || self.peek() == b'1' || self.peek() == b'_' {
-                self.pos += 1;
+            if self.peek() == b'0' && (self.peek_at(1) == b'b' || self.peek_at(1) == b'B') {
+                self.pos += 2;
+                while self.peek() == b'0' || self.peek() == b'1' || self.peek() == b'_' {
+                    self.pos += 1;
+                }
+                self.check_numeric_token(start);
+                let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
+                return radix_literal(&text, 2);
             }
-            self.check_numeric_token(start);
-            let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
-            return radix_literal(&text, 2);
-        }
 
-        // PHP 8.1's explicit octal notation (`0o775`); the legacy
-        // leading-zero form (`0775`) is read after the digit loop below.
-        if self.peek() == b'0' && (self.peek_at(1) == b'o' || self.peek_at(1) == b'O') {
-            self.pos += 2;
-            while (b'0'..=b'7').contains(&self.peek()) || self.peek() == b'_' {
-                self.pos += 1;
+            // PHP 8.1's explicit octal notation (`0o775`); the legacy
+            // leading-zero form (`0775`) is read after the digit loop below.
+            if self.peek() == b'0' && (self.peek_at(1) == b'o' || self.peek_at(1) == b'O') {
+                self.pos += 2;
+                while (b'0'..=b'7').contains(&self.peek()) || self.peek() == b'_' {
+                    self.pos += 1;
+                }
+                self.check_numeric_token(start);
+                let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
+                return radix_literal(&text, 8);
             }
-            self.check_numeric_token(start);
-            let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
-            return radix_literal(&text, 8);
-        }
 
-        while self.peek().is_ascii_digit() || self.peek() == b'_' {
-            self.pos += 1;
-        }
-        // A `.` right after integer digits always starts a float, even
-        // with no fractional digits following (`123.` is a valid float
-        // literal, equal to `123.0`) - `1.$b` is a syntax error in PHP
-        // too (the `.` is greedily consumed into the number, not treated
-        // as concat), so this isn't conditional on what follows the dot.
-        if self.peek() == b'.' {
-            is_float = true;
-            self.pos += 1;
             while self.peek().is_ascii_digit() || self.peek() == b'_' {
                 self.pos += 1;
             }
-        }
-        if self.peek() == b'e' || self.peek() == b'E' {
-            is_float = true;
-            self.pos += 1;
-            if self.peek() == b'+' || self.peek() == b'-' {
+            // A `.` right after integer digits always starts a float, even
+            // with no fractional digits following (`123.` is a valid float
+            // literal, equal to `123.0`) - `1.$b` is a syntax error in PHP
+            // too (the `.` is greedily consumed into the number, not treated
+            // as concat), so this isn't conditional on what follows the dot.
+            if self.peek() == b'.' {
+                is_float = true;
                 self.pos += 1;
+                while self.peek().is_ascii_digit() || self.peek() == b'_' {
+                    self.pos += 1;
+                }
             }
-            while self.peek().is_ascii_digit() || self.peek() == b'_' {
+            if self.peek() == b'e' || self.peek() == b'E' {
+                is_float = true;
                 self.pos += 1;
+                if self.peek() == b'+' || self.peek() == b'-' {
+                    self.pos += 1;
+                }
+                while self.peek().is_ascii_digit() || self.peek() == b'_' {
+                    self.pos += 1;
+                }
             }
-        }
 
-        self.check_numeric_token(start);
-        let text = Self::strip_digit_separators(&self.src[start..self.pos]);
-        if is_float {
-            Token::Float(text.parse().unwrap_or(0.0))
-        } else if text.len() > 1 && text.starts_with('0') {
-            // A legacy octal literal (`0775`); an `8` or `9` in one is a
-            // parse error in PHP.
-            if !text.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
-                let span = self.span(start, self.pos);
-                self.warnings.push(LexWarning {
-                    span,
-                    message: "Invalid numeric literal".to_string(),
-                    is_error: true,
-                });
+            self.check_numeric_token(start);
+            let text = Self::strip_digit_separators(&self.src[start..self.pos]);
+            if is_float {
+                Token::Float(text.parse().unwrap_or(0.0))
+            } else if text.len() > 1 && text.starts_with('0') {
+                // A legacy octal literal (`0775`); an `8` or `9` in one is a
+                // parse error in PHP.
+                if !text.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
+                    let span = self.span(start, self.pos);
+                    self.warnings.push(LexWarning {
+                        span,
+                        message: "Invalid numeric literal".to_string(),
+                        is_error: true,
+                    });
+                }
+                radix_literal(&text[1..], 8)
+            } else {
+                match text.parse::<i64>() {
+                    Ok(v) => Token::Integer(v),
+                    Err(_) => Token::Float(text.parse().unwrap_or(0.0)),
+                }
             }
-            radix_literal(&text[1..], 8)
-        } else {
-            match text.parse::<i64>() {
-                Ok(v) => Token::Integer(v),
-                Err(_) => Token::Float(text.parse().unwrap_or(0.0)),
-            }
-        }
+        })
     }
 
     fn lex_doc_comment(&mut self) -> Token {
@@ -1159,198 +1175,200 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_operator(&mut self) -> Token {
-        macro_rules! op {
-            ($len:expr, $tok:expr) => {{
-                self.pos += $len;
-                return $tok;
-            }};
-        }
+        stack::guard(|| {
+            macro_rules! op {
+                ($len:expr, $tok:expr) => {{
+                    self.pos += $len;
+                    return $tok;
+                }};
+            }
 
-        // Dispatched by leading byte first, rather than a flat linear
-        // chain of `starts_with` prefix checks: every plain single-byte
-        // token (by far the most common class: `;`, `,`, `(`, `)`, `.`,
-        // ...) would otherwise pay the full chain of failed checks before
-        // ever reaching the single-byte match below. Each byte arm keeps
-        // its own 3-char-before-2-char ordering intact wherever one
-        // prefix's checks could otherwise shadow a longer one sharing the
-        // same leading byte (e.g. `<=` is a real prefix of `<=>`, so
-        // `<=>` must still be checked first under `b'<'`).
-        match self.peek() {
-            b'<' => {
-                if self.starts_with(b"<=>") {
-                    op!(3, Token::Spaceship);
+            // Dispatched by leading byte first, rather than a flat linear
+            // chain of `starts_with` prefix checks: every plain single-byte
+            // token (by far the most common class: `;`, `,`, `(`, `)`, `.`,
+            // ...) would otherwise pay the full chain of failed checks before
+            // ever reaching the single-byte match below. Each byte arm keeps
+            // its own 3-char-before-2-char ordering intact wherever one
+            // prefix's checks could otherwise shadow a longer one sharing the
+            // same leading byte (e.g. `<=` is a real prefix of `<=>`, so
+            // `<=>` must still be checked first under `b'<'`).
+            match self.peek() {
+                b'<' => {
+                    if self.starts_with(b"<=>") {
+                        op!(3, Token::Spaceship);
+                    }
+                    if self.starts_with(b"<<=") {
+                        op!(3, Token::LtLtEquals);
+                    }
+                    if self.starts_with(b"<=") {
+                        op!(2, Token::LtEquals);
+                    }
+                    if self.starts_with(b"<<") {
+                        op!(2, Token::LtLt);
+                    }
+                    if self.starts_with(b"<>") {
+                        op!(2, Token::BangEquals);
+                    }
                 }
-                if self.starts_with(b"<<=") {
-                    op!(3, Token::LtLtEquals);
+                b'=' => {
+                    if self.starts_with(b"===") {
+                        op!(3, Token::EqualsEqualsEquals);
+                    }
+                    if self.starts_with(b"==") {
+                        op!(2, Token::EqualsEquals);
+                    }
+                    if self.starts_with(b"=>") {
+                        op!(2, Token::FatArrow);
+                    }
                 }
-                if self.starts_with(b"<=") {
-                    op!(2, Token::LtEquals);
+                b'!' => {
+                    if self.starts_with(b"!==") {
+                        op!(3, Token::BangEqualsEquals);
+                    }
+                    if self.starts_with(b"!=") {
+                        op!(2, Token::BangEquals);
+                    }
                 }
-                if self.starts_with(b"<<") {
-                    op!(2, Token::LtLt);
+                b'?' => {
+                    if self.starts_with(b"?->") {
+                        op!(3, Token::NullsafeArrow);
+                    }
+                    if self.starts_with(b"??=") {
+                        op!(3, Token::QuestionQuestionEquals);
+                    }
+                    if self.starts_with(b"??") {
+                        op!(2, Token::QuestionQuestion);
+                    }
                 }
-                if self.starts_with(b"<>") {
-                    op!(2, Token::BangEquals);
+                b'*' => {
+                    if self.starts_with(b"**=") {
+                        op!(3, Token::StarStarEquals);
+                    }
+                    if self.starts_with(b"**") {
+                        op!(2, Token::StarStar);
+                    }
+                    if self.starts_with(b"*=") {
+                        op!(2, Token::StarEquals);
+                    }
                 }
+                b'.' => {
+                    if self.starts_with(b"...") {
+                        op!(3, Token::Ellipsis);
+                    }
+                    if self.starts_with(b".=") {
+                        op!(2, Token::DotEquals);
+                    }
+                }
+                b'>' => {
+                    if self.starts_with(b">>=") {
+                        op!(3, Token::GtGtEquals);
+                    }
+                    if self.starts_with(b">=") {
+                        op!(2, Token::GtEquals);
+                    }
+                    if self.starts_with(b">>") {
+                        op!(2, Token::GtGt);
+                    }
+                }
+                b'-' => {
+                    if self.starts_with(b"->") {
+                        op!(2, Token::Arrow);
+                    }
+                    if self.starts_with(b"-=") {
+                        op!(2, Token::MinusEquals);
+                    }
+                    if self.starts_with(b"--") {
+                        op!(2, Token::Decrement);
+                    }
+                }
+                b':' => {
+                    if self.starts_with(b"::") {
+                        op!(2, Token::DoubleColon);
+                    }
+                }
+                b'+' => {
+                    if self.starts_with(b"+=") {
+                        op!(2, Token::PlusEquals);
+                    }
+                    if self.starts_with(b"++") {
+                        op!(2, Token::Increment);
+                    }
+                }
+                b'/' => {
+                    if self.starts_with(b"/=") {
+                        op!(2, Token::SlashEquals);
+                    }
+                }
+                b'%' => {
+                    if self.starts_with(b"%=") {
+                        op!(2, Token::PercentEquals);
+                    }
+                }
+                b'&' => {
+                    if self.starts_with(b"&=") {
+                        op!(2, Token::AmpEquals);
+                    }
+                    if self.starts_with(b"&&") {
+                        op!(2, Token::AmpAmp);
+                    }
+                }
+                b'|' => {
+                    if self.starts_with(b"|=") {
+                        op!(2, Token::PipeEquals);
+                    }
+                    if self.starts_with(b"||") {
+                        op!(2, Token::PipePipe);
+                    }
+                    if self.starts_with(b"|>") {
+                        op!(2, Token::PipeGt);
+                    }
+                }
+                b'^' if self.starts_with(b"^=") => {
+                    op!(2, Token::CaretEquals);
+                }
+                _ => {}
             }
-            b'=' => {
-                if self.starts_with(b"===") {
-                    op!(3, Token::EqualsEqualsEquals);
-                }
-                if self.starts_with(b"==") {
-                    op!(2, Token::EqualsEquals);
-                }
-                if self.starts_with(b"=>") {
-                    op!(2, Token::FatArrow);
-                }
-            }
-            b'!' => {
-                if self.starts_with(b"!==") {
-                    op!(3, Token::BangEqualsEquals);
-                }
-                if self.starts_with(b"!=") {
-                    op!(2, Token::BangEquals);
-                }
-            }
-            b'?' => {
-                if self.starts_with(b"?->") {
-                    op!(3, Token::NullsafeArrow);
-                }
-                if self.starts_with(b"??=") {
-                    op!(3, Token::QuestionQuestionEquals);
-                }
-                if self.starts_with(b"??") {
-                    op!(2, Token::QuestionQuestion);
-                }
-            }
-            b'*' => {
-                if self.starts_with(b"**=") {
-                    op!(3, Token::StarStarEquals);
-                }
-                if self.starts_with(b"**") {
-                    op!(2, Token::StarStar);
-                }
-                if self.starts_with(b"*=") {
-                    op!(2, Token::StarEquals);
-                }
-            }
-            b'.' => {
-                if self.starts_with(b"...") {
-                    op!(3, Token::Ellipsis);
-                }
-                if self.starts_with(b".=") {
-                    op!(2, Token::DotEquals);
-                }
-            }
-            b'>' => {
-                if self.starts_with(b">>=") {
-                    op!(3, Token::GtGtEquals);
-                }
-                if self.starts_with(b">=") {
-                    op!(2, Token::GtEquals);
-                }
-                if self.starts_with(b">>") {
-                    op!(2, Token::GtGt);
-                }
-            }
-            b'-' => {
-                if self.starts_with(b"->") {
-                    op!(2, Token::Arrow);
-                }
-                if self.starts_with(b"-=") {
-                    op!(2, Token::MinusEquals);
-                }
-                if self.starts_with(b"--") {
-                    op!(2, Token::Decrement);
-                }
-            }
-            b':' => {
-                if self.starts_with(b"::") {
-                    op!(2, Token::DoubleColon);
-                }
-            }
-            b'+' => {
-                if self.starts_with(b"+=") {
-                    op!(2, Token::PlusEquals);
-                }
-                if self.starts_with(b"++") {
-                    op!(2, Token::Increment);
-                }
-            }
-            b'/' => {
-                if self.starts_with(b"/=") {
-                    op!(2, Token::SlashEquals);
-                }
-            }
-            b'%' => {
-                if self.starts_with(b"%=") {
-                    op!(2, Token::PercentEquals);
-                }
-            }
-            b'&' => {
-                if self.starts_with(b"&=") {
-                    op!(2, Token::AmpEquals);
-                }
-                if self.starts_with(b"&&") {
-                    op!(2, Token::AmpAmp);
-                }
-            }
-            b'|' => {
-                if self.starts_with(b"|=") {
-                    op!(2, Token::PipeEquals);
-                }
-                if self.starts_with(b"||") {
-                    op!(2, Token::PipePipe);
-                }
-                if self.starts_with(b"|>") {
-                    op!(2, Token::PipeGt);
-                }
-            }
-            b'^' if self.starts_with(b"^=") => {
-                op!(2, Token::CaretEquals);
-            }
-            _ => {}
-        }
 
-        let c = self.bump();
-        match c {
-            b'(' => Token::LParen,
-            b')' => Token::RParen,
-            b'{' => Token::LBrace,
-            b'}' => Token::RBrace,
-            b'[' => Token::LBracket,
-            b']' => Token::RBracket,
-            b';' => Token::Semicolon,
-            b',' => Token::Comma,
-            b':' => Token::Colon,
-            b'?' => Token::Question,
-            b'.' => Token::Dot,
-            b'+' => Token::Plus,
-            b'-' => Token::Minus,
-            b'*' => Token::Star,
-            b'/' => Token::Slash,
-            b'%' => Token::Percent,
-            b'=' => Token::Equals,
-            b'<' => Token::Lt,
-            b'>' => Token::Gt,
-            b'!' => Token::Bang,
-            b'&' => Token::Amp,
-            b'|' => Token::Pipe,
-            b'^' => Token::Caret,
-            b'~' => Token::Tilde,
-            b'@' => Token::At,
-            b'\\' => Token::Backslash,
-            0 => Token::Eof,
-            other => {
-                let span = self.span(self.pos - 1, self.pos);
-                self.warnings.push(LexWarning {
-                    span,
-                    message: format!("unexpected byte 0x{other:02x} in PHP source, skipping"),
-                    is_error: false,
-                });
-                self.next_token()
+            let c = self.bump();
+            match c {
+                b'(' => Token::LParen,
+                b')' => Token::RParen,
+                b'{' => Token::LBrace,
+                b'}' => Token::RBrace,
+                b'[' => Token::LBracket,
+                b']' => Token::RBracket,
+                b';' => Token::Semicolon,
+                b',' => Token::Comma,
+                b':' => Token::Colon,
+                b'?' => Token::Question,
+                b'.' => Token::Dot,
+                b'+' => Token::Plus,
+                b'-' => Token::Minus,
+                b'*' => Token::Star,
+                b'/' => Token::Slash,
+                b'%' => Token::Percent,
+                b'=' => Token::Equals,
+                b'<' => Token::Lt,
+                b'>' => Token::Gt,
+                b'!' => Token::Bang,
+                b'&' => Token::Amp,
+                b'|' => Token::Pipe,
+                b'^' => Token::Caret,
+                b'~' => Token::Tilde,
+                b'@' => Token::At,
+                b'\\' => Token::Backslash,
+                0 => Token::Eof,
+                other => {
+                    let span = self.span(self.pos - 1, self.pos);
+                    self.warnings.push(LexWarning {
+                        span,
+                        message: format!("unexpected byte 0x{other:02x} in PHP source, skipping"),
+                        is_error: false,
+                    });
+                    self.next_token()
+                }
             }
-        }
+        })
     }
 }
 
@@ -1481,52 +1499,54 @@ mod tests;
 /// after `0x`/`0b`/`0o` in their base, or decimal with an optional
 /// fraction and an exponent that has digits.
 fn is_numeric_token(raw: &[u8]) -> bool {
-    fn run(bytes: &[u8], digit: fn(&u8) -> bool) -> Option<usize> {
-        let mut i = 0;
-        loop {
-            let start = i;
-            while bytes.get(i).is_some_and(digit) {
-                i += 1;
-            }
-            if i == start {
-                return None;
-            }
-            if bytes.get(i) == Some(&b'_') && bytes.get(i + 1).is_some_and(digit) {
-                i += 1;
-                continue;
-            }
-            return Some(i);
-        }
-    }
-    let prefixed = |digit: fn(&u8) -> bool| run(&raw[2..], digit) == Some(raw.len() - 2);
-    match raw.get(..2) {
-        Some(b"0x" | b"0X") => prefixed(u8::is_ascii_hexdigit),
-        Some(b"0b" | b"0B") => prefixed(|b| matches!(b, b'0' | b'1')),
-        Some(b"0o" | b"0O") => prefixed(|b| matches!(b, b'0'..=b'7')),
-        _ => {
-            let mut i = run(raw, u8::is_ascii_digit).unwrap_or(0);
-            if raw.get(i) == Some(&b'.') {
-                i += 1;
-                if raw.get(i).is_some_and(u8::is_ascii_digit) {
-                    i += run(&raw[i..], u8::is_ascii_digit).unwrap_or(0);
-                }
-            }
-            if i == 0 {
-                return false;
-            }
-            if matches!(raw.get(i), Some(b'e' | b'E')) {
-                i += 1;
-                if matches!(raw.get(i), Some(b'+' | b'-')) {
+    stack::guard(|| {
+        fn run(bytes: &[u8], digit: fn(&u8) -> bool) -> Option<usize> {
+            let mut i = 0;
+            loop {
+                let start = i;
+                while bytes.get(i).is_some_and(digit) {
                     i += 1;
                 }
-                match run(&raw[i..], u8::is_ascii_digit) {
-                    Some(n) => i += n,
-                    None => return false,
+                if i == start {
+                    return None;
                 }
+                if bytes.get(i) == Some(&b'_') && bytes.get(i + 1).is_some_and(digit) {
+                    i += 1;
+                    continue;
+                }
+                return Some(i);
             }
-            i == raw.len()
         }
-    }
+        let prefixed = |digit: fn(&u8) -> bool| run(&raw[2..], digit) == Some(raw.len() - 2);
+        match raw.get(..2) {
+            Some(b"0x" | b"0X") => prefixed(u8::is_ascii_hexdigit),
+            Some(b"0b" | b"0B") => prefixed(|b| matches!(b, b'0' | b'1')),
+            Some(b"0o" | b"0O") => prefixed(|b| matches!(b, b'0'..=b'7')),
+            _ => {
+                let mut i = run(raw, u8::is_ascii_digit).unwrap_or(0);
+                if raw.get(i) == Some(&b'.') {
+                    i += 1;
+                    if raw.get(i).is_some_and(u8::is_ascii_digit) {
+                        i += run(&raw[i..], u8::is_ascii_digit).unwrap_or(0);
+                    }
+                }
+                if i == 0 {
+                    return false;
+                }
+                if matches!(raw.get(i), Some(b'e' | b'E')) {
+                    i += 1;
+                    if matches!(raw.get(i), Some(b'+' | b'-')) {
+                        i += 1;
+                    }
+                    match run(&raw[i..], u8::is_ascii_digit) {
+                        Some(n) => i += n,
+                        None => return false,
+                    }
+                }
+                i == raw.len()
+            }
+        }
+    })
 }
 
 #[cfg(test)]

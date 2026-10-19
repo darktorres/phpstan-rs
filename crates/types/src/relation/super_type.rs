@@ -26,37 +26,39 @@ impl Relation<'_> {
     /// family shares no value with the key, and a plain `int`, `string`,
     /// `mixed` or union of the two holds the keys of its families.
     fn key_disjoint(&self, ty: &Type, key: &crate::ShapeKey) -> bool {
-        let key_family = match key {
-            crate::ShapeKey::Int(_) => ScalarFamily::Int,
-            crate::ShapeKey::Str(_) => ScalarFamily::String,
-        };
-        let holds_family = |t: &Type| match t.repr() {
-            Repr::Int => key_family == ScalarFamily::Int,
-            Repr::String => key_family == ScalarFamily::String,
-            _ => false,
-        };
-        match ty.repr() {
-            Repr::Mixed(_, None) => false,
-            Repr::Union(members)
-                if members
-                    .iter()
-                    .all(|m| matches!(m.repr(), Repr::Int | Repr::String))
-                    && members.iter().any(holds_family) =>
-            {
-                false
+        stack::guard(|| {
+            let key_family = match key {
+                crate::ShapeKey::Int(_) => ScalarFamily::Int,
+                crate::ShapeKey::Str(_) => ScalarFamily::String,
+            };
+            let holds_family = |t: &Type| match t.repr() {
+                Repr::Int => key_family == ScalarFamily::Int,
+                Repr::String => key_family == ScalarFamily::String,
+                _ => false,
+            };
+            match ty.repr() {
+                Repr::Mixed(_, None) => false,
+                Repr::Union(members)
+                    if members
+                        .iter()
+                        .all(|m| matches!(m.repr(), Repr::Int | Repr::String))
+                        && members.iter().any(holds_family) =>
+                {
+                    false
+                }
+                _ => match scalar_family(ty) {
+                    Some(family) if family != key_family => true,
+                    _ if holds_family(ty) => false,
+                    _ => self.disjoint(ty, &key.to_type()),
+                },
             }
-            _ => match scalar_family(ty) {
-                Some(family) if family != key_family => true,
-                _ if holds_family(ty) => false,
-                _ => self.disjoint(ty, &key.to_type()),
-            },
-        }
+        })
     }
 
     /// Whether no value is both an `a` and a `b`: `is_super_type_of`
     /// answers no one way round or the other.
     pub fn disjoint(&self, a: &Type, b: &Type) -> bool {
-        self.is_super_type_of(a, b).no() || self.is_super_type_of(b, a).no()
+        stack::guard(|| self.is_super_type_of(a, b).no() || self.is_super_type_of(b, a).no())
     }
 
     /// Whether every value of `sub` is a `sup` (`Yes`), none is (`No`),
@@ -68,30 +70,34 @@ impl Relation<'_> {
     /// unprovable is `Maybe`, including any comparison with a class the
     /// registry doesn't know.
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
-        // One node against itself: every value of a type is a value of it.
-        if std::sync::Arc::ptr_eq(&sup.0, &sub.0) {
-            return TrinaryLogic::Yes;
-        }
-        // Each shortcut reads the node's kind, set when the node was made.
-        let (sup_flags, sub_flags) = (sup.0.flags(), sub.0.flags());
-        // A literal, `true`, `false`, `null` or an enum case is one value:
-        // one holds another only when they are the same.
-        if sup_flags & sub_flags & crate::IS_SCALAR_VALUE != 0 {
-            return TrinaryLogic::from_bool(sup == sub);
-        }
-        let (sup_kind, sub_kind) = (crate::kind_of(sup_flags), crate::kind_of(sub_flags));
-        // Plain `mixed` holds everything and `never` is held by everything.
-        if sup_kind == KIND_MIXED || sub_kind == KIND_NEVER {
-            return TrinaryLogic::Yes;
-        }
-        // Two scalar families share no value.
-        if is_family_kind(sup_kind) && is_family_kind(sub_kind) && sup_kind != sub_kind {
-            return TrinaryLogic::No;
-        }
-        if self.hierarchy.is_structural() {
-            return structural_memo::answer(sup, sub, || self.is_super_type_of_by_form(sup, sub));
-        }
-        self.is_super_type_of_by_form(sup, sub)
+        stack::guard(|| {
+            // One node against itself: every value of a type is a value of it.
+            if std::sync::Arc::ptr_eq(&sup.0, &sub.0) {
+                return TrinaryLogic::Yes;
+            }
+            // Each shortcut reads the node's kind, set when the node was made.
+            let (sup_flags, sub_flags) = (sup.0.flags(), sub.0.flags());
+            // A literal, `true`, `false`, `null` or an enum case is one value:
+            // one holds another only when they are the same.
+            if sup_flags & sub_flags & crate::IS_SCALAR_VALUE != 0 {
+                return TrinaryLogic::from_bool(sup == sub);
+            }
+            let (sup_kind, sub_kind) = (crate::kind_of(sup_flags), crate::kind_of(sub_flags));
+            // Plain `mixed` holds everything and `never` is held by everything.
+            if sup_kind == KIND_MIXED || sub_kind == KIND_NEVER {
+                return TrinaryLogic::Yes;
+            }
+            // Two scalar families share no value.
+            if is_family_kind(sup_kind) && is_family_kind(sub_kind) && sup_kind != sub_kind {
+                return TrinaryLogic::No;
+            }
+            if self.hierarchy.is_structural() {
+                return structural_memo::answer(sup, sub, || {
+                    self.is_super_type_of_by_form(sup, sub)
+                });
+            }
+            self.is_super_type_of_by_form(sup, sub)
+        })
     }
 
     /// `is_super_type_of` read off the two types' forms, without the
@@ -363,40 +369,42 @@ impl Relation<'_> {
     /// accepts; a key `sup` doesn't declare is fine only when `sup` is
     /// unsealed.
     fn shape_super_type_of(&self, sup: &Shape, sub: &Shape) -> TrinaryLogic {
-        // The answer is the weakest of the fields' answers, `No` weakest, so
-        // the keys, which cost no type comparison, come first and the first
-        // `No` ends it.
-        let mut verdict = TrinaryLogic::Yes;
-        for (at, sup_field) in sup.fields().iter().enumerate() {
-            if !sup_field.optional && sub.field_near(&sup_field.key, at).is_none() {
-                if sub.is_sealed() {
-                    return TrinaryLogic::No;
-                }
-                verdict = TrinaryLogic::Maybe;
-            }
-        }
-        if sup.is_sealed() {
-            for (at, sub_field) in sub.fields().iter().enumerate() {
-                if sup.field_near(&sub_field.key, at).is_none() {
-                    if !sub_field.optional {
+        stack::guard(|| {
+            // The answer is the weakest of the fields' answers, `No` weakest, so
+            // the keys, which cost no type comparison, come first and the first
+            // `No` ends it.
+            let mut verdict = TrinaryLogic::Yes;
+            for (at, sup_field) in sup.fields().iter().enumerate() {
+                if !sup_field.optional && sub.field_near(&sup_field.key, at).is_none() {
+                    if sub.is_sealed() {
                         return TrinaryLogic::No;
                     }
                     verdict = TrinaryLogic::Maybe;
                 }
             }
-        }
-        for (at, sup_field) in sup.fields().iter().enumerate() {
-            let Some(sub_field) = sub.field_near(&sup_field.key, at) else {
-                continue;
-            };
-            match self.is_super_type_of(&sup_field.ty, &sub_field.ty) {
-                TrinaryLogic::No => return TrinaryLogic::No,
-                // Present only sometimes: never always.
-                TrinaryLogic::Yes if !sub_field.optional || sup_field.optional => {}
-                _ => verdict = TrinaryLogic::Maybe,
+            if sup.is_sealed() {
+                for (at, sub_field) in sub.fields().iter().enumerate() {
+                    if sup.field_near(&sub_field.key, at).is_none() {
+                        if !sub_field.optional {
+                            return TrinaryLogic::No;
+                        }
+                        verdict = TrinaryLogic::Maybe;
+                    }
+                }
             }
-        }
-        verdict
+            for (at, sup_field) in sup.fields().iter().enumerate() {
+                let Some(sub_field) = sub.field_near(&sup_field.key, at) else {
+                    continue;
+                };
+                match self.is_super_type_of(&sup_field.ty, &sub_field.ty) {
+                    TrinaryLogic::No => return TrinaryLogic::No,
+                    // Present only sometimes: never always.
+                    TrinaryLogic::Yes if !sub_field.optional || sup_field.optional => {}
+                    _ => verdict = TrinaryLogic::Maybe,
+                }
+            }
+            verdict
+        })
     }
 
     /// `TypeCombinator::union`'s absorption for display: a member some

@@ -45,27 +45,29 @@ pub(crate) fn validate_date_time_string(s: &str) -> Option<bool> {
 /// alone) rather than naming a fixed point (`"@1700000000"`,
 /// `"2024-05-01"`); `None` for a shape this doesn't recognize.
 pub(crate) fn depends_on_current_time(s: &str) -> Option<bool> {
-    let s = s.trim();
-    if s.is_empty() {
-        return Some(true);
-    }
-    if validate_timestamp(s).is_some() || validate_iso_date_time(s).is_some() {
-        return Some(false);
-    }
-    if is_time_of_day(s) {
-        return Some(true);
-    }
-    let lower = s.to_ascii_lowercase();
-    if let Some(rest) = lower
-        .strip_prefix("first day of")
-        .or_else(|| lower.strip_prefix("last day of"))
-    {
-        return depends_on_current_time(rest);
-    }
-    validate_relative_delta(s)
-        .or_else(|| validate_next_last(s))
-        .or_else(|| validate_keyword(s))
-        .map(|_| true)
+    stack::guard(|| {
+        let s = s.trim();
+        if s.is_empty() {
+            return Some(true);
+        }
+        if validate_timestamp(s).is_some() || validate_iso_date_time(s).is_some() {
+            return Some(false);
+        }
+        if is_time_of_day(s) {
+            return Some(true);
+        }
+        let lower = s.to_ascii_lowercase();
+        if let Some(rest) = lower
+            .strip_prefix("first day of")
+            .or_else(|| lower.strip_prefix("last day of"))
+        {
+            return depends_on_current_time(rest);
+        }
+        validate_relative_delta(s)
+            .or_else(|| validate_next_last(s))
+            .or_else(|| validate_keyword(s))
+            .map(|_| true)
+    })
 }
 
 /// `HH:MM[:SS]`, which PHP resolves to that time today.

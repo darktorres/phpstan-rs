@@ -240,28 +240,30 @@ impl Relation<'_> {
     /// The narrower of two types when one contains the other, `never`
     /// when they share no value, both otherwise.
     fn narrower(&self, a: Type, b: Type) -> Type {
-        // `mixed~S` narrows the other side to it without `S`.
-        if let Repr::Mixed(_, lacks) = b.repr() {
-            return match lacks {
-                Some(lacks) => a.without(lacks),
-                None => a,
-            };
-        }
-        if let Repr::Mixed(_, lacks) = a.repr() {
-            return match lacks {
-                Some(lacks) => b.without(lacks),
-                None => b,
-            };
-        }
-        if self.is_super_type_of(&b, &a).yes() {
-            a
-        } else if self.is_super_type_of(&a, &b).yes() {
-            b
-        } else if self.disjoint(&a, &b) {
-            Type::never()
-        } else {
-            self.intersect(vec![a, b])
-        }
+        stack::guard(|| {
+            // `mixed~S` narrows the other side to it without `S`.
+            if let Repr::Mixed(_, lacks) = b.repr() {
+                return match lacks {
+                    Some(lacks) => a.without(lacks),
+                    None => a,
+                };
+            }
+            if let Repr::Mixed(_, lacks) = a.repr() {
+                return match lacks {
+                    Some(lacks) => b.without(lacks),
+                    None => b,
+                };
+            }
+            if self.is_super_type_of(&b, &a).yes() {
+                a
+            } else if self.is_super_type_of(&a, &b).yes() {
+                b
+            } else if self.disjoint(&a, &b) {
+                Type::never()
+            } else {
+                self.intersect(vec![a, b])
+            }
+        })
     }
 
     /// Two shapes as one: a key both have takes both values and is
@@ -269,42 +271,44 @@ impl Relation<'_> {
     /// dropped when optional, or held by the other's unsealed tail.
     /// `None` when no array is both.
     fn intersect_shapes(&self, a: &Shape, b: &Shape) -> Option<Shape> {
-        let mut keys: Vec<&ShapeKey> = a.fields().iter().map(|f| &f.key).collect();
-        for f in b.fields() {
-            if !keys.contains(&&f.key) {
-                keys.push(&f.key);
-            }
-        }
-        let mut fields = Vec::new();
-        for key in keys {
-            let field = match (a.field(key), b.field(key)) {
-                (Some(fa), Some(fb)) => Some(ShapeField::new(
-                    key.clone(),
-                    self.narrower(fa.ty.clone(), fb.ty.clone()),
-                    fa.optional && fb.optional,
-                )),
-                (Some(f), None) => self.field_within_tail(f, b)?,
-                (None, Some(f)) => self.field_within_tail(f, a)?,
-                (None, None) => unreachable!("key came from one of the two shapes"),
-            };
-            if let Some(field) = field {
-                if field.ty == Type::never() {
-                    if !field.optional {
-                        return None;
-                    }
-                    continue;
+        stack::guard(|| {
+            let mut keys: Vec<&ShapeKey> = a.fields().iter().map(|f| &f.key).collect();
+            for f in b.fields() {
+                if !keys.contains(&&f.key) {
+                    keys.push(&f.key);
                 }
-                fields.push(field);
             }
-        }
-        let unsealed = match (a.unsealed.as_deref(), b.unsealed.as_deref()) {
-            (Some((ka, va)), Some((kb, vb))) => Some(Box::new((
-                self.narrower(ka.clone(), kb.clone()),
-                self.narrower(va.clone(), vb.clone()),
-            ))),
-            _ => None,
-        };
-        Some(Shape::from_parts(fields, unsealed, None))
+            let mut fields = Vec::new();
+            for key in keys {
+                let field = match (a.field(key), b.field(key)) {
+                    (Some(fa), Some(fb)) => Some(ShapeField::new(
+                        key.clone(),
+                        self.narrower(fa.ty.clone(), fb.ty.clone()),
+                        fa.optional && fb.optional,
+                    )),
+                    (Some(f), None) => self.field_within_tail(f, b)?,
+                    (None, Some(f)) => self.field_within_tail(f, a)?,
+                    (None, None) => unreachable!("key came from one of the two shapes"),
+                };
+                if let Some(field) = field {
+                    if field.ty == Type::never() {
+                        if !field.optional {
+                            return None;
+                        }
+                        continue;
+                    }
+                    fields.push(field);
+                }
+            }
+            let unsealed = match (a.unsealed.as_deref(), b.unsealed.as_deref()) {
+                (Some((ka, va)), Some((kb, vb))) => Some(Box::new((
+                    self.narrower(ka.clone(), kb.clone()),
+                    self.narrower(va.clone(), vb.clone()),
+                ))),
+                _ => None,
+            };
+            Some(Shape::from_parts(fields, unsealed, None))
+        })
     }
 
     /// `field`, from one shape, as the other shape `other` holds it: its
@@ -312,7 +316,7 @@ impl Relation<'_> {
     /// hold the key. The outer `None` is a required key `other` can't
     /// hold.
     fn field_within_tail(&self, field: &ShapeField, other: &Shape) -> Option<Option<ShapeField>> {
-        match other.unsealed.as_deref() {
+        stack::guard(|| match other.unsealed.as_deref() {
             Some((key, value)) if !self.disjoint(key, &field.key.to_type()) => {
                 Some(Some(ShapeField::new(
                     field.key.clone(),
@@ -322,69 +326,72 @@ impl Relation<'_> {
             }
             _ if field.optional => Some(None),
             _ => None,
-        }
+        })
     }
 
     /// `shape` as an `array<key, value>` holds it. `None` when a required
     /// key can't be one of `key`.
     fn shape_within_array(&self, shape: &Shape, key: &Type, value: &Type) -> Option<Shape> {
-        let tail = Shape::from_parts(
-            Vec::new(),
-            Some(Box::new((key.clone(), value.clone()))),
-            None,
-        );
-        self.intersect_shapes(shape, &tail)
+        stack::guard(|| {
+            let tail = Shape::from_parts(
+                Vec::new(),
+                Some(Box::new((key.clone(), value.clone()))),
+                None,
+            );
+            self.intersect_shapes(shape, &tail)
+        })
     }
 
     /// `shape` with the offsets and array accessories among `rest`
     /// applied, each one it absorbs removed from `rest`. `None` when
     /// `shape` can't have one of them.
     fn apply_offsets(&self, mut shape: Shape, rest: &mut Vec<Type>) -> Option<Shape> {
-        let mut unapplied = Vec::new();
-        for member in rest.drain(..) {
-            match member.repr() {
-                Repr::HasOffset(key) => match shape.field(key).cloned() {
-                    Some(f) => shape.set(ShapeField::new(f.key, f.ty, false)),
-                    None if shape.is_sealed() => return None,
-                    None => unapplied.push(member),
-                },
-                Repr::HasOffsetValue(key, value) => match shape.field(key).cloned() {
-                    Some(f) => {
-                        let ty = self.narrower(f.ty, (*value).clone());
-                        if ty == Type::never() {
-                            return None;
+        stack::guard(|| {
+            let mut unapplied = Vec::new();
+            for member in rest.drain(..) {
+                match member.repr() {
+                    Repr::HasOffset(key) => match shape.field(key).cloned() {
+                        Some(f) => shape.set(ShapeField::new(f.key, f.ty, false)),
+                        None if shape.is_sealed() => return None,
+                        None => unapplied.push(member),
+                    },
+                    Repr::HasOffsetValue(key, value) => match shape.field(key).cloned() {
+                        Some(f) => {
+                            let ty = self.narrower(f.ty, (*value).clone());
+                            if ty == Type::never() {
+                                return None;
+                            }
+                            shape.set(ShapeField::new(f.key, ty, false));
                         }
-                        shape.set(ShapeField::new(f.key, ty, false));
-                    }
-                    None if shape.is_sealed() => return None,
-                    None => unapplied.push(member),
-                },
-                Repr::Accessory(AccessoryKind::NonEmptyArray)
-                    if shape.is_sealed() && shape.fields().is_empty() =>
-                {
-                    return None;
-                }
-                // A list has only the keys 0, 1, ...: a shape requiring any
-                // other key can't be one, and a shape that is a list already
-                // says so.
-                Repr::Accessory(AccessoryKind::ArrayList) => {
-                    let list_keys_only = shape
-                        .fields()
-                        .iter()
-                        .enumerate()
-                        .all(|(i, f)| f.optional || f.key == crate::ShapeKey::Int(i as i64));
-                    if shape.is_sealed() && !list_keys_only {
+                        None if shape.is_sealed() => return None,
+                        None => unapplied.push(member),
+                    },
+                    Repr::Accessory(AccessoryKind::NonEmptyArray)
+                        if shape.is_sealed() && shape.fields().is_empty() =>
+                    {
                         return None;
                     }
-                    if !shape.is_list() {
-                        unapplied.push(member);
+                    // A list has only the keys 0, 1, ...: a shape requiring any
+                    // other key can't be one, and a shape that is a list already
+                    // says so.
+                    Repr::Accessory(AccessoryKind::ArrayList) => {
+                        let list_keys_only =
+                            shape.fields().iter().enumerate().all(|(i, f)| {
+                                f.optional || f.key == crate::ShapeKey::Int(i as i64)
+                            });
+                        if shape.is_sealed() && !list_keys_only {
+                            return None;
+                        }
+                        if !shape.is_list() {
+                            unapplied.push(member);
+                        }
                     }
+                    _ => unapplied.push(member),
                 }
-                _ => unapplied.push(member),
             }
-        }
-        *rest = unapplied;
-        Some(shape)
+            *rest = unapplied;
+            Some(shape)
+        })
     }
 }
 

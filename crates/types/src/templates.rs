@@ -19,98 +19,87 @@ impl Relation<'_> {
         arg: &Type,
         bindings: &mut FxHashMap<String, Type>,
     ) {
-        // A template binds only where the parameter type has one.
-        if !param.references_template() {
-            return;
-        }
         stack::guard(|| {
-            if matches!(arg.repr(), Repr::Never) {
+            // A template binds only where the parameter type has one.
+            if !param.references_template() {
                 return;
             }
-            // A union argument binds member by member, unless the parameter
-            // itself is a union or a bare template to match it whole.
-            if let Repr::Union(members) | Repr::BenevolentUnion(members) = arg.repr()
-                && !matches!(param.repr(), Repr::Union(_) | Repr::TemplateParam(_))
-            {
-                for member in members {
-                    self.infer_template_bindings(param, member, bindings);
+            stack::guard(|| {
+                if matches!(arg.repr(), Repr::Never) {
+                    return;
                 }
-                return;
-            }
-            match param.repr() {
-                Repr::TemplateParam(tp)
-                    if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {}
-                Repr::TemplateParam(tp) => {
-                    // An argument without type information binds nothing.
-                    if arg.is_mixed() {
-                        return;
-                    }
-                    // `T of array<K, V>` binds `K` and `V` too, and the
-                    // bound holds the argument with what they are bound to
-                    // (`R of Repo<E>` holds a `Repo<Entity>` once `E` is
-                    // `Entity`).
-                    self.infer_template_bindings(&tp.bound, arg, bindings);
-                    if matches!((*tp.bound).repr(), Repr::Mixed(..))
-                        || self
-                            .is_super_type_of(&tp.bound.substitute_templates(bindings, self), arg)
-                            .yes()
-                    {
-                        bind(bindings, &tp.name, arg.clone());
-                    }
-                }
-                // `T|null` given `int|null` binds `T` to `int`: an argument
-                // member a parameter member without templates surely holds
-                // is that member's, and the rest binds the templates.
-                Repr::Union(param_members) => {
-                    let mut remaining: Vec<Type> = Vec::new();
-                    'members: for arg_member in arg.union_members() {
-                        for param_member in param_members {
-                            if self.is_super_type_of(param_member, arg_member).yes() {
-                                self.infer_template_bindings(param_member, arg_member, bindings);
-                                continue 'members;
-                            }
-                        }
-                        remaining.push(arg_member.clone());
-                    }
-                    remaining.retain(|arg_member| {
-                        !param_members.iter().any(|param_member| {
-                            !param_member.references_template()
-                                && self.is_super_type_of(param_member, arg_member).yes()
-                        })
-                    });
-                    if remaining.is_empty() {
-                        return;
-                    }
-                    let rest = self.union_of(remaining);
-                    for param_member in param_members {
-                        self.infer_template_bindings(param_member, &rest, bindings);
-                    }
-                }
-                Repr::Intersection(members) => {
+                // A union argument binds member by member, unless the parameter
+                // itself is a union or a bare template to match it whole.
+                if let Repr::Union(members) | Repr::BenevolentUnion(members) = arg.repr()
+                    && !matches!(param.repr(), Repr::Union(_) | Repr::TemplateParam(_))
+                {
                     for member in members {
-                        self.infer_template_bindings(member, arg, bindings);
+                        self.infer_template_bindings(param, member, bindings);
                     }
+                    return;
                 }
-                Repr::Array(key, value) => {
-                    if let Some(arg_key) = arg.array_key_type() {
-                        self.infer_template_bindings(key, &arg_key, bindings);
-                    }
-                    if let Some(arg_value) = arg.array_value_type() {
-                        self.infer_template_bindings(value, &arg_value, bindings);
-                    }
-                }
-                Repr::ArrayShape(shape) => {
-                    // A field binds from the argument members that may
-                    // have its key.
-                    for field in shape.fields() {
-                        let arg = arg.with_key_presence(&field.key, true);
-                        if !arg.is_never()
-                            && let Some(arg_value) = arg.offset_value_type(Some(&field.key))
+                match param.repr() {
+                    Repr::TemplateParam(tp)
+                        if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {}
+                    Repr::TemplateParam(tp) => {
+                        // An argument without type information binds nothing.
+                        if arg.is_mixed() {
+                            return;
+                        }
+                        // `T of array<K, V>` binds `K` and `V` too, and the
+                        // bound holds the argument with what they are bound to
+                        // (`R of Repo<E>` holds a `Repo<Entity>` once `E` is
+                        // `Entity`).
+                        self.infer_template_bindings(&tp.bound, arg, bindings);
+                        if matches!((*tp.bound).repr(), Repr::Mixed(..))
+                            || self
+                                .is_super_type_of(
+                                    &tp.bound.substitute_templates(bindings, self),
+                                    arg,
+                                )
+                                .yes()
                         {
-                            self.infer_template_bindings(&field.ty, &arg_value, bindings);
+                            bind(bindings, &tp.name, arg.clone());
                         }
                     }
-                    if let Some((key, value)) = shape.unsealed.as_deref() {
+                    // `T|null` given `int|null` binds `T` to `int`: an argument
+                    // member a parameter member without templates surely holds
+                    // is that member's, and the rest binds the templates.
+                    Repr::Union(param_members) => {
+                        let mut remaining: Vec<Type> = Vec::new();
+                        'members: for arg_member in arg.union_members() {
+                            for param_member in param_members {
+                                if self.is_super_type_of(param_member, arg_member).yes() {
+                                    self.infer_template_bindings(
+                                        param_member,
+                                        arg_member,
+                                        bindings,
+                                    );
+                                    continue 'members;
+                                }
+                            }
+                            remaining.push(arg_member.clone());
+                        }
+                        remaining.retain(|arg_member| {
+                            !param_members.iter().any(|param_member| {
+                                !param_member.references_template()
+                                    && self.is_super_type_of(param_member, arg_member).yes()
+                            })
+                        });
+                        if remaining.is_empty() {
+                            return;
+                        }
+                        let rest = self.union_of(remaining);
+                        for param_member in param_members {
+                            self.infer_template_bindings(param_member, &rest, bindings);
+                        }
+                    }
+                    Repr::Intersection(members) => {
+                        for member in members {
+                            self.infer_template_bindings(member, arg, bindings);
+                        }
+                    }
+                    Repr::Array(key, value) => {
                         if let Some(arg_key) = arg.array_key_type() {
                             self.infer_template_bindings(key, &arg_key, bindings);
                         }
@@ -118,41 +107,63 @@ impl Relation<'_> {
                             self.infer_template_bindings(value, &arg_value, bindings);
                         }
                     }
-                }
-                Repr::ClassString(inner) => {
-                    if let Repr::ClassString(arg_inner) = arg.repr() {
-                        self.infer_template_bindings(inner, arg_inner, bindings);
-                    }
-                }
-                Repr::Object(class, params) if !params.is_empty() => {
-                    let Some(args) = self.object_arguments_as(arg, class) else {
-                        return;
-                    };
-                    for (param, arg) in params.iter().zip(&args) {
-                        let param = param.without_call_site_variance().unwrap_or(param);
-                        self.infer_template_bindings(param, arg, bindings);
-                    }
-                }
-                Repr::Callable(Some(sig)) => {
-                    if let Some(arg_sig) = arg.callable_sig() {
-                        for (param, arg_param) in sig.params.iter().zip(&arg_sig.params) {
-                            self.infer_template_bindings(&param.ty, &arg_param.ty, bindings);
+                    Repr::ArrayShape(shape) => {
+                        // A field binds from the argument members that may
+                        // have its key.
+                        for field in shape.fields() {
+                            let arg = arg.with_key_presence(&field.key, true);
+                            if !arg.is_never()
+                                && let Some(arg_value) = arg.offset_value_type(Some(&field.key))
+                            {
+                                self.infer_template_bindings(&field.ty, &arg_value, bindings);
+                            }
                         }
-                        self.infer_template_bindings(
-                            &sig.return_type,
-                            &arg_sig.return_type,
-                            bindings,
-                        );
-                    } else if let Some((class, _)) = arg.as_object()
-                        && let Some(return_type) =
-                            self.hierarchy.method_return_type(class, "__invoke")
-                    {
-                        self.infer_template_bindings(&sig.return_type, &return_type, bindings);
+                        if let Some((key, value)) = shape.unsealed.as_deref() {
+                            if let Some(arg_key) = arg.array_key_type() {
+                                self.infer_template_bindings(key, &arg_key, bindings);
+                            }
+                            if let Some(arg_value) = arg.array_value_type() {
+                                self.infer_template_bindings(value, &arg_value, bindings);
+                            }
+                        }
                     }
+                    Repr::ClassString(inner) => {
+                        if let Repr::ClassString(arg_inner) = arg.repr() {
+                            self.infer_template_bindings(inner, arg_inner, bindings);
+                        }
+                    }
+                    Repr::Object(class, params) if !params.is_empty() => {
+                        let Some(args) = self.object_arguments_as(arg, class) else {
+                            return;
+                        };
+                        for (param, arg) in params.iter().zip(&args) {
+                            let param = param.without_call_site_variance().unwrap_or(param);
+                            self.infer_template_bindings(param, arg, bindings);
+                        }
+                    }
+                    Repr::Callable(Some(sig)) => {
+                        if let Some(arg_sig) = arg.callable_sig() {
+                            for (param, arg_param) in sig.params.iter().zip(&arg_sig.params) {
+                                self.infer_template_bindings(&param.ty, &arg_param.ty, bindings);
+                            }
+                            self.infer_template_bindings(
+                                &sig.return_type,
+                                &arg_sig.return_type,
+                                bindings,
+                            );
+                        } else if let Some((class, _)) = arg.as_object()
+                            && let Some(return_type) =
+                                self.hierarchy.method_return_type(class, "__invoke")
+                        {
+                            self.infer_template_bindings(&sig.return_type, &return_type, bindings);
+                        }
+                    }
+                    Repr::VarianceArg(_, inner) => {
+                        self.infer_template_bindings(inner, arg, bindings)
+                    }
+                    _ => {}
                 }
-                Repr::VarianceArg(_, inner) => self.infer_template_bindings(inner, arg, bindings),
-                _ => {}
-            }
+            })
         })
     }
 
@@ -161,7 +172,7 @@ impl Relation<'_> {
     /// `Container<int>` through its `@implements`. `None` when `arg` isn't
     /// an object of `class`.
     fn object_arguments_as(&self, arg: &Type, class: &str) -> Option<Vec<Type>> {
-        match arg.repr() {
+        stack::guard(|| match arg.repr() {
             Repr::Object(arg_class, args) if arg_class.eq_ignore_ascii_case(class) => {
                 Some(args.clone())
             }
@@ -187,7 +198,7 @@ impl Relation<'_> {
                 .find_map(|member| self.object_arguments_as(member, class)),
             Repr::TemplateParam(tp) => self.object_arguments_as(&tp.bound, class),
             _ => None,
-        }
+        })
     }
 }
 
@@ -443,71 +454,97 @@ pub(crate) fn substitute_with(
     relation: &Relation,
     prune: bool,
 ) -> Type {
-    if prune
-        && ty.0.flags() & (crate::HAS_TEMPLATE_REF | crate::HAS_LATE | crate::HAS_DEFERRED) == 0
-    {
-        return ty.clone();
-    }
     stack::guard(|| {
-        match ty.repr() {
-            Repr::TemplateParam(tp) if !substituted(tp) => ty.clone(),
-            Repr::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
-                let fallback = match tp.default.as_deref() {
-                    Some(default) => default,
-                    None if to_bound(tp) && !matches!((*tp.bound).repr(), Repr::Mixed(..)) => {
-                        &tp.bound
-                    }
-                    None => return Type::mixed(),
-                };
-                // The template's own name is bound to `Mixed` while its
-                // fallback is substituted, so a self-referential bound
-                // (`@template T of Foo<T>`), or two templates bounded by each
-                // other, can't recurse forever.
-                let mut guarded = bindings.clone();
-                guarded.insert(tp.name.clone(), Type::mixed());
-                substitute_with(fallback, &guarded, substituted, to_bound, relation, prune)
-            }),
-            // A template-subject conditional (`(T is int ? A : B)`) resolves
-            // once `T` is bound, the way real PHPStan's `ConditionalType`
-            // does; otherwise both branches stay.
-            Repr::Conditional {
-                subject: ConditionalSubject::Template(subject),
-                target,
-                if_true,
-                if_false,
-                negated,
-            } if bindings
-                .get(subject.as_str())
-                .is_some_and(|b| !matches!(b.repr(), Repr::Mixed(..))) =>
-            {
-                let target =
-                    substitute_with(target, bindings, substituted, to_bound, relation, prune);
-                match super::conditional::conditional_branch(
-                    relation,
-                    &bindings[subject.as_str()],
-                    &target,
-                    *negated,
-                ) {
-                    Some(true) => {
-                        substitute_with(if_true, bindings, substituted, to_bound, relation, prune)
-                    }
-                    Some(false) => {
-                        substitute_with(if_false, bindings, substituted, to_bound, relation, prune)
-                    }
-                    None => Type::union(
-                        substitute_with(if_true, bindings, substituted, to_bound, relation, prune),
-                        substitute_with(if_false, bindings, substituted, to_bound, relation, prune),
-                    ),
-                }
-            }
-            // Every nested position - a generic argument (`Box<T>` becomes
-            // `Box<int>`), a shape field, a `Closure(T): U` shape, a
-            // conditional return type's branches (`subject` is a raw
-            // parameter name, not a `Type`, so there's nothing to substitute
-            // there).
-            _ => super::late::settle(ty.map_children(&mut |t| {
-                substitute_with(t, bindings, substituted, to_bound, relation, prune)
-            })),
+        if prune
+            && ty.0.flags() & (crate::HAS_TEMPLATE_REF | crate::HAS_LATE | crate::HAS_DEFERRED) == 0
+        {
+            return ty.clone();
         }
+        stack::guard(|| {
+            match ty.repr() {
+                Repr::TemplateParam(tp) if !substituted(tp) => ty.clone(),
+                Repr::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
+                    let fallback = match tp.default.as_deref() {
+                        Some(default) => default,
+                        None if to_bound(tp) && !matches!((*tp.bound).repr(), Repr::Mixed(..)) => {
+                            &tp.bound
+                        }
+                        None => return Type::mixed(),
+                    };
+                    // The template's own name is bound to `Mixed` while its
+                    // fallback is substituted, so a self-referential bound
+                    // (`@template T of Foo<T>`), or two templates bounded by each
+                    // other, can't recurse forever.
+                    let mut guarded = bindings.clone();
+                    guarded.insert(tp.name.clone(), Type::mixed());
+                    substitute_with(fallback, &guarded, substituted, to_bound, relation, prune)
+                }),
+                // A template-subject conditional (`(T is int ? A : B)`) resolves
+                // once `T` is bound, the way real PHPStan's `ConditionalType`
+                // does; otherwise both branches stay.
+                Repr::Conditional {
+                    subject: ConditionalSubject::Template(subject),
+                    target,
+                    if_true,
+                    if_false,
+                    negated,
+                } if bindings
+                    .get(subject.as_str())
+                    .is_some_and(|b| !matches!(b.repr(), Repr::Mixed(..))) =>
+                {
+                    let target =
+                        substitute_with(target, bindings, substituted, to_bound, relation, prune);
+                    match super::conditional::conditional_branch(
+                        relation,
+                        &bindings[subject.as_str()],
+                        &target,
+                        *negated,
+                    ) {
+                        Some(true) => substitute_with(
+                            if_true,
+                            bindings,
+                            substituted,
+                            to_bound,
+                            relation,
+                            prune,
+                        ),
+                        Some(false) => substitute_with(
+                            if_false,
+                            bindings,
+                            substituted,
+                            to_bound,
+                            relation,
+                            prune,
+                        ),
+                        None => Type::union(
+                            substitute_with(
+                                if_true,
+                                bindings,
+                                substituted,
+                                to_bound,
+                                relation,
+                                prune,
+                            ),
+                            substitute_with(
+                                if_false,
+                                bindings,
+                                substituted,
+                                to_bound,
+                                relation,
+                                prune,
+                            ),
+                        ),
+                    }
+                }
+                // Every nested position - a generic argument (`Box<T>` becomes
+                // `Box<int>`), a shape field, a `Closure(T): U` shape, a
+                // conditional return type's branches (`subject` is a raw
+                // parameter name, not a `Type`, so there's nothing to substitute
+                // there).
+                _ => super::late::settle(ty.map_children(&mut |t| {
+                    substitute_with(t, bindings, substituted, to_bound, relation, prune)
+                })),
+            }
+        })
     })
 }

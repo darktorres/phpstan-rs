@@ -62,10 +62,10 @@ enum Form<'a> {
 
 impl Form<'_> {
     fn exact_hash(&self) -> u64 {
-        match self {
+        stack::guard(|| match self {
             Form::Owned(repr) => exact_hash(&repr.as_ref()),
             Form::Borrowed(repr) => exact_hash(repr),
-        }
+        })
     }
 
     fn is_form_of(&self, stored: &Repr) -> bool {

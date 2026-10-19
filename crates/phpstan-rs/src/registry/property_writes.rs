@@ -836,7 +836,7 @@ mod reference {
     }
 
     fn collect_assigned_variables(target: &Expr, out: &mut FxHashSet<String>) {
-        match &target.kind {
+        stack::guard(|| match &target.kind {
             ExprKind::Variable(name) => {
                 out.insert(name.to_string());
             }
@@ -848,7 +848,7 @@ mod reference {
                 }
             }
             _ => {}
-        }
+        })
     }
 
     struct Scan<'r> {
@@ -862,18 +862,18 @@ mod reference {
     /// Whose property a write to `target` writes: `Some(true)` its own
     /// `$this`'s, `Some(false)` another object's, `None` no property's.
     fn property_target_owner(target: &Expr) -> Option<bool> {
-        match &target.peeled().kind {
+        stack::guard(|| match &target.peeled().kind {
             ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _, _) => {
                 Some(matches!(&base.peeled().kind, ExprKind::Variable(v) if **v == *"this"))
             }
             ExprKind::Index(base, _) => property_target_owner(base),
             _ => None,
-        }
+        })
     }
 
     impl Scan<'_> {
         fn write(&mut self, target: &Expr) {
-            match target.peeled().kind {
+            stack::guard(|| match target.peeled().kind {
                 ExprKind::Destructure(ref items, _) => {
                     for item in items {
                         if let Some(target) = &item.target {
@@ -886,7 +886,7 @@ mod reference {
                     Some(false) => self.anything = true,
                     None => {}
                 },
-            }
+            })
         }
 
         fn depend(&mut self, key: DeclKey, need: Need) {

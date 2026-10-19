@@ -203,15 +203,17 @@ fn completion_of(stmt: &Stmt, labels: &[GotoLabel]) -> Completion {
 /// The completion of a statement list: what follows a statement that
 /// terminates is unreachable until a label a `goto` lands on.
 fn block_completion(stmts: &[Stmt], labels: &[GotoLabel]) -> Completion {
-    let mut reach = Reach::default();
-    for stmt in stmts {
-        if matches!(&stmt.kind, StmtKind::Label(name) if labels.iter().any(|l| l.name == name.name))
-        {
-            reach.label();
+    stack::guard(|| {
+        let mut reach = Reach::default();
+        for stmt in stmts {
+            if matches!(&stmt.kind, StmtKind::Label(name) if labels.iter().any(|l| l.name == name.name))
+            {
+                reach.label();
+            }
+            reach.add(completion_of(stmt, labels));
         }
-        reach.add(completion_of(stmt, labels));
-    }
-    reach.finish().completion
+        reach.finish().completion
+    })
 }
 
 /// A condition that is a literal: always true, always false, or neither
@@ -227,11 +229,13 @@ fn known_condition(cond: &Expr) -> Option<bool> {
 /// The flow of a statement list: a nested block is part of it, and what has
 /// no event in it is not.
 fn flow_of_stmts(stmts: &[Stmt], labels: &[GotoLabel]) -> Vec<Flow> {
-    let mut out = Vec::new();
-    for stmt in stmts {
-        flow_of_stmt(stmt, labels, &mut out);
-    }
-    out
+    stack::guard(|| {
+        let mut out = Vec::new();
+        for stmt in stmts {
+            flow_of_stmt(stmt, labels, &mut out);
+        }
+        out
+    })
 }
 
 fn events_of_each<'a>(exprs: impl IntoIterator<Item = &'a Expr>) -> Vec<Event> {

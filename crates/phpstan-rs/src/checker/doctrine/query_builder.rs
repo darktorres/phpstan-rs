@@ -25,11 +25,13 @@ use syntax::ast::{Arg, Expr, ExprKind};
 /// `->getQuery()`), but costs a real `Expr` clone per assignment,
 /// project-wide; this keeps that cost to the rare, actually-relevant one.
 fn looks_like_query_builder_chain(e: &Expr) -> bool {
-    let e = e.peeled();
-    stack::guard(|| match &e.kind {
-        ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
-        ExprKind::MethodCall(inner, _, _, _) => looks_like_query_builder_chain(inner),
-        _ => false,
+    stack::guard(|| {
+        let e = e.peeled();
+        stack::guard(|| match &e.kind {
+            ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
+            ExprKind::MethodCall(inner, _, _, _) => looks_like_query_builder_chain(inner),
+            _ => false,
+        })
     })
 }
 

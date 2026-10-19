@@ -216,7 +216,7 @@ impl Pass {
     }
 
     fn return_overrides(&self, attrs: &[Attribute]) -> Vec<String> {
-        return_overrides(attrs)
+        stack::guard(|| return_overrides(attrs))
     }
 
     /// Drops the function declarations a closed range supersedes.

@@ -157,29 +157,33 @@ impl Relation<'_> {
 
     /// Every outcome comparing a value of `a` with one of `b` can have.
     pub fn outcomes(&self, a: &Type, b: &Type, version: Option<PhpVersion>) -> Outcomes {
-        let versions = Versions::of(version);
-        let mut out = Outcomes::NONE;
-        for x in a.union_members() {
-            for y in b.union_members() {
-                out = out.or(self.member_outcomes(x, y, versions));
-                if out == Outcomes::ALL {
-                    return out;
+        stack::guard(|| {
+            let versions = Versions::of(version);
+            let mut out = Outcomes::NONE;
+            for x in a.union_members() {
+                for y in b.union_members() {
+                    out = out.or(self.member_outcomes(x, y, versions));
+                    if out == Outcomes::ALL {
+                        return out;
+                    }
                 }
             }
-        }
-        out
+            out
+        })
     }
 
     fn member_outcomes(&self, a: &Type, b: &Type, versions: Versions) -> Outcomes {
-        let (x, y) = (self.value(a), self.value(b));
-        let mut out = Outcomes::NONE;
-        if versions.php7 {
-            out = out.or(self.compare(&x, &y, false));
-        }
-        if versions.php8 {
-            out = out.or(self.compare(&x, &y, true));
-        }
-        out
+        stack::guard(|| {
+            let (x, y) = (self.value(a), self.value(b));
+            let mut out = Outcomes::NONE;
+            if versions.php7 {
+                out = out.or(self.compare(&x, &y, false));
+            }
+            if versions.php8 {
+                out = out.or(self.compare(&x, &y, true));
+            }
+            out
+        })
     }
 
     fn value<'t>(&self, ty: &'t Type) -> Value<'t> {
@@ -238,40 +242,46 @@ impl Relation<'_> {
 
     /// `zend_compare(a, b)`'s possible outcomes, on PHP 8 when `php8`.
     fn compare(&self, a: &Value<'_>, b: &Value<'_>, php8: bool) -> Outcomes {
-        use Value::*;
-        match (a, b) {
-            (Unknown, _) | (_, Unknown) => Outcomes::ALL,
-            (Int(..) | Float(_), Int(..) | Float(_)) => numbers(number_range(a), number_range(b)),
-            (Array { .. }, Array { .. }) => self.compare_arrays(a, b, php8),
-            (Null, Null) => Outcomes::EQUAL,
-            (Null, Str(s)) => strings(&self::Str::Literal(b""), s, php8),
-            (Str(s), Null) => strings(s, &self::Str::Literal(b""), php8),
-            (Str(x), Str(y)) => strings(x, y, php8),
-            (Bool(_) | Null, _) | (_, Bool(_) | Null) => bools(truthiness(a), truthiness(b)),
-            (Str(s), Int(..) | Float(_)) => number_and_string(number_range(b), s, php8).swapped(),
-            (Int(..) | Float(_), Str(s)) => number_and_string(number_range(a), s, php8),
-            (Object { .. }, Object { .. }) => self.compare_objects(a, b),
-            (Object { class, .. }, Str(s)) => self.object_and_string(*class, s, php8),
-            (Str(s), Object { class, .. }) => self.object_and_string(*class, s, php8).swapped(),
-            (Object { class, .. }, Int(..) | Float(_)) => {
-                if self.compares_itself(*class) {
-                    Outcomes::ALL
-                } else {
-                    numbers((Some(1.0), Some(1.0)), number_range(b))
+        stack::guard(|| {
+            use Value::*;
+            match (a, b) {
+                (Unknown, _) | (_, Unknown) => Outcomes::ALL,
+                (Int(..) | Float(_), Int(..) | Float(_)) => {
+                    numbers(number_range(a), number_range(b))
                 }
-            }
-            (Int(..) | Float(_), Object { class, .. }) => {
-                if self.compares_itself(*class) {
-                    Outcomes::ALL
-                } else {
-                    numbers(number_range(a), (Some(1.0), Some(1.0)))
+                (Array { .. }, Array { .. }) => self.compare_arrays(a, b, php8),
+                (Null, Null) => Outcomes::EQUAL,
+                (Null, Str(s)) => strings(&self::Str::Literal(b""), s, php8),
+                (Str(s), Null) => strings(s, &self::Str::Literal(b""), php8),
+                (Str(x), Str(y)) => strings(x, y, php8),
+                (Bool(_) | Null, _) | (_, Bool(_) | Null) => bools(truthiness(a), truthiness(b)),
+                (Str(s), Int(..) | Float(_)) => {
+                    number_and_string(number_range(b), s, php8).swapped()
                 }
+                (Int(..) | Float(_), Str(s)) => number_and_string(number_range(a), s, php8),
+                (Object { .. }, Object { .. }) => self.compare_objects(a, b),
+                (Object { class, .. }, Str(s)) => self.object_and_string(*class, s, php8),
+                (Str(s), Object { class, .. }) => self.object_and_string(*class, s, php8).swapped(),
+                (Object { class, .. }, Int(..) | Float(_)) => {
+                    if self.compares_itself(*class) {
+                        Outcomes::ALL
+                    } else {
+                        numbers((Some(1.0), Some(1.0)), number_range(b))
+                    }
+                }
+                (Int(..) | Float(_), Object { class, .. }) => {
+                    if self.compares_itself(*class) {
+                        Outcomes::ALL
+                    } else {
+                        numbers(number_range(a), (Some(1.0), Some(1.0)))
+                    }
+                }
+                (Object { .. }, Array { .. }) => Outcomes::GREATER,
+                (Array { .. }, Object { .. }) => Outcomes::LESS,
+                (Array { .. }, _) => Outcomes::GREATER,
+                (_, Array { .. }) => Outcomes::LESS,
             }
-            (Object { .. }, Array { .. }) => Outcomes::GREATER,
-            (Array { .. }, Object { .. }) => Outcomes::LESS,
-            (Array { .. }, _) => Outcomes::GREATER,
-            (_, Array { .. }) => Outcomes::LESS,
-        }
+        })
     }
 
     /// Whether a class compares its objects its own way (`DateTime`,
@@ -348,66 +358,70 @@ impl Relation<'_> {
     }
 
     fn compare_arrays(&self, a: &Value<'_>, b: &Value<'_>, php8: bool) -> Outcomes {
-        let (
-            Value::Array {
-                least: la,
-                most: ma,
-                shape: sa,
-            },
-            Value::Array {
-                least: lb,
-                most: mb,
-                shape: sb,
-            },
-        ) = (a, b)
-        else {
-            return Outcomes::ALL;
-        };
-        if ma.is_some_and(|m| m < *lb) {
-            return Outcomes::LESS;
-        }
-        if mb.is_some_and(|m| m < *la) {
-            return Outcomes::GREATER;
-        }
-        let (Some(sa), Some(sb)) = (sa, sb) else {
-            return Outcomes::ALL;
-        };
-        let exact = |s: &Shape| {
-            s.fields()
-                .iter()
-                .all(|f| !f.optional)
-                .then_some(s.fields().len())
-        };
-        match (exact(sa), exact(sb)) {
-            (Some(x), Some(y)) if x == y => {}
-            _ => return Outcomes::ALL,
-        }
-        // Key by key in the left's order; a key the right lacks leaves them
-        // uncomparable (`zend_hash_compare` without ordering).
-        let mut out = Outcomes::NONE;
-        for field in sa.fields() {
-            let Some(other) = sb.field(&field.key) else {
-                return out.or(Outcomes::UNCOMPARABLE);
+        stack::guard(|| {
+            let (
+                Value::Array {
+                    least: la,
+                    most: ma,
+                    shape: sa,
+                },
+                Value::Array {
+                    least: lb,
+                    most: mb,
+                    shape: sb,
+                },
+            ) = (a, b)
+            else {
+                return Outcomes::ALL;
             };
-            let pair = self.outcomes_on(&field.ty, &other.ty, php8);
-            out = out.or(pair.without(Outcomes::EQUAL));
-            if !pair.has(Outcomes::EQUAL) {
-                return out;
+            if ma.is_some_and(|m| m < *lb) {
+                return Outcomes::LESS;
             }
-        }
-        out.or(Outcomes::EQUAL)
+            if mb.is_some_and(|m| m < *la) {
+                return Outcomes::GREATER;
+            }
+            let (Some(sa), Some(sb)) = (sa, sb) else {
+                return Outcomes::ALL;
+            };
+            let exact = |s: &Shape| {
+                s.fields()
+                    .iter()
+                    .all(|f| !f.optional)
+                    .then_some(s.fields().len())
+            };
+            match (exact(sa), exact(sb)) {
+                (Some(x), Some(y)) if x == y => {}
+                _ => return Outcomes::ALL,
+            }
+            // Key by key in the left's order; a key the right lacks leaves them
+            // uncomparable (`zend_hash_compare` without ordering).
+            let mut out = Outcomes::NONE;
+            for field in sa.fields() {
+                let Some(other) = sb.field(&field.key) else {
+                    return out.or(Outcomes::UNCOMPARABLE);
+                };
+                let pair = self.outcomes_on(&field.ty, &other.ty, php8);
+                out = out.or(pair.without(Outcomes::EQUAL));
+                if !pair.has(Outcomes::EQUAL) {
+                    return out;
+                }
+            }
+            out.or(Outcomes::EQUAL)
+        })
     }
 
     fn outcomes_on(&self, a: &Type, b: &Type, php8: bool) -> Outcomes {
-        self.outcomes(
-            a,
-            b,
-            Some(if php8 {
-                PhpVersion::new(8, 0)
-            } else {
-                PhpVersion::new(7, 4)
-            }),
-        )
+        stack::guard(|| {
+            self.outcomes(
+                a,
+                b,
+                Some(if php8 {
+                    PhpVersion::new(8, 0)
+                } else {
+                    PhpVersion::new(7, 4)
+                }),
+            )
+        })
     }
 }
 

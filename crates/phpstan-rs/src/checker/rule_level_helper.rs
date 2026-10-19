@@ -53,12 +53,14 @@ impl RuleLevelHelper {
 /// `ty`'s union members, a template bounded by a union standing for its
 /// bound's members.
 fn level_members<'t>(ty: &'t Type, out: &mut Vec<&'t Type>) {
-    for member in ty.union_members() {
-        match member.template_bound() {
-            Some(bound) if bound.union_members().len() > 1 => level_members(bound, out),
-            _ => out.push(member),
+    stack::guard(|| {
+        for member in ty.union_members() {
+            match member.template_bound() {
+                Some(bound) if bound.union_members().len() > 1 => level_members(bound, out),
+                _ => out.push(member),
+            }
         }
-    }
+    })
 }
 
 #[cfg(test)]

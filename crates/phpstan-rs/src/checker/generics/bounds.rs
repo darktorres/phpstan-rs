@@ -36,7 +36,9 @@ impl<'a> Checker<'a> {
         label: &str,
         span: Span,
     ) {
-        self.check_generic_bounds_and_arity(ty, location, label, span, true);
+        stack::guard(|| {
+            self.check_generic_bounds_and_arity(ty, location, label, span, true);
+        })
     }
 
     /// `check_arity` gates both `check_generic_reference_arity` and
@@ -58,92 +60,96 @@ impl<'a> Checker<'a> {
         span: Span,
         check_arity: bool,
     ) {
-        if check_arity {
-            self.check_generic_reference_arity(ty, location, span);
-        }
-        if check_arity && let Some((class, args)) = ty.as_object() {
-            self.check_call_site_variance(class, args, location, span);
-        }
-        match ty.as_object() {
-            Some((class, args)) => {
-                if !args.is_empty()
-                    && let Some(info) = self.registry.classes.get(class.as_str())
-                    && info.templates().iter().any(|t| !t.bound.is_mixed())
-                {
-                    // Bound-checking cares about the real referenced
-                    // type, not a call-site variance marker wrapping it
-                    // (`Collection<covariant Foo>` still needs `Foo`
-                    // itself checked against the bound -
-                    // `accepts`'s own variance handling is
-                    // separate) - `Type::without_call_site_variance` unwraps for
-                    // both the substitution bindings and the bound
-                    // comparison; the *displayed* `arg` below stays the
-                    // original, marker-and-all, so a violation message
-                    // still shows `covariant Foo`.
-                    let bindings: TemplateBindings = info
-                        .template_names()
-                        .map(str::to_string)
-                        .zip(args.iter().map(|a| {
-                            a.without_call_site_variance()
-                                .cloned()
-                                .unwrap_or(Type::mixed())
-                        }))
-                        .collect();
-                    for (template, arg) in info.templates().iter().zip(args.iter()) {
-                        let name = template.name.as_str();
-                        if template.bound.is_mixed() {
-                            continue;
-                        }
-                        let bound = template
-                            .bound
-                            .substitute_templates(&bindings, &self.relation());
-                        let Some(checked_arg) = arg.without_call_site_variance() else {
-                            continue;
-                        };
-                        // Same "don't know, don't guess" leniency this
-                        // project applies to a class the registry has no
-                        // real data for (an uninstalled dependency, or a
-                        // PHAR-bundled one like `phpstan/phpstan` itself,
-                        // which ships with no loose source files to
-                        // parse) - without it, every reference to one of
-                        // its own real classes, e.g.
-                        // `PHPStan\Type\ArrayType implements
-                        // PHPStan\Type\Type`, would read as violating a
-                        // bound this project has no way to verify either
-                        // way.
-                        // Real PHPStan's own `GenericObjectTypeCheck`
-                        // calls `$boundType->isSuperTypeOf(...)` directly
-                        // (`vendor/phpstan-src/src/Rules/Generics/
-                        // GenericObjectTypeCheck.php`), never
-                        // `RuleLevelHelper::accepts()` - `checkExplicitMixed`/
-                        // `checkImplicitMixed` never applies to a generic
-                        // bound check in real PHPStan either, so this
-                        // stays on plain `accepts`, not
-                        // `rule_level_accepts` (see that
-                        // method's own doc comment, which already
-                        // disclosed this exact exclusion).
-                        if !checked_arg.is_mixed()
-                            && self.is_type_fully_known(checked_arg)
-                            && self.is_type_fully_known(&bound)
-                            && !self.accepts(&bound, checked_arg).yes()
-                        {
-                            let kind = class_kind_identifier(&info.kind());
-                            self.report(format!(
+        stack::guard(|| {
+            if check_arity {
+                self.check_generic_reference_arity(ty, location, span);
+            }
+            if check_arity && let Some((class, args)) = ty.as_object() {
+                self.check_call_site_variance(class, args, location, span);
+            }
+            match ty.as_object() {
+                Some((class, args)) => {
+                    if !args.is_empty()
+                        && let Some(info) = self.registry.classes.get(class.as_str())
+                        && info.templates().iter().any(|t| !t.bound.is_mixed())
+                    {
+                        // Bound-checking cares about the real referenced
+                        // type, not a call-site variance marker wrapping it
+                        // (`Collection<covariant Foo>` still needs `Foo`
+                        // itself checked against the bound -
+                        // `accepts`'s own variance handling is
+                        // separate) - `Type::without_call_site_variance` unwraps for
+                        // both the substitution bindings and the bound
+                        // comparison; the *displayed* `arg` below stays the
+                        // original, marker-and-all, so a violation message
+                        // still shows `covariant Foo`.
+                        let bindings: TemplateBindings = info
+                            .template_names()
+                            .map(str::to_string)
+                            .zip(args.iter().map(|a| {
+                                a.without_call_site_variance()
+                                    .cloned()
+                                    .unwrap_or(Type::mixed())
+                            }))
+                            .collect();
+                        for (template, arg) in info.templates().iter().zip(args.iter()) {
+                            let name = template.name.as_str();
+                            if template.bound.is_mixed() {
+                                continue;
+                            }
+                            let bound = template
+                                .bound
+                                .substitute_templates(&bindings, &self.relation());
+                            let Some(checked_arg) = arg.without_call_site_variance() else {
+                                continue;
+                            };
+                            // Same "don't know, don't guess" leniency this
+                            // project applies to a class the registry has no
+                            // real data for (an uninstalled dependency, or a
+                            // PHAR-bundled one like `phpstan/phpstan` itself,
+                            // which ships with no loose source files to
+                            // parse) - without it, every reference to one of
+                            // its own real classes, e.g.
+                            // `PHPStan\Type\ArrayType implements
+                            // PHPStan\Type\Type`, would read as violating a
+                            // bound this project has no way to verify either
+                            // way.
+                            // Real PHPStan's own `GenericObjectTypeCheck`
+                            // calls `$boundType->isSuperTypeOf(...)` directly
+                            // (`vendor/phpstan-src/src/Rules/Generics/
+                            // GenericObjectTypeCheck.php`), never
+                            // `RuleLevelHelper::accepts()` - `checkExplicitMixed`/
+                            // `checkImplicitMixed` never applies to a generic
+                            // bound check in real PHPStan either, so this
+                            // stays on plain `accepts`, not
+                            // `rule_level_accepts` (see that
+                            // method's own doc comment, which already
+                            // disclosed this exact exclusion).
+                            if !checked_arg.is_mixed()
+                                && self.is_type_fully_known(checked_arg)
+                                && self.is_type_fully_known(&bound)
+                                && !self.accepts(&bound, checked_arg).yes()
+                            {
+                                let kind = class_kind_identifier(&info.kind());
+                                self.report(format!(
                                     "Type {arg} in generic type {ty} in {location} is not subtype of template type {name} of {kind} {class}."
                                 ),
                                 span,
                                 6,
                                 "generics.notSubtype",
                             );
+                            }
                         }
                     }
+                    for arg in args {
+                        self.check_generic_bounds(arg, location, label, span);
+                    }
                 }
-                for arg in args {
-                    self.check_generic_bounds(arg, location, label, span);
+                None => {
+                    ty.for_each_child(&mut |t| self.check_generic_bounds(t, location, label, span))
                 }
             }
-            None => ty.for_each_child(&mut |t| self.check_generic_bounds(t, location, label, span)),
-        }
+        })
     }
 
     /// `false` if `ty` mentions any class this project has no real data

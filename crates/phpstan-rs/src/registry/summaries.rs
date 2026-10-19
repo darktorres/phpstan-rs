@@ -337,13 +337,13 @@ fn property_of(target: &Expr) -> Option<PropertyOf> {
 }
 
 fn property_of_index_base(base: &Expr) -> Option<PropertyOf> {
-    match &base.peeled().kind {
+    stack::guard(|| match &base.peeled().kind {
         ExprKind::PropertyAccess(object, _, _) | ExprKind::DynamicPropertyAccess(object, _, _) => {
             Some(own_or_other(object))
         }
         ExprKind::Index(inner, _) => property_of_index_base(inner),
         _ => None,
-    }
+    })
 }
 
 fn own_or_other(object: &Expr) -> PropertyOf {
@@ -569,7 +569,7 @@ impl<'ast> Visitor<'ast> for Reassigned<'_> {
 }
 
 fn collect_assigned(target: &Expr, out: &mut FxHashSet<Name>) {
-    match &target.kind {
+    stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => {
             out.insert(name.clone());
         }
@@ -581,5 +581,5 @@ fn collect_assigned(target: &Expr, out: &mut FxHashSet<Name>) {
             }
         }
         _ => {}
-    }
+    })
 }

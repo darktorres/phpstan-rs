@@ -264,7 +264,7 @@ impl From<Name> for String {
 impl<'a> arbitrary::Arbitrary<'a> for Name {
     /// Interns into the global interner.
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Name> {
-        Ok(Interner::global().name(<&str>::arbitrary(u)?))
+        stack::guard(|| Ok(Interner::global().name(<&str>::arbitrary(u)?)))
     }
 }
 

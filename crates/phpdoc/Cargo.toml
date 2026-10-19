@@ -12,6 +12,7 @@ name = "phpdoc"
 hotpath.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
+stack.workspace = true
 syntax.workspace = true
 types.workspace = true
 

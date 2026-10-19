@@ -61,31 +61,33 @@ pub struct IgnoreErrorEntry {
 
 impl IgnoreErrorEntry {
     fn matches(&self, path: &str, case: CaseRule, d: &Diagnostic) -> bool {
-        if let Some(identifier) = &self.identifier
-            && *identifier != *d.identifier
-        {
-            return false;
-        }
-        if let Some(pattern) = &self.path
-            && !path_glob_matches(pattern, path, case)
-        {
-            return false;
-        }
-        if let Some(message) = &self.message {
-            match regex::Regex::new(message) {
-                Ok(re) => {
-                    if !re.is_match(&d.message) {
-                        return false;
-                    }
-                }
-                // A malformed pattern can never match - the same "don't
-                // guess, don't crash" leniency this project applies to
-                // every other user-supplied, unvalidated-at-parse-time
-                // config string.
-                Err(_) => return false,
+        stack::guard(|| {
+            if let Some(identifier) = &self.identifier
+                && *identifier != *d.identifier
+            {
+                return false;
             }
-        }
-        true
+            if let Some(pattern) = &self.path
+                && !path_glob_matches(pattern, path, case)
+            {
+                return false;
+            }
+            if let Some(message) = &self.message {
+                match regex::Regex::new(message) {
+                    Ok(re) => {
+                        if !re.is_match(&d.message) {
+                            return false;
+                        }
+                    }
+                    // A malformed pattern can never match - the same "don't
+                    // guess, don't crash" leniency this project applies to
+                    // every other user-supplied, unvalidated-at-parse-time
+                    // config string.
+                    Err(_) => return false,
+                }
+            }
+            true
+        })
     }
 }
 
@@ -107,44 +109,48 @@ pub(crate) fn glob_matches(pattern: &str, path: &str) -> bool {
 /// matches a `/`, or a `\` that a name holds. The letters of both are
 /// compared as `case` compares them.
 pub(crate) fn path_glob_matches(pattern: &str, path: &str, case: CaseRule) -> bool {
-    glob_matches_by(
-        &case.key(pattern),
-        &case.key(path),
-        diagnostics::path_byte_names,
-    )
+    stack::guard(|| {
+        glob_matches_by(
+            &case.key(pattern),
+            &case.key(path),
+            diagnostics::path_byte_names,
+        )
+    })
 }
 
 /// `glob_matches`, with `matches` telling whether a byte of `pattern`
 /// matches a byte of `subject`.
 fn glob_matches_by(pattern: &str, subject: &str, matches: impl Fn(u8, u8) -> bool) -> bool {
-    let starts_with = |text: &[u8], part: &[u8]| {
-        text.len() >= part.len() && part.iter().zip(text).all(|(&p, &s)| matches(p, s))
-    };
-    let parts: Vec<&[u8]> = pattern.as_bytes().split(|&b| b == b'*').collect();
-    let mut cursor = subject.as_bytes();
-    if let [whole] = parts[..] {
-        return cursor.len() == whole.len() && starts_with(cursor, whole);
-    }
-    let last = parts.len() - 1;
-    for (i, part) in parts.iter().enumerate() {
-        if i == 0 {
-            if !starts_with(cursor, part) {
-                return false;
-            }
-            cursor = &cursor[part.len()..];
-        } else if i == last {
-            return cursor.len() >= part.len()
-                && starts_with(&cursor[cursor.len() - part.len()..], part);
-        } else if !part.is_empty() {
-            match (0..=cursor.len().saturating_sub(part.len()))
-                .find(|&at| starts_with(&cursor[at..], part))
-            {
-                Some(at) => cursor = &cursor[at + part.len()..],
-                None => return false,
+    stack::guard(|| {
+        let starts_with = |text: &[u8], part: &[u8]| {
+            text.len() >= part.len() && part.iter().zip(text).all(|(&p, &s)| matches(p, s))
+        };
+        let parts: Vec<&[u8]> = pattern.as_bytes().split(|&b| b == b'*').collect();
+        let mut cursor = subject.as_bytes();
+        if let [whole] = parts[..] {
+            return cursor.len() == whole.len() && starts_with(cursor, whole);
+        }
+        let last = parts.len() - 1;
+        for (i, part) in parts.iter().enumerate() {
+            if i == 0 {
+                if !starts_with(cursor, part) {
+                    return false;
+                }
+                cursor = &cursor[part.len()..];
+            } else if i == last {
+                return cursor.len() >= part.len()
+                    && starts_with(&cursor[cursor.len() - part.len()..], part);
+            } else if !part.is_empty() {
+                match (0..=cursor.len().saturating_sub(part.len()))
+                    .find(|&at| starts_with(&cursor[at..], part))
+                {
+                    Some(at) => cursor = &cursor[at + part.len()..],
+                    None => return false,
+                }
             }
         }
-    }
-    true
+        true
+    })
 }
 
 /// Drops every diagnostic matched by any entry in `entries`, in place -

@@ -108,56 +108,58 @@ fn argument(arg: &Arg) -> AttributeArgument {
 }
 
 fn value(expr: &Expr) -> AttributeValue {
-    let expr = expr.peeled();
-    stack::guard(|| match &expr.kind {
-        ExprKind::Literal(Literal::Null) => AttributeValue::Null,
-        ExprKind::Literal(Literal::Bool(b)) => AttributeValue::Bool(*b),
-        ExprKind::Literal(Literal::Int(i)) => AttributeValue::Int(*i),
-        ExprKind::Literal(Literal::Float(f)) => AttributeValue::Float(*f),
-        ExprKind::Literal(Literal::String(s)) => {
-            AttributeValue::String(Name::from(&*s.to_str_lossy()))
-        }
-        ExprKind::Unary(UnaryOp::Neg, inner) => match value(inner) {
-            AttributeValue::Int(i) => AttributeValue::Int(i.wrapping_neg()),
-            AttributeValue::Float(f) => AttributeValue::Float(-f),
-            _ => AttributeValue::Unsupported,
-        },
-        ExprKind::Name(name) => match name.to_ascii_lowercase().trim_start_matches('\\') {
-            "true" => AttributeValue::Bool(true),
-            "false" => AttributeValue::Bool(false),
-            "null" => AttributeValue::Null,
-            _ => AttributeValue::Constant(name.written.clone()),
-        },
-        ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
-            AttributeValue::ClassName(class_ref(class))
-        }
-        ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => {
-            AttributeValue::ClassConstant {
-                class: class_ref(class),
-                name: name.name.clone(),
+    stack::guard(|| {
+        let expr = expr.peeled();
+        stack::guard(|| match &expr.kind {
+            ExprKind::Literal(Literal::Null) => AttributeValue::Null,
+            ExprKind::Literal(Literal::Bool(b)) => AttributeValue::Bool(*b),
+            ExprKind::Literal(Literal::Int(i)) => AttributeValue::Int(*i),
+            ExprKind::Literal(Literal::Float(f)) => AttributeValue::Float(*f),
+            ExprKind::Literal(Literal::String(s)) => {
+                AttributeValue::String(Name::from(&*s.to_str_lossy()))
             }
-        }
-        ExprKind::ArrayLiteral(items) => {
-            if items.iter().any(|i| i.spread) {
-                return AttributeValue::Unsupported;
+            ExprKind::Unary(UnaryOp::Neg, inner) => match value(inner) {
+                AttributeValue::Int(i) => AttributeValue::Int(i.wrapping_neg()),
+                AttributeValue::Float(f) => AttributeValue::Float(-f),
+                _ => AttributeValue::Unsupported,
+            },
+            ExprKind::Name(name) => match name.to_ascii_lowercase().trim_start_matches('\\') {
+                "true" => AttributeValue::Bool(true),
+                "false" => AttributeValue::Bool(false),
+                "null" => AttributeValue::Null,
+                _ => AttributeValue::Constant(name.written.clone()),
+            },
+            ExprKind::ClassNameFetch(StaticTarget::Name(class)) => {
+                AttributeValue::ClassName(class_ref(class))
             }
-            AttributeValue::Array(
-                items
-                    .iter()
-                    .map(|i| (i.key.as_ref().map(value), value(&i.value)))
-                    .collect(),
-            )
-        }
-        ExprKind::Binary(BinOp::BitOr, left, right) => {
-            let mut operands = Vec::new();
-            for side in [left, right] {
-                match value(side) {
-                    AttributeValue::BitOr(inner) => operands.extend(inner),
-                    other => operands.push(other),
+            ExprKind::ClassConstFetch(StaticTarget::Name(class), name) => {
+                AttributeValue::ClassConstant {
+                    class: class_ref(class),
+                    name: name.name.clone(),
                 }
             }
-            AttributeValue::BitOr(operands)
-        }
-        _ => AttributeValue::Unsupported,
+            ExprKind::ArrayLiteral(items) => {
+                if items.iter().any(|i| i.spread) {
+                    return AttributeValue::Unsupported;
+                }
+                AttributeValue::Array(
+                    items
+                        .iter()
+                        .map(|i| (i.key.as_ref().map(value), value(&i.value)))
+                        .collect(),
+                )
+            }
+            ExprKind::Binary(BinOp::BitOr, left, right) => {
+                let mut operands = Vec::new();
+                for side in [left, right] {
+                    match value(side) {
+                        AttributeValue::BitOr(inner) => operands.extend(inner),
+                        other => operands.push(other),
+                    }
+                }
+                AttributeValue::BitOr(operands)
+            }
+            _ => AttributeValue::Unsupported,
+        })
     })
 }

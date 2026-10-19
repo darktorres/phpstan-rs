@@ -118,55 +118,57 @@ impl<'a> Checker<'a> {
         diagnostics: &mut Vec<(String, usize, Type, Type)>,
         visited: &FxHashSet<String>,
     ) {
-        if visited.contains(class) {
-            return;
-        }
-        let Some(info) = self.class_info(class) else {
-            return;
-        };
-        let mut visited = visited.clone();
-        visited.insert(class.to_string());
+        stack::guard(|| {
+            if visited.contains(class) {
+                return;
+            }
+            let Some(info) = self.class_info(class) else {
+                return;
+            };
+            let mut visited = visited.clone();
+            visited.insert(class.to_string());
 
-        for iface in info.implements() {
-            let raw_args = info
-                .implements_args()
-                .get(iface)
-                .cloned()
-                .unwrap_or_default();
-            let concrete_args: Vec<Type> = raw_args
-                .iter()
-                .map(|t| t.substitute_templates(own_bindings, &self.relation()))
-                .collect();
-            self.visit_ancestor(iface, &concrete_args, found, diagnostics, &visited);
-        }
+            for iface in info.implements() {
+                let raw_args = info
+                    .implements_args()
+                    .get(iface)
+                    .cloned()
+                    .unwrap_or_default();
+                let concrete_args: Vec<Type> = raw_args
+                    .iter()
+                    .map(|t| t.substitute_templates(own_bindings, &self.relation()))
+                    .collect();
+                self.visit_ancestor(iface, &concrete_args, found, diagnostics, &visited);
+            }
 
-        // A class extending a genuinely non-generic parent has no `@extends`
-        // tag to write at all (nothing generic to pass through), so
-        // `extends_args` is empty not because this project failed to
-        // parse one but because there is none - walking into that parent
-        // anyway would compare *its own*, entirely independent
-        // declaration of some shared interface against this class's own,
-        // as if the two were bound through a real generic relationship
-        // when they aren't related that way at all. Real PHPStan's own
-        // `CrossCheckInterfacesHelper::check` has the identical gate
-        // (`$checkParents`, `getExtendsTags()`) for exactly this reason -
-        // only cross-check into a parent when there's a real `@extends`
-        // tag linking the two. `extends.len() == 1` is required in
-        // addition, for the same multi-extends-conflation reason
-        // `check_ancestor_generic_bounds`'s own arity checking already
-        // established (`ClassReflection::extends_args`'s own doc comment) - an
-        // interface `extends`-ing more than one parent at once conflates
-        // their argument lists into one flat, un-keyed list, unsafe to
-        // attribute to either.
-        if info.extends().len() == 1 && !info.extends_args().is_empty() {
-            let parent = &info.extends()[0];
-            let concrete_args: Vec<Type> = info
-                .extends_args()
-                .iter()
-                .map(|t| t.substitute_templates(own_bindings, &self.relation()))
-                .collect();
-            self.visit_ancestor(parent, &concrete_args, found, diagnostics, &visited);
-        }
+            // A class extending a genuinely non-generic parent has no `@extends`
+            // tag to write at all (nothing generic to pass through), so
+            // `extends_args` is empty not because this project failed to
+            // parse one but because there is none - walking into that parent
+            // anyway would compare *its own*, entirely independent
+            // declaration of some shared interface against this class's own,
+            // as if the two were bound through a real generic relationship
+            // when they aren't related that way at all. Real PHPStan's own
+            // `CrossCheckInterfacesHelper::check` has the identical gate
+            // (`$checkParents`, `getExtendsTags()`) for exactly this reason -
+            // only cross-check into a parent when there's a real `@extends`
+            // tag linking the two. `extends.len() == 1` is required in
+            // addition, for the same multi-extends-conflation reason
+            // `check_ancestor_generic_bounds`'s own arity checking already
+            // established (`ClassReflection::extends_args`'s own doc comment) - an
+            // interface `extends`-ing more than one parent at once conflates
+            // their argument lists into one flat, un-keyed list, unsafe to
+            // attribute to either.
+            if info.extends().len() == 1 && !info.extends_args().is_empty() {
+                let parent = &info.extends()[0];
+                let concrete_args: Vec<Type> = info
+                    .extends_args()
+                    .iter()
+                    .map(|t| t.substitute_templates(own_bindings, &self.relation()))
+                    .collect();
+                self.visit_ancestor(parent, &concrete_args, found, diagnostics, &visited);
+            }
+        })
     }
 
     /// Records `name`'s own binding (if it's a generic interface - a
@@ -187,36 +189,38 @@ impl<'a> Checker<'a> {
         diagnostics: &mut Vec<(String, usize, Type, Type)>,
         visited: &FxHashSet<String>,
     ) {
-        let Some(info) = self.class_info(name) else {
-            return;
-        };
-        if info.kind() == syntax::ast::ClassKind::Interface && !info.templates().is_empty() {
-            match found.get(name) {
-                Some(existing) => {
-                    for (idx, (new_ty, old_ty)) in
-                        concrete_args.iter().zip(existing.iter()).enumerate()
-                    {
-                        if new_ty != old_ty {
-                            diagnostics.push((
-                                name.to_string(),
-                                idx,
-                                new_ty.clone(),
-                                old_ty.clone(),
-                            ));
+        stack::guard(|| {
+            let Some(info) = self.class_info(name) else {
+                return;
+            };
+            if info.kind() == syntax::ast::ClassKind::Interface && !info.templates().is_empty() {
+                match found.get(name) {
+                    Some(existing) => {
+                        for (idx, (new_ty, old_ty)) in
+                            concrete_args.iter().zip(existing.iter()).enumerate()
+                        {
+                            if new_ty != old_ty {
+                                diagnostics.push((
+                                    name.to_string(),
+                                    idx,
+                                    new_ty.clone(),
+                                    old_ty.clone(),
+                                ));
+                            }
                         }
                     }
-                }
-                None => {
-                    found.insert(name.to_string(), concrete_args.to_vec());
+                    None => {
+                        found.insert(name.to_string(), concrete_args.to_vec());
+                    }
                 }
             }
-        }
-        let next_bindings: FxHashMap<String, Type> = info
-            .template_names()
-            .map(str::to_string)
-            .zip(concrete_args.iter().cloned())
-            .collect();
-        self.walk_for_interface_conflicts(name, &next_bindings, found, diagnostics, visited);
+            let next_bindings: FxHashMap<String, Type> = info
+                .template_names()
+                .map(str::to_string)
+                .zip(concrete_args.iter().cloned())
+                .collect();
+            self.walk_for_interface_conflicts(name, &next_bindings, found, diagnostics, visited);
+        })
     }
 }
 

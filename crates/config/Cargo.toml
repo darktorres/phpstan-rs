@@ -10,6 +10,7 @@ name = "config"
 
 [dependencies]
 serde.workspace = true
+stack.workspace = true
 toml.workspace = true
 
 [lints]

@@ -820,7 +820,7 @@ fn string_bitwise(op: ArithmeticOp, l: &Type, r: &Type) -> Type {
 /// whatever `$x` is.
 fn fold_bitwise_int_literals(op: ArithmeticOp, l: &Type, r: &Type) -> Option<Type> {
     fn literals(ty: &Type) -> Option<Vec<i64>> {
-        match ty.repr() {
+        stack::guard(|| match ty.repr() {
             Repr::IntLiteral(n) => Some(vec![*n]),
             Repr::True => Some(vec![1]),
             Repr::False | Repr::Null => Some(vec![0]),
@@ -829,7 +829,7 @@ fn fold_bitwise_int_literals(op: ArithmeticOp, l: &Type, r: &Type) -> Option<Typ
                 Some(acc)
             }),
             _ => None,
-        }
+        })
     }
     let apply = |a: i64, b: i64| match op {
         ArithmeticOp::BitAnd => a & b,

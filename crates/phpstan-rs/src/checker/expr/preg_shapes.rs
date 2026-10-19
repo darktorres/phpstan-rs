@@ -401,15 +401,17 @@ pub(super) struct PregFlags {
 /// both `PATTERN_ORDER` and `SET_ORDER` appear together - never guessed.
 pub(super) fn parse_preg_flags(e: &Expr, allow_order: bool) -> Option<PregFlags> {
     fn collect<'a>(e: &'a Expr, out: &mut Vec<&'a str>) -> bool {
-        let e = e.peeled();
-        match &e.kind {
-            ExprKind::Name(name) => {
-                out.push(name.trim_start_matches('\\'));
-                true
+        stack::guard(|| {
+            let e = e.peeled();
+            match &e.kind {
+                ExprKind::Name(name) => {
+                    out.push(name.trim_start_matches('\\'));
+                    true
+                }
+                ExprKind::Binary(BinOp::BitOr, l, r) => collect(l, out) && collect(r, out),
+                _ => false,
             }
-            ExprKind::Binary(BinOp::BitOr, l, r) => collect(l, out) && collect(r, out),
-            _ => false,
-        }
+        })
     }
     let mut names = Vec::new();
     if !collect(e, &mut names) {

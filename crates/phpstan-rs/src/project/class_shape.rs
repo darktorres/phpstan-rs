@@ -30,18 +30,20 @@ const DOCTRINE_MAPPED: [&str; 3] = ["Entity", "Embeddable", "MappedSuperclass"];
 /// these statements are all there is to look through - not every
 /// expression of every body, as `for_each_declaration` does.
 pub(super) fn collect_classes<'a>(stmts: &'a [Stmt], out: &mut Vec<(String, &'a ClassDecl)>) {
-    for stmt in stmts {
-        stack::guard(|| match &stmt.kind {
-            StmtKind::ClassDecl(c) if c.def.kind != ClassKind::Enum => {
-                out.push((c.fq_name().to_string(), c));
-            }
-            StmtKind::Block(inner)
-            | StmtKind::Declare {
-                body: Some(inner), ..
-            } => collect_classes(inner, out),
-            _ => {}
-        });
-    }
+    stack::guard(|| {
+        for stmt in stmts {
+            stack::guard(|| match &stmt.kind {
+                StmtKind::ClassDecl(c) if c.def.kind != ClassKind::Enum => {
+                    out.push((c.fq_name().to_string(), c));
+                }
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => collect_classes(inner, out),
+                _ => {}
+            });
+        }
+    })
 }
 
 fn is_doctrine_mapped(c: &ClassDef, ctx_names: &[String]) -> bool {

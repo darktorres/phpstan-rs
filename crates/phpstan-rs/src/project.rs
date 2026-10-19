@@ -3390,97 +3390,99 @@ pub fn parse_file_with_names<'a>(
     names: Option<&mut syntax::name::NameCache>,
     analysed: bool,
 ) -> Result<ParsedFile, ParseError> {
-    let source: syntax::Source<'a> = source.into();
-    let Parsed {
-        ast,
-        references,
-        ignores,
-        warnings: lex_warnings,
-        facts,
-        line_index,
-    } = parse_with_ignores(
-        root,
-        path,
-        source,
-        names,
-        body_text == BodyText::Skipped,
-        analysed,
-    )?;
-    // Its declarations take the file's number once the file is numbered.
-    let origin = Origin::PendingFile;
-    let file_declarations::FileDeclarations {
-        functions,
-        classes,
-        constants,
-        built_decls,
-        duplicate_fn_sites,
-        duplicate_class_sites,
-        declared_classes,
-    } = file_declarations::collect(&ast, is_stub, &origin, &facts);
-    let (references, declaration_references) = file_references(&ast, references);
-    // What a walk of the declarations finds.
-    #[cfg(debug_assertions)]
-    assert_eq!(
-        format!("{declared_classes:?}"),
-        format!("{:?}", declared_classes::declared_classes(&ast)),
-        "the classes found alongside the declarations and by their own walk differ"
-    );
-    // The anonymous classes are the declarations built last, one per
-    // `new class`, so the file's own walk need not be repeated for them.
-    let anonymous_classes = built_decls
-        .iter()
-        .filter_map(|decl| match decl {
-            BuiltDecl::Class { name, info, .. } if info.is_anonymous() => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
-    let bodies = FileBodies::of_file(
-        &ast,
-        &facts,
-        (body_text != BodyText::Parsed).then_some(source),
-    );
-    let global_facts = Arc::new(GlobalFacts::of_file(&ast, &facts));
-    let pest_facts = PestFacts::of(path, &ast);
-    let parsed = ParsedFile {
-        ast: Some(ast),
-        lex_warnings,
-        functions,
-        classes,
-        constants,
-        references,
-        declaration_references,
-        built_decls,
-        anonymous_classes,
-        duplicate_fn_sites,
-        duplicate_class_sites,
-        ignores,
-        bodies,
-        global_facts,
-        pest_facts,
-        declared_classes,
-        facts,
-        line_index,
-        class_fn_refs: None,
-        owner: None,
-    };
-    // A file that skipped bodies gives what the whole of it gives, but for
-    // the bodies, when it parses whole; a body with a syntax error is not
-    // found by the skip.
-    #[cfg(debug_assertions)]
-    if parsed.facts.has_skimmed_bodies
-        && let Ok(full) = parse_file_with_names(
-            path,
+    stack::guard(|| {
+        let source: syntax::Source<'a> = source.into();
+        let Parsed {
+            ast,
+            references,
+            ignores,
+            warnings: lex_warnings,
+            facts,
+            line_index,
+        } = parse_with_ignores(
             root,
+            path,
             source,
-            is_stub,
-            BodyText::AsText,
-            None,
+            names,
+            body_text == BodyText::Skipped,
             analysed,
-        )
-    {
-        file_cache::assert_same_but_bodies(&parsed, &full);
-    }
-    Ok(parsed)
+        )?;
+        // Its declarations take the file's number once the file is numbered.
+        let origin = Origin::PendingFile;
+        let file_declarations::FileDeclarations {
+            functions,
+            classes,
+            constants,
+            built_decls,
+            duplicate_fn_sites,
+            duplicate_class_sites,
+            declared_classes,
+        } = file_declarations::collect(&ast, is_stub, &origin, &facts);
+        let (references, declaration_references) = file_references(&ast, references);
+        // What a walk of the declarations finds.
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            format!("{declared_classes:?}"),
+            format!("{:?}", declared_classes::declared_classes(&ast)),
+            "the classes found alongside the declarations and by their own walk differ"
+        );
+        // The anonymous classes are the declarations built last, one per
+        // `new class`, so the file's own walk need not be repeated for them.
+        let anonymous_classes = built_decls
+            .iter()
+            .filter_map(|decl| match decl {
+                BuiltDecl::Class { name, info, .. } if info.is_anonymous() => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        let bodies = FileBodies::of_file(
+            &ast,
+            &facts,
+            (body_text != BodyText::Parsed).then_some(source),
+        );
+        let global_facts = Arc::new(GlobalFacts::of_file(&ast, &facts));
+        let pest_facts = PestFacts::of(path, &ast);
+        let parsed = ParsedFile {
+            ast: Some(ast),
+            lex_warnings,
+            functions,
+            classes,
+            constants,
+            references,
+            declaration_references,
+            built_decls,
+            anonymous_classes,
+            duplicate_fn_sites,
+            duplicate_class_sites,
+            ignores,
+            bodies,
+            global_facts,
+            pest_facts,
+            declared_classes,
+            facts,
+            line_index,
+            class_fn_refs: None,
+            owner: None,
+        };
+        // A file that skipped bodies gives what the whole of it gives, but for
+        // the bodies, when it parses whole; a body with a syntax error is not
+        // found by the skip.
+        #[cfg(debug_assertions)]
+        if parsed.facts.has_skimmed_bodies
+            && let Ok(full) = parse_file_with_names(
+                path,
+                root,
+                source,
+                is_stub,
+                BodyText::AsText,
+                None,
+                analysed,
+            )
+        {
+            file_cache::assert_same_but_bodies(&parsed, &full);
+        }
+        Ok(parsed)
+    })
 }
 
 impl ParsedFile {

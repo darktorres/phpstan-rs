@@ -159,7 +159,9 @@ impl<'a> Checker<'a> {
     }
 
     fn walk_promoted_in_expr(&mut self, e: &Expr) {
-        Promotions { checker: self }.visit_expr(e);
+        stack::guard(|| {
+            Promotions { checker: self }.visit_expr(e);
+        })
     }
 
     fn check_promoted_in_methods(&mut self, fqn: &str, kind: ClassKind, methods: &[MethodDecl]) {
@@ -198,21 +200,23 @@ impl<'a> Checker<'a> {
     }
 
     fn walk_promoted_in_property_hooks(&mut self, properties: &[PropertyDecl]) {
-        for p in properties {
-            let Some(hooks) = &p.hooks else {
-                continue;
-            };
-            if let Some(param) = hooks.set.as_ref().and_then(|hook| hook.param.as_ref()) {
-                self.check_parameter_name(param);
-            }
-            for hook in hooks.iter() {
-                match &hook.body {
-                    PropertyHookBody::Arrow(e) => self.walk_promoted_in_expr(e),
-                    PropertyHookBody::Block(stmts) => self.walk_promoted_in_body(stmts),
-                    PropertyHookBody::Abstract => {}
+        stack::guard(|| {
+            for p in properties {
+                let Some(hooks) = &p.hooks else {
+                    continue;
+                };
+                if let Some(param) = hooks.set.as_ref().and_then(|hook| hook.param.as_ref()) {
+                    self.check_parameter_name(param);
+                }
+                for hook in hooks.iter() {
+                    match &hook.body {
+                        PropertyHookBody::Arrow(e) => self.walk_promoted_in_expr(e),
+                        PropertyHookBody::Block(stmts) => self.walk_promoted_in_body(stmts),
+                        PropertyHookBody::Abstract => {}
+                    }
                 }
             }
-        }
+        })
     }
 
     /// Whether some class using `trait_fqn` imports its `method` under

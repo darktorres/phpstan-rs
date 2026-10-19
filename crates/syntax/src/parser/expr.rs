@@ -56,7 +56,7 @@ impl Parser<'_> {
     /// assignment's right side, a `print` operand and a ternary's branches
     /// are.
     pub(crate) fn parse_assignment(&mut self) -> Result<Expr, ParseError> {
-        self.parse_expr_bp(bp::TERNARY)
+        stack::guard(|| self.parse_expr_bp(bp::TERNARY))
     }
 
     pub(crate) fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
@@ -77,51 +77,53 @@ impl Parser<'_> {
     }
 
     fn parse_expr_bp_inner(&mut self, min: u8) -> Result<Expr, ParseError> {
-        let start = self.current_pos();
-        let mut lhs = self.parse_prefix(start)?;
-        // The level of the non-associative operator just applied: another
-        // of the same level is a syntax error.
-        let mut applied_non_associative: Option<u8> = None;
-        while let Some((power, assoc, infix)) = self.infix() {
-            if power < min {
-                break;
-            }
-            if assoc == Assoc::None && applied_non_associative == Some(power) {
-                return Err(ParseError {
-                    message: format!("syntax error, unexpected token \"{:?}\"", self.peek()),
-                    span: self.current_span(),
-                });
-            }
-            lhs = match infix {
-                Infix::Binary(op) => {
-                    self.skip();
-                    let next = if assoc == Assoc::Right {
-                        power
-                    } else {
-                        power + 1
-                    };
-                    let rhs = self.parse_expr_bp(next)?;
-                    self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start)
+        stack::guard(|| {
+            let start = self.current_pos();
+            let mut lhs = self.parse_prefix(start)?;
+            // The level of the non-associative operator just applied: another
+            // of the same level is a syntax error.
+            let mut applied_non_associative: Option<u8> = None;
+            while let Some((power, assoc, infix)) = self.infix() {
+                if power < min {
+                    break;
                 }
-                Infix::Instanceof => {
-                    self.skip();
-                    // The right-hand side is usually a static class name,
-                    // but PHP also allows what `new` does (`$x instanceof
-                    // $className`, `$x instanceof static::$class`, `$x
-                    // instanceof ('std' . $class)`) for a runtime-determined
-                    // class.
-                    let reference = self.parse_new_class_reference()?;
-                    let target = match &reference.kind {
-                        ExprKind::Name(name) => InstanceofTarget::Name(name.clone()),
-                        _ => InstanceofTarget::Expr(Box::new(reference)),
-                    };
-                    self.expr(ExprKind::Instanceof(Box::new(lhs), target), start)
+                if assoc == Assoc::None && applied_non_associative == Some(power) {
+                    return Err(ParseError {
+                        message: format!("syntax error, unexpected token \"{:?}\"", self.peek()),
+                        span: self.current_span(),
+                    });
                 }
-                Infix::Ternary => self.parse_ternary_rest(lhs, start)?,
-            };
-            applied_non_associative = (assoc == Assoc::None).then_some(power);
-        }
-        Ok(lhs)
+                lhs = match infix {
+                    Infix::Binary(op) => {
+                        self.skip();
+                        let next = if assoc == Assoc::Right {
+                            power
+                        } else {
+                            power + 1
+                        };
+                        let rhs = self.parse_expr_bp(next)?;
+                        self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start)
+                    }
+                    Infix::Instanceof => {
+                        self.skip();
+                        // The right-hand side is usually a static class name,
+                        // but PHP also allows what `new` does (`$x instanceof
+                        // $className`, `$x instanceof static::$class`, `$x
+                        // instanceof ('std' . $class)`) for a runtime-determined
+                        // class.
+                        let reference = self.parse_new_class_reference()?;
+                        let target = match &reference.kind {
+                            ExprKind::Name(name) => InstanceofTarget::Name(name.clone()),
+                            _ => InstanceofTarget::Expr(Box::new(reference)),
+                        };
+                        self.expr(ExprKind::Instanceof(Box::new(lhs), target), start)
+                    }
+                    Infix::Ternary => self.parse_ternary_rest(lhs, start)?,
+                };
+                applied_non_associative = (assoc == Assoc::None).then_some(power);
+            }
+            Ok(lhs)
+        })
     }
 
     /// The `? ... : ...` or `?: ...` after `cond`, the current token being
@@ -129,35 +131,37 @@ impl Parser<'_> {
     /// one that is the condition of another unless both are short
     /// (`$a ?: $b ?: $c`).
     fn parse_ternary_rest(&mut self, cond: Expr, start: u32) -> Result<Expr, ParseError> {
-        let short = matches!(self.peek_at(1), Token::Colon);
-        if let ExprKind::Ternary(_, then, _) = &cond.kind
-            && !(then.is_none() && short)
-        {
-            return Err(ParseError {
+        stack::guard(|| {
+            let short = matches!(self.peek_at(1), Token::Colon);
+            if let ExprKind::Ternary(_, then, _) = &cond.kind
+                && !(then.is_none() && short)
+            {
+                return Err(ParseError {
                 message: "Unparenthesized `a ? b : c ? d : e` is not supported; use either `(a ? b : c) ? d : e` or `a ? b : (c ? d : e)`".to_string(),
                 span: self.current_span(),
             });
-        }
-        self.skip(); // ?
-        if short {
-            self.skip(); // :
+            }
+            self.skip(); // ?
+            if short {
+                self.skip(); // :
+                let else_branch = self.parse_expr_bp(bp::TERNARY + 1)?;
+                return Ok(self.expr(
+                    ExprKind::Ternary(Box::new(cond), None, Box::new(else_branch)),
+                    start,
+                ));
+            }
+            let then_branch = self.parse_expr_bp(bp::LOWEST)?;
+            self.expect(&Token::Colon)?;
             let else_branch = self.parse_expr_bp(bp::TERNARY + 1)?;
-            return Ok(self.expr(
-                ExprKind::Ternary(Box::new(cond), None, Box::new(else_branch)),
+            Ok(self.expr(
+                ExprKind::Ternary(
+                    Box::new(cond),
+                    Some(Box::new(then_branch)),
+                    Box::new(else_branch),
+                ),
                 start,
-            ));
-        }
-        let then_branch = self.parse_expr_bp(bp::LOWEST)?;
-        self.expect(&Token::Colon)?;
-        let else_branch = self.parse_expr_bp(bp::TERNARY + 1)?;
-        Ok(self.expr(
-            ExprKind::Ternary(
-                Box::new(cond),
-                Some(Box::new(then_branch)),
-                Box::new(else_branch),
-            ),
-            start,
-        ))
+            ))
+        })
     }
 
     /// What the next token is as an operator between two operands: its
@@ -289,37 +293,39 @@ impl Parser<'_> {
     /// pattern depends on it), and the other prefix operators take their
     /// operand with `**` (`-$a ** 2` is `-($a ** 2)`).
     fn parse_prefix(&mut self, start: u32) -> Result<Expr, ParseError> {
-        if let Some(spelling) = self.try_parse_cast() {
-            let operand = self.parse_expr_bp(bp::UNARY)?;
-            return Ok(self.expr(ExprKind::Cast(spelling, Box::new(operand)), start));
-        }
-        let op = match self.peek() {
-            Token::Bang => {
-                self.skip();
-                let operand = self.parse_expr_bp(bp::INSTANCEOF)?;
-                return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, Box::new(operand)), start));
-            }
-            Token::Minus => UnaryOp::Neg,
-            Token::Plus => UnaryOp::Plus,
-            Token::Tilde => UnaryOp::BitNot,
-            Token::Increment => UnaryOp::PreInc,
-            Token::Decrement => UnaryOp::PreDec,
-            Token::At => {
-                self.skip();
+        stack::guard(|| {
+            if let Some(spelling) = self.try_parse_cast() {
                 let operand = self.parse_expr_bp(bp::UNARY)?;
-                return Ok(self.expr(ExprKind::ErrorSuppress(Box::new(operand)), start));
+                return Ok(self.expr(ExprKind::Cast(spelling, Box::new(operand)), start));
             }
-            _ => {
-                // An operand: a primary with its postfix chain, taking an
-                // assignment to its right where PHP's grammar has
-                // `variable '=' expr`, wherever an operand may stand.
-                let operand = self.parse_postfix_from_primary()?;
-                return self.parse_assignment_tail(operand, start);
-            }
-        };
-        self.skip();
-        let operand = self.parse_expr_bp(bp::UNARY)?;
-        Ok(self.expr(ExprKind::Unary(op, Box::new(operand)), start))
+            let op = match self.peek() {
+                Token::Bang => {
+                    self.skip();
+                    let operand = self.parse_expr_bp(bp::INSTANCEOF)?;
+                    return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, Box::new(operand)), start));
+                }
+                Token::Minus => UnaryOp::Neg,
+                Token::Plus => UnaryOp::Plus,
+                Token::Tilde => UnaryOp::BitNot,
+                Token::Increment => UnaryOp::PreInc,
+                Token::Decrement => UnaryOp::PreDec,
+                Token::At => {
+                    self.skip();
+                    let operand = self.parse_expr_bp(bp::UNARY)?;
+                    return Ok(self.expr(ExprKind::ErrorSuppress(Box::new(operand)), start));
+                }
+                _ => {
+                    // An operand: a primary with its postfix chain, taking an
+                    // assignment to its right where PHP's grammar has
+                    // `variable '=' expr`, wherever an operand may stand.
+                    let operand = self.parse_postfix_from_primary()?;
+                    return self.parse_assignment_tail(operand, start);
+                }
+            };
+            self.skip();
+            let operand = self.parse_expr_bp(bp::UNARY)?;
+            Ok(self.expr(ExprKind::Unary(op, Box::new(operand)), start))
+        })
     }
 
     /// An assignment whose target is the operand just parsed. PHP's grammar
@@ -333,66 +339,70 @@ impl Parser<'_> {
         lhs: Expr,
         start: u32,
     ) -> Result<Expr, ParseError> {
-        let op = match self.peek() {
-            Token::Equals => None,
-            Token::PlusEquals => Some(BinOp::Add),
-            Token::MinusEquals => Some(BinOp::Sub),
-            Token::StarEquals => Some(BinOp::Mul),
-            Token::StarStarEquals => Some(BinOp::Pow),
-            Token::SlashEquals => Some(BinOp::Div),
-            Token::PercentEquals => Some(BinOp::Mod),
-            Token::DotEquals => Some(BinOp::Concat),
-            Token::QuestionQuestionEquals => Some(BinOp::Coalesce),
-            Token::AmpEquals => Some(BinOp::BitAnd),
-            Token::PipeEquals => Some(BinOp::BitOr),
-            Token::CaretEquals => Some(BinOp::BitXor),
-            Token::LtLtEquals => Some(BinOp::Shl),
-            Token::GtGtEquals => Some(BinOp::Shr),
-            _ => return Ok(lhs),
-        };
-        let op_span = self.current_span();
-        let unexpected = |token: &str| ParseError {
-            message: format!("syntax error, unexpected token \"{token}\""),
-            span: op_span,
-        };
-        let is_pattern = matches!(
-            lhs.kind,
-            ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
-        );
-        // `($a) = 1`: a parenthesized expression isn't a variable, nor is
-        // `array(...)`.
-        if matches!(lhs.kind, ExprKind::Grouping(_))
-            || self.long_arrays.contains(&lhs.id)
-            || (is_pattern && op.is_some())
-        {
-            return Err(unexpected(&format!("{:?}", self.peek())));
-        }
-        self.skip();
-        // Reference assignment (`$a = &$b;`) - only valid on a plain `=`,
-        // never a compound one. See `ExprKind::AssignRef`'s own doc
-        // comment for why this gets its own variant rather than just
-        // being consumed and discarded.
-        let amp_span = self.current_span();
-        let is_ref = op.is_none() && self.eat(&Token::Amp);
-        if is_ref && is_pattern {
-            return Err(ParseError {
-                message: "syntax error, unexpected token \"&\"".to_string(),
-                span: amp_span,
-            });
-        }
-        let lhs = if is_pattern {
-            self.as_pattern(lhs, true)?
-        } else {
-            lhs
-        };
-        let rhs = self.parse_assignment()?;
-        Ok(match op {
-            None if is_ref => self.expr(ExprKind::AssignRef(Box::new(lhs), Box::new(rhs)), start),
-            None => self.expr(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), start),
-            Some(binop) => self.expr(
-                ExprKind::CompoundAssign(binop, Box::new(lhs), Box::new(rhs)),
-                start,
-            ),
+        stack::guard(|| {
+            let op = match self.peek() {
+                Token::Equals => None,
+                Token::PlusEquals => Some(BinOp::Add),
+                Token::MinusEquals => Some(BinOp::Sub),
+                Token::StarEquals => Some(BinOp::Mul),
+                Token::StarStarEquals => Some(BinOp::Pow),
+                Token::SlashEquals => Some(BinOp::Div),
+                Token::PercentEquals => Some(BinOp::Mod),
+                Token::DotEquals => Some(BinOp::Concat),
+                Token::QuestionQuestionEquals => Some(BinOp::Coalesce),
+                Token::AmpEquals => Some(BinOp::BitAnd),
+                Token::PipeEquals => Some(BinOp::BitOr),
+                Token::CaretEquals => Some(BinOp::BitXor),
+                Token::LtLtEquals => Some(BinOp::Shl),
+                Token::GtGtEquals => Some(BinOp::Shr),
+                _ => return Ok(lhs),
+            };
+            let op_span = self.current_span();
+            let unexpected = |token: &str| ParseError {
+                message: format!("syntax error, unexpected token \"{token}\""),
+                span: op_span,
+            };
+            let is_pattern = matches!(
+                lhs.kind,
+                ExprKind::ArrayLiteral(_) | ExprKind::Destructure(..)
+            );
+            // `($a) = 1`: a parenthesized expression isn't a variable, nor is
+            // `array(...)`.
+            if matches!(lhs.kind, ExprKind::Grouping(_))
+                || self.long_arrays.contains(&lhs.id)
+                || (is_pattern && op.is_some())
+            {
+                return Err(unexpected(&format!("{:?}", self.peek())));
+            }
+            self.skip();
+            // Reference assignment (`$a = &$b;`) - only valid on a plain `=`,
+            // never a compound one. See `ExprKind::AssignRef`'s own doc
+            // comment for why this gets its own variant rather than just
+            // being consumed and discarded.
+            let amp_span = self.current_span();
+            let is_ref = op.is_none() && self.eat(&Token::Amp);
+            if is_ref && is_pattern {
+                return Err(ParseError {
+                    message: "syntax error, unexpected token \"&\"".to_string(),
+                    span: amp_span,
+                });
+            }
+            let lhs = if is_pattern {
+                self.as_pattern(lhs, true)?
+            } else {
+                lhs
+            };
+            let rhs = self.parse_assignment()?;
+            Ok(match op {
+                None if is_ref => {
+                    self.expr(ExprKind::AssignRef(Box::new(lhs), Box::new(rhs)), start)
+                }
+                None => self.expr(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), start),
+                Some(binop) => self.expr(
+                    ExprKind::CompoundAssign(binop, Box::new(lhs), Box::new(rhs)),
+                    start,
+                ),
+            })
         })
     }
 
@@ -401,7 +411,7 @@ impl Parser<'_> {
     /// `target` is the whole target rather than an item of an enclosing
     /// pattern.
     pub(crate) fn as_pattern(&mut self, mut target: Expr, top: bool) -> Result<Expr, ParseError> {
-        match &mut target.kind {
+        stack::guard(|| match &mut target.kind {
             ExprKind::ArrayLiteral(items) => {
                 let items = std::mem::take(items);
                 if self.long_arrays.contains(&target.id) {
@@ -430,7 +440,7 @@ impl Parser<'_> {
                 Ok(target)
             }
             _ => Ok(target),
-        }
+        })
     }
 
     /// The items of a `[...]` or `list(...)` spelled `syntax`, as the
@@ -441,61 +451,63 @@ impl Parser<'_> {
         syntax: DestructureSyntax,
         span: Span,
     ) -> Result<Vec<DestructureItem>, ParseError> {
-        let error = |message: &str, span: Span| ParseError {
-            message: message.to_string(),
-            span,
-        };
-        let keyed = items.iter().any(|item| item.key.is_some());
-        let mut pattern = Vec::with_capacity(items.len());
-        for item in items {
-            let skipped = matches!(item.value.kind, ExprKind::Literal(Literal::Null))
-                && self.take_pattern_only(item.value.id);
-            if skipped {
-                if keyed {
+        stack::guard(|| {
+            let error = |message: &str, span: Span| ParseError {
+                message: message.to_string(),
+                span,
+            };
+            let keyed = items.iter().any(|item| item.key.is_some());
+            let mut pattern = Vec::with_capacity(items.len());
+            for item in items {
+                let skipped = matches!(item.value.kind, ExprKind::Literal(Literal::Null))
+                    && self.take_pattern_only(item.value.id);
+                if skipped {
+                    if keyed {
+                        return Err(error(
+                            "Cannot use empty array entries in keyed array assignment",
+                            item.value.span,
+                        ));
+                    }
+                    pattern.push(DestructureItem {
+                        key: None,
+                        target: None,
+                        by_ref: false,
+                    });
+                    continue;
+                }
+                if item.spread {
                     return Err(error(
-                        "Cannot use empty array entries in keyed array assignment",
+                        "Spread operator is not supported in assignments",
                         item.value.span,
                     ));
                 }
-                pattern.push(DestructureItem {
-                    key: None,
-                    target: None,
-                    by_ref: false,
-                });
-                continue;
-            }
-            if item.spread {
-                return Err(error(
-                    "Spread operator is not supported in assignments",
-                    item.value.span,
-                ));
-            }
-            if item.key.is_some() != keyed {
-                return Err(error(
-                    "Cannot mix keyed and unkeyed array entries in assignments",
-                    item.value.span,
-                ));
-            }
-            let mixed = match (&item.value.kind, syntax) {
-                (ExprKind::ArrayLiteral(_), DestructureSyntax::List) => {
-                    !self.long_arrays.contains(&item.value.id)
+                if item.key.is_some() != keyed {
+                    return Err(error(
+                        "Cannot mix keyed and unkeyed array entries in assignments",
+                        item.value.span,
+                    ));
                 }
-                (ExprKind::Destructure(_, inner), _) => *inner != syntax,
-                _ => false,
-            };
-            if mixed {
-                return Err(error("Cannot mix [] and list()", item.value.span));
+                let mixed = match (&item.value.kind, syntax) {
+                    (ExprKind::ArrayLiteral(_), DestructureSyntax::List) => {
+                        !self.long_arrays.contains(&item.value.id)
+                    }
+                    (ExprKind::Destructure(_, inner), _) => *inner != syntax,
+                    _ => false,
+                };
+                if mixed {
+                    return Err(error("Cannot mix [] and list()", item.value.span));
+                }
+                pattern.push(DestructureItem {
+                    key: item.key,
+                    target: Some(self.as_pattern(item.value, false)?),
+                    by_ref: item.by_ref,
+                });
             }
-            pattern.push(DestructureItem {
-                key: item.key,
-                target: Some(self.as_pattern(item.value, false)?),
-                by_ref: item.by_ref,
-            });
-        }
-        if pattern.iter().all(|item| item.target.is_none()) {
-            return Err(error("Cannot use empty list", span));
-        }
-        Ok(pattern)
+            if pattern.iter().all(|item| item.target.is_none()) {
+                return Err(error("Cannot use empty list", span));
+            }
+            Ok(pattern)
+        })
     }
 
     /// Drops the error waiting on `id` being part of a destructuring

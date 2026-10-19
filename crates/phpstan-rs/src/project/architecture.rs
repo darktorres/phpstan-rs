@@ -96,107 +96,109 @@ impl<'p> Context<'p> {
     }
 
     fn matches(&mut self, selector: &Selector, fqn: &str) -> bool {
-        let fqn = self.canonical(fqn);
-        let registry = &self.project.registry;
-        let info = registry.lookup_class(&fqn).map(|(_, info)| info.clone());
-        if let Some(ns) = &selector.namespace
-            && !self.pattern(ns).matches_namespace(&fqn)
-        {
-            return false;
-        }
-        if let Some(name) = &selector.classname
-            && !self.pattern(name).matches_name(&fqn)
-        {
-            return false;
-        }
-        if let Some(parent) = &selector.extends {
-            let parent = self.canonical(parent);
-            if !self
-                .extends_chain(&fqn)
-                .iter()
-                .any(|p| p.eq_ignore_ascii_case(&parent))
+        stack::guard(|| {
+            let fqn = self.canonical(fqn);
+            let registry = &self.project.registry;
+            let info = registry.lookup_class(&fqn).map(|(_, info)| info.clone());
+            if let Some(ns) = &selector.namespace
+                && !self.pattern(ns).matches_namespace(&fqn)
             {
                 return false;
             }
-        }
-        if let Some(iface) = &selector.implements {
-            let iface = self.canonical(iface);
-            let is_interface = registry
-                .lookup_class(&iface)
-                .is_some_and(|(_, i)| i.kind() == ClassKind::Interface);
-            if fqn.eq_ignore_ascii_case(&iface)
-                || !is_interface
-                || !registry.is_subclass_of(&fqn, &iface)
+            if let Some(name) = &selector.classname
+                && !self.pattern(name).matches_name(&fqn)
             {
                 return false;
             }
-        }
-        if let Some(trait_name) = &selector.uses_trait {
-            let trait_name = self.canonical(trait_name).to_ascii_lowercase();
-            if !registry
-                .all_ancestor_names(&fqn)
-                .iter()
-                .any(|a| a.to_ascii_lowercase() == trait_name)
+            if let Some(parent) = &selector.extends {
+                let parent = self.canonical(parent);
+                if !self
+                    .extends_chain(&fqn)
+                    .iter()
+                    .any(|p| p.eq_ignore_ascii_case(&parent))
+                {
+                    return false;
+                }
+            }
+            if let Some(iface) = &selector.implements {
+                let iface = self.canonical(iface);
+                let is_interface = registry
+                    .lookup_class(&iface)
+                    .is_some_and(|(_, i)| i.kind() == ClassKind::Interface);
+                if fqn.eq_ignore_ascii_case(&iface)
+                    || !is_interface
+                    || !registry.is_subclass_of(&fqn, &iface)
+                {
+                    return false;
+                }
+            }
+            if let Some(trait_name) = &selector.uses_trait {
+                let trait_name = self.canonical(trait_name).to_ascii_lowercase();
+                if !registry
+                    .all_ancestor_names(&fqn)
+                    .iter()
+                    .any(|a| a.to_ascii_lowercase() == trait_name)
+                {
+                    return false;
+                }
+            }
+            let declared_attributes: Vec<String> = self
+                .declared
+                .get(&fqn.to_ascii_lowercase())
+                .map(|d| d.attributes.clone())
+                .unwrap_or_default();
+            let has_attribute = |name: &str| {
+                let name = name.trim_start_matches('\\');
+                declared_attributes
+                    .iter()
+                    .any(|a| a.trim_start_matches('\\').eq_ignore_ascii_case(name))
+            };
+            if let Some(attribute) = &selector.applies_attribute
+                && !has_attribute(&self.canonical(attribute))
             {
                 return false;
             }
-        }
-        let declared_attributes: Vec<String> = self
-            .declared
-            .get(&fqn.to_ascii_lowercase())
-            .map(|d| d.attributes.clone())
-            .unwrap_or_default();
-        let has_attribute = |name: &str| {
-            let name = name.trim_start_matches('\\');
-            declared_attributes
-                .iter()
-                .any(|a| a.trim_start_matches('\\').eq_ignore_ascii_case(name))
-        };
-        if let Some(attribute) = &selector.applies_attribute
-            && !has_attribute(&self.canonical(attribute))
-        {
-            return false;
-        }
-        let flags = [
-            (
-                selector.is_abstract,
-                info.as_ref()
-                    .map(|i| i.is_abstract() && i.kind() == ClassKind::Class),
-            ),
-            (selector.is_final, info.as_ref().map(|i| i.is_final())),
-            (selector.is_readonly, info.as_ref().map(|i| i.is_readonly())),
-            (
-                selector.is_interface,
-                info.as_ref().map(|i| i.kind() == ClassKind::Interface),
-            ),
-            (
-                selector.is_trait,
-                info.as_ref().map(|i| i.kind() == ClassKind::Trait),
-            ),
-            (
-                selector.is_enum,
-                info.as_ref().map(|i| i.kind() == ClassKind::Enum),
-            ),
-            (
-                selector.is_exception,
-                info.as_ref()
-                    .map(|_| registry.is_subclass_of(&fqn, "Throwable")),
-            ),
-            (selector.is_attribute, Some(has_attribute("Attribute"))),
-            (
-                selector.is_standard_class,
-                info.as_ref()
-                    .map(|i| i.kind() == ClassKind::Class && !i.is_abstract()),
-            ),
-        ];
-        for (wanted, actual) in flags {
-            if let Some(wanted) = wanted
-                && actual != Some(wanted)
-            {
-                return false;
+            let flags = [
+                (
+                    selector.is_abstract,
+                    info.as_ref()
+                        .map(|i| i.is_abstract() && i.kind() == ClassKind::Class),
+                ),
+                (selector.is_final, info.as_ref().map(|i| i.is_final())),
+                (selector.is_readonly, info.as_ref().map(|i| i.is_readonly())),
+                (
+                    selector.is_interface,
+                    info.as_ref().map(|i| i.kind() == ClassKind::Interface),
+                ),
+                (
+                    selector.is_trait,
+                    info.as_ref().map(|i| i.kind() == ClassKind::Trait),
+                ),
+                (
+                    selector.is_enum,
+                    info.as_ref().map(|i| i.kind() == ClassKind::Enum),
+                ),
+                (
+                    selector.is_exception,
+                    info.as_ref()
+                        .map(|_| registry.is_subclass_of(&fqn, "Throwable")),
+                ),
+                (selector.is_attribute, Some(has_attribute("Attribute"))),
+                (
+                    selector.is_standard_class,
+                    info.as_ref()
+                        .map(|i| i.kind() == ClassKind::Class && !i.is_abstract()),
+                ),
+            ];
+            for (wanted, actual) in flags {
+                if let Some(wanted) = wanted
+                    && actual != Some(wanted)
+                {
+                    return false;
+                }
             }
-        }
-        !selector.excluding.iter().any(|ex| self.matches(ex, &fqn))
+            !selector.excluding.iter().any(|ex| self.matches(ex, &fqn))
+        })
     }
 
     fn matches_any(&mut self, selectors: &[Selector], fqn: &str) -> bool {

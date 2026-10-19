@@ -664,613 +664,627 @@ impl<'a> Checker<'a> {
     }
 
     fn apply_narrowing_unguarded(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
-        // A preg call's truthiness narrows its `$matches` and subject.
-        self.apply_preg_result_narrowing(cond, locals, branch_true);
-        // `function_exists('foo')`'s own true branch proves `foo` is
-        // callable for the rest of that branch - a project-specific
-        // adaptation (this project's own registry, unlike real PHPStan's
-        // live reflection, can genuinely lack a symbol that still exists
-        // at runtime). Only the exact literal-string-argument shape is recognized - a
-        // computed argument never populates the guard, matching this
-        // project's usual "don't guess" leniency. The `&&` arm below
-        // already recurses into this for free (`if (function_exists('foo')
-        // && ...)`).
-        if branch_true
-            && let ExprKind::Call(callee, args) = &cond.peeled().kind
-            && let ExprKind::Name(fn_name) = &callee.peeled().kind
-            && fn_name
-                .rsplit('\\')
-                .next()
-                .unwrap_or(fn_name)
-                .eq_ignore_ascii_case("function_exists")
-            && let [guarded_arg] = args.as_slice()
-            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
-        {
-            locals
-                .guarded_functions_mut()
-                .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
-        }
-        // `class_exists('X')`'s true branch (or `interface_exists`,
-        // `trait_exists`, `enum_exists`) proves the class-like `X` declared.
-        if branch_true
-            && let ExprKind::Call(callee, args) = &cond.peeled().kind
-            && let ExprKind::Name(fn_name) = &callee.peeled().kind
-            && matches!(
-                fn_name
+        stack::guard(|| {
+            // A preg call's truthiness narrows its `$matches` and subject.
+            self.apply_preg_result_narrowing(cond, locals, branch_true);
+            // `function_exists('foo')`'s own true branch proves `foo` is
+            // callable for the rest of that branch - a project-specific
+            // adaptation (this project's own registry, unlike real PHPStan's
+            // live reflection, can genuinely lack a symbol that still exists
+            // at runtime). Only the exact literal-string-argument shape is recognized - a
+            // computed argument never populates the guard, matching this
+            // project's usual "don't guess" leniency. The `&&` arm below
+            // already recurses into this for free (`if (function_exists('foo')
+            // && ...)`).
+            if branch_true
+                && let ExprKind::Call(callee, args) = &cond.peeled().kind
+                && let ExprKind::Name(fn_name) = &callee.peeled().kind
+                && fn_name
                     .rsplit('\\')
                     .next()
                     .unwrap_or(fn_name)
-                    .to_ascii_lowercase()
-                    .as_str(),
-                "class_exists" | "interface_exists" | "trait_exists" | "enum_exists"
-            )
-            && let Some(guarded_arg) = args.first()
-            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
-        {
-            locals
-                .guarded_classes_mut()
-                .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
-        }
-        // `defined('NAME')`'s true branch proves the global constant
-        // `NAME` exists, the constant counterpart of `function_exists`.
-        if branch_true
-            && let ExprKind::Call(callee, args) = &cond.peeled().kind
-            && let ExprKind::Name(fn_name) = &callee.peeled().kind
-            && fn_name
-                .rsplit('\\')
-                .next()
-                .unwrap_or(fn_name)
-                .eq_ignore_ascii_case("defined")
-            && let [guarded_arg] = args.as_slice()
-            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
-        {
-            locals
-                .guarded_constants_mut()
-                .insert(guarded_name.trim_start_matches('\\').to_string());
-        }
-        // Real PHPStan's own `MethodExistsTypeSpecifyingExtension`/
-        // `PropertyExistsTypeSpecifyingExtension` (`Accessory\
-        // HasMethodType`/`HasPropertyType`) - a `method_exists($recv,
-        // 'name')`/`property_exists($recv, 'name')` true branch proves
-        // `$recv->name(...)`/`$recv->name` is safe for the rest of that
-        // branch, regardless of `$recv`'s own static type. Mirrors
-        // `guarded_functions`'s own design exactly, one level down (a
-        // per-receiver fact instead of a global one): only the exact
-        // (bare variable, literal string) shape is recognized.
-        if branch_true
-            && let ExprKind::Call(callee, args) = &cond.peeled().kind
-            && let ExprKind::Name(fn_name) = &callee.peeled().kind
-            && let [recv_arg, name_arg] = args.as_slice()
-            && let ExprKind::Variable(recv_name) = &recv_arg.value.peeled().kind
-            && let Some(member_name) = literal_string_value(&name_arg.value)
-        {
-            let bare = fn_name.rsplit('\\').next().unwrap_or(fn_name);
-            if bare.eq_ignore_ascii_case("method_exists") {
-                let receiver = locals.var_key(recv_name);
+                    .eq_ignore_ascii_case("function_exists")
+                && let [guarded_arg] = args.as_slice()
+                && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
+            {
                 locals
-                    .guarded_methods_mut()
-                    .insert((receiver, member_name.into_owned()));
-            } else if bare.eq_ignore_ascii_case("property_exists") {
-                let receiver = locals.var_key(recv_name);
+                    .guarded_functions_mut()
+                    .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
+            }
+            // `class_exists('X')`'s true branch (or `interface_exists`,
+            // `trait_exists`, `enum_exists`) proves the class-like `X` declared.
+            if branch_true
+                && let ExprKind::Call(callee, args) = &cond.peeled().kind
+                && let ExprKind::Name(fn_name) = &callee.peeled().kind
+                && matches!(
+                    fn_name
+                        .rsplit('\\')
+                        .next()
+                        .unwrap_or(fn_name)
+                        .to_ascii_lowercase()
+                        .as_str(),
+                    "class_exists" | "interface_exists" | "trait_exists" | "enum_exists"
+                )
+                && let Some(guarded_arg) = args.first()
+                && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
+            {
                 locals
-                    .guarded_properties_mut()
-                    .insert((receiver, member_name.into_owned()));
+                    .guarded_classes_mut()
+                    .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
             }
-        }
-        match &cond.kind {
-            // `&&` narrows the "both true" branch by composing each side
-            // in order (the right operand's own narrowing can rely on the
-            // left's, same as check_expr's short-circuit-aware handling)
-            // - the false branch would need "at least one is false, but
-            // not sure which", which isn't a narrowing this can express,
-            // so it's left alone, same conservative choice `||` mirrors
-            // for its own unrepresentable branch below.
-            ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) if branch_true => {
-                self.apply_narrowing(l, locals, true);
-                self.apply_narrowing(r, locals, true);
+            // `defined('NAME')`'s true branch proves the global constant
+            // `NAME` exists, the constant counterpart of `function_exists`.
+            if branch_true
+                && let ExprKind::Call(callee, args) = &cond.peeled().kind
+                && let ExprKind::Name(fn_name) = &callee.peeled().kind
+                && fn_name
+                    .rsplit('\\')
+                    .next()
+                    .unwrap_or(fn_name)
+                    .eq_ignore_ascii_case("defined")
+                && let [guarded_arg] = args.as_slice()
+                && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
+            {
+                locals
+                    .guarded_constants_mut()
+                    .insert(guarded_name.trim_start_matches('\\').to_string());
             }
-            ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) if !branch_true => {
-                self.apply_narrowing(l, locals, false);
-                self.apply_narrowing(r, locals, false);
-            }
-            // "At least one is true, but not sure
-            // which" isn't representable in general - but when every
-            // operand is a direct predicate-table check on the identical
-            // expression, it narrows precisely to the union of what each
-            // operand would give alone (`is_int($x) || is_string($x)`
-            // being true means `$x` is exactly `int|string`, not "give
-            // up"). `or_chain_narrowing_target` is the one doing the
-            // actual restriction-checking; this arm only acts when it
-            // succeeds.
-            ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, ..) if branch_true => {
-                if let Some((key, target_ty, repr_expr)) =
-                    self.or_chain_narrowing_target(cond, locals)
-                {
-                    let current = self.current_narrowed_type(repr_expr, key, locals);
-                    locals.insert(key, self.relation().narrow(&current, &target_ty));
+            // Real PHPStan's own `MethodExistsTypeSpecifyingExtension`/
+            // `PropertyExistsTypeSpecifyingExtension` (`Accessory\
+            // HasMethodType`/`HasPropertyType`) - a `method_exists($recv,
+            // 'name')`/`property_exists($recv, 'name')` true branch proves
+            // `$recv->name(...)`/`$recv->name` is safe for the rest of that
+            // branch, regardless of `$recv`'s own static type. Mirrors
+            // `guarded_functions`'s own design exactly, one level down (a
+            // per-receiver fact instead of a global one): only the exact
+            // (bare variable, literal string) shape is recognized.
+            if branch_true
+                && let ExprKind::Call(callee, args) = &cond.peeled().kind
+                && let ExprKind::Name(fn_name) = &callee.peeled().kind
+                && let [recv_arg, name_arg] = args.as_slice()
+                && let ExprKind::Variable(recv_name) = &recv_arg.value.peeled().kind
+                && let Some(member_name) = literal_string_value(&name_arg.value)
+            {
+                let bare = fn_name.rsplit('\\').next().unwrap_or(fn_name);
+                if bare.eq_ignore_ascii_case("method_exists") {
+                    let receiver = locals.var_key(recv_name);
+                    locals
+                        .guarded_methods_mut()
+                        .insert((receiver, member_name.into_owned()));
+                } else if bare.eq_ignore_ascii_case("property_exists") {
+                    let receiver = locals.var_key(recv_name);
+                    locals
+                        .guarded_properties_mut()
+                        .insert((receiver, member_name.into_owned()));
                 }
             }
-            // `if ((! is_int($a) && ! is_string($a)) || (!
-            // is_int($b) && ! is_string($b)) || ...) { continue; }`
-            // narrows several different variables at once through one
-            // combined condition. The `Or ... if !branch_true` arm just
-            // above already decomposes an arbitrarily-long `||` chain
-            // into independent per-leaf `apply_narrowing` calls (De
-            // Morgan on the outer `||`) - each landing here, on exactly
-            // one `&&`-of-negated-predicates leaf, one variable at a
-            // time. `&&`'s own false branch finishes the same De Morgan
-            // step one level down: `!(!is_int($v) && !is_string($v))`
-            // is `is_int($v) || is_string($v)`, which
-            // `and_chain_narrowing_target` computes by reusing
-            // `or_chain_narrowing_target` on each un-negated leaf
-            // directly (double negation), then this arm narrows exactly
-            // the way the sibling `Or ... if branch_true` arm above
-            // already does for a literal `||`. Every leaf here is
-            // independent (a different key each), so each And-term
-            // simply lands on its own call to this same arm, mutating
-            // the one shared `locals` for its own key only.
-            ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, ..) if !branch_true => {
-                if let Some((key, target_ty, repr_expr)) =
-                    self.and_chain_narrowing_target(cond, locals)
-                {
-                    let current = self.current_narrowed_type(repr_expr, key, locals);
-                    locals.insert(key, self.relation().narrow(&current, &target_ty));
+            match &cond.kind {
+                // `&&` narrows the "both true" branch by composing each side
+                // in order (the right operand's own narrowing can rely on the
+                // left's, same as check_expr's short-circuit-aware handling)
+                // - the false branch would need "at least one is false, but
+                // not sure which", which isn't a narrowing this can express,
+                // so it's left alone, same conservative choice `||` mirrors
+                // for its own unrepresentable branch below.
+                ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) if branch_true => {
+                    self.apply_narrowing(l, locals, true);
+                    self.apply_narrowing(r, locals, true);
                 }
-            }
-            ExprKind::Binary(op, l, r) => {
-                self.apply_comparison_narrowing(op, l, r, locals, branch_true);
-            }
-            ExprKind::Unary(UnaryOp::Not, inner) => {
-                self.apply_narrowing(inner, locals, !branch_true);
-            }
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                self.apply_narrowing(inner, locals, branch_true)
-            }
-            // `(bool) $x`'s own truthiness is exactly `$x`'s -
-            // PHP's cast doesn't change which values are truthy/falsy, it
-            // just makes the check explicit (a common, idiomatic style:
-            // `if (! (bool) $fp) { throw ...; }` after `fopen()`) - so
-            // this narrows precisely as if the cast weren't there at all.
-            // Any other cast (`(int)`, `(string)`, ...) genuinely changes
-            // the value and isn't narrowable this way, so it's left alone.
-            ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => {
-                self.apply_narrowing(inner, locals, branch_true);
-            }
-            // `empty($x)` is PHP's falsy check: false leaves the truthy
-            // values, true the falsy ones - for a defined variable, which
-            // `empty()` of an undefined one can't be told apart from.
-            ExprKind::Empty(operand) => {
-                let defined = is_defined_variable(operand, locals);
-                self.narrow_emptiness(operand, branch_true, defined, locals);
-            }
-            // `isset($x)`'s truthy branch means specifically "not null" -
-            // it's true for `0`, `''`, `false`, an empty array - so this
-            // narrows only `Null` away. The false branch says one operand
-            // is null or unset: with a single operand that's a defined
-            // variable, it's null.
-            ExprKind::Isset(operands) => {
-                if let [operand] = operands.as_slice()
-                    && let Some(key) = locals.key_of(operand)
-                {
-                    // The identical `isset($x)` re-checked later replays
-                    // what the first occurrence's matching branch learned
-                    // (`truthiness_discriminant_subject`), both branches.
-                    let isset = locals.intern(KeyData::Isset(key));
-                    self.replay_truthiness_discriminant_facts(isset, locals, branch_true);
+                ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) if !branch_true => {
+                    self.apply_narrowing(l, locals, false);
+                    self.apply_narrowing(r, locals, false);
                 }
-                if branch_true {
-                    for operand in operands {
-                        if let Some(key) = locals.key_of(operand) {
-                            let current = self.current_narrowed_type(operand, key, locals);
-                            locals.insert(key, current.without(&Type::null()));
-                        }
-                        self.narrow_isset_containers(operand, locals);
-                    }
-                } else if let [operand] = operands.as_slice()
-                    && is_defined_variable(operand, locals)
-                    && let Some(key) = locals.key_of(operand)
-                {
-                    let current = self.current_narrowed_type(operand, key, locals);
-                    let null = if self
-                        .relation()
-                        .is_super_type_of(&current, &Type::null())
-                        .no()
+                // "At least one is true, but not sure
+                // which" isn't representable in general - but when every
+                // operand is a direct predicate-table check on the identical
+                // expression, it narrows precisely to the union of what each
+                // operand would give alone (`is_int($x) || is_string($x)`
+                // being true means `$x` is exactly `int|string`, not "give
+                // up"). `or_chain_narrowing_target` is the one doing the
+                // actual restriction-checking; this arm only acts when it
+                // succeeds.
+                ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, ..) if branch_true => {
+                    if let Some((key, target_ty, repr_expr)) =
+                        self.or_chain_narrowing_target(cond, locals)
                     {
-                        Type::never()
-                    } else {
-                        Type::null()
-                    };
-                    locals.insert(key, null);
+                        let current = self.current_narrowed_type(repr_expr, key, locals);
+                        locals.insert(key, self.relation().narrow(&current, &target_ty));
+                    }
                 }
-            }
-            ExprKind::Call(callee, args) => {
-                // `key_of`, not a bare `ExprKind::
-                // Variable` match - without this, `is_string($arr['key'])`
-                // (or `empty($arr['key'])`) never narrowed `$arr['key']`
-                // at all, the array-index counterpart of the exact gap
-                // the `instanceof` arm below already covers for property
-                // chains (`$arg->value instanceof Variable`).
-                if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
-                    && let Some(key) = locals.key_of(&single_arg.value)
-                {
-                    // The function the call reaches: `\is_array($x)` and
-                    // `is_array($x)` in a namespace alike, but not a
-                    // namespaced function of the same name.
-                    let name = self.registry.called_function_name(name);
-                    if name == "count" && branch_true {
-                        // A bare `if (count($x))`/`while
-                        // (count($x))` truthiness check, not the `> 0`/
-                        // `>= 1` comparison form the `Binary` arm above
-                        // already handles - `count()` is never negative,
-                        // so a truthy result means exactly the same
-                        // "provably non-empty" fact. The false branch
-                        // (`count($x) === 0`) isn't narrowed here, the
-                        // same asymmetry the comparison form's own arm
-                        // already accepts (`Type::to_non_empty_array`
-                        // has no "prove empty" counterpart).
-                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
-                        locals.insert(key, current.to_non_empty_array());
-                    } else if name == "array_is_list" {
-                        // Passing proves list-ness. Failing proves the
-                        // array non-empty, as an empty array is a list.
-                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
-                        let narrowed = if branch_true {
-                            current.to_list()
+                // `if ((! is_int($a) && ! is_string($a)) || (!
+                // is_int($b) && ! is_string($b)) || ...) { continue; }`
+                // narrows several different variables at once through one
+                // combined condition. The `Or ... if !branch_true` arm just
+                // above already decomposes an arbitrarily-long `||` chain
+                // into independent per-leaf `apply_narrowing` calls (De
+                // Morgan on the outer `||`) - each landing here, on exactly
+                // one `&&`-of-negated-predicates leaf, one variable at a
+                // time. `&&`'s own false branch finishes the same De Morgan
+                // step one level down: `!(!is_int($v) && !is_string($v))`
+                // is `is_int($v) || is_string($v)`, which
+                // `and_chain_narrowing_target` computes by reusing
+                // `or_chain_narrowing_target` on each un-negated leaf
+                // directly (double negation), then this arm narrows exactly
+                // the way the sibling `Or ... if branch_true` arm above
+                // already does for a literal `||`. Every leaf here is
+                // independent (a different key each), so each And-term
+                // simply lands on its own call to this same arm, mutating
+                // the one shared `locals` for its own key only.
+                ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, ..) if !branch_true => {
+                    if let Some((key, target_ty, repr_expr)) =
+                        self.and_chain_narrowing_target(cond, locals)
+                    {
+                        let current = self.current_narrowed_type(repr_expr, key, locals);
+                        locals.insert(key, self.relation().narrow(&current, &target_ty));
+                    }
+                }
+                ExprKind::Binary(op, l, r) => {
+                    self.apply_comparison_narrowing(op, l, r, locals, branch_true);
+                }
+                ExprKind::Unary(UnaryOp::Not, inner) => {
+                    self.apply_narrowing(inner, locals, !branch_true);
+                }
+                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                    self.apply_narrowing(inner, locals, branch_true)
+                }
+                // `(bool) $x`'s own truthiness is exactly `$x`'s -
+                // PHP's cast doesn't change which values are truthy/falsy, it
+                // just makes the check explicit (a common, idiomatic style:
+                // `if (! (bool) $fp) { throw ...; }` after `fopen()`) - so
+                // this narrows precisely as if the cast weren't there at all.
+                // Any other cast (`(int)`, `(string)`, ...) genuinely changes
+                // the value and isn't narrowable this way, so it's left alone.
+                ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => {
+                    self.apply_narrowing(inner, locals, branch_true);
+                }
+                // `empty($x)` is PHP's falsy check: false leaves the truthy
+                // values, true the falsy ones - for a defined variable, which
+                // `empty()` of an undefined one can't be told apart from.
+                ExprKind::Empty(operand) => {
+                    let defined = is_defined_variable(operand, locals);
+                    self.narrow_emptiness(operand, branch_true, defined, locals);
+                }
+                // `isset($x)`'s truthy branch means specifically "not null" -
+                // it's true for `0`, `''`, `false`, an empty array - so this
+                // narrows only `Null` away. The false branch says one operand
+                // is null or unset: with a single operand that's a defined
+                // variable, it's null.
+                ExprKind::Isset(operands) => {
+                    if let [operand] = operands.as_slice()
+                        && let Some(key) = locals.key_of(operand)
+                    {
+                        // The identical `isset($x)` re-checked later replays
+                        // what the first occurrence's matching branch learned
+                        // (`truthiness_discriminant_subject`), both branches.
+                        let isset = locals.intern(KeyData::Isset(key));
+                        self.replay_truthiness_discriminant_facts(isset, locals, branch_true);
+                    }
+                    if branch_true {
+                        for operand in operands {
+                            if let Some(key) = locals.key_of(operand) {
+                                let current = self.current_narrowed_type(operand, key, locals);
+                                locals.insert(key, current.without(&Type::null()));
+                            }
+                            self.narrow_isset_containers(operand, locals);
+                        }
+                    } else if let [operand] = operands.as_slice()
+                        && is_defined_variable(operand, locals)
+                        && let Some(key) = locals.key_of(operand)
+                    {
+                        let current = self.current_narrowed_type(operand, key, locals);
+                        let null = if self
+                            .relation()
+                            .is_super_type_of(&current, &Type::null())
+                            .no()
+                        {
+                            Type::never()
                         } else {
-                            current.to_non_list()
+                            Type::null()
                         };
-                        locals.insert(key, narrowed);
-                    } else if name == "is_numeric" {
-                        // Deliberately its own arm,
-                        // not a `narrowing_type_for_predicate` table entry
-                        // - that table's single target type feeds *both*
-                        // directions through the same dispatch below,
-                        // which is sound for `is_scalar`/`is_string`/etc.
-                        // (a string is unconditionally scalar/a-string
-                        // either way) but not for `is_numeric`, where a
-                        // string only *sometimes* qualifies: excluding a
-                        // shared "int|float|string" target on the false
-                        // branch would wrongly drop `String` entirely,
-                        // even though a genuinely non-numeric string
-                        // (`"hello"`) is exactly the ordinary case that
-                        // makes `!is_numeric` true. The two directions
-                        // need different exclusion sets instead.
-                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
-                        let narrowed = if branch_true {
-                            // Bool/True/False/Null can never satisfy
-                            // is_numeric - unconditionally safe to drop.
-                            // A kept String (bare, or inside the
-                            // resulting Union) is upgraded to
-                            // numeric-string, matching real PHPStan:
-                            // `string $x` under is_numeric($x) narrows
-                            // to plain numeric-string, `mixed $x`
-                            // narrows to int|float|numeric-string.
-                            let excluded = [
-                                Type::bool(),
-                                Type::bool_literal(true),
-                                Type::bool_literal(false),
-                                Type::null(),
-                            ]
-                            .into_iter()
-                            .fold(current.into_owned(), |acc, excluded| {
-                                self.exclude(&acc, &excluded)
-                            });
-                            excluded.with_string_accessory(AccessoryKind::NumericString)
-                        } else {
-                            // Int/Float are unconditionally numeric, so
-                            // failing is_numeric proves the value wasn't
-                            // one; a string that isn't numeric isn't a
-                            // decimal int either.
-                            [Type::int(), Type::float()]
+                        locals.insert(key, null);
+                    }
+                }
+                ExprKind::Call(callee, args) => {
+                    // `key_of`, not a bare `ExprKind::
+                    // Variable` match - without this, `is_string($arr['key'])`
+                    // (or `empty($arr['key'])`) never narrowed `$arr['key']`
+                    // at all, the array-index counterpart of the exact gap
+                    // the `instanceof` arm below already covers for property
+                    // chains (`$arg->value instanceof Variable`).
+                    if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
+                        && let Some(key) = locals.key_of(&single_arg.value)
+                    {
+                        // The function the call reaches: `\is_array($x)` and
+                        // `is_array($x)` in a namespace alike, but not a
+                        // namespaced function of the same name.
+                        let name = self.registry.called_function_name(name);
+                        if name == "count" && branch_true {
+                            // A bare `if (count($x))`/`while
+                            // (count($x))` truthiness check, not the `> 0`/
+                            // `>= 1` comparison form the `Binary` arm above
+                            // already handles - `count()` is never negative,
+                            // so a truthy result means exactly the same
+                            // "provably non-empty" fact. The false branch
+                            // (`count($x) === 0`) isn't narrowed here, the
+                            // same asymmetry the comparison form's own arm
+                            // already accepts (`Type::to_non_empty_array`
+                            // has no "prove empty" counterpart).
+                            let current =
+                                self.current_narrowed_type(&single_arg.value, key, locals);
+                            locals.insert(key, current.to_non_empty_array());
+                        } else if name == "array_is_list" {
+                            // Passing proves list-ness. Failing proves the
+                            // array non-empty, as an empty array is a list.
+                            let current =
+                                self.current_narrowed_type(&single_arg.value, key, locals);
+                            let narrowed = if branch_true {
+                                current.to_list()
+                            } else {
+                                current.to_non_list()
+                            };
+                            locals.insert(key, narrowed);
+                        } else if name == "is_numeric" {
+                            // Deliberately its own arm,
+                            // not a `narrowing_type_for_predicate` table entry
+                            // - that table's single target type feeds *both*
+                            // directions through the same dispatch below,
+                            // which is sound for `is_scalar`/`is_string`/etc.
+                            // (a string is unconditionally scalar/a-string
+                            // either way) but not for `is_numeric`, where a
+                            // string only *sometimes* qualifies: excluding a
+                            // shared "int|float|string" target on the false
+                            // branch would wrongly drop `String` entirely,
+                            // even though a genuinely non-numeric string
+                            // (`"hello"`) is exactly the ordinary case that
+                            // makes `!is_numeric` true. The two directions
+                            // need different exclusion sets instead.
+                            let current =
+                                self.current_narrowed_type(&single_arg.value, key, locals);
+                            let narrowed = if branch_true {
+                                // Bool/True/False/Null can never satisfy
+                                // is_numeric - unconditionally safe to drop.
+                                // A kept String (bare, or inside the
+                                // resulting Union) is upgraded to
+                                // numeric-string, matching real PHPStan:
+                                // `string $x` under is_numeric($x) narrows
+                                // to plain numeric-string, `mixed $x`
+                                // narrows to int|float|numeric-string.
+                                let excluded = [
+                                    Type::bool(),
+                                    Type::bool_literal(true),
+                                    Type::bool_literal(false),
+                                    Type::null(),
+                                ]
                                 .into_iter()
                                 .fold(current.into_owned(), |acc, excluded| {
                                     self.exclude(&acc, &excluded)
-                                })
-                                .with_string_accessory(AccessoryKind::NonDecimalIntegerString)
-                        };
-                        locals.insert(key, narrowed);
-                    } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
-                        let current = self.current_narrowed_type(&single_arg.value, key, locals);
-                        let narrowed = if branch_true {
-                            self.relation().narrow(&current, &target_ty)
-                        } else {
-                            self.exclude(&current, &target_ty)
-                        };
-                        locals.insert(key, narrowed);
-                    } else if let ExprKind::Name(raw) = &callee.kind {
-                        self.apply_function_conditional_asserts(raw, args, locals, branch_true);
-                    }
-                } else if let ExprKind::Name(name) = &callee.kind
+                                });
+                                excluded.with_string_accessory(AccessoryKind::NumericString)
+                            } else {
+                                // Int/Float are unconditionally numeric, so
+                                // failing is_numeric proves the value wasn't
+                                // one; a string that isn't numeric isn't a
+                                // decimal int either.
+                                [Type::int(), Type::float()]
+                                    .into_iter()
+                                    .fold(current.into_owned(), |acc, excluded| {
+                                        self.exclude(&acc, &excluded)
+                                    })
+                                    .with_string_accessory(AccessoryKind::NonDecimalIntegerString)
+                            };
+                            locals.insert(key, narrowed);
+                        } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
+                            let current =
+                                self.current_narrowed_type(&single_arg.value, key, locals);
+                            let narrowed = if branch_true {
+                                self.relation().narrow(&current, &target_ty)
+                            } else {
+                                self.exclude(&current, &target_ty)
+                            };
+                            locals.insert(key, narrowed);
+                        } else if let ExprKind::Name(raw) = &callee.kind {
+                            self.apply_function_conditional_asserts(raw, args, locals, branch_true);
+                        }
+                    } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "in_array"
                     && let [needle, haystack, strict] = args.as_slice()
                     // Only the strict form - a loose comparison's type
                     // juggling makes the real match set wider than the
                     // haystack's own values.
                     && matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(true)))
-                {
-                    self.narrow_strict_membership(
-                        &needle.value,
-                        &haystack.value,
-                        branch_true,
-                        locals,
-                    );
-                } else if let ExprKind::Name(name) = &callee.kind
-                    && name.trim_start_matches('\\') == "in_array"
-                    && let [needle, haystack, rest @ ..] = args.as_slice()
-                    && !rest.iter().any(|strict| {
-                        !matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(false)))
-                    })
-                {
-                    self.narrow_loose_membership(
-                        &needle.value,
-                        &haystack.value,
-                        branch_true,
-                        locals,
-                    );
-                } else if let ExprKind::Name(name) = &callee.kind
-                    && name.trim_start_matches('\\') == "array_key_exists"
-                    && let [key_arg, arr_arg] = args.as_slice()
-                {
-                    self.narrow_key_presence(&key_arg.value, &arr_arg.value, branch_true, locals);
-                } else if let ExprKind::Name(name) = &callee.kind
-                    && matches!(
-                        name.trim_start_matches('\\'),
-                        "str_contains" | "str_starts_with" | "str_ends_with"
-                    )
-                    && branch_true
-                    && let [haystack, needle] = args.as_slice()
-                    && let Some(key) = locals.key_of(&haystack.value)
-                {
-                    // Real PHPStan's own
-                    // `StrContainingTypeSpecifyingExtension` - a haystack
-                    // that provably contains/starts/ends with a non-empty
-                    // literal needle can't itself be empty. Only fires for
-                    // a needle this checker can prove is a non-empty
-                    // string literal (matching real PHPStan's own
-                    // `isNonEmptyString()` gate) - a variable/computed
-                    // needle proves nothing. Only the true branch is
-                    // narrowable (mirrors `isFunctionSupported`'s own
-                    // `$context->true()` restriction) - failing any of
-                    // these three proves nothing about the haystack's own
-                    // emptiness. `strpos`/`stripos`/`fnmatch`/`mb_*`
-                    // variants (also in real PHPStan's own table) are
-                    // deliberately left out - their `int|false` (or
-                    // `false`-on-no-match) return makes a bare truthy
-                    // `if (strpos(...))` a real, separate PHP footgun
-                    // (position `0` is falsy despite being a match) this
-                    // checker doesn't otherwise model, unlike these three
-                    // genuinely bool-returning functions.
-                    let needle_ty = self.infer_expr(&needle.value, locals);
-                    if let Some(needle_lit) = needle_ty.string_literal_value()
-                        && !needle_lit.is_empty()
                     {
-                        let kind = if needle_lit == "0" {
-                            AccessoryKind::NonEmptyString
-                        } else {
-                            AccessoryKind::NonFalsyString
-                        };
-                        let current = self.current_narrowed_type(&haystack.value, key, locals);
-                        locals.insert(key, current.with_string_accessory(kind));
-                    }
-                } else if let ExprKind::Name(name) = &callee.kind
-                    && matches!(name.trim_start_matches('\\'), "is_a")
-                    && let [obj_arg, class_arg, ..] = args.as_slice()
-                    && let Some(key) = locals.key_of(&obj_arg.value)
-                {
-                    // `is_a($x, SomeClass::class)`/`is_a($x, 'SomeClass')`
-                    // is semantically `$x instanceof SomeClass` with its
-                    // target spelled as a runtime value instead of native
-                    // syntax - reuses the identical `Instanceof` arm's own
-                    // narrowing primitives below rather than a new
-                    // mechanism. The optional 3rd `$allow_string` argument
-                    // doesn't change narrowing at all (only whether a
-                    // `class-string` first argument is also accepted), so
-                    // it's matched away by the `..` above without being
-                    // inspected. A dynamic class-name argument (not a
-                    // literal string or `::class` constant) resolves via
-                    // `literal_string_value`'s own "give up, don't guess"
-                    // `None` the same way a dynamic `instanceof` target
-                    // does. `Foo::class` is a `ClassNameFetch`, not a
-                    // string `literal_string_value` handles.
-                    let class = match &class_arg.value.kind {
-                        ExprKind::ClassNameFetch(target) => {
-                            target.as_name().map(|name| self.resolve_name_expr(name))
+                        self.narrow_strict_membership(
+                            &needle.value,
+                            &haystack.value,
+                            branch_true,
+                            locals,
+                        );
+                    } else if let ExprKind::Name(name) = &callee.kind
+                        && name.trim_start_matches('\\') == "in_array"
+                        && let [needle, haystack, rest @ ..] = args.as_slice()
+                        && !rest.iter().any(|strict| {
+                            !matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(false)))
+                        })
+                    {
+                        self.narrow_loose_membership(
+                            &needle.value,
+                            &haystack.value,
+                            branch_true,
+                            locals,
+                        );
+                    } else if let ExprKind::Name(name) = &callee.kind
+                        && name.trim_start_matches('\\') == "array_key_exists"
+                        && let [key_arg, arr_arg] = args.as_slice()
+                    {
+                        self.narrow_key_presence(
+                            &key_arg.value,
+                            &arr_arg.value,
+                            branch_true,
+                            locals,
+                        );
+                    } else if let ExprKind::Name(name) = &callee.kind
+                        && matches!(
+                            name.trim_start_matches('\\'),
+                            "str_contains" | "str_starts_with" | "str_ends_with"
+                        )
+                        && branch_true
+                        && let [haystack, needle] = args.as_slice()
+                        && let Some(key) = locals.key_of(&haystack.value)
+                    {
+                        // Real PHPStan's own
+                        // `StrContainingTypeSpecifyingExtension` - a haystack
+                        // that provably contains/starts/ends with a non-empty
+                        // literal needle can't itself be empty. Only fires for
+                        // a needle this checker can prove is a non-empty
+                        // string literal (matching real PHPStan's own
+                        // `isNonEmptyString()` gate) - a variable/computed
+                        // needle proves nothing. Only the true branch is
+                        // narrowable (mirrors `isFunctionSupported`'s own
+                        // `$context->true()` restriction) - failing any of
+                        // these three proves nothing about the haystack's own
+                        // emptiness. `strpos`/`stripos`/`fnmatch`/`mb_*`
+                        // variants (also in real PHPStan's own table) are
+                        // deliberately left out - their `int|false` (or
+                        // `false`-on-no-match) return makes a bare truthy
+                        // `if (strpos(...))` a real, separate PHP footgun
+                        // (position `0` is falsy despite being a match) this
+                        // checker doesn't otherwise model, unlike these three
+                        // genuinely bool-returning functions.
+                        let needle_ty = self.infer_expr(&needle.value, locals);
+                        if let Some(needle_lit) = needle_ty.string_literal_value()
+                            && !needle_lit.is_empty()
+                        {
+                            let kind = if needle_lit == "0" {
+                                AccessoryKind::NonEmptyString
+                            } else {
+                                AccessoryKind::NonFalsyString
+                            };
+                            let current = self.current_narrowed_type(&haystack.value, key, locals);
+                            locals.insert(key, current.with_string_accessory(kind));
                         }
-                        _ => literal_string_value(&class_arg.value)
-                            .map(|name| self.class_type_named(&name)),
-                    };
-                    if let Some(resolved) = class {
-                        let current = self.current_narrowed_type(&obj_arg.value, key, locals);
+                    } else if let ExprKind::Name(name) = &callee.kind
+                        && matches!(name.trim_start_matches('\\'), "is_a")
+                        && let [obj_arg, class_arg, ..] = args.as_slice()
+                        && let Some(key) = locals.key_of(&obj_arg.value)
+                    {
+                        // `is_a($x, SomeClass::class)`/`is_a($x, 'SomeClass')`
+                        // is semantically `$x instanceof SomeClass` with its
+                        // target spelled as a runtime value instead of native
+                        // syntax - reuses the identical `Instanceof` arm's own
+                        // narrowing primitives below rather than a new
+                        // mechanism. The optional 3rd `$allow_string` argument
+                        // doesn't change narrowing at all (only whether a
+                        // `class-string` first argument is also accepted), so
+                        // it's matched away by the `..` above without being
+                        // inspected. A dynamic class-name argument (not a
+                        // literal string or `::class` constant) resolves via
+                        // `literal_string_value`'s own "give up, don't guess"
+                        // `None` the same way a dynamic `instanceof` target
+                        // does. `Foo::class` is a `ClassNameFetch`, not a
+                        // string `literal_string_value` handles.
+                        let class = match &class_arg.value.kind {
+                            ExprKind::ClassNameFetch(target) => {
+                                target.as_name().map(|name| self.resolve_name_expr(name))
+                            }
+                            _ => literal_string_value(&class_arg.value)
+                                .map(|name| self.class_type_named(&name)),
+                        };
+                        if let Some(resolved) = class {
+                            let current = self.current_narrowed_type(&obj_arg.value, key, locals);
+                            if branch_true {
+                                locals.insert(
+                                    key,
+                                    self.relation().narrow_to_instance(&current, &resolved),
+                                );
+                            } else {
+                                locals.insert(key, self.exclude(&current, &resolved));
+                            }
+                        }
+                    } else if let ExprKind::Name(name) = &callee.kind {
+                        self.apply_function_conditional_asserts(name, args, locals, branch_true);
+                    }
+                }
+                // `@phpstan-assert-if-true`/`-if-false` on a method's own
+                // docblock - see `FunctionReflection::assert_if_true`'s own doc
+                // comment for the full picture. `recv_class` picks a
+                // representative member out of a `Union`/`Intersection`
+                // receiver the exact same way `checker/expr.rs`'s own
+                // `MethodCall` arm already does for ordinary method-call
+                // checking - a variable typed as the union of several
+                // concrete subclasses that all inherit the identical method
+                // resolves the same `AssertInfo` any single member would.
+                // Once resolved, `apply_assert_infos`/`Relation::narrow`
+                // already narrow the receiver's own full current type
+                // generically, Union or not.
+                ExprKind::MethodCall(recv, method, args, _) => {
+                    let recv_ty = self.infer_expr(recv, locals);
+                    let class = recv_ty.first_object_class().cloned();
+                    if let Some(class) = class
+                        && let Some(sig) = self.registry.lookup_method(&class, method)
+                    {
+                        let infos = if branch_true {
+                            sig.assert_if_true()
+                        } else {
+                            sig.assert_if_false()
+                        };
+                        if !infos.is_empty() {
+                            self.apply_assert_infos(infos, sig, Some(recv), args, locals);
+                        }
+                    }
+                }
+                // Same idea as `MethodCall` just above, for a static method
+                // call - no receiver expression exists here at all, so only
+                // a `Param`-targeted assertion can ever resolve.
+                ExprKind::StaticCall(target, method, args) => {
+                    if let Some(class) = self.infer_static_target_class(target, locals)
+                        && let Some(sig) = self.registry.lookup_method(&class, method)
+                    {
+                        let infos = if branch_true {
+                            sig.assert_if_true()
+                        } else {
+                            sig.assert_if_false()
+                        };
+                        if !infos.is_empty() {
+                            self.apply_assert_infos(infos, sig, None, args, locals);
+                        }
+                    }
+                }
+                ExprKind::Instanceof(inner, target) => {
+                    // The false branch doesn't need a
+                    // "not this class" type to be representable - it only
+                    // needs to *drop* the one member just proven impossible
+                    // from an already-enumerated `Union`, exactly what
+                    // `Type::without` already does soundly elsewhere.
+                    // A dynamic target (`$x instanceof $className`) still
+                    // doesn't name a concrete class to narrow to either way.
+                    if let Some(key) = locals.key_of(inner)
+                        && let InstanceofTarget::Name(class_name) = target
+                    {
+                        let resolved = self.resolve_name_expr(class_name);
                         if branch_true {
+                            self.replay_object_discriminant_facts(key, &resolved, locals);
+                            let current = self.current_narrowed_type(inner, key, locals);
                             locals.insert(
                                 key,
                                 self.relation().narrow_to_instance(&current, &resolved),
                             );
                         } else {
+                            let current = self.current_narrowed_type(inner, key, locals);
                             locals.insert(key, self.exclude(&current, &resolved));
                         }
                     }
-                } else if let ExprKind::Name(name) = &callee.kind {
-                    self.apply_function_conditional_asserts(name, args, locals, branch_true);
                 }
-            }
-            // `@phpstan-assert-if-true`/`-if-false` on a method's own
-            // docblock - see `FunctionReflection::assert_if_true`'s own doc
-            // comment for the full picture. `recv_class` picks a
-            // representative member out of a `Union`/`Intersection`
-            // receiver the exact same way `checker/expr.rs`'s own
-            // `MethodCall` arm already does for ordinary method-call
-            // checking - a variable typed as the union of several
-            // concrete subclasses that all inherit the identical method
-            // resolves the same `AssertInfo` any single member would.
-            // Once resolved, `apply_assert_infos`/`Relation::narrow`
-            // already narrow the receiver's own full current type
-            // generically, Union or not.
-            ExprKind::MethodCall(recv, method, args, _) => {
-                let recv_ty = self.infer_expr(recv, locals);
-                let class = recv_ty.first_object_class().cloned();
-                if let Some(class) = class
-                    && let Some(sig) = self.registry.lookup_method(&class, method)
-                {
-                    let infos = if branch_true {
-                        sig.assert_if_true()
-                    } else {
-                        sig.assert_if_false()
+                // An assignment used as a boolean sub-condition (`$a &&
+                // ($x = f()) && $x->m()`, `!$a || !$x = f()`) evaluates
+                // unconditionally whenever control actually reaches it -
+                // the assigned value becomes `$x`'s real type regardless of
+                // which way the *whole* enclosing condition ultimately goes,
+                // so this must run before (and instead of) the generic
+                // bare-truthiness catch-all just below, which `narrowing_
+                // key`'s own `Assign` case would otherwise match too:
+                // without this dedicated arm, that catch-all narrowed
+                // falsiness out of the *pre*-assignment type it read via
+                // `current_narrowed_type` (a no-op for most non-falsy
+                // reassignments, silently discarding the assignment's real
+                // effect) rather than binding the assigned type at all.
+                // `check_expr`'s own `Binary(And/Or, ...)` handling re-derives
+                // each operand's narrowing through this same function (see
+                // its own doc comment) instead of reusing whatever it
+                // already computed while checking each operand for
+                // diagnostics, so a later &&/|| operand referencing the
+                // freshly-assigned variable needs the assignment replayed
+                // here too - e.g. `$r->hasMethod('__call') && ($r =
+                // $r->getMethod('__call')) && $r->isPublic()` must see that
+                // `$r` became a `ReflectionMethod` two conjuncts earlier in
+                // the very same condition, not the pre-reassignment type.
+                //
+                // The `branch_true` truthy case still needs its own extra
+                // step on top of the plain bind: `if ($position = strpos($x,
+                // "#")) { substr($x, 0, $position); }` relies on the
+                // assignment's own result being truthy to reach the `if`
+                // body at all - without also excluding falsy members from
+                // the freshly-bound type here, `$position` would keep
+                // `strpos()`'s raw `int<0, max>|false` inside the truthy
+                // branch instead of a real non-zero `int` (`substr()`'s 3rd
+                // argument expects `int|null`, not `int<0, max>|false`).
+                ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
+                    let (rhs_ty, native) = match self.assigned_values.get(&cond.span) {
+                        Some((ty, native)) => (ty.clone(), native.clone()),
+                        None => (
+                            self.infer_expr(rhs, locals),
+                            matches!(cond.kind, ExprKind::Assign(..))
+                                .then(|| self.native_expr_type(rhs, locals)),
+                        ),
                     };
-                    if !infos.is_empty() {
-                        self.apply_assert_infos(infos, sig, Some(recv), args, locals);
+                    self.bind_assignment_target(lhs, rhs_ty, locals);
+                    if let ExprKind::Variable(name) = &lhs.kind
+                        && let Some(native) = native
+                    {
+                        let key = locals.var_key(name);
+                        locals.set_native(key, native);
+                    }
+                    // The value's own subjects (`$x` in `$o = $x instanceof
+                    // Foo`), unless it reads a variable the target replaced.
+                    if !reads_assigned_variable(lhs, rhs) {
+                        self.apply_narrowing(rhs, locals, branch_true);
+                    }
+                    if let Some(key) = locals.key_of(lhs)
+                        && let Some(current) = locals.get(key).cloned()
+                    {
+                        let narrowed = if branch_true {
+                            current.without_falsy()
+                        } else {
+                            current.only_falsy(&self.relation())
+                        };
+                        locals.insert(key, narrowed);
                     }
                 }
-            }
-            // Same idea as `MethodCall` just above, for a static method
-            // call - no receiver expression exists here at all, so only
-            // a `Param`-targeted assertion can ever resolve.
-            ExprKind::StaticCall(target, method, args) => {
-                if let Some(class) = self.infer_static_target_class(target, locals)
-                    && let Some(sig) = self.registry.lookup_method(&class, method)
-                {
-                    let infos = if branch_true {
-                        sig.assert_if_true()
-                    } else {
-                        sig.assert_if_false()
-                    };
-                    if !infos.is_empty() {
-                        self.apply_assert_infos(infos, sig, None, args, locals);
-                    }
-                }
-            }
-            ExprKind::Instanceof(inner, target) => {
-                // The false branch doesn't need a
-                // "not this class" type to be representable - it only
-                // needs to *drop* the one member just proven impossible
-                // from an already-enumerated `Union`, exactly what
-                // `Type::without` already does soundly elsewhere.
-                // A dynamic target (`$x instanceof $className`) still
-                // doesn't name a concrete class to narrow to either way.
-                if let Some(key) = locals.key_of(inner)
-                    && let InstanceofTarget::Name(class_name) = target
-                {
-                    let resolved = self.resolve_name_expr(class_name);
-                    if branch_true {
-                        self.replay_object_discriminant_facts(key, &resolved, locals);
-                        let current = self.current_narrowed_type(inner, key, locals);
-                        locals.insert(key, self.relation().narrow_to_instance(&current, &resolved));
-                    } else {
-                        let current = self.current_narrowed_type(inner, key, locals);
-                        locals.insert(key, self.exclude(&current, &resolved));
-                    }
-                }
-            }
-            // An assignment used as a boolean sub-condition (`$a &&
-            // ($x = f()) && $x->m()`, `!$a || !$x = f()`) evaluates
-            // unconditionally whenever control actually reaches it -
-            // the assigned value becomes `$x`'s real type regardless of
-            // which way the *whole* enclosing condition ultimately goes,
-            // so this must run before (and instead of) the generic
-            // bare-truthiness catch-all just below, which `narrowing_
-            // key`'s own `Assign` case would otherwise match too:
-            // without this dedicated arm, that catch-all narrowed
-            // falsiness out of the *pre*-assignment type it read via
-            // `current_narrowed_type` (a no-op for most non-falsy
-            // reassignments, silently discarding the assignment's real
-            // effect) rather than binding the assigned type at all.
-            // `check_expr`'s own `Binary(And/Or, ...)` handling re-derives
-            // each operand's narrowing through this same function (see
-            // its own doc comment) instead of reusing whatever it
-            // already computed while checking each operand for
-            // diagnostics, so a later &&/|| operand referencing the
-            // freshly-assigned variable needs the assignment replayed
-            // here too - e.g. `$r->hasMethod('__call') && ($r =
-            // $r->getMethod('__call')) && $r->isPublic()` must see that
-            // `$r` became a `ReflectionMethod` two conjuncts earlier in
-            // the very same condition, not the pre-reassignment type.
-            //
-            // The `branch_true` truthy case still needs its own extra
-            // step on top of the plain bind: `if ($position = strpos($x,
-            // "#")) { substr($x, 0, $position); }` relies on the
-            // assignment's own result being truthy to reach the `if`
-            // body at all - without also excluding falsy members from
-            // the freshly-bound type here, `$position` would keep
-            // `strpos()`'s raw `int<0, max>|false` inside the truthy
-            // branch instead of a real non-zero `int` (`substr()`'s 3rd
-            // argument expects `int|null`, not `int<0, max>|false`).
-            ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-                let (rhs_ty, native) = match self.assigned_values.get(&cond.span) {
-                    Some((ty, native)) => (ty.clone(), native.clone()),
-                    None => (
-                        self.infer_expr(rhs, locals),
-                        matches!(cond.kind, ExprKind::Assign(..))
-                            .then(|| self.native_expr_type(rhs, locals)),
-                    ),
-                };
-                self.bind_assignment_target(lhs, rhs_ty, locals);
-                if let ExprKind::Variable(name) = &lhs.kind
-                    && let Some(native) = native
-                {
+                // The narrow slice of real PHPStan's `ConditionalExpressionHolder`
+                // this project builds - `$ok = $x instanceof Foo; if ($ok) {...}`
+                // (or the plain-alias form `$y = $x; if ($y) {...}`) replays
+                // the *stored* condition through this exact same recursive
+                // dispatch, correlating a *second* variable's narrowing to
+                // `name`'s own truthiness with zero new type-narrowing logic
+                // - only replay. Must run for both `branch_true` values
+                // (`if (!$ok) {...}` needs the negated replay too), unlike
+                // the bare-truthiness catch-all just below, so this can't
+                // simply be folded into that arm's own `branch_true`-gated
+                // guard. Runs *in addition to* that catch-all's own bare-
+                // variable behavior (preserved verbatim right after), not
+                // instead of it - a strict superset for a bare-`Variable`
+                // condition, never a behavior change when there's no alias
+                // to replay.
+                ExprKind::Variable(name) => {
                     let key = locals.var_key(name);
-                    locals.set_native(key, native);
+                    if let Some((_, alias)) = locals.condition_aliases().get(&key).cloned() {
+                        self.apply_narrowing(&alias, locals, branch_true);
+                    }
+                    let truthy = locals.intern(KeyData::Truthy(key));
+                    self.replay_truthiness_discriminant_facts(truthy, locals, branch_true);
+                    // A bool is truthy exactly when it's `true`, so what its
+                    // equality recorded holds too.
+                    if locals.get(key).is_some_and(|t| t.is_bool().yes()) {
+                        self.replay_truthiness_discriminant_facts(key, locals, branch_true);
+                    }
+                    if branch_true {
+                        let current = self.current_narrowed_type(cond, key, locals);
+                        locals.insert(key, current.without_falsy());
+                    }
                 }
-                // The value's own subjects (`$x` in `$o = $x instanceof
-                // Foo`), unless it reads a variable the target replaced.
-                if !reads_assigned_variable(lhs, rhs) {
-                    self.apply_narrowing(rhs, locals, branch_true);
-                }
-                if let Some(key) = locals.key_of(lhs)
-                    && let Some(current) = locals.get(key).cloned()
-                {
-                    let narrowed = if branch_true {
-                        current.without_falsy()
-                    } else {
-                        current.only_falsy(&self.relation())
-                    };
-                    locals.insert(key, narrowed);
-                }
-            }
-            // The narrow slice of real PHPStan's `ConditionalExpressionHolder`
-            // this project builds - `$ok = $x instanceof Foo; if ($ok) {...}`
-            // (or the plain-alias form `$y = $x; if ($y) {...}`) replays
-            // the *stored* condition through this exact same recursive
-            // dispatch, correlating a *second* variable's narrowing to
-            // `name`'s own truthiness with zero new type-narrowing logic
-            // - only replay. Must run for both `branch_true` values
-            // (`if (!$ok) {...}` needs the negated replay too), unlike
-            // the bare-truthiness catch-all just below, so this can't
-            // simply be folded into that arm's own `branch_true`-gated
-            // guard. Runs *in addition to* that catch-all's own bare-
-            // variable behavior (preserved verbatim right after), not
-            // instead of it - a strict superset for a bare-`Variable`
-            // condition, never a behavior change when there's no alias
-            // to replay.
-            ExprKind::Variable(name) => {
-                let key = locals.var_key(name);
-                if let Some((_, alias)) = locals.condition_aliases().get(&key).cloned() {
-                    self.apply_narrowing(&alias, locals, branch_true);
-                }
-                let truthy = locals.intern(KeyData::Truthy(key));
-                self.replay_truthiness_discriminant_facts(truthy, locals, branch_true);
-                // A bool is truthy exactly when it's `true`, so what its
-                // equality recorded holds too.
-                if locals.get(key).is_some_and(|t| t.is_bool().yes()) {
-                    self.replay_truthiness_discriminant_facts(key, locals, branch_true);
-                }
-                if branch_true {
+                // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
+                // reaching here via the `Not` arm's recursion above) - only
+                // the truthy branch is narrowable, by excluding the falsy
+                // members this project can represent (`Null`/`False`); the
+                // falsy branch isn't safely narrowable to anything more
+                // specific than the current type.
+                _ if branch_true && locals.key_of(cond).is_some() => {
+                    let key = locals.key_of(cond).expect("checked by guard above");
                     let current = self.current_narrowed_type(cond, key, locals);
                     locals.insert(key, current.without_falsy());
                 }
+                _ => {}
             }
-            // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
-            // reaching here via the `Not` arm's recursion above) - only
-            // the truthy branch is narrowable, by excluding the falsy
-            // members this project can represent (`Null`/`False`); the
-            // falsy branch isn't safely narrowable to anything more
-            // specific than the current type.
-            _ if branch_true && locals.key_of(cond).is_some() => {
-                let key = locals.key_of(cond).expect("checked by guard above");
-                let current = self.current_narrowed_type(cond, key, locals);
-                locals.insert(key, current.without_falsy());
-            }
-            _ => {}
-        }
+        })
     }
 
     /// The store half of the condition-alias mechanism (see `apply_

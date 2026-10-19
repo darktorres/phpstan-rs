@@ -4414,82 +4414,88 @@ impl<'a> Checker<'a> {
     /// `null` skipped the rest of it, so that `null` isn't this link's.
     /// Anything else's type is its inferred one.
     pub(crate) fn chain_link_type(&self, e: &Expr, locals: &Locals) -> Type {
-        if !matches!(
-            e.kind,
-            ExprKind::MethodCall(..)
-                | ExprKind::PropertyAccess(..)
-                | ExprKind::Index(_, Some(_))
-                | ExprKind::Grouping(_)
-        ) {
-            return self.infer_expr(e, locals);
-        }
-        self.cached(e, locals, InferQuestion::ChainLink, || {
-            self.chain_link_type_uncached(e, locals)
+        stack::guard(|| {
+            if !matches!(
+                e.kind,
+                ExprKind::MethodCall(..)
+                    | ExprKind::PropertyAccess(..)
+                    | ExprKind::Index(_, Some(_))
+                    | ExprKind::Grouping(_)
+            ) {
+                return self.infer_expr(e, locals);
+            }
+            self.cached(e, locals, InferQuestion::ChainLink, || {
+                self.chain_link_type_uncached(e, locals)
+            })
         })
     }
 
     fn chain_link_type_uncached(&self, e: &Expr, locals: &Locals) -> Type {
-        match &e.kind {
-            ExprKind::MethodCall(recv, method, args, _) => {
-                // What the method is looked up on is the receiver's object
-                // part; a `null` one is reported where it's checked.
-                let recv_ty = self.chain_link_type(recv, locals).without(&Type::null());
-                self.method_call_return_type(recv, &recv_ty, method, args, locals)
-            }
-            ExprKind::PropertyAccess(base, prop, _) => {
-                if locals.may_have_member_narrowing()
-                    && let Some(base_key) = locals.find_key(base)
-                    && let Some(narrowed) = locals
-                        .find(&KeyData::Prop {
-                            base: base_key,
-                            prop: prop.name.clone(),
-                        })
-                        .and_then(|key| locals.get(key))
-                {
-                    return narrowed.clone();
+        stack::guard(|| {
+            match &e.kind {
+                ExprKind::MethodCall(recv, method, args, _) => {
+                    // What the method is looked up on is the receiver's object
+                    // part; a `null` one is reported where it's checked.
+                    let recv_ty = self.chain_link_type(recv, locals).without(&Type::null());
+                    self.method_call_return_type(recv, &recv_ty, method, args, locals)
                 }
-                let base_ty = self.chain_link_type(base, locals).without(&Type::null());
-                // See `property_access_type`'s doc comment - shared
-                // with `check_expr`'s identical arm.
-                self.property_access_type(&base_ty, prop)
-            }
-            // A general array's element is taken as present; a key the
-            // type says may be missing reads `V|null` (`offset_read_type`).
-            ExprKind::Index(base, Some(idx)) => {
-                // The narrowed key first: `apply_narrowing` writes a
-                // narrowed type under `key_of`'s `"base[key]"`
-                // (e.g. after `is_string($info['code'])`).
-                if locals.may_have_member_narrowing()
-                    && let Some(key) = locals.find_key(e)
-                    && let Some(narrowed) = locals.get(key)
-                {
-                    return narrowed.clone();
+                ExprKind::PropertyAccess(base, prop, _) => {
+                    if locals.may_have_member_narrowing()
+                        && let Some(base_key) = locals.find_key(base)
+                        && let Some(narrowed) = locals
+                            .find(&KeyData::Prop {
+                                base: base_key,
+                                prop: prop.name.clone(),
+                            })
+                            .and_then(|key| locals.get(key))
+                    {
+                        return narrowed.clone();
+                    }
+                    let base_ty = self.chain_link_type(base, locals).without(&Type::null());
+                    // See `property_access_type`'s doc comment - shared
+                    // with `check_expr`'s identical arm.
+                    self.property_access_type(&base_ty, prop)
                 }
-                let key_ty = match crate::checker::literal_shape_key(idx) {
-                    Some(key) => key.to_type(),
-                    None => self.infer_expr(idx, locals),
-                };
-                self.offset_read_type(&self.chain_link_type(base, locals), &key_ty)
+                // A general array's element is taken as present; a key the
+                // type says may be missing reads `V|null` (`offset_read_type`).
+                ExprKind::Index(base, Some(idx)) => {
+                    // The narrowed key first: `apply_narrowing` writes a
+                    // narrowed type under `key_of`'s `"base[key]"`
+                    // (e.g. after `is_string($info['code'])`).
+                    if locals.may_have_member_narrowing()
+                        && let Some(key) = locals.find_key(e)
+                        && let Some(narrowed) = locals.get(key)
+                    {
+                        return narrowed.clone();
+                    }
+                    let key_ty = match crate::checker::literal_shape_key(idx) {
+                        Some(key) => key.to_type(),
+                        None => self.infer_expr(idx, locals),
+                    };
+                    self.offset_read_type(&self.chain_link_type(base, locals), &key_ty)
+                }
+                // Parentheses don't end a chain.
+                ExprKind::Grouping(inner) => self.chain_link_type(inner, locals),
+                _ => self.infer_expr(e, locals),
             }
-            // Parentheses don't end a chain.
-            ExprKind::Grouping(inner) => self.chain_link_type(inner, locals),
-            _ => self.infer_expr(e, locals),
-        }
+        })
     }
 
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
-        // Inferring is `&self`, so nothing moves under one call: an
-        // inference asked for outside an expression check remembers what it
-        // finds of the operands for as long as it runs, as one inside does,
-        // and not each level of a nested expression infers them again.
-        let outermost = self.open_infer_scope();
-        let ty = self.cached(e, locals, InferQuestion::Type, || {
-            self.infer_expr_unguarded(e, locals)
-        });
-        if outermost {
-            self.close_infer_scope();
-        }
-        ty
+        stack::guard(|| {
+            // Inferring is `&self`, so nothing moves under one call: an
+            // inference asked for outside an expression check remembers what it
+            // finds of the operands for as long as it runs, as one inside does,
+            // and not each level of a nested expression infers them again.
+            let outermost = self.open_infer_scope();
+            let ty = self.cached(e, locals, InferQuestion::Type, || {
+                self.infer_expr_unguarded(e, locals)
+            });
+            if outermost {
+                self.close_infer_scope();
+            }
+            ty
+        })
     }
 
     /// Starts remembering inferred types, unless that is going on already;
@@ -4541,459 +4547,481 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_expr_unguarded(&self, e: &Expr, locals: &Locals) -> Type {
-        match &e.kind {
-            ExprKind::Literal(lit) => match lit {
-                Literal::Int(n) => Type::int_literal(*n),
-                Literal::Float(f) => Type::float_literal(*f),
-                Literal::String(s) => Type::string_literal_ref(s),
-                Literal::Bool(true) => Type::bool_literal(true),
-                Literal::Bool(false) => Type::bool_literal(false),
-                Literal::Null => Type::null(),
-            },
-            ExprKind::Variable(name) => locals
-                .get_var(name)
-                .cloned()
-                .unwrap_or_else(|| unassigned_variable_type(name)),
-            ExprKind::Grouping(inner)
-            | ExprKind::ErrorSuppress(inner)
-            | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
-            // First-class-callable syntax (`strlen(...)`, `$obj->
-            // method(...)`) produces a real `Closure` instance at runtime
-            // - infer the same `Object("Closure", ...)` the native
-            // `Closure` type hint resolves to (rather than the broader
-            // `callable`, which `callable`-hinted parameters accept
-            // via `accepts`'s separate leniency), so a strictly
-            // `Closure`-typed parameter correctly accepts it. A closure/
-            // arrow-fn literal additionally carries its own signature
-            // (`closure_literal_type`).
-            ExprKind::FirstClassCallable(inner) => self.first_class_callable_type(inner, locals),
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr {
-                    params,
-                    return_type,
-                    ..
-                } = &**closure;
-                let inferred = self.closure_syntactic_return_type(closure, locals, None);
-                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
-            }
-            ExprKind::ArrowFn(arrow) => {
-                let syntax::ast::ArrowFnExpr {
-                    params,
-                    return_type,
-                    body,
-                    is_generator,
-                    ..
-                } = &**arrow;
-                let inferred =
-                    self.arrow_fn_inferred_return(params, body, *is_generator, locals, None);
-                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
-            }
-            ExprKind::Match { subject, arms } => {
-                let default = match_default(arms);
-                // Same "don't let an unknown branch compose into a
-                // partial Union that looks more precise than it is" rule
-                // Ternary applies, generalized to N arms plus an optional
-                // default - and the same per-arm narrowing `check_expr`'s
-                // Match handling applies, so a `default` arm returning
-                // the match's subject infers its narrowed type rather
-                // than the subject's unnarrowed original type.
-                let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
-                let mut accumulated = locals.clone();
-                let mut result_types: Vec<Type> = Vec::new();
-                for (conds, result) in arms.iter().filter_map(MatchArm::conditioned) {
-                    let arm_locals =
-                        self.narrow_match_arm_conditions(subject, conds, &accumulated, match_true);
-                    result_types.push(self.infer_expr(result, &arm_locals));
-                    if let [only_cond] = conds.as_slice() {
-                        if match_true {
-                            self.apply_narrowing(only_cond, &mut accumulated, false);
-                        } else {
-                            self.apply_equality_narrowing(
-                                subject,
-                                only_cond,
-                                &mut accumulated,
-                                false,
-                            );
-                        }
-                    }
-                }
-                if let Some(d) = default {
-                    result_types.push(self.infer_expr(d, &accumulated));
-                }
-                // See `check_expr`'s identical arm's doc comment for
-                // why this must be a `Type::union` reduction, not a raw
-                // dedup-then-union construction.
-                result_types
-                    .into_iter()
-                    .union_all_with(&self.relation())
-                    .unwrap_or(Type::never())
-            }
-            // A throw expression never actually produces a value - Never
-            // is exactly the right type for it, the same way it's used for
-            // a function that always throws or exits.
-            ExprKind::Throw(_) => Type::never(),
-            ExprKind::NewAnonymousClass(class) => anonymous_class_type(class),
-            ExprKind::ShellExec(_) => self.shell_exec_type(),
-            ExprKind::Print(_) => Type::int_literal(1),
-            ExprKind::Isset(_) | ExprKind::Empty(_) => Type::bool(),
-            // `true` or `false` when the subject's type decides it.
-            ExprKind::Instanceof(inner, target) => {
-                let subject = self.infer_expr(inner, locals);
-                match self.instanceof_outcome(&subject, target, locals) {
-                    Some((always, _)) => Type::bool_literal(always),
-                    None => Type::bool(),
-                }
-            }
-            ExprKind::Exit(..) => Type::never(),
-            ExprKind::Eval(_) | ExprKind::Include(..) => Type::mixed(),
-            ExprKind::Cast(cast, inner) => {
-                let inner_ty = self.infer_expr(inner, locals);
-                self.cast_type(cast.kind(), &inner_ty)
-            }
-            ExprKind::Unary(UnaryOp::Not, _) => Type::bool(),
-            // Real PHP's unary minus/plus convert a numeric string
-            // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) -
-            // the same implicit-numeric-coercion rule arithmetic
-            // operators apply generally.
-            ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
-                let inner_ty = self.infer_expr(inner, locals);
-                if inner_ty.is_string().yes() {
-                    Type::int()
-                } else if *op == UnaryOp::Neg {
-                    inner_ty.negate()
-                } else {
-                    inner_ty
-                }
-            }
-            ExprKind::Unary(UnaryOp::BitNot, inner) => {
-                let inner_ty = self.infer_expr(inner, locals);
-                self.bitwise_not_type(&inner_ty)
-            }
-            ExprKind::Unary(UnaryOp::PreInc, inner) => {
-                self.infer_expr(inner, locals).increment_type()
-            }
-            ExprKind::Unary(UnaryOp::PreDec, inner) => {
-                self.infer_expr(inner, locals).decrement_type()
-            }
-            ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
-            ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),
-            ExprKind::Assign(_, rhs) | ExprKind::AssignRef(_, rhs) => self.infer_expr(rhs, locals),
-            // `self`/`parent`/`static` aren't lexed as keywords (see the
-            // parser: they're indistinguishable from any other identifier),
-            // so a literal `ExprKind::Name("self")` has to be special-cased
-            // here rather than showing up as an Object of that name.
-            ExprKind::New(class_expr, args) => match &class_expr.kind {
-                ExprKind::Name(name) => match name.written.as_ref() {
-                    "self" | "parent" | "static" => {
-                        let raw = match name.written.as_ref() {
-                            "self" => Type::self_ref(Vec::new()),
-                            "parent" => Type::parent_ref(),
-                            _ => Type::static_ref(Vec::new()),
-                        };
-                        match &self.current_class {
-                            Some(c) => self.resolve_pseudo(&raw, c),
-                            None => raw,
-                        }
-                    }
-                    // `new ReflectionClass($view)`-shaped constructor-
-                    // argument-driven class-level generic inference - the
-                    // same `Relation::infer_template_bindings`/`TemplateBindings`
-                    // primitive `infer_call_return_type` uses for
-                    // ordinary call-site inference, just binding against
-                    // a constructor's params instead of a function's.
-                    // Rebind to the registry's canonical-case spelling
-                    // first (mirroring `check_expr`'s identical fix)
-                    // since `lookup_method`'s ancestor walk needs exact
-                    // case.
-                    _ => {
-                        let canonical = self.resolve_class_name(name);
-                        let templates = self
-                            .registry
-                            .classes
-                            .get(canonical.as_str())
-                            .map(|info| info.templates())
-                            .unwrap_or(&[]);
-                        if templates.is_empty() {
-                            Type::object(canonical.into(), Vec::new())
-                        } else {
-                            let mut bindings: TemplateBindings = TemplateBindings::default();
-                            if let Some(sig) =
-                                self.registry.lookup_method(&canonical, "__construct")
-                            {
-                                let resolved_args = resolve_call_args(args, sig.params());
-                                for (param, slot) in sig.params().iter().zip(resolved_args.iter()) {
-                                    let Some(arg) = slot else { continue };
-                                    let arg_ty = self.infer_expr(arg, locals);
-                                    // A bare string literal naming a
-                                    // real, registered class binds a
-                                    // `class-string<T>` slot exactly like
-                                    // an explicit `Foo::class` would,
-                                    // mirroring real PHPStan's
-                                    // `ConstantStringType::isClassString()`.
-                                    let promoted =
-                                        param.ty().promote_class_string_literals(&arg_ty, &|s| {
-                                            self.registry
-                                                .lookup_class(s)
-                                                .map(|(c, _)| c.to_string())
-                                        });
-                                    self.relation().infer_template_bindings(
-                                        param.ty(),
-                                        &promoted,
-                                        &mut bindings,
-                                    );
-                                }
-                            }
-                            // A template the constructor's arguments
-                            // never bound is left erased (trimmed off the
-                            // trailing end, same as a real bare `new Box()`
-                            // reference with fewer type arguments than
-                            // declared) rather than eagerly filled with
-                            // `Mixed`: `substitute_scoped`'s `@template
-                            // T = Default` fallback only triggers for a
-                            // name genuinely absent from the zip against
-                            // `templates`, not one explicitly bound to
-                            // `Mixed`. A template bound in the middle
-                            // with a later one still unbound has no such
-                            // "erase the tail" option (PHP's type-argument
-                            // syntax can't skip a middle position
-                            // either), so it does still fall back to
-                            // `Mixed` there.
-                            let last_bound = templates
-                                .iter()
-                                .rposition(|t| bindings.contains_key(t.name.as_str()))
-                                .map(|i| i + 1)
-                                .unwrap_or(0);
-                            let bound_args = templates[..last_bound]
-                                .iter()
-                                .map(|t| match bindings.get(t.name.as_str()) {
-                                    Some(ty) => generalize_inferred_class_template(t, ty),
-                                    None => Type::mixed(),
-                                })
-                                .collect();
-                            Type::object(canonical.into(), bound_args)
-                        }
-                    }
+        stack::guard(|| {
+            match &e.kind {
+                ExprKind::Literal(lit) => match lit {
+                    Literal::Int(n) => Type::int_literal(*n),
+                    Literal::Float(f) => Type::float_literal(*f),
+                    Literal::String(s) => Type::string_literal_ref(s),
+                    Literal::Bool(true) => Type::bool_literal(true),
+                    Literal::Bool(false) => Type::bool_literal(false),
+                    Literal::Null => Type::null(),
                 },
-                _ => Type::mixed(),
-            },
-            ExprKind::Call(callee, args) => match &callee.kind {
-                ExprKind::Name(name) => self
-                    .registry
-                    .resolve_function(name)
-                    .map(|(resolved_name, sig)| {
-                        self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
-                    })
-                    .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals)),
-                _ => self.call_fallback_return_type(callee, args, locals),
-            },
-            ExprKind::MethodCall(..)
-            | ExprKind::PropertyAccess(..)
-            | ExprKind::Index(_, Some(_)) => {
-                let link = self.chain_link_type(e, locals);
-                // A nullsafe access in the chain that meets `null` makes the
-                // whole chain `null`.
-                if postfix_chain_has_nullsafe(e) && !link.is_mixed() {
-                    self.relation().union(link, Type::null())
-                } else {
-                    link
+                ExprKind::Variable(name) => locals
+                    .get_var(name)
+                    .cloned()
+                    .unwrap_or_else(|| unassigned_variable_type(name)),
+                ExprKind::Grouping(inner)
+                | ExprKind::ErrorSuppress(inner)
+                | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
+                // First-class-callable syntax (`strlen(...)`, `$obj->
+                // method(...)`) produces a real `Closure` instance at runtime
+                // - infer the same `Object("Closure", ...)` the native
+                // `Closure` type hint resolves to (rather than the broader
+                // `callable`, which `callable`-hinted parameters accept
+                // via `accepts`'s separate leniency), so a strictly
+                // `Closure`-typed parameter correctly accepts it. A closure/
+                // arrow-fn literal additionally carries its own signature
+                // (`closure_literal_type`).
+                ExprKind::FirstClassCallable(inner) => {
+                    self.first_class_callable_type(inner, locals)
                 }
-            }
-            ExprKind::StaticCall(target, method, args) => {
-                if let Some(property) = target.parent_hook_property() {
-                    return self.parent_hook_call_type(property, method);
+                ExprKind::Closure(closure) => {
+                    let syntax::ast::ClosureExpr {
+                        params,
+                        return_type,
+                        ..
+                    } = &**closure;
+                    let inferred = self.closure_syntactic_return_type(closure, locals, None);
+                    self.closure_literal_type(params, return_type.as_deref(), inferred, None)
                 }
-                if self.collect_member_refs
-                    && let Some(class) = self.infer_static_target_class(target, locals)
-                    && let Some((owner, _)) = self.lookup_method_with_owner(&class, method)
-                {
-                    self.record_member_ref(e.span, &owner, method);
-                    // The `::cases()` escape hatch - see
-                    // `Checker::escaped_enums`'s own doc comment. `owner`
-                    // is already the registry's own canonically-declared
-                    // name (same reasoning as `check_expr`'s identical
-                    // hook).
-                    if method.eq_ignore_ascii_case("cases")
-                        && self
-                            .registry
-                            .classes
-                            .get(owner.as_ref())
-                            .is_some_and(|c| c.kind() == ClassKind::Enum)
-                    {
-                        self.record_enum_escape(&owner);
+                ExprKind::ArrowFn(arrow) => {
+                    let syntax::ast::ArrowFnExpr {
+                        params,
+                        return_type,
+                        body,
+                        is_generator,
+                        ..
+                    } = &**arrow;
+                    let inferred =
+                        self.arrow_fn_inferred_return(params, body, *is_generator, locals, None);
+                    self.closure_literal_type(params, return_type.as_deref(), inferred, None)
+                }
+                ExprKind::Match { subject, arms } => {
+                    let default = match_default(arms);
+                    // Same "don't let an unknown branch compose into a
+                    // partial Union that looks more precise than it is" rule
+                    // Ternary applies, generalized to N arms plus an optional
+                    // default - and the same per-arm narrowing `check_expr`'s
+                    // Match handling applies, so a `default` arm returning
+                    // the match's subject infers its narrowed type rather
+                    // than the subject's unnarrowed original type.
+                    let match_true =
+                        matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
+                    let mut accumulated = locals.clone();
+                    let mut result_types: Vec<Type> = Vec::new();
+                    for (conds, result) in arms.iter().filter_map(MatchArm::conditioned) {
+                        let arm_locals = self.narrow_match_arm_conditions(
+                            subject,
+                            conds,
+                            &accumulated,
+                            match_true,
+                        );
+                        result_types.push(self.infer_expr(result, &arm_locals));
+                        if let [only_cond] = conds.as_slice() {
+                            if match_true {
+                                self.apply_narrowing(only_cond, &mut accumulated, false);
+                            } else {
+                                self.apply_equality_narrowing(
+                                    subject,
+                                    only_cond,
+                                    &mut accumulated,
+                                    false,
+                                );
+                            }
+                        }
+                    }
+                    if let Some(d) = default {
+                        result_types.push(self.infer_expr(d, &accumulated));
+                    }
+                    // See `check_expr`'s identical arm's doc comment for
+                    // why this must be a `Type::union` reduction, not a raw
+                    // dedup-then-union construction.
+                    result_types
+                        .into_iter()
+                        .union_all_with(&self.relation())
+                        .unwrap_or(Type::never())
+                }
+                // A throw expression never actually produces a value - Never
+                // is exactly the right type for it, the same way it's used for
+                // a function that always throws or exits.
+                ExprKind::Throw(_) => Type::never(),
+                ExprKind::NewAnonymousClass(class) => anonymous_class_type(class),
+                ExprKind::ShellExec(_) => self.shell_exec_type(),
+                ExprKind::Print(_) => Type::int_literal(1),
+                ExprKind::Isset(_) | ExprKind::Empty(_) => Type::bool(),
+                // `true` or `false` when the subject's type decides it.
+                ExprKind::Instanceof(inner, target) => {
+                    let subject = self.infer_expr(inner, locals);
+                    match self.instanceof_outcome(&subject, target, locals) {
+                        Some((always, _)) => Type::bool_literal(always),
+                        None => Type::bool(),
                     }
                 }
-                self.infer_static_target_class(target, locals)
-                    .and_then(|class| {
-                        self.static_call_method(target, &class, method)
-                            .map(|(_, sig)| {
-                                let sig = sig.as_ref();
-                                let resolved_args = resolve_call_args(args, sig.params());
-                                let resolved =
-                                    self.infer_call_return_type(sig, &resolved_args, locals);
-                                let resolved = self
-                                    .narrow_enum_from_call(&class, method, args, resolved, locals);
-                                // The `::from()`/`::tryFrom()` literal-argument
-                                // signal - see `check_expr`'s
-                                // identical fix just above `ExprKind::
-                                // ClassConstFetch` for why this reads the
-                                // already-computed type rather than
-                                // threading a new span parameter through
-                                // `narrow_enum_from_call`.
-                                if let Some((case_class, case)) = resolved.as_enum_case() {
-                                    self.record_member_ref(e.span, case_class, case);
-                                }
-                                if let Some(ty) =
-                                    self.class_argument_return(&class, method, args, locals)
+                ExprKind::Exit(..) => Type::never(),
+                ExprKind::Eval(_) | ExprKind::Include(..) => Type::mixed(),
+                ExprKind::Cast(cast, inner) => {
+                    let inner_ty = self.infer_expr(inner, locals);
+                    self.cast_type(cast.kind(), &inner_ty)
+                }
+                ExprKind::Unary(UnaryOp::Not, _) => Type::bool(),
+                // Real PHP's unary minus/plus convert a numeric string
+                // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) -
+                // the same implicit-numeric-coercion rule arithmetic
+                // operators apply generally.
+                ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
+                    let inner_ty = self.infer_expr(inner, locals);
+                    if inner_ty.is_string().yes() {
+                        Type::int()
+                    } else if *op == UnaryOp::Neg {
+                        inner_ty.negate()
+                    } else {
+                        inner_ty
+                    }
+                }
+                ExprKind::Unary(UnaryOp::BitNot, inner) => {
+                    let inner_ty = self.infer_expr(inner, locals);
+                    self.bitwise_not_type(&inner_ty)
+                }
+                ExprKind::Unary(UnaryOp::PreInc, inner) => {
+                    self.infer_expr(inner, locals).increment_type()
+                }
+                ExprKind::Unary(UnaryOp::PreDec, inner) => {
+                    self.infer_expr(inner, locals).decrement_type()
+                }
+                ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
+                ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),
+                ExprKind::Assign(_, rhs) | ExprKind::AssignRef(_, rhs) => {
+                    self.infer_expr(rhs, locals)
+                }
+                // `self`/`parent`/`static` aren't lexed as keywords (see the
+                // parser: they're indistinguishable from any other identifier),
+                // so a literal `ExprKind::Name("self")` has to be special-cased
+                // here rather than showing up as an Object of that name.
+                ExprKind::New(class_expr, args) => match &class_expr.kind {
+                    ExprKind::Name(name) => match name.written.as_ref() {
+                        "self" | "parent" | "static" => {
+                            let raw = match name.written.as_ref() {
+                                "self" => Type::self_ref(Vec::new()),
+                                "parent" => Type::parent_ref(),
+                                _ => Type::static_ref(Vec::new()),
+                            };
+                            match &self.current_class {
+                                Some(c) => self.resolve_pseudo(&raw, c),
+                                None => raw,
+                            }
+                        }
+                        // `new ReflectionClass($view)`-shaped constructor-
+                        // argument-driven class-level generic inference - the
+                        // same `Relation::infer_template_bindings`/`TemplateBindings`
+                        // primitive `infer_call_return_type` uses for
+                        // ordinary call-site inference, just binding against
+                        // a constructor's params instead of a function's.
+                        // Rebind to the registry's canonical-case spelling
+                        // first (mirroring `check_expr`'s identical fix)
+                        // since `lookup_method`'s ancestor walk needs exact
+                        // case.
+                        _ => {
+                            let canonical = self.resolve_class_name(name);
+                            let templates = self
+                                .registry
+                                .classes
+                                .get(canonical.as_str())
+                                .map(|info| info.templates())
+                                .unwrap_or(&[]);
+                            if templates.is_empty() {
+                                Type::object(canonical.into(), Vec::new())
+                            } else {
+                                let mut bindings: TemplateBindings = TemplateBindings::default();
+                                if let Some(sig) =
+                                    self.registry.lookup_method(&canonical, "__construct")
                                 {
-                                    return ty;
+                                    let resolved_args = resolve_call_args(args, sig.params());
+                                    for (param, slot) in
+                                        sig.params().iter().zip(resolved_args.iter())
+                                    {
+                                        let Some(arg) = slot else { continue };
+                                        let arg_ty = self.infer_expr(arg, locals);
+                                        // A bare string literal naming a
+                                        // real, registered class binds a
+                                        // `class-string<T>` slot exactly like
+                                        // an explicit `Foo::class` would,
+                                        // mirroring real PHPStan's
+                                        // `ConstantStringType::isClassString()`.
+                                        let promoted = param.ty().promote_class_string_literals(
+                                            &arg_ty,
+                                            &|s| {
+                                                self.registry
+                                                    .lookup_class(s)
+                                                    .map(|(c, _)| c.to_string())
+                                            },
+                                        );
+                                        self.relation().infer_template_bindings(
+                                            param.ty(),
+                                            &promoted,
+                                            &mut bindings,
+                                        );
+                                    }
                                 }
-                                self.resolve_static_call_return(&resolved, target, &class)
-                            })
-                    })
-                    .unwrap_or(Type::mixed())
-            }
-            ExprKind::DynamicStaticCall(target, name, args) => {
-                match &self.infer_expr(name, locals).constant_strings_text()[..] {
-                    [method] => self.infer_expr(
-                        &static_call(target, method.to_string(), args, e.span),
-                        locals,
-                    ),
+                                // A template the constructor's arguments
+                                // never bound is left erased (trimmed off the
+                                // trailing end, same as a real bare `new Box()`
+                                // reference with fewer type arguments than
+                                // declared) rather than eagerly filled with
+                                // `Mixed`: `substitute_scoped`'s `@template
+                                // T = Default` fallback only triggers for a
+                                // name genuinely absent from the zip against
+                                // `templates`, not one explicitly bound to
+                                // `Mixed`. A template bound in the middle
+                                // with a later one still unbound has no such
+                                // "erase the tail" option (PHP's type-argument
+                                // syntax can't skip a middle position
+                                // either), so it does still fall back to
+                                // `Mixed` there.
+                                let last_bound = templates
+                                    .iter()
+                                    .rposition(|t| bindings.contains_key(t.name.as_str()))
+                                    .map(|i| i + 1)
+                                    .unwrap_or(0);
+                                let bound_args = templates[..last_bound]
+                                    .iter()
+                                    .map(|t| match bindings.get(t.name.as_str()) {
+                                        Some(ty) => generalize_inferred_class_template(t, ty),
+                                        None => Type::mixed(),
+                                    })
+                                    .collect();
+                                Type::object(canonical.into(), bound_args)
+                            }
+                        }
+                    },
                     _ => Type::mixed(),
-                }
-            }
-            ExprKind::DynamicClassConstFetch(target, name) => {
-                let names: Option<Vec<String>> = {
-                    let names = self.infer_expr(name, locals);
-                    let names = names.constant_strings_text();
-                    (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
-                };
-                names
-                    .into_iter()
-                    .flatten()
-                    .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
-                    .union_all_with(&self.relation())
-                    .unwrap_or(Type::mixed())
-            }
-            ExprKind::ClassNameFetch(target) => {
-                match self.infer_static_target_class(target, locals) {
-                    Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
-                    None => Type::string(),
-                }
-            }
-            ExprKind::DynamicStaticPropertyFetch(target, _) => {
-                if self.collect_member_refs {
-                    self.record_dynamic_static_member_escape(target);
-                }
-                Type::mixed()
-            }
-            ExprKind::StaticPropertyFetch(target, prop_name) => {
-                // A static property (`self::$prop`) can be narrowed the
-                // same way an instance property already is above - check
-                // for a locally-narrowed override before falling back to
-                // its own declared type.
-                if locals.may_have_member_narrowing()
-                    && let Some(class_name) = target.as_name()
-                    && let Some(narrowed) = locals
-                        .find(&locals.static_prop_data(class_name, &prop_name.name))
-                        .and_then(|key| locals.get(key))
-                {
-                    return narrowed.clone();
-                }
-                let Some(class) = self.infer_static_target_class(target, locals) else {
-                    return Type::mixed();
-                };
-                if self.collect_member_refs
-                    && let Some((owner, _)) =
-                        self.registry.lookup_property_with_owner(&class, prop_name)
-                {
-                    self.record_member_ref(e.span, &owner, prop_name);
-                }
-                self.registry
-                    .lookup_property(&class, prop_name)
-                    .map(|p| self.resolve_pseudo(p.ty(), &class))
-                    .unwrap_or(Type::mixed())
-            }
-            ExprKind::ClassConstFetch(target, member) => {
-                let Some(class) = self.infer_static_target_class(target, locals) else {
-                    return Type::mixed();
-                };
-                if self.collect_member_refs
-                    && let Some((owner, _)) = self.registry.lookup_const_with_owner(&class, member)
-                {
-                    self.record_member_ref(e.span, &owner, member);
-                }
-                self.registry
-                    .lookup_const_with_owner(&class, member)
-                    .map(|(owner, cs)| {
-                        let ty =
-                            self.settings
-                                .constants
-                                .class_constant_type(&owner, member, cs.ty());
-                        self.resolve_pseudo(&ty, &class)
-                    })
-                    .unwrap_or(Type::mixed())
-            }
-            ExprKind::Ternary(cond, then_, else_) => {
-                let mut else_locals = locals.clone();
-                self.apply_narrowing(cond, &mut else_locals, false);
-                let else_ty = self.infer_expr(else_, &else_locals);
-                match then_ {
-                    Some(t) => {
-                        let mut then_locals = locals.clone();
-                        self.apply_narrowing(cond, &mut then_locals, true);
-                        let then_ty = self.infer_expr(t, &then_locals);
-                        // See the parallel arm in `check_expr` for why
-                        // this must be `Type::union`, not a raw
-                        // a raw union.
-                        self.relation().union(then_ty, else_ty)
+                },
+                ExprKind::Call(callee, args) => match &callee.kind {
+                    ExprKind::Name(name) => self
+                        .registry
+                        .resolve_function(name)
+                        .map(|(resolved_name, sig)| {
+                            self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
+                        })
+                        .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals)),
+                    _ => self.call_fallback_return_type(callee, args, locals),
+                },
+                ExprKind::MethodCall(..)
+                | ExprKind::PropertyAccess(..)
+                | ExprKind::Index(_, Some(_)) => {
+                    let link = self.chain_link_type(e, locals);
+                    // A nullsafe access in the chain that meets `null` makes the
+                    // whole chain `null`.
+                    if postfix_chain_has_nullsafe(e) && !link.is_mixed() {
+                        self.relation().union(link, Type::null())
+                    } else {
+                        link
                     }
-                    None => Type::mixed(),
                 }
+                ExprKind::StaticCall(target, method, args) => {
+                    if let Some(property) = target.parent_hook_property() {
+                        return self.parent_hook_call_type(property, method);
+                    }
+                    if self.collect_member_refs
+                        && let Some(class) = self.infer_static_target_class(target, locals)
+                        && let Some((owner, _)) = self.lookup_method_with_owner(&class, method)
+                    {
+                        self.record_member_ref(e.span, &owner, method);
+                        // The `::cases()` escape hatch - see
+                        // `Checker::escaped_enums`'s own doc comment. `owner`
+                        // is already the registry's own canonically-declared
+                        // name (same reasoning as `check_expr`'s identical
+                        // hook).
+                        if method.eq_ignore_ascii_case("cases")
+                            && self
+                                .registry
+                                .classes
+                                .get(owner.as_ref())
+                                .is_some_and(|c| c.kind() == ClassKind::Enum)
+                        {
+                            self.record_enum_escape(&owner);
+                        }
+                    }
+                    self.infer_static_target_class(target, locals)
+                        .and_then(|class| {
+                            self.static_call_method(target, &class, method)
+                                .map(|(_, sig)| {
+                                    let sig = sig.as_ref();
+                                    let resolved_args = resolve_call_args(args, sig.params());
+                                    let resolved =
+                                        self.infer_call_return_type(sig, &resolved_args, locals);
+                                    let resolved = self.narrow_enum_from_call(
+                                        &class, method, args, resolved, locals,
+                                    );
+                                    // The `::from()`/`::tryFrom()` literal-argument
+                                    // signal - see `check_expr`'s
+                                    // identical fix just above `ExprKind::
+                                    // ClassConstFetch` for why this reads the
+                                    // already-computed type rather than
+                                    // threading a new span parameter through
+                                    // `narrow_enum_from_call`.
+                                    if let Some((case_class, case)) = resolved.as_enum_case() {
+                                        self.record_member_ref(e.span, case_class, case);
+                                    }
+                                    if let Some(ty) =
+                                        self.class_argument_return(&class, method, args, locals)
+                                    {
+                                        return ty;
+                                    }
+                                    self.resolve_static_call_return(&resolved, target, &class)
+                                })
+                        })
+                        .unwrap_or(Type::mixed())
+                }
+                ExprKind::DynamicStaticCall(target, name, args) => {
+                    match &self.infer_expr(name, locals).constant_strings_text()[..] {
+                        [method] => self.infer_expr(
+                            &static_call(target, method.to_string(), args, e.span),
+                            locals,
+                        ),
+                        _ => Type::mixed(),
+                    }
+                }
+                ExprKind::DynamicClassConstFetch(target, name) => {
+                    let names: Option<Vec<String>> = {
+                        let names = self.infer_expr(name, locals);
+                        let names = names.constant_strings_text();
+                        (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
+                    };
+                    names
+                        .into_iter()
+                        .flatten()
+                        .map(|member| {
+                            self.infer_expr(&constant_fetch(target, member, e.span), locals)
+                        })
+                        .union_all_with(&self.relation())
+                        .unwrap_or(Type::mixed())
+                }
+                ExprKind::ClassNameFetch(target) => {
+                    match self.infer_static_target_class(target, locals) {
+                        Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
+                        None => Type::string(),
+                    }
+                }
+                ExprKind::DynamicStaticPropertyFetch(target, _) => {
+                    if self.collect_member_refs {
+                        self.record_dynamic_static_member_escape(target);
+                    }
+                    Type::mixed()
+                }
+                ExprKind::StaticPropertyFetch(target, prop_name) => {
+                    // A static property (`self::$prop`) can be narrowed the
+                    // same way an instance property already is above - check
+                    // for a locally-narrowed override before falling back to
+                    // its own declared type.
+                    if locals.may_have_member_narrowing()
+                        && let Some(class_name) = target.as_name()
+                        && let Some(narrowed) = locals
+                            .find(&locals.static_prop_data(class_name, &prop_name.name))
+                            .and_then(|key| locals.get(key))
+                    {
+                        return narrowed.clone();
+                    }
+                    let Some(class) = self.infer_static_target_class(target, locals) else {
+                        return Type::mixed();
+                    };
+                    if self.collect_member_refs
+                        && let Some((owner, _)) =
+                            self.registry.lookup_property_with_owner(&class, prop_name)
+                    {
+                        self.record_member_ref(e.span, &owner, prop_name);
+                    }
+                    self.registry
+                        .lookup_property(&class, prop_name)
+                        .map(|p| self.resolve_pseudo(p.ty(), &class))
+                        .unwrap_or(Type::mixed())
+                }
+                ExprKind::ClassConstFetch(target, member) => {
+                    let Some(class) = self.infer_static_target_class(target, locals) else {
+                        return Type::mixed();
+                    };
+                    if self.collect_member_refs
+                        && let Some((owner, _)) =
+                            self.registry.lookup_const_with_owner(&class, member)
+                    {
+                        self.record_member_ref(e.span, &owner, member);
+                    }
+                    self.registry
+                        .lookup_const_with_owner(&class, member)
+                        .map(|(owner, cs)| {
+                            let ty = self.settings.constants.class_constant_type(
+                                &owner,
+                                member,
+                                cs.ty(),
+                            );
+                            self.resolve_pseudo(&ty, &class)
+                        })
+                        .unwrap_or(Type::mixed())
+                }
+                ExprKind::Ternary(cond, then_, else_) => {
+                    let mut else_locals = locals.clone();
+                    self.apply_narrowing(cond, &mut else_locals, false);
+                    let else_ty = self.infer_expr(else_, &else_locals);
+                    match then_ {
+                        Some(t) => {
+                            let mut then_locals = locals.clone();
+                            self.apply_narrowing(cond, &mut then_locals, true);
+                            let then_ty = self.infer_expr(t, &then_locals);
+                            // See the parallel arm in `check_expr` for why
+                            // this must be `Type::union`, not a raw
+                            // a raw union.
+                            self.relation().union(then_ty, else_ty)
+                        }
+                        None => Type::mixed(),
+                    }
+                }
+                ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
+                // Routed through the identical `resolve_concat_type` engine
+                // as `BinOp::Concat`, as a left-fold over each part (an
+                // interpolated string is exactly a chain of concatenations) -
+                // `check_expr`'s separate `Interpolated` arm walks each part
+                // for a different purpose (implicit `__toString()`/array-to-
+                // string checks), not reused here since it doesn't compute or
+                // return a refined type. An empty `parts` list can't occur in
+                // practice, but folds to plain `string` rather than
+                // panicking if it somehow did.
+                ExprKind::Interpolated(parts) => concat_string_parts(
+                    parts
+                        .iter()
+                        .map(|p| {
+                            self.infer_expr(p, locals)
+                                .to_string_type(self.registry)
+                                .unwrap_or(Type::string())
+                        })
+                        .collect(),
+                    self.registry,
+                ),
+                // A homogeneous array's element type applies regardless of
+                // which key is accessed; optimistically assumes the access is
+                // in bounds/present rather than widening to `V|null` for a
+                // possibly-missing element - consistent with this checker's
+                // general preference for fewer false positives over catching
+                // every possible runtime-undefined access.
+                ExprKind::Name(name) => self
+                    .global_constant_type(name)
+                    .unwrap_or_else(|| bare_name_literal_type(name)),
+                // Mirrors `check_expr`'s `ExprKind::Yield`/`YieldFrom` arms -
+                // needed here too, since `assertType()`'s testing-DSL
+                // recognition computes its "actual" type via `infer_expr`,
+                // not `check_expr`.
+                ExprKind::Yield(_, _) => self
+                    .current_declared_return_type
+                    .as_ref()
+                    .map(|t| generator_template_param(t, self.registry, "TSend"))
+                    .unwrap_or(Type::mixed()),
+                ExprKind::YieldFrom(inner) => generator_template_param(
+                    &self.infer_expr(inner, locals),
+                    self.registry,
+                    "TReturn",
+                ),
+                _ => Type::mixed(),
             }
-            ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
-            // Routed through the identical `resolve_concat_type` engine
-            // as `BinOp::Concat`, as a left-fold over each part (an
-            // interpolated string is exactly a chain of concatenations) -
-            // `check_expr`'s separate `Interpolated` arm walks each part
-            // for a different purpose (implicit `__toString()`/array-to-
-            // string checks), not reused here since it doesn't compute or
-            // return a refined type. An empty `parts` list can't occur in
-            // practice, but folds to plain `string` rather than
-            // panicking if it somehow did.
-            ExprKind::Interpolated(parts) => concat_string_parts(
-                parts
-                    .iter()
-                    .map(|p| {
-                        self.infer_expr(p, locals)
-                            .to_string_type(self.registry)
-                            .unwrap_or(Type::string())
-                    })
-                    .collect(),
-                self.registry,
-            ),
-            // A homogeneous array's element type applies regardless of
-            // which key is accessed; optimistically assumes the access is
-            // in bounds/present rather than widening to `V|null` for a
-            // possibly-missing element - consistent with this checker's
-            // general preference for fewer false positives over catching
-            // every possible runtime-undefined access.
-            ExprKind::Name(name) => self
-                .global_constant_type(name)
-                .unwrap_or_else(|| bare_name_literal_type(name)),
-            // Mirrors `check_expr`'s `ExprKind::Yield`/`YieldFrom` arms -
-            // needed here too, since `assertType()`'s testing-DSL
-            // recognition computes its "actual" type via `infer_expr`,
-            // not `check_expr`.
-            ExprKind::Yield(_, _) => self
-                .current_declared_return_type
-                .as_ref()
-                .map(|t| generator_template_param(t, self.registry, "TSend"))
-                .unwrap_or(Type::mixed()),
-            ExprKind::YieldFrom(inner) => {
-                generator_template_param(&self.infer_expr(inner, locals), self.registry, "TReturn")
-            }
-            _ => Type::mixed(),
-        }
+        })
     }
 
     /// A closure/arrow-fn literal's own declared `: T` return hint isn't
@@ -5218,22 +5246,26 @@ impl<'a> Checker<'a> {
     }
 
     fn collect_member_ref_defaults_function(&mut self, f: &FunctionDecl) {
-        self.collect_member_ref_defaults_params(&f.params);
-        for s in f.body_stmts() {
-            self.collect_member_ref_defaults_stmt(s);
-        }
+        stack::guard(|| {
+            self.collect_member_ref_defaults_params(&f.params);
+            for s in f.body_stmts() {
+                self.collect_member_ref_defaults_stmt(s);
+            }
+        })
     }
 
     /// Every declaration in `stmt`'s body, nested ones included.
     fn collect_member_ref_defaults_stmt(&mut self, stmt: &Stmt) {
-        syntax::visit::any_stmt_in_body(stmt, |s| {
-            self.collect_member_ref_defaults_decl(s);
-            false
-        });
+        stack::guard(|| {
+            syntax::visit::any_stmt_in_body(stmt, |s| {
+                self.collect_member_ref_defaults_decl(s);
+                false
+            });
+        })
     }
 
     fn collect_member_ref_defaults_decl(&mut self, stmt: &Stmt) {
-        match &stmt.kind {
+        stack::guard(|| match &stmt.kind {
             StmtKind::FunctionDecl(f) => self.collect_member_ref_defaults_function(f),
             StmtKind::ClassDecl(c) => {
                 for p in &c.def.properties {
@@ -5249,7 +5281,7 @@ impl<'a> Checker<'a> {
                 }
             }
             _ => {}
-        }
+        })
     }
 
     /// `??`'s result is usually just `r`'s type (`ExprKind::Binary(
@@ -5267,260 +5299,264 @@ impl<'a> Checker<'a> {
     /// the literal empty `[]` shape from the fallback alone, making every
     /// later `$details['key']` read look like a typo.
     fn widen_coalesce_result(&self, l: &Expr, r_ty: Type, locals: &Locals) -> Type {
-        // `$x ?? null` is a real, if unusual, no-op: if `$x` is null the
-        // result is null either way, and otherwise the result is exactly
-        // `$x` itself - so its type is exactly `$x`'s own type,
-        // unnarrowed, not the literal `r_ty` (`null`) this function
-        // otherwise trusts as the fallback's type. Otherwise an unshaped-
-        // array element read (`$post['selection'] ?? null`, `$post:
-        // array` with no shape, so `Mixed`) would collapse all the way
-        // down to bare `null`, when code checking the original
-        // expression with `is_array($selection_raw)` immediately after
-        // should still be checking a real `Mixed`.
-        if r_ty.is_null().yes() {
-            let l_ty = self.infer_expr(l, locals);
-            // The no-op reasoning above only holds when `l` is a bare
-            // variable - `locals`'s tracked type for one already
-            // reflects every way it can be null (a prior narrowing, an
-            // untyped param, ...), so trusting it completely is correct.
-            // An array/property access (or any other expression `??`
-            // exists specifically because this checker can't otherwise
-            // prove is always set) is different: `infer_expr` for
-            // `$group[$index]` on an `array<int, string>`-typed `$group`
-            // returns plain `string`, with no "the key might not exist"
-            // notion folded in - the exact real-PHP case `?? null`
-            // idiomatically guards against. Unioning `Null` back in here
-            // is always safe for the already-covered `Mixed` case too
-            // (`Type::union` collapses `Mixed | Null` back to plain
-            // `Mixed`).
-            return if matches!(l.kind, ExprKind::Variable(_)) {
-                l_ty
-            } else {
-                self.relation().union(l_ty, Type::null())
-            };
-        }
-        let l_ty = self.infer_expr(l, locals).without(&Type::null());
-        // `$x ?? throw new Foo();` (or any other never-returning right
-        // side: `exit`, a `never`-typed call) - falling through to the
-        // generic `_ => r_ty` fallback below would make the whole
-        // expression, and by extension any `$x = ... ?? throw ...;`
-        // assignment statement built from it, infer as `never`
-        // itself, which `Completion::terminates`'s `StmtKind::Expression` case
-        // then reads as "this plain assignment statement always ends
-        // control flow," wrongly marking every statement after it
-        // unreachable. The real semantics: reaching anything past this
-        // expression at all already proves the right side never ran, so
-        // the result is exactly the left side's own non-null type, the
-        // same as the `?? null` case above computes.
-        if r_ty.is_never() {
-            return l_ty;
-        }
-        // Still scoped to exactly array on the left, matching
-        // this function's documented, deliberately narrow boundary (an
-        // ArrayShape on the left stays uncovered) - also recognizes a
-        // `list<T>`/`non-empty-array<T>`-typed left side (a real
-        // `Intersection`), which would otherwise lose its type here the
-        // same way a plain array would.
-        let l_is_array = l_ty.is_array().yes() && l_ty.as_array_shape().is_none();
-        match &r_ty {
-            r if l_is_array && r.as_array_shape().is_some() => l_ty,
-            // The general case must not discard `l_ty` entirely, keeping
-            // only `r_ty` - that's wrong for `??`'s semantics regardless
-            // of precision: the result is `$expr` itself when it's not
-            // null (already computed above, with `Null` excluded) or
-            // `$default` when it is - a real union of both outcomes, not
-            // "the default's type, unconditionally."
-            _ => self.relation().union(l_ty, r_ty),
-        }
+        stack::guard(|| {
+            // `$x ?? null` is a real, if unusual, no-op: if `$x` is null the
+            // result is null either way, and otherwise the result is exactly
+            // `$x` itself - so its type is exactly `$x`'s own type,
+            // unnarrowed, not the literal `r_ty` (`null`) this function
+            // otherwise trusts as the fallback's type. Otherwise an unshaped-
+            // array element read (`$post['selection'] ?? null`, `$post:
+            // array` with no shape, so `Mixed`) would collapse all the way
+            // down to bare `null`, when code checking the original
+            // expression with `is_array($selection_raw)` immediately after
+            // should still be checking a real `Mixed`.
+            if r_ty.is_null().yes() {
+                let l_ty = self.infer_expr(l, locals);
+                // The no-op reasoning above only holds when `l` is a bare
+                // variable - `locals`'s tracked type for one already
+                // reflects every way it can be null (a prior narrowing, an
+                // untyped param, ...), so trusting it completely is correct.
+                // An array/property access (or any other expression `??`
+                // exists specifically because this checker can't otherwise
+                // prove is always set) is different: `infer_expr` for
+                // `$group[$index]` on an `array<int, string>`-typed `$group`
+                // returns plain `string`, with no "the key might not exist"
+                // notion folded in - the exact real-PHP case `?? null`
+                // idiomatically guards against. Unioning `Null` back in here
+                // is always safe for the already-covered `Mixed` case too
+                // (`Type::union` collapses `Mixed | Null` back to plain
+                // `Mixed`).
+                return if matches!(l.kind, ExprKind::Variable(_)) {
+                    l_ty
+                } else {
+                    self.relation().union(l_ty, Type::null())
+                };
+            }
+            let l_ty = self.infer_expr(l, locals).without(&Type::null());
+            // `$x ?? throw new Foo();` (or any other never-returning right
+            // side: `exit`, a `never`-typed call) - falling through to the
+            // generic `_ => r_ty` fallback below would make the whole
+            // expression, and by extension any `$x = ... ?? throw ...;`
+            // assignment statement built from it, infer as `never`
+            // itself, which `Completion::terminates`'s `StmtKind::Expression` case
+            // then reads as "this plain assignment statement always ends
+            // control flow," wrongly marking every statement after it
+            // unreachable. The real semantics: reaching anything past this
+            // expression at all already proves the right side never ran, so
+            // the result is exactly the left side's own non-null type, the
+            // same as the `?? null` case above computes.
+            if r_ty.is_never() {
+                return l_ty;
+            }
+            // Still scoped to exactly array on the left, matching
+            // this function's documented, deliberately narrow boundary (an
+            // ArrayShape on the left stays uncovered) - also recognizes a
+            // `list<T>`/`non-empty-array<T>`-typed left side (a real
+            // `Intersection`), which would otherwise lose its type here the
+            // same way a plain array would.
+            let l_is_array = l_ty.is_array().yes() && l_ty.as_array_shape().is_none();
+            match &r_ty {
+                r if l_is_array && r.as_array_shape().is_some() => l_ty,
+                // The general case must not discard `l_ty` entirely, keeping
+                // only `r_ty` - that's wrong for `??`'s semantics regardless
+                // of precision: the result is `$expr` itself when it's not
+                // null (already computed above, with `Null` excluded) or
+                // `$default` when it is - a real union of both outcomes, not
+                // "the default's type, unconditionally."
+                _ => self.relation().union(l_ty, r_ty),
+            }
+        })
     }
 
     pub(crate) fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &Locals) -> Type {
-        match op {
-            // `resolve_concat_type` is a full port of real PHPStan's
-            // `InitializerExprTypeResolver::resolveConcatType`: real
-            // constant-folding for two literal operands, and AND/OR
-            // composition of every accessory kind (`NonFalsyString`/
-            // `NonEmptyString`/`LiteralString`/`LowercaseString`/
-            // `UppercaseString`/`NumericString`), not just non-falsiness.
-            BinOp::Concat => self
-                .infer_expr(l, locals)
-                .concat(&self.infer_expr(r, locals), self.registry),
-            // Real constant folding, mirroring real PHPStan's
-            // `BooleanAndHandler`/`BooleanOrHandler::resolveType` -
-            // without this, `check_boolean_and_or`'s "whole result"
-            // diagnostic (`booleanAnd.always*`/`booleanOr.always*`) could
-            // never fire at all, since it has nothing but a permanent
-            // bare `bool` to match against. A definitely-false left
-            // side makes `&&`'s result definitely false without even
-            // considering the right side; otherwise the right side is
-            // inferred against `l`'s truthy-narrowed scope (the same
-            // `apply_narrowing` every call site narrows into before
-            // checking the right operand), since that's the only scope
-            // the right side is ever actually reached in.
-            BinOp::And | BinOp::LogicalAnd => {
-                let l_ty = self.infer_expr(l, locals);
-                if l_ty.is_false().yes() {
-                    return Type::bool_literal(false);
+        stack::guard(|| {
+            match op {
+                // `resolve_concat_type` is a full port of real PHPStan's
+                // `InitializerExprTypeResolver::resolveConcatType`: real
+                // constant-folding for two literal operands, and AND/OR
+                // composition of every accessory kind (`NonFalsyString`/
+                // `NonEmptyString`/`LiteralString`/`LowercaseString`/
+                // `UppercaseString`/`NumericString`), not just non-falsiness.
+                BinOp::Concat => self
+                    .infer_expr(l, locals)
+                    .concat(&self.infer_expr(r, locals), self.registry),
+                // Real constant folding, mirroring real PHPStan's
+                // `BooleanAndHandler`/`BooleanOrHandler::resolveType` -
+                // without this, `check_boolean_and_or`'s "whole result"
+                // diagnostic (`booleanAnd.always*`/`booleanOr.always*`) could
+                // never fire at all, since it has nothing but a permanent
+                // bare `bool` to match against. A definitely-false left
+                // side makes `&&`'s result definitely false without even
+                // considering the right side; otherwise the right side is
+                // inferred against `l`'s truthy-narrowed scope (the same
+                // `apply_narrowing` every call site narrows into before
+                // checking the right operand), since that's the only scope
+                // the right side is ever actually reached in.
+                BinOp::And | BinOp::LogicalAnd => {
+                    let l_ty = self.infer_expr(l, locals);
+                    if l_ty.is_false().yes() {
+                        return Type::bool_literal(false);
+                    }
+                    let mut narrowed = locals.clone();
+                    self.apply_narrowing(l, &mut narrowed, true);
+                    let r_ty = self.infer_expr(r, &narrowed);
+                    if r_ty.is_false().yes() {
+                        Type::bool_literal(false)
+                    } else if l_ty.is_true().yes() && r_ty.is_true().yes() {
+                        Type::bool_literal(true)
+                    } else {
+                        Type::bool()
+                    }
                 }
-                let mut narrowed = locals.clone();
-                self.apply_narrowing(l, &mut narrowed, true);
-                let r_ty = self.infer_expr(r, &narrowed);
-                if r_ty.is_false().yes() {
-                    Type::bool_literal(false)
-                } else if l_ty.is_true().yes() && r_ty.is_true().yes() {
-                    Type::bool_literal(true)
-                } else {
-                    Type::bool()
+                BinOp::Or | BinOp::LogicalOr => {
+                    let l_ty = self.infer_expr(l, locals);
+                    if l_ty.is_true().yes() {
+                        return Type::bool_literal(true);
+                    }
+                    let mut narrowed = locals.clone();
+                    self.apply_narrowing(l, &mut narrowed, false);
+                    let r_ty = self.infer_expr(r, &narrowed);
+                    if r_ty.is_true().yes() {
+                        Type::bool_literal(true)
+                    } else if l_ty.is_false().yes() && r_ty.is_false().yes() {
+                        Type::bool_literal(false)
+                    } else {
+                        Type::bool()
+                    }
                 }
-            }
-            BinOp::Or | BinOp::LogicalOr => {
-                let l_ty = self.infer_expr(l, locals);
-                if l_ty.is_true().yes() {
-                    return Type::bool_literal(true);
+                // `xor` doesn't short-circuit, so both sides are always
+                // inferred against the same, un-narrowed scope - confirmed
+                // against `BinaryOpHandler::resolveType`'s own
+                // `BinaryOp\LogicalXor` arm.
+                BinOp::LogicalXor => {
+                    let l_ty = self.infer_expr(l, locals).to_boolean();
+                    let r_ty = self.infer_expr(r, locals).to_boolean();
+                    match (l_ty.bool_literal_value(), r_ty.bool_literal_value()) {
+                        (Some(a), Some(b)) => Type::bool_literal(a != b),
+                        _ => Type::bool(),
+                    }
                 }
-                let mut narrowed = locals.clone();
-                self.apply_narrowing(l, &mut narrowed, false);
-                let r_ty = self.infer_expr(r, &narrowed);
-                if r_ty.is_true().yes() {
-                    Type::bool_literal(true)
-                } else if l_ty.is_false().yes() && r_ty.is_false().yes() {
-                    Type::bool_literal(false)
-                } else {
-                    Type::bool()
+                BinOp::Identical | BinOp::NotIdentical => Type::bool(),
+                // Mirrors real PHPStan's `ConstantLooseComparisonRule` -
+                // `Type::loosely_equals`'s doc comment has the full
+                // scope/version-gating reasoning.
+                BinOp::Eq | BinOp::NotEq => {
+                    let lt = self.infer_expr(l, locals);
+                    let rt = self.infer_expr(r, locals);
+                    match self
+                        .registry
+                        .php_version_consensus(|v| lt.loosely_equals(&rt, v))
+                    {
+                        Some(equal) => {
+                            let outcome = if matches!(op, BinOp::Eq) {
+                                equal
+                            } else {
+                                !equal
+                            };
+                            if outcome {
+                                Type::bool_literal(true)
+                            } else {
+                                Type::bool_literal(false)
+                            }
+                        }
+                        None => Type::bool(),
+                    }
                 }
-            }
-            // `xor` doesn't short-circuit, so both sides are always
-            // inferred against the same, un-narrowed scope - confirmed
-            // against `BinaryOpHandler::resolveType`'s own
-            // `BinaryOp\LogicalXor` arm.
-            BinOp::LogicalXor => {
-                let l_ty = self.infer_expr(l, locals).to_boolean();
-                let r_ty = self.infer_expr(r, locals).to_boolean();
-                match (l_ty.bool_literal_value(), r_ty.bool_literal_value()) {
-                    (Some(a), Some(b)) => Type::bool_literal(a != b),
-                    _ => Type::bool(),
-                }
-            }
-            BinOp::Identical | BinOp::NotIdentical => Type::bool(),
-            // Mirrors real PHPStan's `ConstantLooseComparisonRule` -
-            // `Type::loosely_equals`'s doc comment has the full
-            // scope/version-gating reasoning.
-            BinOp::Eq | BinOp::NotEq => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                match self
-                    .registry
-                    .php_version_consensus(|v| lt.loosely_equals(&rt, v))
-                {
-                    Some(equal) => {
-                        let outcome = if matches!(op, BinOp::Eq) {
-                            equal
-                        } else {
-                            !equal
-                        };
+                // Mirrors real PHPStan's
+                // `NumberComparisonOperatorsConstantConditionRule`: the same
+                // relationship as `Eq`/`NotEq` above has to
+                // `ConstantLooseComparisonRule` - a standalone rule, never
+                // folded into `if`/`while`'s generic constant-condition
+                // family (its own `smaller.always*`/`greater.always*`/
+                // `smallerOrEqual.always*`/`greaterOrEqual.always*`
+                // identifiers, not `if.always*`).
+                // `should_skip_constant_condition` (`checker/control_flow.rs`)
+                // already excludes all four of these ops from the generic
+                // `if`/`while` path - this constant-folding half only feeds
+                // `check_constant_numeric_comparison`'s standalone diagnostic
+                // below.
+                BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
+                    let lt = self.infer_expr(l, locals);
+                    let rt = self.infer_expr(r, locals);
+                    if let Some(ordering) = ordering_op(op)
+                        && let Some(outcome) = self.ordering_outcome(&lt, ordering, &rt)
+                    {
                         if outcome {
                             Type::bool_literal(true)
                         } else {
                             Type::bool_literal(false)
                         }
-                    }
-                    None => Type::bool(),
-                }
-            }
-            // Mirrors real PHPStan's
-            // `NumberComparisonOperatorsConstantConditionRule`: the same
-            // relationship as `Eq`/`NotEq` above has to
-            // `ConstantLooseComparisonRule` - a standalone rule, never
-            // folded into `if`/`while`'s generic constant-condition
-            // family (its own `smaller.always*`/`greater.always*`/
-            // `smallerOrEqual.always*`/`greaterOrEqual.always*`
-            // identifiers, not `if.always*`).
-            // `should_skip_constant_condition` (`checker/control_flow.rs`)
-            // already excludes all four of these ops from the generic
-            // `if`/`while` path - this constant-folding half only feeds
-            // `check_constant_numeric_comparison`'s standalone diagnostic
-            // below.
-            BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                if let Some(ordering) = ordering_op(op)
-                    && let Some(outcome) = self.ordering_outcome(&lt, ordering, &rt)
-                {
-                    if outcome {
-                        Type::bool_literal(true)
                     } else {
-                        Type::bool_literal(false)
+                        Type::bool()
                     }
-                } else {
-                    Type::bool()
                 }
+                // The spaceship operator returns -1/0/1 (an int), not a bool -
+                // its single most common real use is returning a value
+                // directly from a comparator (`usort`/`uasort`/...).
+                //
+                // `GMP`/`BcMath\Number`'s overloaded spaceship still returns
+                // the same `-1|0|1` range, just computed by the object's own
+                // comparison rather than a plain numeric one -
+                // `binary_operator_overload_result` produces the identical
+                // `IntRange(-1, 1)` either way, so this also refines how
+                // precisely non-overloaded spaceship is typed.
+                BinOp::Spaceship
+                | BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Pow
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr
+                | BinOp::Mod
+                | BinOp::Div => {
+                    let lt = self.infer_expr(l, locals);
+                    let rt = self.infer_expr(r, locals);
+                    // An operand that never has a value leaves none for the result.
+                    if lt.is_never() || rt.is_never() {
+                        return Type::never();
+                    }
+                    if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                        return ty;
+                    }
+                    // `<=>` gives what the comparison can come to: `-1`, `0`,
+                    // and `1` for greater or uncomparable.
+                    if *op == BinOp::Spaceship {
+                        let outcomes =
+                            self.relation()
+                                .outcomes(&lt, &rt, self.comparison_php_version());
+                        let mut values = Vec::new();
+                        if outcomes.contains(types::Outcomes::LESS) {
+                            values.push(Type::int_literal(-1));
+                        }
+                        if outcomes.contains(types::Outcomes::EQUAL) {
+                            values.push(Type::int_literal(0));
+                        }
+                        if outcomes.contains(types::Outcomes::GREATER)
+                            || outcomes.contains(types::Outcomes::UNCOMPARABLE)
+                        {
+                            values.push(Type::int_literal(1));
+                        }
+                        if !values.is_empty() {
+                            return self.relation().union_of(values);
+                        }
+                    }
+                    arithmetic_op(op)
+                        .map_or_else(Type::mixed, |op| Type::binary_operation(op, &lt, &rt))
+                }
+                BinOp::Coalesce => {
+                    let r_ty = self.infer_expr(r, locals);
+                    self.widen_coalesce_result(l, r_ty, locals)
+                }
+                // `$value |> callable` calls callable($value) - its return
+                // type depends on resolving whatever expression `callable` is
+                // (a string, a closure, a first-class callable reference...)
+                // to a real signature, which this checker doesn't attempt.
+                BinOp::Pipe => Type::mixed(),
             }
-            // The spaceship operator returns -1/0/1 (an int), not a bool -
-            // its single most common real use is returning a value
-            // directly from a comparator (`usort`/`uasort`/...).
-            //
-            // `GMP`/`BcMath\Number`'s overloaded spaceship still returns
-            // the same `-1|0|1` range, just computed by the object's own
-            // comparison rather than a plain numeric one -
-            // `binary_operator_overload_result` produces the identical
-            // `IntRange(-1, 1)` either way, so this also refines how
-            // precisely non-overloaded spaceship is typed.
-            BinOp::Spaceship
-            | BinOp::Add
-            | BinOp::Sub
-            | BinOp::Mul
-            | BinOp::Pow
-            | BinOp::BitAnd
-            | BinOp::BitOr
-            | BinOp::BitXor
-            | BinOp::Shl
-            | BinOp::Shr
-            | BinOp::Mod
-            | BinOp::Div => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                // An operand that never has a value leaves none for the result.
-                if lt.is_never() || rt.is_never() {
-                    return Type::never();
-                }
-                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
-                    return ty;
-                }
-                // `<=>` gives what the comparison can come to: `-1`, `0`,
-                // and `1` for greater or uncomparable.
-                if *op == BinOp::Spaceship {
-                    let outcomes =
-                        self.relation()
-                            .outcomes(&lt, &rt, self.comparison_php_version());
-                    let mut values = Vec::new();
-                    if outcomes.contains(types::Outcomes::LESS) {
-                        values.push(Type::int_literal(-1));
-                    }
-                    if outcomes.contains(types::Outcomes::EQUAL) {
-                        values.push(Type::int_literal(0));
-                    }
-                    if outcomes.contains(types::Outcomes::GREATER)
-                        || outcomes.contains(types::Outcomes::UNCOMPARABLE)
-                    {
-                        values.push(Type::int_literal(1));
-                    }
-                    if !values.is_empty() {
-                        return self.relation().union_of(values);
-                    }
-                }
-                arithmetic_op(op)
-                    .map_or_else(Type::mixed, |op| Type::binary_operation(op, &lt, &rt))
-            }
-            BinOp::Coalesce => {
-                let r_ty = self.infer_expr(r, locals);
-                self.widen_coalesce_result(l, r_ty, locals)
-            }
-            // `$value |> callable` calls callable($value) - its return
-            // type depends on resolving whatever expression `callable` is
-            // (a string, a closure, a first-class callable reference...)
-            // to a real signature, which this checker doesn't attempt.
-            BinOp::Pipe => Type::mixed(),
-        }
+        })
     }
 }
 
@@ -5621,18 +5657,20 @@ impl<'a> Checker<'a> {
     /// `check_expr`'s dynamic-call branch makes on the diagnostic-producing
     /// side.
     fn call_fallback_return_type(&self, callee: &Expr, args: &[Arg], locals: &Locals) -> Type {
-        self.infer_expr(callee, locals)
-            .callable_sig()
-            .map_or(Type::mixed(), |sig| {
-                if sig.templates.is_empty() {
-                    return (*sig.return_type).clone();
-                }
-                let arg_types: Vec<Type> = args
-                    .iter()
-                    .map(|a| self.infer_expr(&a.value, locals))
-                    .collect();
-                sig.instantiated_return(&arg_types, &self.relation())
-            })
+        stack::guard(|| {
+            self.infer_expr(callee, locals)
+                .callable_sig()
+                .map_or(Type::mixed(), |sig| {
+                    if sig.templates.is_empty() {
+                        return (*sig.return_type).clone();
+                    }
+                    let arg_types: Vec<Type> = args
+                        .iter()
+                        .map(|a| self.infer_expr(&a.value, locals))
+                        .collect();
+                    sig.instantiated_return(&arg_types, &self.relation())
+                })
+        })
     }
 
     /// `@phpstan-self-out`: after `$x->method(...)`, `$x` has the tag's
@@ -5727,7 +5765,7 @@ impl<'a> Checker<'a> {
         inner: &ExprKind,
         locals: &Locals,
     ) -> Option<FirstClassTarget<'a>> {
-        match inner {
+        stack::guard(|| match inner {
             ExprKind::Call(callee, _) => {
                 let ExprKind::Name(name) = &callee.kind else {
                     return None;
@@ -5759,37 +5797,39 @@ impl<'a> Checker<'a> {
                 })
             }
             _ => None,
-        }
+        })
     }
 
     /// A first-class callable's `Closure(...)` type: the named function's
     /// or method's signature, its own templates the closure's; a plain
     /// `Closure` when what it names isn't known.
     fn first_class_callable_type(&self, inner: &Expr, locals: &Locals) -> Type {
-        let Some(target) = self.first_class_callable_target(&inner.kind, locals) else {
-            return Type::object("Closure".into(), Vec::new());
-        };
-        let sig = types::CallableSig {
-            params: target
-                .sig
-                .params()
-                .iter()
-                .map(|p| types::CallableParam {
-                    ty: p.ty().clone(),
-                    variadic: p.variadic(),
-                    optional: p.has_default(),
-                    by_ref: p.by_ref(),
-                })
-                .collect(),
-            return_type: Box::new(target.sig.return_type().clone()),
-            templates: Vec::new(),
-        }
-        .with_own_templates(&|scope| scope.eq_ignore_ascii_case(&target.name));
-        let closure = Type::closure_literal(sig);
-        match &target.class {
-            Some(class) => self.resolve_pseudo(&closure, class),
-            None => closure,
-        }
+        stack::guard(|| {
+            let Some(target) = self.first_class_callable_target(&inner.kind, locals) else {
+                return Type::object("Closure".into(), Vec::new());
+            };
+            let sig = types::CallableSig {
+                params: target
+                    .sig
+                    .params()
+                    .iter()
+                    .map(|p| types::CallableParam {
+                        ty: p.ty().clone(),
+                        variadic: p.variadic(),
+                        optional: p.has_default(),
+                        by_ref: p.by_ref(),
+                    })
+                    .collect(),
+                return_type: Box::new(target.sig.return_type().clone()),
+                templates: Vec::new(),
+            }
+            .with_own_templates(&|scope| scope.eq_ignore_ascii_case(&target.name));
+            let closure = Type::closure_literal(sig);
+            match &target.class {
+                Some(class) => self.resolve_pseudo(&closure, class),
+                None => closure,
+            }
+        })
     }
 
     /// A closure/arrow-fn literal's own type (`Type::closure_literal`):
@@ -5857,68 +5897,70 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         overrides: Option<&[Type]>,
     ) -> Option<Type> {
-        let syntax::ast::ClosureExpr {
-            params,
-            uses,
-            body,
-            is_generator,
-            is_static,
-            ..
-        } = closure;
-        if *is_generator {
-            return None;
-        }
-        let mut scope = locals.closure_scope();
-        for u in uses {
-            if let Some(ty) = locals.get_var(&u.name) {
-                scope.insert_var(&u.name, ty.clone());
+        stack::guard(|| {
+            let syntax::ast::ClosureExpr {
+                params,
+                uses,
+                body,
+                is_generator,
+                is_static,
+                ..
+            } = closure;
+            if *is_generator {
+                return None;
             }
-        }
-        if !is_static && let Some(this_ty) = locals.get_var("this") {
-            scope.insert_var("this", this_ty.clone());
-        }
-        for (i, p) in params.iter().enumerate() {
-            let ty = self.closure_param_type(p, i, overrides);
-            let ty = if p.variadic {
-                Type::array(Type::unknown_array_key(), ty)
-            } else {
-                ty
-            };
-            scope.insert_var(&p.name, ty);
-        }
-        // Every `return` in the body, last first.
-        struct Returns<'ast>(Vec<&'ast Stmt>);
-        impl<'ast> syntax::visit::Visitor<'ast> for Returns<'ast> {
-            fn visit_expr(&mut self, _: &'ast Expr) {}
-            fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-            fn visit_class_def(&mut self, _: &'ast ClassDef) {}
-            fn visit_stmt(&mut self, s: &'ast Stmt) {
-                syntax::visit::walk_stmt(self, s);
-                if matches!(s.kind, StmtKind::Return(_)) {
-                    self.0.push(s);
+            let mut scope = locals.closure_scope();
+            for u in uses {
+                if let Some(ty) = locals.get_var(&u.name) {
+                    scope.insert_var(&u.name, ty.clone());
                 }
             }
-        }
-        let mut returns = Returns(Vec::new());
-        syntax::visit::walk_stmts(&mut returns, body);
-        let mut points = Vec::new();
-        let mut saw_explicit_return = false;
-        for s in returns.0.into_iter().rev() {
-            saw_explicit_return = true;
-            points.push(match &s.kind {
-                StmtKind::Return(Some(value)) => self.infer_expr(value, &scope),
-                _ => Type::void(),
-            });
-        }
-        let falls_off_end = !body
-            .last()
-            .is_some_and(|s| matches!(s.kind, StmtKind::Return(_) | StmtKind::Throw(_)));
-        Some(closure_inferred_return_type(
-            &self.relation(),
-            points,
-            saw_explicit_return,
-            falls_off_end,
-        ))
+            if !is_static && let Some(this_ty) = locals.get_var("this") {
+                scope.insert_var("this", this_ty.clone());
+            }
+            for (i, p) in params.iter().enumerate() {
+                let ty = self.closure_param_type(p, i, overrides);
+                let ty = if p.variadic {
+                    Type::array(Type::unknown_array_key(), ty)
+                } else {
+                    ty
+                };
+                scope.insert_var(&p.name, ty);
+            }
+            // Every `return` in the body, last first.
+            struct Returns<'ast>(Vec<&'ast Stmt>);
+            impl<'ast> syntax::visit::Visitor<'ast> for Returns<'ast> {
+                fn visit_expr(&mut self, _: &'ast Expr) {}
+                fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+                fn visit_class_def(&mut self, _: &'ast ClassDef) {}
+                fn visit_stmt(&mut self, s: &'ast Stmt) {
+                    syntax::visit::walk_stmt(self, s);
+                    if matches!(s.kind, StmtKind::Return(_)) {
+                        self.0.push(s);
+                    }
+                }
+            }
+            let mut returns = Returns(Vec::new());
+            syntax::visit::walk_stmts(&mut returns, body);
+            let mut points = Vec::new();
+            let mut saw_explicit_return = false;
+            for s in returns.0.into_iter().rev() {
+                saw_explicit_return = true;
+                points.push(match &s.kind {
+                    StmtKind::Return(Some(value)) => self.infer_expr(value, &scope),
+                    _ => Type::void(),
+                });
+            }
+            let falls_off_end = !body
+                .last()
+                .is_some_and(|s| matches!(s.kind, StmtKind::Return(_) | StmtKind::Throw(_)));
+            Some(closure_inferred_return_type(
+                &self.relation(),
+                points,
+                saw_explicit_return,
+                falls_off_end,
+            ))
+        })
     }
 
     /// A non-generator arrow fn's own inferred return type: its body
@@ -5932,20 +5974,22 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         overrides: Option<&[Type]>,
     ) -> Option<Type> {
-        if is_generator {
-            return None;
-        }
-        let mut arrow_locals = locals.clone();
-        for (i, p) in params.iter().enumerate() {
-            let ty = self.closure_param_type(p, i, overrides);
-            let ty = if p.variadic {
-                Type::array(Type::unknown_array_key(), ty)
-            } else {
-                ty
-            };
-            arrow_locals.insert_var(&p.name, ty);
-        }
-        Some(self.infer_expr(body, &arrow_locals))
+        stack::guard(|| {
+            if is_generator {
+                return None;
+            }
+            let mut arrow_locals = locals.clone();
+            for (i, p) in params.iter().enumerate() {
+                let ty = self.closure_param_type(p, i, overrides);
+                let ty = if p.variadic {
+                    Type::array(Type::unknown_array_key(), ty)
+                } else {
+                    ty
+                };
+                arrow_locals.insert_var(&p.name, ty);
+            }
+            Some(self.infer_expr(body, &arrow_locals))
+        })
     }
 
     /// A closure/arrow-fn literal parameter's type: its own native hint
@@ -6601,16 +6645,18 @@ impl<'a> Checker<'a> {
 /// and re-widening its result to include `Null` here would risk masking
 /// further bugs rather than fixing anything.
 pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
-    let base = base.peeled();
-    stack::guard(|| match &base.kind {
-        ExprKind::PropertyAccess(inner, _, operator)
-        | ExprKind::MethodCall(inner, _, _, operator)
-        | ExprKind::DynamicPropertyAccess(inner, _, operator)
-        | ExprKind::DynamicMethodCall(inner, _, _, operator) => {
-            operator.is_nullsafe() || postfix_chain_has_nullsafe(inner)
-        }
-        ExprKind::Index(inner, _) => postfix_chain_has_nullsafe(inner),
-        _ => false,
+    stack::guard(|| {
+        let base = base.peeled();
+        stack::guard(|| match &base.kind {
+            ExprKind::PropertyAccess(inner, _, operator)
+            | ExprKind::MethodCall(inner, _, _, operator)
+            | ExprKind::DynamicPropertyAccess(inner, _, operator)
+            | ExprKind::DynamicMethodCall(inner, _, _, operator) => {
+                operator.is_nullsafe() || postfix_chain_has_nullsafe(inner)
+            }
+            ExprKind::Index(inner, _) => postfix_chain_has_nullsafe(inner),
+            _ => false,
+        })
     })
 }
 

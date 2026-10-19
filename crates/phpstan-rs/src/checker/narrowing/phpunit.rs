@@ -276,73 +276,75 @@ impl<'a> Checker<'a> {
     /// An `assertThat` constraint built directly by one of `Assert`'s
     /// factories; `None` for any other expression.
     fn constraint<'e>(&self, e: &'e Expr, locals: &Locals) -> Option<Check<'e>> {
-        let (name, sig, args) = self.phpunit_method(e, locals)?;
-        let resolved = resolve_call_args(args, sig.params());
-        let arg = |i: usize| resolved.get(i).copied().flatten();
-        let parts = |locals: &Locals| -> Option<Vec<Check<'e>>> {
-            args.iter()
-                .map(|a| (!a.spread).then(|| self.constraint(&a.value, locals))?)
-                .collect()
-        };
-        Some(match name.as_str() {
-            "istrue" => Check::Type(Type::bool_literal(true)),
-            "isfalse" => Check::Type(Type::bool_literal(false)),
-            "isnull" => Check::Type(Type::null()),
-            "istype" => {
-                let kind = literal_string_value(arg(0)?)?;
-                Check::Type(native_type(&kind)?)
-            }
-            "isinstanceof" => {
-                let (ty, exact) = self.instance_target(arg(0)?, locals)?;
-                Check::Instance { ty, exact }
-            }
-            "identicalto" => Check::Identical(arg(0)?),
-            "equalto" => Check::Equal {
-                expected: arg(0)?,
-                exact: true,
-            },
-            "isempty" => Check::Empty,
-            "countof" => Check::Count(self.infer_expr(arg(0)?, locals)),
-            "arrayhaskey" => Check::HasKey(arg(0)?),
-            "greaterthan" => Check::Ordering(OrderingOp::Gt, arg(0)?),
-            "lessthan" => Check::Ordering(OrderingOp::Lt, arg(0)?),
-            "stringstartswith" => Check::Str {
-                non_empty: self.is_non_empty_string(arg(0)?, locals),
-                coerced: true,
-            },
-            // A haystack that isn't a string fails, unless the needle is
-            // empty.
-            "stringcontains" => {
-                let non_empty = self.is_non_empty_string(arg(0)?, locals);
-                Check::Str {
-                    non_empty,
-                    coerced: !non_empty,
+        stack::guard(|| {
+            let (name, sig, args) = self.phpunit_method(e, locals)?;
+            let resolved = resolve_call_args(args, sig.params());
+            let arg = |i: usize| resolved.get(i).copied().flatten();
+            let parts = |locals: &Locals| -> Option<Vec<Check<'e>>> {
+                args.iter()
+                    .map(|a| (!a.spread).then(|| self.constraint(&a.value, locals))?)
+                    .collect()
+            };
+            Some(match name.as_str() {
+                "istrue" => Check::Type(Type::bool_literal(true)),
+                "isfalse" => Check::Type(Type::bool_literal(false)),
+                "isnull" => Check::Type(Type::null()),
+                "istype" => {
+                    let kind = literal_string_value(arg(0)?)?;
+                    Check::Type(native_type(&kind)?)
                 }
-            }
-            "isjson" => Check::Str {
-                non_empty: true,
-                coerced: false,
-            },
-            "matchesregularexpression" => Check::Matches {
-                pattern: arg(0)?,
-                coerced: false,
-            },
-            "containsidentical" => Check::Contains {
-                needle: arg(0)?,
-                strict: true,
-            },
-            "containsequal" => Check::Contains {
-                needle: arg(0)?,
-                strict: false,
-            },
-            "islist" => Check::Type(is_kind_type("list")?),
-            "isnan" | "isinfinite" => Check::Type(Type::float()),
-            "isfinite" => Check::Type(self.relation().union(Type::int(), Type::float())),
-            "logicalnot" => Check::Not(Box::new(self.constraint(arg(0)?, locals)?)),
-            "logicaland" => Check::And(parts(locals)?),
-            "logicalor" => Check::Or(parts(locals)?),
-            // `isInt()`, `isString()` and the other type factories.
-            other => Check::Type(is_kind_type(other.strip_prefix("is")?)?),
+                "isinstanceof" => {
+                    let (ty, exact) = self.instance_target(arg(0)?, locals)?;
+                    Check::Instance { ty, exact }
+                }
+                "identicalto" => Check::Identical(arg(0)?),
+                "equalto" => Check::Equal {
+                    expected: arg(0)?,
+                    exact: true,
+                },
+                "isempty" => Check::Empty,
+                "countof" => Check::Count(self.infer_expr(arg(0)?, locals)),
+                "arrayhaskey" => Check::HasKey(arg(0)?),
+                "greaterthan" => Check::Ordering(OrderingOp::Gt, arg(0)?),
+                "lessthan" => Check::Ordering(OrderingOp::Lt, arg(0)?),
+                "stringstartswith" => Check::Str {
+                    non_empty: self.is_non_empty_string(arg(0)?, locals),
+                    coerced: true,
+                },
+                // A haystack that isn't a string fails, unless the needle is
+                // empty.
+                "stringcontains" => {
+                    let non_empty = self.is_non_empty_string(arg(0)?, locals);
+                    Check::Str {
+                        non_empty,
+                        coerced: !non_empty,
+                    }
+                }
+                "isjson" => Check::Str {
+                    non_empty: true,
+                    coerced: false,
+                },
+                "matchesregularexpression" => Check::Matches {
+                    pattern: arg(0)?,
+                    coerced: false,
+                },
+                "containsidentical" => Check::Contains {
+                    needle: arg(0)?,
+                    strict: true,
+                },
+                "containsequal" => Check::Contains {
+                    needle: arg(0)?,
+                    strict: false,
+                },
+                "islist" => Check::Type(is_kind_type("list")?),
+                "isnan" | "isinfinite" => Check::Type(Type::float()),
+                "isfinite" => Check::Type(self.relation().union(Type::int(), Type::float())),
+                "logicalnot" => Check::Not(Box::new(self.constraint(arg(0)?, locals)?)),
+                "logicaland" => Check::And(parts(locals)?),
+                "logicalor" => Check::Or(parts(locals)?),
+                // `isInt()`, `isString()` and the other type factories.
+                other => Check::Type(is_kind_type(other.strip_prefix("is")?)?),
+            })
         })
     }
 
@@ -392,137 +394,144 @@ impl<'a> Checker<'a> {
 
     /// Narrows `value` by `check` having held (`holds`) or failed.
     fn apply_check(&self, value: &Expr, check: &Check<'_>, holds: bool, locals: &mut Locals) {
-        let key = locals.key_of(value);
-        let narrow_value = |locals: &mut Locals, f: &dyn Fn(&Type) -> Option<Type>| {
-            if let Some(key) = key {
-                let current = self.current_narrowed_type(value, key, locals);
-                if let Some(narrowed) = f(&current) {
-                    locals.insert(key, narrowed);
+        stack::guard(|| {
+            let key = locals.key_of(value);
+            let narrow_value = |locals: &mut Locals, f: &dyn Fn(&Type) -> Option<Type>| {
+                if let Some(key) = key {
+                    let current = self.current_narrowed_type(value, key, locals);
+                    if let Some(narrowed) = f(&current) {
+                        locals.insert(key, narrowed);
+                    }
                 }
-            }
-        };
-        match check {
-            Check::Type(ty) => narrow_value(locals, &|current| {
-                Some(if holds {
-                    self.relation().narrow(current, ty)
-                } else {
-                    self.exclude(current, ty)
-                })
-            }),
-            Check::Instance { ty, exact } => narrow_value(locals, &|current| {
-                if holds {
-                    Some(self.relation().narrow_to_instance(current, ty))
-                } else {
-                    exact.then(|| self.exclude(current, ty))
-                }
-            }),
-            Check::Identical(other) => self.apply_equality_narrowing(value, other, locals, holds),
-            Check::Equal { expected, exact } => {
-                let expected = self.infer_expr(expected, locals);
-                narrow_value(locals, &|current| {
-                    Some(
-                        self.relation()
-                            .narrow_comparator(current, &expected, holds, *exact),
-                    )
-                })
-            }
-            Check::Empty if holds => narrow_value(locals, &|current| {
-                // A `Countable` object counting 0 is empty too.
-                let countable = Type::object("Countable".into(), Vec::new());
-                let kept: Vec<Type> = current
-                    .union_members()
-                    .iter()
-                    .filter_map(|m| {
-                        if !m.is_object().no()
-                            && !self.relation().is_super_type_of(&countable, m).no()
-                        {
-                            Some(m.clone())
-                        } else {
-                            let falsy = m.only_falsy(&self.relation());
-                            (!falsy.is_never()).then_some(falsy)
-                        }
+            };
+            match check {
+                Check::Type(ty) => narrow_value(locals, &|current| {
+                    Some(if holds {
+                        self.relation().narrow(current, ty)
+                    } else {
+                        self.exclude(current, ty)
                     })
-                    .collect();
-                Some(self.relation().union_of(kept))
-            }),
-            Check::Empty => self.narrow_emptiness(value, false, true, locals),
-            Check::Count(count) => {
-                self.narrow_counted(value, false, BinOp::Identical, count, holds, locals)
-            }
-            Check::HasKey(k) => self.narrow_key_presence(k, value, holds, locals),
-            Check::Ordering(op, other) => {
-                self.apply_ordering_narrowing(value, other, *op, holds, locals)
-            }
-            Check::Str { non_empty, coerced } if holds => narrow_value(locals, &|current| {
-                let target = if *non_empty {
-                    Type::string().with_string_accessory(AccessoryKind::NonEmptyString)
-                } else {
-                    Type::string()
-                };
-                Some(self.refine_string_members(current, &target, *coerced))
-            }),
-            Check::Matches { pattern, coerced } if holds => {
-                let call = PregCall {
-                    all: false,
-                    pattern,
-                    subject: Some(value),
-                    matches: None,
-                    flags: None,
-                    offset: None,
-                };
-                self.narrow_preg_outcome(&call, &Type::int_literal(1), locals);
-                narrow_value(locals, &|current| {
-                    Some(self.refine_string_members(current, &Type::string(), *coerced))
-                });
-            }
-            Check::Contains { needle, strict } => {
-                if *strict {
-                    self.narrow_strict_membership(needle, value, holds, locals);
-                } else {
-                    self.narrow_loose_membership(needle, value, holds, locals);
+                }),
+                Check::Instance { ty, exact } => narrow_value(locals, &|current| {
+                    if holds {
+                        Some(self.relation().narrow_to_instance(current, ty))
+                    } else {
+                        exact.then(|| self.exclude(current, ty))
+                    }
+                }),
+                Check::Identical(other) => {
+                    self.apply_equality_narrowing(value, other, locals, holds)
                 }
-            }
-            Check::HasProperty(name) if holds => {
-                let property = literal_string_value(name);
-                narrow_value(locals, &|current| {
-                    let object = match &property {
-                        Some(p) => Type::intersection_of(vec![
-                            Type::object_without_class(),
-                            Type::has_property(p.as_ref().into()),
-                        ]),
-                        None => Type::object_without_class(),
+                Check::Equal { expected, exact } => {
+                    let expected = self.infer_expr(expected, locals);
+                    narrow_value(locals, &|current| {
+                        Some(
+                            self.relation()
+                                .narrow_comparator(current, &expected, holds, *exact),
+                        )
+                    })
+                }
+                Check::Empty if holds => narrow_value(locals, &|current| {
+                    // A `Countable` object counting 0 is empty too.
+                    let countable = Type::object("Countable".into(), Vec::new());
+                    let kept: Vec<Type> = current
+                        .union_members()
+                        .iter()
+                        .filter_map(|m| {
+                            if !m.is_object().no()
+                                && !self.relation().is_super_type_of(&countable, m).no()
+                            {
+                                Some(m.clone())
+                            } else {
+                                let falsy = m.only_falsy(&self.relation());
+                                (!falsy.is_never()).then_some(falsy)
+                            }
+                        })
+                        .collect();
+                    Some(self.relation().union_of(kept))
+                }),
+                Check::Empty => self.narrow_emptiness(value, false, true, locals),
+                Check::Count(count) => {
+                    self.narrow_counted(value, false, BinOp::Identical, count, holds, locals)
+                }
+                Check::HasKey(k) => self.narrow_key_presence(k, value, holds, locals),
+                Check::Ordering(op, other) => {
+                    self.apply_ordering_narrowing(value, other, *op, holds, locals)
+                }
+                Check::Str { non_empty, coerced } if holds => narrow_value(locals, &|current| {
+                    let target = if *non_empty {
+                        Type::string().with_string_accessory(AccessoryKind::NonEmptyString)
+                    } else {
+                        Type::string()
                     };
-                    Some(self.relation().narrow(current, &object))
-                });
-            }
-            Check::Not(inner) => self.apply_check(value, inner, !holds, locals),
-            Check::And(parts) if holds => {
-                for part in parts {
-                    self.apply_check(value, part, true, locals);
+                    Some(self.refine_string_members(current, &target, *coerced))
+                }),
+                Check::Matches { pattern, coerced } if holds => {
+                    let call = PregCall {
+                        all: false,
+                        pattern,
+                        subject: Some(value),
+                        matches: None,
+                        flags: None,
+                        offset: None,
+                    };
+                    self.narrow_preg_outcome(&call, &Type::int_literal(1), locals);
+                    narrow_value(locals, &|current| {
+                        Some(self.refine_string_members(current, &Type::string(), *coerced))
+                    });
                 }
-            }
-            Check::Or(parts) if !holds => {
-                for part in parts {
-                    self.apply_check(value, part, false, locals);
+                Check::Contains { needle, strict } => {
+                    if *strict {
+                        self.narrow_strict_membership(needle, value, holds, locals);
+                    } else {
+                        self.narrow_loose_membership(needle, value, holds, locals);
+                    }
                 }
-            }
-            // One part held: each part's narrowing of the value, joined.
-            Check::Or(parts) => {
-                let Some(key) = key else {
-                    return;
-                };
-                let mut joined: Vec<Type> = Vec::new();
-                for part in parts {
-                    let mut branch = locals.clone();
-                    self.apply_check(value, part, true, &mut branch);
-                    joined.push(self.current_narrowed_type(value, key, &branch).into_owned());
+                Check::HasProperty(name) if holds => {
+                    let property = literal_string_value(name);
+                    narrow_value(locals, &|current| {
+                        let object = match &property {
+                            Some(p) => Type::intersection_of(vec![
+                                Type::object_without_class(),
+                                Type::has_property(p.as_ref().into()),
+                            ]),
+                            None => Type::object_without_class(),
+                        };
+                        Some(self.relation().narrow(current, &object))
+                    });
                 }
-                locals.insert(key, self.relation().union_of(joined));
+                Check::Not(inner) => self.apply_check(value, inner, !holds, locals),
+                Check::And(parts) if holds => {
+                    for part in parts {
+                        self.apply_check(value, part, true, locals);
+                    }
+                }
+                Check::Or(parts) if !holds => {
+                    for part in parts {
+                        self.apply_check(value, part, false, locals);
+                    }
+                }
+                // One part held: each part's narrowing of the value, joined.
+                Check::Or(parts) => {
+                    let Some(key) = key else {
+                        return;
+                    };
+                    let mut joined: Vec<Type> = Vec::new();
+                    for part in parts {
+                        let mut branch = locals.clone();
+                        self.apply_check(value, part, true, &mut branch);
+                        joined.push(self.current_narrowed_type(value, key, &branch).into_owned());
+                    }
+                    locals.insert(key, self.relation().union_of(joined));
+                }
+                // A failed `And`, and the string and property checks failing,
+                // say nothing narrowable.
+                Check::And(_)
+                | Check::Str { .. }
+                | Check::Matches { .. }
+                | Check::HasProperty(_) => {}
             }
-            // A failed `And`, and the string and property checks failing,
-            // say nothing narrowable.
-            Check::And(_) | Check::Str { .. } | Check::Matches { .. } | Check::HasProperty(_) => {}
-        }
+        })
     }
 
     /// `current` once a `string` parameter took it, its string members

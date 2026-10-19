@@ -666,26 +666,28 @@ impl<'a> Checker<'a> {
 /// caught by this check's own manual verification pass, not a test
 /// written in advance of knowing this gap existed.
 fn expr_reads_a_mutable_property(e: &Expr) -> bool {
-    let e = e.peeled();
-    stack::guard(|| match &e.kind {
-        ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
-        ExprKind::StaticPropertyFetch(..) => true,
-        ExprKind::Call(callee, args) => {
-            expr_reads_a_mutable_property(callee)
-                || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))
-        }
-        ExprKind::MethodCall(base, _, args, _) => {
-            expr_reads_a_mutable_property(base)
-                || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))
-        }
-        ExprKind::Binary(_, l, r) => {
-            expr_reads_a_mutable_property(l) || expr_reads_a_mutable_property(r)
-        }
-        ExprKind::Unary(_, inner) => expr_reads_a_mutable_property(inner),
-        ExprKind::Index(base, idx) => {
-            expr_reads_a_mutable_property(base)
-                || idx.as_deref().is_some_and(expr_reads_a_mutable_property)
-        }
-        _ => false,
+    stack::guard(|| {
+        let e = e.peeled();
+        stack::guard(|| match &e.kind {
+            ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
+            ExprKind::StaticPropertyFetch(..) => true,
+            ExprKind::Call(callee, args) => {
+                expr_reads_a_mutable_property(callee)
+                    || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))
+            }
+            ExprKind::MethodCall(base, _, args, _) => {
+                expr_reads_a_mutable_property(base)
+                    || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))
+            }
+            ExprKind::Binary(_, l, r) => {
+                expr_reads_a_mutable_property(l) || expr_reads_a_mutable_property(r)
+            }
+            ExprKind::Unary(_, inner) => expr_reads_a_mutable_property(inner),
+            ExprKind::Index(base, idx) => {
+                expr_reads_a_mutable_property(base)
+                    || idx.as_deref().is_some_and(expr_reads_a_mutable_property)
+            }
+            _ => false,
+        })
     })
 }

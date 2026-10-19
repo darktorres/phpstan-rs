@@ -92,24 +92,26 @@ fn expand_type_alias(
     done: &mut NameMap<Type>,
     visiting: &mut Vec<Name>,
 ) -> Type {
-    if let Some(ty) = done.get(name) {
-        return ty.clone();
-    }
-    if visiting.contains(name) {
-        return Type::mixed();
-    }
-    visiting.push(name.clone());
-    let expanded = expand_alias_uses(
-        raw.get(name)
-            .expect("an alias is looked up where it is declared")
-            .clone(),
-        raw,
-        done,
-        visiting,
-    );
-    visiting.pop();
-    done.insert(name.clone(), expanded.clone());
-    expanded
+    stack::guard(|| {
+        if let Some(ty) = done.get(name) {
+            return ty.clone();
+        }
+        if visiting.contains(name) {
+            return Type::mixed();
+        }
+        visiting.push(name.clone());
+        let expanded = expand_alias_uses(
+            raw.get(name)
+                .expect("an alias is looked up where it is declared")
+                .clone(),
+            raw,
+            done,
+            visiting,
+        );
+        visiting.pop();
+        done.insert(name.clone(), expanded.clone());
+        expanded
+    })
 }
 
 fn expand_alias_uses(
@@ -118,9 +120,11 @@ fn expand_alias_uses(
     done: &mut NameMap<Type>,
     visiting: &mut Vec<Name>,
 ) -> Type {
-    ty.replace_objects(&mut |name| {
-        let (key, _) = raw.get_key_value(name.as_str())?;
-        Some(expand_type_alias(&key.clone(), raw, done, visiting))
+    stack::guard(|| {
+        ty.replace_objects(&mut |name| {
+            let (key, _) = raw.get_key_value(name.as_str())?;
+            Some(expand_type_alias(&key.clone(), raw, done, visiting))
+        })
     })
 }
 

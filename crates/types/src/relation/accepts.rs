@@ -655,27 +655,31 @@ impl Relation<'_> {
     /// Every field `sup` lists is in `sub` - present for sure where
     /// `sup` requires it - with a type `sup` accepts.
     fn shape_accepts_fields(&self, sub: &Shape, sup: &Shape) -> bool {
-        sup.fields().iter().all(|f| match sub.field(&f.key) {
-            Some(sub_field) => {
-                (f.optional || !sub_field.optional) && self.accepts_type(&sub_field.ty, &f.ty)
-            }
-            None => f.optional,
+        stack::guard(|| {
+            sup.fields().iter().all(|f| match sub.field(&f.key) {
+                Some(sub_field) => {
+                    (f.optional || !sub_field.optional) && self.accepts_type(&sub_field.ty, &f.ty)
+                }
+                None => f.optional,
+            })
         })
     }
 
     /// An instance of `class` is callable when it has `__invoke`, whose
     /// signature must fit `sig`; an unknown class may be.
     fn object_is_callable(&self, class: &str, sig: Option<&CallableSig>) -> bool {
-        if self.hierarchy.find_class(class).is_none() {
-            return true;
-        }
-        match (self.hierarchy.method_signature(class, "__invoke"), sig) {
-            (None, _) => false,
-            (Some(_), None) => true,
-            (Some(invoke), Some(sig)) => {
-                self.callable_sig_fits(&invoke, sig, &|x, y| self.accepts_type(x, y), true)
+        stack::guard(|| {
+            if self.hierarchy.find_class(class).is_none() {
+                return true;
             }
-        }
+            match (self.hierarchy.method_signature(class, "__invoke"), sig) {
+                (None, _) => false,
+                (Some(_), None) => true,
+                (Some(invoke), Some(sig)) => {
+                    self.callable_sig_fits(&invoke, sig, &|x, y| self.accepts_type(x, y), true)
+                }
+            }
+        })
     }
 
     /// A string is callable when it names a function or a static
@@ -760,23 +764,25 @@ impl Relation<'_> {
     /// to be one (a class's name, or a subclass's, never is), each
     /// member of a union alike. What `inner` doesn't pin down may.
     fn class_string_may_be_kind(&self, inner: &Type, kind: ClassKind) -> bool {
-        if kind == ClassKind::Class {
-            return true;
-        }
-        match inner.repr() {
-            Repr::Object(name, _) => self
-                .hierarchy
-                .find_class(name)
-                .is_none_or(|class| class.kind == kind),
-            Repr::Union(members) | Repr::BenevolentUnion(members) => members
-                .iter()
-                .all(|m| self.class_string_may_be_kind(m, kind)),
-            Repr::Intersection(members) => members
-                .iter()
-                .any(|m| self.class_string_may_be_kind(m, kind)),
-            Repr::TemplateParam(tp) => self.class_string_may_be_kind(&tp.bound, kind),
-            _ => true,
-        }
+        stack::guard(|| {
+            if kind == ClassKind::Class {
+                return true;
+            }
+            match inner.repr() {
+                Repr::Object(name, _) => self
+                    .hierarchy
+                    .find_class(name)
+                    .is_none_or(|class| class.kind == kind),
+                Repr::Union(members) | Repr::BenevolentUnion(members) => members
+                    .iter()
+                    .all(|m| self.class_string_may_be_kind(m, kind)),
+                Repr::Intersection(members) => members
+                    .iter()
+                    .any(|m| self.class_string_may_be_kind(m, kind)),
+                Repr::TemplateParam(tp) => self.class_string_may_be_kind(&tp.bound, kind),
+                _ => true,
+            }
+        })
     }
 
     /// Real PHPStan's own `InitializerExprTypeResolver::

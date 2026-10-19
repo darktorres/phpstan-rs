@@ -346,8 +346,10 @@ impl Type {
 /// deeply nested type drops without overflowing it.
 impl Drop for Node {
     fn drop(&mut self) {
-        let repr = std::mem::replace(&mut self.repr, Repr::Never);
-        stack::guard(|| drop(repr));
+        stack::guard(|| {
+            let repr = std::mem::replace(&mut self.repr, Repr::Never);
+            stack::guard(|| drop(repr));
+        })
     }
 }
 
@@ -951,21 +953,23 @@ impl CallableSig {
     /// own: `f(...)` of a generic `f` is a generic `Closure`.
     pub fn with_own_templates(mut self, is_own: &dyn Fn(&str) -> bool) -> CallableSig {
         fn collect(ty: &Type, is_own: &dyn Fn(&str) -> bool, out: &mut Vec<TemplateParam>) {
-            if let Repr::TemplateParam(tp) = ty.repr()
-                && tp.scope.as_deref().is_some_and(is_own)
-            {
-                if !out.iter().any(|t| t.name == tp.name) {
-                    out.push(TemplateParam {
-                        scope: Some(CALLABLE_TEMPLATE_SCOPE.to_string()),
-                        ..tp.clone()
-                    });
+            stack::guard(|| {
+                if let Repr::TemplateParam(tp) = ty.repr()
+                    && tp.scope.as_deref().is_some_and(is_own)
+                {
+                    if !out.iter().any(|t| t.name == tp.name) {
+                        out.push(TemplateParam {
+                            scope: Some(CALLABLE_TEMPLATE_SCOPE.to_string()),
+                            ..tp.clone()
+                        });
+                    }
+                    return;
                 }
-                return;
-            }
-            ty.for_each_child(&mut |c| collect(c, is_own, out));
+                ty.for_each_child(&mut |c| collect(c, is_own, out));
+            })
         }
         fn rescope(ty: &Type, is_own: &dyn Fn(&str) -> bool) -> Type {
-            match ty.repr() {
+            stack::guard(|| match ty.repr() {
                 Repr::TemplateParam(tp) if tp.scope.as_deref().is_some_and(is_own) => {
                     Type::template_param(TemplateParam {
                         scope: Some(CALLABLE_TEMPLATE_SCOPE.to_string()),
@@ -973,7 +977,7 @@ impl CallableSig {
                     })
                 }
                 _ => ty.map_children(&mut |c| rescope(c, is_own)),
-            }
+            })
         }
         let mut own = Vec::new();
         for p in &self.params {
@@ -995,7 +999,7 @@ impl CallableSig {
     /// current `templates` entries - after their bounds changed.
     pub fn rebind_templates(mut self) -> CallableSig {
         fn rebind(ty: &Type, templates: &[TemplateParam]) -> Type {
-            match ty.repr() {
+            stack::guard(|| match ty.repr() {
                 Repr::TemplateParam(tp) if tp.scope.as_deref() == Some(CALLABLE_TEMPLATE_SCOPE) => {
                     match templates.iter().find(|t| t.name == tp.name) {
                         Some(t) => Type::template_param(t.clone()),
@@ -1003,7 +1007,7 @@ impl CallableSig {
                     }
                 }
                 _ => ty.map_children(&mut |c| rebind(c, templates)),
-            }
+            })
         }
         if self.templates.is_empty() {
             return self;

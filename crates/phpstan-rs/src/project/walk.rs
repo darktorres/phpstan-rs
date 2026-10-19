@@ -771,15 +771,17 @@ impl Tree {
 
     /// Emits the files under `node`, in the order of its slots.
     fn emit_node(&mut self, node: usize, out: &mut Vec<Listed>) {
-        for slot in std::mem::take(&mut self.nodes[node].slots) {
-            match slot {
-                Slot::Empty => {}
-                Slot::File(file) => {
-                    out.push(self.files[file].take().expect("a file is emitted once"));
+        stack::guard(|| {
+            for slot in std::mem::take(&mut self.nodes[node].slots) {
+                match slot {
+                    Slot::Empty => {}
+                    Slot::File(file) => {
+                        out.push(self.files[file].take().expect("a file is emitted once"));
+                    }
+                    Slot::Dir(child) => self.emit_node(child, out),
                 }
-                Slot::Dir(child) => self.emit_node(child, out),
             }
-        }
+        })
     }
 }
 
@@ -1403,123 +1405,127 @@ impl<'a, 'p> Walk<'a, 'p> {
         take: Option<&Take<'_>>,
         owner_at: composer::OwnerAt<'p>,
     ) -> Vec<Found> {
-        let Some(listing) = self.listings.listing(dir) else {
-            return Vec::new();
-        };
-        let starts = self.starts_for(scope.role);
-        let cut = |excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
-        #[cfg(test)]
-        if let Some(reaching) = reaching {
+        stack::guard(|| {
+            let Some(listing) = self.listings.listing(dir) else {
+                return Vec::new();
+            };
+            let starts = self.starts_for(scope.role);
+            let cut = |excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
+            #[cfg(test)]
+            if let Some(reaching) = reaching {
+                assert_eq!(
+                    (reaching.reach(), reaching.covered),
+                    starts.reach_by_ancestors(dir.as_path(), &cut),
+                    "what reaches {}",
+                    dir.as_path().display()
+                );
+            }
+            // The files listed here are all in `dir`, so they share its owner.
+            let owner = owner_at.owner();
+            #[cfg(test)]
             assert_eq!(
-                (reaching.reach(), reaching.covered),
-                starts.reach_by_ancestors(dir.as_path(), &cut),
-                "what reaches {}",
+                owner,
+                self.packages.owner_of_dir(dir.as_path()),
+                "the owner of {}",
                 dir.as_path().display()
             );
-        }
-        // The files listed here are all in `dir`, so they share its owner.
-        let owner = owner_at.owner();
-        #[cfg(test)]
-        assert_eq!(
-            owner,
-            self.packages.owner_of_dir(dir.as_path()),
-            "the owner of {}",
-            dir.as_path().display()
-        );
-        // What the walks that reach `dir` decide for its files, when this walk
-        // is the one walk of their strongest role.
-        let reach = match reaching.map(Reaching::reach) {
-            Some(reach) if take.is_some() && reach.hands_over(scope.role).is_some() => Some(reach),
-            _ => None,
-        };
-        let mut batch = Vec::new();
-        let mut steps = Vec::with_capacity(listing.entries.len());
-        let mut dirs = Vec::new();
-        for entry in &listing.entries {
-            // An entry whose type cannot be read is not listed.
-            let Some(file_type) = entry.kind else {
-                continue;
-            };
-            let name = entry.name.as_os_str();
-            // A child's path is built only when the walk needs it.
-            if file_type.is_symlink() {
-                if scope.excluded.excludes(name) {
-                    continue;
+            // What the walks that reach `dir` decide for its files, when this walk
+            // is the one walk of their strongest role.
+            let reach = match reaching.map(Reaching::reach) {
+                Some(reach) if take.is_some() && reach.hands_over(scope.role).is_some() => {
+                    Some(reach)
                 }
-                let child = dir.child(name);
-                match composer::canonical::canonicalize(child.as_path()) {
-                    Ok(target) => {
-                        if !self.leaves_out_link(scope.excluded, &target) {
-                            steps.push(Step::Found(Found::Link(target)));
-                        }
+                _ => None,
+            };
+            let mut batch = Vec::new();
+            let mut steps = Vec::with_capacity(listing.entries.len());
+            let mut dirs = Vec::new();
+            for entry in &listing.entries {
+                // An entry whose type cannot be read is not listed.
+                let Some(file_type) = entry.kind else {
+                    continue;
+                };
+                let name = entry.name.as_os_str();
+                // A child's path is built only when the walk needs it.
+                if file_type.is_symlink() {
+                    if scope.excluded.excludes(name) {
+                        continue;
                     }
-                    // A dangling `.php` link is listed under its own path, so
-                    // that reading it reports that path.
-                    Err(_)
-                        if is_php(child.as_path())
-                            && !(scope.outside && self.under_root(child.as_path())) =>
-                    {
+                    let child = dir.child(name);
+                    match composer::canonical::canonicalize(child.as_path()) {
+                        Ok(target) => {
+                            if !self.leaves_out_link(scope.excluded, &target) {
+                                steps.push(Step::Found(Found::Link(target)));
+                            }
+                        }
+                        // A dangling `.php` link is listed under its own path, so
+                        // that reading it reports that path.
+                        Err(_)
+                            if is_php(child.as_path())
+                                && !(scope.outside && self.under_root(child.as_path())) =>
+                        {
+                            steps.push(Step::Found(Found::File(child, owner)));
+                        }
+                        Err(_) => {}
+                    }
+                } else if file_type.is_dir() {
+                    if scope.excluded.excludes(name) {
+                        continue;
+                    }
+                    let child = dir.child(name);
+                    if scope.outside && self.under_root(child.as_path()) {
+                        continue;
+                    }
+                    if self.leaves_out_dir(scope.excluded, child.as_path()) {
+                        continue;
+                    }
+                    let below = reaching.map(|reaching| {
+                        starts.below(reaching, child.as_path(), child.hash(), Some(name), &cut)
+                    });
+                    if below.as_ref().is_some_and(|below| scope.prunes(below)) {
+                        continue;
+                    }
+                    steps.push(Step::Dir);
+                    dirs.push((child, below, owner_at.child(name)));
+                } else if path_bytes::is_php_name(name) {
+                    let child = dir.child(name);
+                    if !(scope.outside && self.under_root(child.as_path())) {
+                        if let Some(reach) = reach
+                            && let Some(stub) =
+                                starts.with_file_walks(reach, &child).hands_over(scope.role)
+                        {
+                            batch.push(Listed {
+                                path: child.clone(),
+                                role: scope.role,
+                                stub,
+                                owner: Some(owner),
+                            });
+                        }
                         steps.push(Step::Found(Found::File(child, owner)));
                     }
-                    Err(_) => {}
-                }
-            } else if file_type.is_dir() {
-                if scope.excluded.excludes(name) {
-                    continue;
-                }
-                let child = dir.child(name);
-                if scope.outside && self.under_root(child.as_path()) {
-                    continue;
-                }
-                if self.leaves_out_dir(scope.excluded, child.as_path()) {
-                    continue;
-                }
-                let below = reaching.map(|reaching| {
-                    starts.below(reaching, child.as_path(), child.hash(), Some(name), &cut)
-                });
-                if below.as_ref().is_some_and(|below| scope.prunes(below)) {
-                    continue;
-                }
-                steps.push(Step::Dir);
-                dirs.push((child, below, owner_at.child(name)));
-            } else if path_bytes::is_php_name(name) {
-                let child = dir.child(name);
-                if !(scope.outside && self.under_root(child.as_path())) {
-                    if let Some(reach) = reach
-                        && let Some(stub) =
-                            starts.with_file_walks(reach, &child).hands_over(scope.role)
-                    {
-                        batch.push(Listed {
-                            path: child.clone(),
-                            role: scope.role,
-                            stub,
-                            owner: Some(owner),
-                        });
-                    }
-                    steps.push(Step::Found(Found::File(child, owner)));
                 }
             }
-        }
-        if let Some(take) = take
-            && !batch.is_empty()
-        {
-            take(batch);
-        }
-        let subtrees: Vec<Vec<Found>> = dirs
-            .par_iter()
-            .map(|(child, below, owner_at)| {
-                self.walk_subdirectory(child, below.as_ref(), scope, ancestors, take, *owner_at)
-            })
-            .collect();
-        let mut subtrees = subtrees.into_iter();
-        let mut found = Vec::new();
-        for step in steps {
-            match step {
-                Step::Found(item) => found.push(item),
-                Step::Dir => found.extend(subtrees.next().unwrap_or_default()),
+            if let Some(take) = take
+                && !batch.is_empty()
+            {
+                take(batch);
             }
-        }
-        found
+            let subtrees: Vec<Vec<Found>> = dirs
+                .par_iter()
+                .map(|(child, below, owner_at)| {
+                    self.walk_subdirectory(child, below.as_ref(), scope, ancestors, take, *owner_at)
+                })
+                .collect();
+            let mut subtrees = subtrees.into_iter();
+            let mut found = Vec::new();
+            for step in steps {
+                match step {
+                    Step::Found(item) => found.push(item),
+                    Step::Dir => found.extend(subtrees.next().unwrap_or_default()),
+                }
+            }
+            found
+        })
     }
 
     /// Walks the subdirectory `child`, which `reaching` reaches, unless it is
@@ -1534,25 +1540,27 @@ impl<'a, 'p> Walk<'a, 'p> {
         take: Option<&Take<'_>>,
         owner_at: composer::OwnerAt<'p>,
     ) -> Vec<Found> {
-        let Ok(handle) = Handle::from_path(child) else {
-            return Vec::new();
-        };
-        // A directory that is its own ancestor ends the loop: its files are
-        // listed by the walk above it.
-        if ancestors.holds(&handle) {
-            return Vec::new();
-        }
-        self.walk_dir(
-            child,
-            reaching,
-            scope,
-            &Ancestors {
-                handle: &handle,
-                parent: Some(ancestors),
-            },
-            take,
-            owner_at,
-        )
+        stack::guard(|| {
+            let Ok(handle) = Handle::from_path(child) else {
+                return Vec::new();
+            };
+            // A directory that is its own ancestor ends the loop: its files are
+            // listed by the walk above it.
+            if ancestors.holds(&handle) {
+                return Vec::new();
+            }
+            self.walk_dir(
+                child,
+                reaching,
+                scope,
+                &Ancestors {
+                    handle: &handle,
+                    parent: Some(ancestors),
+                },
+                take,
+                owner_at,
+            )
+        })
     }
 
     /// Records what a walk listed, in the order it listed it: each file under

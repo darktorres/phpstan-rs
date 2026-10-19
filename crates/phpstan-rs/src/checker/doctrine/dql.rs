@@ -308,77 +308,80 @@ impl Parser {
     }
 
     fn parse_select_item_kind(&mut self) -> Option<SelectItemKind> {
-        // A parenthesized scalar subquery (168k) - checked before the
-        // generic `DISTINCT`/`NEW`/`CASE`/function-call dispatch below,
-        // none of which ever start with `(`.
-        if matches!(self.peek(), Some(Token::LParen))
-            && ident_ci(&self.tokens, self.pos + 1, "SELECT")
-        {
-            let (chain, items, end) = parse_select_statement_tokens(&self.tokens, self.pos + 1)?;
-            if self.tokens.get(end) != Some(&Token::RParen) {
-                return None;
-            }
-            self.pos = end + 1;
-            return Some(SelectItemKind::Subquery(Box::new(chain), items));
-        }
-        if self.eat_ident_ci("DISTINCT") {
-            // Shape-irrelevant, but must still be consumed - the real
-            // operand follows it.
-            return self.parse_select_item_kind();
-        }
-        if self.eat_ident_ci("NEW") {
-            return match self.next()? {
-                Token::QualifiedName(name) | Token::Ident(name) => {
-                    if self.next() != Some(Token::LParen) {
-                        return None;
-                    }
-                    // The constructor's own arguments don't affect the
-                    // row shape (it's always exactly `Object(Dto, [])`),
-                    // so they're skipped, not parsed - just balance
-                    // parens to find where they end.
-                    self.skip_balanced_parens()?;
-                    Some(SelectItemKind::New(name))
-                }
-                _ => None,
-            };
-        }
-        if self.eat_ident_ci("CASE") {
-            return self.parse_case();
-        }
-        // `IDENTITY(...)` is field-ref-shaped (resolves to the target
-        // association's own id type), not a function call - checked
-        // before the generic function-call dispatch below, which would
-        // otherwise treat it as an unrecognized custom function.
-        if matches!(self.peek(), Some(Token::Ident(s)) if s.eq_ignore_ascii_case("IDENTITY")) {
-            return self.parse_field_ref().map(SelectItemKind::Field);
-        }
-        // A function-call shape: `Ident(...)` - an aggregate if `Ident`
-        // is one of the five built-ins, otherwise a custom function
-        // (168h).
-        if let Some(Token::Ident(name)) = self.peek().cloned()
-            && self.tokens.get(self.pos + 1) == Some(&Token::LParen)
-        {
-            self.pos += 2;
-            if let Some(func) = AggregateFn::from_name(&name) {
-                // `DISTINCT` inside an aggregate call (`COUNT(DISTINCT
-                // x)`) only changes cardinality, never `COUNT`'s own
-                // result type - consumed, not tracked.
-                self.eat_ident_ci("DISTINCT");
-                let operand = if matches!(self.peek(), Some(Token::Star)) {
-                    self.pos += 1;
-                    None
-                } else {
-                    self.parse_field_ref()
-                };
-                if self.next() != Some(Token::RParen) {
+        stack::guard(|| {
+            // A parenthesized scalar subquery (168k) - checked before the
+            // generic `DISTINCT`/`NEW`/`CASE`/function-call dispatch below,
+            // none of which ever start with `(`.
+            if matches!(self.peek(), Some(Token::LParen))
+                && ident_ci(&self.tokens, self.pos + 1, "SELECT")
+            {
+                let (chain, items, end) =
+                    parse_select_statement_tokens(&self.tokens, self.pos + 1)?;
+                if self.tokens.get(end) != Some(&Token::RParen) {
                     return None;
                 }
-                return Some(SelectItemKind::Aggregate { func, operand });
+                self.pos = end + 1;
+                return Some(SelectItemKind::Subquery(Box::new(chain), items));
             }
-            self.skip_balanced_parens()?;
-            return Some(SelectItemKind::Custom(name));
-        }
-        self.parse_field_ref().map(SelectItemKind::Field)
+            if self.eat_ident_ci("DISTINCT") {
+                // Shape-irrelevant, but must still be consumed - the real
+                // operand follows it.
+                return self.parse_select_item_kind();
+            }
+            if self.eat_ident_ci("NEW") {
+                return match self.next()? {
+                    Token::QualifiedName(name) | Token::Ident(name) => {
+                        if self.next() != Some(Token::LParen) {
+                            return None;
+                        }
+                        // The constructor's own arguments don't affect the
+                        // row shape (it's always exactly `Object(Dto, [])`),
+                        // so they're skipped, not parsed - just balance
+                        // parens to find where they end.
+                        self.skip_balanced_parens()?;
+                        Some(SelectItemKind::New(name))
+                    }
+                    _ => None,
+                };
+            }
+            if self.eat_ident_ci("CASE") {
+                return self.parse_case();
+            }
+            // `IDENTITY(...)` is field-ref-shaped (resolves to the target
+            // association's own id type), not a function call - checked
+            // before the generic function-call dispatch below, which would
+            // otherwise treat it as an unrecognized custom function.
+            if matches!(self.peek(), Some(Token::Ident(s)) if s.eq_ignore_ascii_case("IDENTITY")) {
+                return self.parse_field_ref().map(SelectItemKind::Field);
+            }
+            // A function-call shape: `Ident(...)` - an aggregate if `Ident`
+            // is one of the five built-ins, otherwise a custom function
+            // (168h).
+            if let Some(Token::Ident(name)) = self.peek().cloned()
+                && self.tokens.get(self.pos + 1) == Some(&Token::LParen)
+            {
+                self.pos += 2;
+                if let Some(func) = AggregateFn::from_name(&name) {
+                    // `DISTINCT` inside an aggregate call (`COUNT(DISTINCT
+                    // x)`) only changes cardinality, never `COUNT`'s own
+                    // result type - consumed, not tracked.
+                    self.eat_ident_ci("DISTINCT");
+                    let operand = if matches!(self.peek(), Some(Token::Star)) {
+                        self.pos += 1;
+                        None
+                    } else {
+                        self.parse_field_ref()
+                    };
+                    if self.next() != Some(Token::RParen) {
+                        return None;
+                    }
+                    return Some(SelectItemKind::Aggregate { func, operand });
+                }
+                self.skip_balanced_parens()?;
+                return Some(SelectItemKind::Custom(name));
+            }
+            self.parse_field_ref().map(SelectItemKind::Field)
+        })
     }
 
     /// Consumes tokens up to and including the matching `)` for a

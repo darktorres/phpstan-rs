@@ -13,7 +13,7 @@ pub struct PhpString(Arc<[u8]>);
 #[cfg(feature = "fuzzing")]
 impl<'a> arbitrary::Arbitrary<'a> for PhpString {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<PhpString> {
-        Ok(PhpString(Arc::from(<&[u8]>::arbitrary(u)?)))
+        stack::guard(|| Ok(PhpString(Arc::from(<&[u8]>::arbitrary(u)?))))
     }
 }
 

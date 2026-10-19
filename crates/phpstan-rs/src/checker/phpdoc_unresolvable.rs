@@ -125,59 +125,61 @@ fn has_known_prefix(name: &str) -> bool {
 
 /// Calls `f` on `node` and every node nested in it.
 fn walk(node: &TypeNode, f: &mut dyn FnMut(&TypeNode)) {
-    f(node);
-    match node {
-        TypeNode::Nullable(inner)
-        | TypeNode::ArrayOf(inner)
-        | TypeNode::Paren(inner)
-        | TypeNode::VarianceArg(_, inner) => walk(inner, f),
-        TypeNode::Union(ms) | TypeNode::Intersection(ms) => ms.iter().for_each(|m| walk(m, f)),
-        TypeNode::Generic(_, args) => args.iter().for_each(|a| walk(a, f)),
-        TypeNode::OffsetAccess(base, offset) => {
-            walk(base, f);
-            walk(offset, f);
-        }
-        TypeNode::ArrayShape {
-            fields,
-            unsealed_type,
-            ..
-        } => {
-            fields.iter().for_each(|field| walk(&field.ty, f));
-            if let Some((key, value)) = unsealed_type {
-                if let Some(key) = key {
-                    walk(key, f);
-                }
-                walk(value, f);
+    stack::guard(|| {
+        f(node);
+        match node {
+            TypeNode::Nullable(inner)
+            | TypeNode::ArrayOf(inner)
+            | TypeNode::Paren(inner)
+            | TypeNode::VarianceArg(_, inner) => walk(inner, f),
+            TypeNode::Union(ms) | TypeNode::Intersection(ms) => ms.iter().for_each(|m| walk(m, f)),
+            TypeNode::Generic(_, args) => args.iter().for_each(|a| walk(a, f)),
+            TypeNode::OffsetAccess(base, offset) => {
+                walk(base, f);
+                walk(offset, f);
             }
-        }
-        TypeNode::Callable {
-            templates,
-            params,
-            return_type,
-            ..
-        } => {
-            for t in templates {
-                for ty in [&t.bound, &t.lower, &t.default].into_iter().flatten() {
-                    walk(ty, f);
+            TypeNode::ArrayShape {
+                fields,
+                unsealed_type,
+                ..
+            } => {
+                fields.iter().for_each(|field| walk(&field.ty, f));
+                if let Some((key, value)) = unsealed_type {
+                    if let Some(key) = key {
+                        walk(key, f);
+                    }
+                    walk(value, f);
                 }
             }
-            params.iter().for_each(|p| walk(&p.ty, f));
-            if let Some(ret) = return_type {
-                walk(ret, f);
+            TypeNode::Callable {
+                templates,
+                params,
+                return_type,
+                ..
+            } => {
+                for t in templates {
+                    for ty in [&t.bound, &t.lower, &t.default].into_iter().flatten() {
+                        walk(ty, f);
+                    }
+                }
+                params.iter().for_each(|p| walk(&p.ty, f));
+                if let Some(ret) = return_type {
+                    walk(ret, f);
+                }
             }
+            TypeNode::Conditional {
+                target,
+                if_true,
+                if_false,
+                ..
+            } => {
+                walk(target, f);
+                walk(if_true, f);
+                walk(if_false, f);
+            }
+            _ => {}
         }
-        TypeNode::Conditional {
-            target,
-            if_true,
-            if_false,
-            ..
-        } => {
-            walk(target, f);
-            walk(if_true, f);
-            walk(if_false, f);
-        }
-        _ => {}
-    }
+    })
 }
 
 impl<'a> Checker<'a> {

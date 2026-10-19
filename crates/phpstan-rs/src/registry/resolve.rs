@@ -1660,19 +1660,21 @@ fn resolve_value_of_target(target_fqn: &str, classes: &NameTable<ClassReflection
 /// Whether `fqn` is `UnitEnum`, `BackedEnum` or an interface extending
 /// one, which only enums implement.
 fn is_enum_interface(fqn: &str, classes: &NameTable<ClassReflection>, depth: usize) -> bool {
-    let fqn = fqn.trim_start_matches('\\');
-    if fqn.eq_ignore_ascii_case("UnitEnum") || fqn.eq_ignore_ascii_case("BackedEnum") {
-        return true;
-    }
-    depth < 32
-        && classes.get(fqn).is_some_and(|info| {
-            info.kind == ClassKind::Interface
-                && info
-                    .extends
-                    .iter()
-                    .chain(&info.implements)
-                    .any(|parent| is_enum_interface(parent, classes, depth + 1))
-        })
+    stack::guard(|| {
+        let fqn = fqn.trim_start_matches('\\');
+        if fqn.eq_ignore_ascii_case("UnitEnum") || fqn.eq_ignore_ascii_case("BackedEnum") {
+            return true;
+        }
+        depth < 32
+            && classes.get(fqn).is_some_and(|info| {
+                info.kind == ClassKind::Interface
+                    && info
+                        .extends
+                        .iter()
+                        .chain(&info.implements)
+                        .any(|parent| is_enum_interface(parent, classes, depth + 1))
+            })
+    })
 }
 
 /// Resolves `ty` (a param/return type that may contain a `ValueOf`)
@@ -2056,33 +2058,37 @@ fn resolve_constant_names(ty: &Type, registry: &Registry) -> Option<Type> {
 
 /// Whether `ty` has a constant-named `Object` anywhere in it.
 fn mentions_constant_name(ty: &Type, registry: &Registry) -> bool {
-    if !ty.has_constant_looking_name() {
-        return false;
-    }
     stack::guard(|| {
-        if let Some((name, args)) = ty.as_object()
-            && args.is_empty()
-            && constant_named_value(name, registry).is_some()
-        {
-            return true;
+        if !ty.has_constant_looking_name() {
+            return false;
         }
-        ty.any_child(|child| mentions_constant_name(child, registry))
+        stack::guard(|| {
+            if let Some((name, args)) = ty.as_object()
+                && args.is_empty()
+                && constant_named_value(name, registry).is_some()
+            {
+                return true;
+            }
+            ty.any_child(|child| mentions_constant_name(child, registry))
+        })
     })
 }
 
 fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool) -> Type {
-    if !ty.has_constant_looking_name() {
-        return ty.clone();
-    }
     stack::guard(|| {
-        if let Some((name, args)) = ty.as_object()
-            && args.is_empty()
-            && let Some(value) = constant_named_type(name, registry)
-        {
-            *changed = true;
-            return value;
+        if !ty.has_constant_looking_name() {
+            return ty.clone();
         }
-        ty.map_children(&mut |t| resolve_constant_names_rec(t, registry, changed))
+        stack::guard(|| {
+            if let Some((name, args)) = ty.as_object()
+                && args.is_empty()
+                && let Some(value) = constant_named_type(name, registry)
+            {
+                *changed = true;
+                return value;
+            }
+            ty.map_children(&mut |t| resolve_constant_names_rec(t, registry, changed))
+        })
     })
 }
 

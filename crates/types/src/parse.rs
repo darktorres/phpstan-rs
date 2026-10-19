@@ -253,7 +253,7 @@ fn top_level_find(s: &str, pat: &str) -> Option<usize> {
 /// `TemplateParam`.
 fn mark_callable_templates(sig: CallableSig) -> CallableSig {
     fn mark(ty: &Type, templates: &[crate::TemplateParam]) -> Type {
-        match ty.repr() {
+        stack::guard(|| match ty.repr() {
             Repr::Object(name, args) if args.is_empty() => {
                 match templates.iter().find(|t| t.name == *name) {
                     Some(t) => Type::template_param(t.clone()),
@@ -261,7 +261,7 @@ fn mark_callable_templates(sig: CallableSig) -> CallableSig {
                 }
             }
             _ => ty.map_children(&mut |c| mark(c, templates)),
-        }
+        })
     }
     if sig.templates.is_empty() {
         return sig;

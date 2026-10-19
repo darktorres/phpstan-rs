@@ -256,14 +256,16 @@ impl<'a> Layout<'a> {
         config: &BTreeMap<String, String>,
         depth: u8,
     ) -> Option<String> {
-        let Some(start) = text.find("{$") else {
-            return Some(text.to_string());
-        };
-        let Some(end) = text.rfind('}').filter(|&end| end >= start + 3) else {
-            return Some(text.to_string());
-        };
-        let value = self.reference(&text[start + 2..end], config, depth)?;
-        Some(format!("{}{}{}", &text[..start], value, &text[end + 1..]))
+        stack::guard(|| {
+            let Some(start) = text.find("{$") else {
+                return Some(text.to_string());
+            };
+            let Some(end) = text.rfind('}').filter(|&end| end >= start + 3) else {
+                return Some(text.to_string());
+            };
+            let value = self.reference(&text[start + 2..end], config, depth)?;
+            Some(format!("{}{}{}", &text[..start], value, &text[end + 1..]))
+        })
     }
 
     /// The value a `{$name}` reference gives, or `None` when it is not modelled
@@ -274,19 +276,21 @@ impl<'a> Layout<'a> {
         config: &BTreeMap<String, String>,
         depth: u8,
     ) -> Option<String> {
-        if depth > 8 {
-            return None;
-        }
-        if let Some(value) = config.get(name) {
-            return self.references(value, config, depth + 1);
-        }
-        if name == "vendor-dir" {
-            return Some("vendor".to_string());
-        }
-        if UNMODELLED_KEYS.contains(&name) {
-            return None;
-        }
-        Some(String::new())
+        stack::guard(|| {
+            if depth > 8 {
+                return None;
+            }
+            if let Some(value) = config.get(name) {
+                return self.references(value, config, depth + 1);
+            }
+            if name == "vendor-dir" {
+                return Some("vendor".to_string());
+            }
+            if UNMODELLED_KEYS.contains(&name) {
+                return None;
+            }
+            Some(String::new())
+        })
     }
 
     /// Composer's `Platform::expandPath`: a leading `~/` or `~\` takes the home

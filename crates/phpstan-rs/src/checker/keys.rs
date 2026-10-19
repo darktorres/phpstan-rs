@@ -224,19 +224,21 @@ impl KeyTable {
 
     /// Whether `key` is `root` or built on it, through any number of steps.
     pub(crate) fn depends_on(&self, key: LocalKey, root: LocalKey) -> bool {
-        if key == root {
-            return true;
-        }
-        match self.data(key) {
-            KeyData::Var(_) | KeyData::StaticProp { .. } => false,
-            KeyData::Prop { base, .. } | KeyData::Index { base, .. } => {
-                self.depends_on(*base, root)
+        stack::guard(|| {
+            if key == root {
+                return true;
             }
-            KeyData::VarIndex { base, subscript } => {
-                self.depends_on(*base, root) || self.depends_on(*subscript, root)
+            match self.data(key) {
+                KeyData::Var(_) | KeyData::StaticProp { .. } => false,
+                KeyData::Prop { base, .. } | KeyData::Index { base, .. } => {
+                    self.depends_on(*base, root)
+                }
+                KeyData::VarIndex { base, subscript } => {
+                    self.depends_on(*base, root) || self.depends_on(*subscript, root)
+                }
+                KeyData::Truthy(tested) | KeyData::Isset(tested) => self.depends_on(*tested, root),
             }
-            KeyData::Truthy(tested) | KeyData::Isset(tested) => self.depends_on(*tested, root),
-        }
+        })
     }
 
     /// Every key built on `root`, through any number of steps, `root`
@@ -265,7 +267,7 @@ impl KeyTable {
     }
 
     fn render_into(&self, key: LocalKey, out: &mut String) {
-        match self.data(key) {
+        stack::guard(|| match self.data(key) {
             KeyData::Var(name) => out.push_str(name),
             KeyData::Prop { base, prop } => {
                 self.render_into(*base, out);
@@ -299,7 +301,7 @@ impl KeyTable {
                 self.render_into(*tested, out);
                 out.push(')');
             }
-        }
+        })
     }
 
     /// The key of the expression `e` narrows, made when it has not been:

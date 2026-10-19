@@ -499,8 +499,10 @@ fn walk_top_level(stmts: &[Stmt], out: &mut GlobalFacts) {
 /// unconditional - a function body's own scope isn't subject to the
 /// include-graph check the way file top level is.
 fn walk_function_body(stmts: &[Stmt], out: &mut GlobalFacts) {
-    let global_names = collect_global_names(stmts);
-    walk_scope(stmts, false, &global_names, true, out);
+    stack::guard(|| {
+        let global_names = collect_global_names(stmts);
+        walk_scope(stmts, false, &global_names, true, out);
+    })
 }
 
 /// Every name a `global` statement in this body imports. A nested
@@ -527,15 +529,17 @@ fn walk_scope(
     walk_bodies: bool,
     out: &mut GlobalFacts,
 ) {
-    let mut scope = Scope {
-        top_level,
-        global_names,
-        walk_bodies,
-        out,
-    };
-    for stmt in stmts {
-        scope.visit_stmt(stmt);
-    }
+    stack::guard(|| {
+        let mut scope = Scope {
+            top_level,
+            global_names,
+            walk_bodies,
+            out,
+        };
+        for stmt in stmts {
+            scope.visit_stmt(stmt);
+        }
+    })
 }
 
 /// One scope's walk: a nested function, method or closure body is walked
@@ -550,27 +554,29 @@ struct Scope<'r> {
 
 impl<'a> Visitor<'a> for Scope<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        match &stmt.kind {
-            StmtKind::FunctionDecl(f) => {
-                if self.walk_bodies {
-                    walk_function_body(f.body_stmts(), self.out);
-                }
-                return;
-            }
-            StmtKind::ClassDecl(c) => {
-                if self.walk_bodies {
-                    for method in &c.def.methods {
-                        walk_function_body(method.function.body_stmts(), self.out);
+        stack::guard(|| {
+            match &stmt.kind {
+                StmtKind::FunctionDecl(f) => {
+                    if self.walk_bodies {
+                        walk_function_body(f.body_stmts(), self.out);
                     }
+                    return;
                 }
-                return;
+                StmtKind::ClassDecl(c) => {
+                    if self.walk_bodies {
+                        for method in &c.def.methods {
+                            walk_function_body(method.function.body_stmts(), self.out);
+                        }
+                    }
+                    return;
+                }
+                StmtKind::Expression(e) => {
+                    handle_top_expr_statement(e, self.top_level, self.global_names, self.out);
+                }
+                _ => {}
             }
-            StmtKind::Expression(e) => {
-                handle_top_expr_statement(e, self.top_level, self.global_names, self.out);
-            }
-            _ => {}
-        }
-        walk_stmt(self, stmt);
+            walk_stmt(self, stmt);
+        })
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
@@ -809,7 +815,7 @@ fn static_value(expr: &Expr) -> StaticValue {
 /// The type of an assigned value, using only registry lookups - no
 /// `Checker`/`Locals`, neither exists yet at this point in the pipeline.
 fn resolve_value(value: &StaticValue, registry: &Registry) -> Type {
-    match value {
+    stack::guard(|| match value {
         StaticValue::Known(ty) => ty.clone(),
         StaticValue::Array(items) => {
             let fields = items
@@ -837,5 +843,5 @@ fn resolve_value(value: &StaticValue, registry: &Registry) -> Type {
             .and_then(|(class, _)| registry.lookup_method(class, method))
             .map(|sig| sig.return_type.clone())
             .unwrap_or(Type::mixed()),
-    }
+    })
 }

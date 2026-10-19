@@ -138,13 +138,15 @@ impl ArchitectureRule {
     /// at startup.
     pub fn validate(&self) -> Result<(), String> {
         fn selectors_ok(selectors: &[Selector]) -> Result<(), String> {
-            for s in selectors {
-                for pattern in [&s.namespace, &s.classname].into_iter().flatten() {
-                    NamePattern::parse(pattern)?;
+            stack::guard(|| {
+                for s in selectors {
+                    for pattern in [&s.namespace, &s.classname].into_iter().flatten() {
+                        NamePattern::parse(pattern)?;
+                    }
+                    selectors_ok(&s.excluding)?;
                 }
-                selectors_ok(&s.excluding)?;
-            }
-            Ok(())
+                Ok(())
+            })
         }
         if self.classes.is_empty() {
             return Err("an [[architecture]] rule needs a non-empty `classes`".to_string());

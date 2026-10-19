@@ -391,33 +391,39 @@ impl Project {
 /// A native type's union members, each as its intersected parts: a class
 /// by its resolved name, a keyword type in lowercase.
 fn native_members(hint: &TypeHint) -> Vec<Vec<String>> {
-    fn part(hint: &TypeHint) -> String {
+    stack::guard(|| {
+        fn part(hint: &TypeHint) -> String {
+            match &hint.kind {
+                TypeHintKind::Name(name) => {
+                    name.resolved_class().unwrap_or(&name.written).to_string()
+                }
+                TypeHintKind::Keyword(_, written) => written.to_ascii_lowercase(),
+                _ => hint.to_string(),
+            }
+        }
         match &hint.kind {
-            TypeHintKind::Name(name) => name.resolved_class().unwrap_or(&name.written).to_string(),
-            TypeHintKind::Keyword(_, written) => written.to_ascii_lowercase(),
-            _ => hint.to_string(),
+            TypeHintKind::Union(members) => members.iter().flat_map(native_members).collect(),
+            TypeHintKind::Nullable(inner) => {
+                let mut out = native_members(inner);
+                out.push(vec!["null".to_string()]);
+                out
+            }
+            TypeHintKind::Intersection(parts) => vec![parts.iter().map(part).collect()],
+            _ => vec![vec![part(hint)]],
         }
-    }
-    match &hint.kind {
-        TypeHintKind::Union(members) => members.iter().flat_map(native_members).collect(),
-        TypeHintKind::Nullable(inner) => {
-            let mut out = native_members(inner);
-            out.push(vec!["null".to_string()]);
-            out
-        }
-        TypeHintKind::Intersection(parts) => vec![parts.iter().map(part).collect()],
-        _ => vec![vec![part(hint)]],
-    }
+    })
 }
 
 fn union_members(node: &phpdoc::grammar::TypeNode, out: &mut Vec<String>) {
-    use phpdoc::grammar::TypeNode;
-    match node.unwrap_paren() {
-        TypeNode::Union(members) => members.iter().for_each(|m| union_members(m, out)),
-        TypeNode::Nullable(inner) => {
-            union_members(inner, out);
-            out.push("null".to_string());
+    stack::guard(|| {
+        use phpdoc::grammar::TypeNode;
+        match node.unwrap_paren() {
+            TypeNode::Union(members) => members.iter().for_each(|m| union_members(m, out)),
+            TypeNode::Nullable(inner) => {
+                union_members(inner, out);
+                out.push("null".to_string());
+            }
+            other => out.push(other.to_source_string()),
         }
-        other => out.push(other.to_source_string()),
-    }
+    })
 }

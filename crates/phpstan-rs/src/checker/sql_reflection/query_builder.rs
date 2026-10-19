@@ -265,11 +265,13 @@ fn combine_predicate_parts(parts: &[(bool, String)]) -> Option<String> {
 }
 
 fn looks_like_dbal_query_builder_chain(e: &Expr) -> bool {
-    let e = e.peeled();
-    stack::guard(|| match &e.kind {
-        ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
-        ExprKind::MethodCall(inner, _, _, _) => looks_like_dbal_query_builder_chain(inner),
-        _ => false,
+    stack::guard(|| {
+        let e = e.peeled();
+        stack::guard(|| match &e.kind {
+            ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
+            ExprKind::MethodCall(inner, _, _, _) => looks_like_dbal_query_builder_chain(inner),
+            _ => false,
+        })
     })
 }
 
@@ -676,49 +678,53 @@ fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<S
 /// else falls through rather than guesses" precedent (see `resolve.rs`'s
 /// static-schema JOIN/aggregate bail-outs).
 fn fold_sprintf_call(checker: &Checker, args: &[Arg], locals: &Locals) -> Option<String> {
-    let fmt = fold_string_expr(checker, &args.first()?.value, locals)?;
-    let mut values = args[1..].iter();
-    let mut out = String::new();
-    let mut chars = fmt.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '%' {
-            out.push(c);
-            continue;
-        }
-        match chars.next()? {
-            '%' => out.push('%'),
-            's' => out.push_str(&fold_sprintf_string_arg(checker, values.next()?, locals)?),
-            'd' => {
-                let n = fold_sprintf_int_arg(checker, values.next()?, locals)?;
-                out.push_str(&n.to_string());
+    stack::guard(|| {
+        let fmt = fold_string_expr(checker, &args.first()?.value, locals)?;
+        let mut values = args[1..].iter();
+        let mut out = String::new();
+        let mut chars = fmt.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '%' {
+                out.push(c);
+                continue;
             }
-            'u' => {
-                let n = fold_sprintf_int_arg(checker, values.next()?, locals)?;
-                if n < 0 {
-                    return None;
+            match chars.next()? {
+                '%' => out.push('%'),
+                's' => out.push_str(&fold_sprintf_string_arg(checker, values.next()?, locals)?),
+                'd' => {
+                    let n = fold_sprintf_int_arg(checker, values.next()?, locals)?;
+                    out.push_str(&n.to_string());
                 }
-                out.push_str(&n.to_string());
+                'u' => {
+                    let n = fold_sprintf_int_arg(checker, values.next()?, locals)?;
+                    if n < 0 {
+                        return None;
+                    }
+                    out.push_str(&n.to_string());
+                }
+                _ => return None,
             }
-            _ => return None,
         }
-    }
-    // Real `sprintf()` throws `ValueError` on a count mismatch - folding
-    // a call that would itself fail at runtime is unsafe/pointless, so
-    // bail rather than fold a text that could never actually be produced.
-    if values.next().is_some() {
-        return None;
-    }
-    Some(out)
+        // Real `sprintf()` throws `ValueError` on a count mismatch - folding
+        // a call that would itself fail at runtime is unsafe/pointless, so
+        // bail rather than fold a text that could never actually be produced.
+        if values.next().is_some() {
+            return None;
+        }
+        Some(out)
+    })
 }
 
 fn fold_sprintf_string_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<String> {
-    if let Some(s) = fold_string_expr(checker, &arg.value, locals) {
-        return Some(s);
-    }
-    checker
-        .infer_expr(&arg.value, locals)
-        .int_literal_value()
-        .map(|n| n.to_string())
+    stack::guard(|| {
+        if let Some(s) = fold_string_expr(checker, &arg.value, locals) {
+            return Some(s);
+        }
+        checker
+            .infer_expr(&arg.value, locals)
+            .int_literal_value()
+            .map(|n| n.to_string())
+    })
 }
 
 fn fold_sprintf_int_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<i64> {

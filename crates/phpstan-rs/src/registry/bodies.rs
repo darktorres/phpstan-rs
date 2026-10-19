@@ -498,10 +498,10 @@ impl BodySource for FileBodies {
     }
 
     fn summary(&self, provenance: &Provenance) -> Option<&Arc<BodySummary>> {
-        self.summary(provenance.declaration_span())
+        stack::guard(|| self.summary(provenance.declaration_span()))
     }
 
     fn init_flow(&self, provenance: &Provenance) -> Option<&Arc<InitFlow>> {
-        self.init_flow(provenance.declaration_span())
+        stack::guard(|| self.init_flow(provenance.declaration_span()))
     }
 }

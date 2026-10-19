@@ -144,30 +144,33 @@ impl Schema {
 
     /// Reports every key in `table`, at `path`, that no section owns.
     fn check_table(&self, path: &[&str], table: &toml::Table, errors: &mut Vec<String>) {
-        for (key, value) in table {
-            let mut child: Vec<&str> = path.to_vec();
-            child.push(key);
-            let exact = self.sections.iter().any(|s| s.path == child.as_slice());
-            let deeper = self
-                .sections
-                .iter()
-                .any(|s| s.path.len() > child.len() && s.path[..child.len()] == *child.as_slice());
-            if exact || deeper {
-                match value {
-                    toml::Value::Table(inner) => self.check_table(&child, inner, errors),
-                    _ if exact => {}
-                    _ => errors.push(format!("config key `{}` must be a table", dotted(&child))),
+        stack::guard(|| {
+            for (key, value) in table {
+                let mut child: Vec<&str> = path.to_vec();
+                child.push(key);
+                let exact = self.sections.iter().any(|s| s.path == child.as_slice());
+                let deeper = self.sections.iter().any(|s| {
+                    s.path.len() > child.len() && s.path[..child.len()] == *child.as_slice()
+                });
+                if exact || deeper {
+                    match value {
+                        toml::Value::Table(inner) => self.check_table(&child, inner, errors),
+                        _ if exact => {}
+                        _ => {
+                            errors.push(format!("config key `{}` must be a table", dotted(&child)))
+                        }
+                    }
+                    continue;
                 }
-                continue;
+                let owned = self
+                    .sections
+                    .iter()
+                    .any(|s| s.path == path && s.fields.contains(&key.as_str()));
+                if !owned {
+                    errors.push(format!("unknown config key `{}`", dotted(&child)));
+                }
             }
-            let owned = self
-                .sections
-                .iter()
-                .any(|s| s.path == path && s.fields.contains(&key.as_str()));
-            if !owned {
-                errors.push(format!("unknown config key `{}`", dotted(&child)));
-            }
-        }
+        })
     }
 }
 

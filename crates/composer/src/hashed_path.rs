@@ -127,7 +127,7 @@ pub struct Resolved(HashedPath);
 impl Resolved {
     /// `path`, resolved.
     pub fn resolve(path: &Path) -> Self {
-        Resolved(HashedPath::new(crate::manifest::resolve(path)))
+        stack::guard(|| Resolved(HashedPath::new(crate::manifest::resolve(path))))
     }
 
     /// `path`, which the caller knows to be resolved.

@@ -1439,15 +1439,19 @@ impl Stmt {
 /// tree (a long `.` chain is one) drops without overflowing it.
 impl Drop for Expr {
     fn drop(&mut self) {
-        let kind = std::mem::replace(&mut self.kind, ExprKind::Literal(Literal::Null));
-        stack::guard(|| drop(kind));
+        stack::guard(|| {
+            let kind = std::mem::replace(&mut self.kind, ExprKind::Literal(Literal::Null));
+            stack::guard(|| drop(kind));
+        })
     }
 }
 
 impl Drop for Stmt {
     fn drop(&mut self) {
-        let kind = std::mem::replace(&mut self.kind, StmtKind::Block(Vec::new()));
-        stack::guard(|| drop(kind));
+        stack::guard(|| {
+            let kind = std::mem::replace(&mut self.kind, StmtKind::Block(Vec::new()));
+            stack::guard(|| drop(kind));
+        })
     }
 }
 
@@ -1618,15 +1622,17 @@ pub fn match_default(arms: &[MatchArm]) -> Option<&Expr> {
 /// resolved here even if a caller's type tracking knows it's a literal
 /// value, since this function only sees the raw `Expr`.
 pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
-    let e = e.peeled();
-    stack::guard(|| match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => s.as_str().map(std::borrow::Cow::Borrowed),
-        ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
-            let l = literal_string_value(lhs)?;
-            let r = literal_string_value(rhs)?;
-            Some(std::borrow::Cow::Owned(format!("{l}{r}")))
-        }
-        _ => None,
+    stack::guard(|| {
+        let e = e.peeled();
+        stack::guard(|| match &e.kind {
+            ExprKind::Literal(Literal::String(s)) => s.as_str().map(std::borrow::Cow::Borrowed),
+            ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
+                let l = literal_string_value(lhs)?;
+                let r = literal_string_value(rhs)?;
+                Some(std::borrow::Cow::Owned(format!("{l}{r}")))
+            }
+            _ => None,
+        })
     })
 }
 

@@ -743,27 +743,29 @@ impl Spelled {
         base_dir: &Path,
         mut each: impl FnMut(&[u8]),
     ) {
-        let mut path = Vec::new();
-        let mut text = 0;
-        for piece in &self.pieces {
-            let dir = match *piece {
-                Piece::Text(len) => {
-                    let end = text + len as usize;
-                    path.extend_from_slice(&self.text.0[text..end]);
-                    text = end;
-                    continue;
-                }
-                Piece::GeneratedDir => generated_dir,
-                Piece::VendorDir => vendor_dir,
-                Piece::BaseDir => base_dir,
-                Piece::End => {
-                    each(&path);
-                    path.clear();
-                    continue;
-                }
-            };
-            path.extend_from_slice(dir.as_os_str().as_encoded_bytes());
-        }
+        stack::guard(|| {
+            let mut path = Vec::new();
+            let mut text = 0;
+            for piece in &self.pieces {
+                let dir = match *piece {
+                    Piece::Text(len) => {
+                        let end = text + len as usize;
+                        path.extend_from_slice(&self.text.0[text..end]);
+                        text = end;
+                        continue;
+                    }
+                    Piece::GeneratedDir => generated_dir,
+                    Piece::VendorDir => vendor_dir,
+                    Piece::BaseDir => base_dir,
+                    Piece::End => {
+                        each(&path);
+                        path.clear();
+                        continue;
+                    }
+                };
+                path.extend_from_slice(dir.as_os_str().as_encoded_bytes());
+            }
+        })
     }
 }
 
@@ -1088,24 +1090,28 @@ impl<'p> Resolver<'p> {
     /// twice (`a//b`, `a/b`) is listed under either, with a canonical form
     /// that is the same.
     fn listed(&mut self, dir: &Path) -> Option<&Listed> {
-        let key = dir.as_os_str().as_encoded_bytes();
-        if !self.listings.contains_key(key) {
-            let listed = self.list(dir);
-            self.listings.insert(key.to_vec(), listed);
-        }
-        self.listings.get(key)?.as_ref()
+        stack::guard(|| {
+            let key = dir.as_os_str().as_encoded_bytes();
+            if !self.listings.contains_key(key) {
+                let listed = self.list(dir);
+                self.listings.insert(key.to_vec(), listed);
+            }
+            self.listings.get(key)?.as_ref()
+        })
     }
 
     /// The table's listing of `dir`, under its canonical form. A listing
     /// with an entry that could not be read is no listing: the entries it
     /// lacks are not known.
     fn list(&mut self, dir: &Path) -> Option<Listed> {
-        let canonical = self.canonical_dir(dir)?;
-        let listing = self.table.listing(&canonical)?;
-        listing.complete.then(|| Listed {
-            vendor: Place::of(canonical.as_path(), self.vendor_dir),
-            canonical,
-            listing,
+        stack::guard(|| {
+            let canonical = self.canonical_dir(dir)?;
+            let listing = self.table.listing(&canonical)?;
+            listing.complete.then(|| Listed {
+                vendor: Place::of(canonical.as_path(), self.vendor_dir),
+                canonical,
+                listing,
+            })
         })
     }
 
@@ -1115,23 +1121,25 @@ impl<'p> Resolver<'p> {
     /// spelled as discovery spells them, are canonical already, so the
     /// directories above them are not read.
     fn canonical_dir(&mut self, dir: &Path) -> Option<HashedPath> {
-        for known in [self.vendor_dir, self.base_dir] {
-            if dir.as_os_str() == known.as_os_str() {
-                return Some(HashedPath::new(known.to_path_buf()));
+        stack::guard(|| {
+            for known in [self.vendor_dir, self.base_dir] {
+                if dir.as_os_str() == known.as_os_str() {
+                    return Some(HashedPath::new(known.to_path_buf()));
+                }
             }
-        }
-        // The root, or a path that ends in `..`, which names the parent of
-        // what precedes it: the system resolves it.
-        let Some((parent, name)) = path_bytes::split(dir) else {
-            return canonicalized(dir);
-        };
-        if parent.as_os_str().is_empty() {
-            return canonicalized(dir);
-        }
-        let Some(parent_listed) = self.listed(parent) else {
-            return canonicalized(dir);
-        };
-        entry_canonical(parent_listed, name, dir)
+            // The root, or a path that ends in `..`, which names the parent of
+            // what precedes it: the system resolves it.
+            let Some((parent, name)) = path_bytes::split(dir) else {
+                return canonicalized(dir);
+            };
+            if parent.as_os_str().is_empty() {
+                return canonicalized(dir);
+            }
+            let Some(parent_listed) = self.listed(parent) else {
+                return canonicalized(dir);
+            };
+            entry_canonical(parent_listed, name, dir)
+        })
     }
 }
 

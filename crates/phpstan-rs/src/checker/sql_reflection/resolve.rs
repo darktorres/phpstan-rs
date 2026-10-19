@@ -254,21 +254,23 @@ fn pure_ast_expr(expr: &Expr, driver: Option<SqlDriver>) -> Option<(String, Type
 /// second argument, ...) isn't a "needs no schema at all" shape, so
 /// bails rather than guess.
 fn count_argument_name(f: &sqlparser::ast::Function, driver: Option<SqlDriver>) -> Option<String> {
-    let sqlparser::ast::FunctionArguments::List(list) = &f.args else {
-        return None;
-    };
-    let [arg] = list.args.as_slice() else {
-        return None;
-    };
-    match arg {
-        sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Wildcard) => {
-            Some("*".to_string())
+    stack::guard(|| {
+        let sqlparser::ast::FunctionArguments::List(list) = &f.args else {
+            return None;
+        };
+        let [arg] = list.args.as_slice() else {
+            return None;
+        };
+        match arg {
+            sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Wildcard) => {
+                Some("*".to_string())
+            }
+            sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(e)) => {
+                Some(pure_ast_expr(e, driver)?.0)
+            }
+            _ => None,
         }
-        sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(e)) => {
-            Some(pure_ast_expr(e, driver)?.0)
-        }
-        _ => None,
-    }
+    })
 }
 
 /// The unaliased column name real driver metadata reports for a bare
@@ -414,28 +416,30 @@ fn resolve_ctes_from_static_schema(
     schema: &SchemaCatalog,
     query: &sqlparser::ast::Query,
 ) -> Option<FxHashMap<String, Vec<TypedColumn>>> {
-    let mut ctes = FxHashMap::default();
-    if let Some(with) = &query.with {
-        if with.recursive {
-            return None;
-        }
-        for cte in &with.cte_tables {
-            let SetExpr::Select(inner) = &*cte.query.body else {
+    stack::guard(|| {
+        let mut ctes = FxHashMap::default();
+        if let Some(with) = &query.with {
+            if with.recursive {
                 return None;
-            };
-            let fields = resolve_select_from_static_schema(schema, inner, &ctes)?;
-            let columns = fields
-                .into_iter()
-                .map(|(name, ty, _)| TypedColumn {
-                    name,
-                    ty,
-                    nullable: false,
-                })
-                .collect();
-            ctes.insert(cte.alias.name.value.clone(), columns);
+            }
+            for cte in &with.cte_tables {
+                let SetExpr::Select(inner) = &*cte.query.body else {
+                    return None;
+                };
+                let fields = resolve_select_from_static_schema(schema, inner, &ctes)?;
+                let columns = fields
+                    .into_iter()
+                    .map(|(name, ty, _)| TypedColumn {
+                        name,
+                        ty,
+                        nullable: false,
+                    })
+                    .collect();
+                ctes.insert(cte.alias.name.value.clone(), columns);
+            }
         }
-    }
-    Some(ctes)
+        Some(ctes)
+    })
 }
 
 /// A table's, derived table's or CTE's column, typed. A derived table's

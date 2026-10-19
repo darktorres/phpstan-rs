@@ -314,14 +314,14 @@ impl<'a> Walker<'a> {
 /// Whether a native type hint names the banned type `name` (lowercase,
 /// without a leading backslash).
 fn hint_mentions(hint: &TypeHint, name: &str) -> bool {
-    match &hint.kind {
+    stack::guard(|| match &hint.kind {
         TypeHintKind::Keyword(keyword, _) => keyword.as_str() == name,
         TypeHintKind::Name(written) => written.trim_start_matches('\\').eq_ignore_ascii_case(name),
         TypeHintKind::Nullable(inner) => hint_mentions(inner, name),
         TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
             members.iter().any(|m| hint_mentions(m, name))
         }
-    }
+    })
 }
 
 impl<'ast> Visitor<'ast> for Walker<'_> {

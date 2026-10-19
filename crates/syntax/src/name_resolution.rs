@@ -175,21 +175,23 @@ pub fn for_each_in_context<'a>(stmts: &'a [Stmt], mut f: impl FnMut(&'a Stmt, &N
         ctx: &mut NameContext,
         f: &mut impl FnMut(&'a Stmt, &NameContext),
     ) {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
-                    body: Some(inner), ..
-                } => {
-                    walk(inner, ctx, f);
-                    continue;
+        stack::guard(|| {
+            for stmt in stmts {
+                match &stmt.kind {
+                    StmtKind::Namespace(name) => ctx.set_namespace(name),
+                    StmtKind::Use(imports) => ctx.add_uses(imports),
+                    StmtKind::Block(inner)
+                    | StmtKind::Declare {
+                        body: Some(inner), ..
+                    } => {
+                        walk(inner, ctx, f);
+                        continue;
+                    }
+                    _ => {}
                 }
-                _ => {}
+                f(stmt, ctx);
             }
-            f(stmt, ctx);
-        }
+        })
     }
     walk(stmts, &mut NameContext::default(), &mut f);
 }
@@ -555,7 +557,7 @@ impl Resolver {
 
     #[inline(never)]
     fn resolve_expr(&mut self, expr: &mut Expr) {
-        match &mut expr.kind {
+        stack::guard(|| match &mut expr.kind {
             ExprKind::Name(name) => self.constant(name),
 
             ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
@@ -603,14 +605,14 @@ impl Resolver {
                 }
             }
             _ => walk_expr_mut(self, expr),
-        }
+        })
     }
 
     fn static_target(&mut self, target: &mut StaticTarget) {
-        match target {
+        stack::guard(|| match target {
             StaticTarget::Name(name) => self.class(name),
             StaticTarget::Expr(e) => self.visit_expr(e),
-        }
+        })
     }
 }
 
@@ -699,27 +701,29 @@ impl VisitorMut for Resolver {
     }
 
     fn visit_expr(&mut self, expr: &mut Expr) {
-        // Only name-bearing expressions need more than the plain walk;
-        // keeping the rest out of `resolve_expr` keeps the frames of this
-        // recursion small.
-        if matches!(
-            expr.kind,
-            ExprKind::Name(_)
-                | ExprKind::Call(..)
-                | ExprKind::New(..)
-                | ExprKind::ClassConstFetch(..)
-                | ExprKind::ClassNameFetch(_)
-                | ExprKind::StaticPropertyFetch(..)
-                | ExprKind::DynamicStaticPropertyFetch(..)
-                | ExprKind::DynamicClassConstFetch(..)
-                | ExprKind::StaticCall(..)
-                | ExprKind::DynamicStaticCall(..)
-                | ExprKind::Instanceof(..)
-        ) {
-            self.resolve_expr(expr);
-        } else {
-            walk_expr_mut(self, expr);
-        }
+        stack::guard(|| {
+            // Only name-bearing expressions need more than the plain walk;
+            // keeping the rest out of `resolve_expr` keeps the frames of this
+            // recursion small.
+            if matches!(
+                expr.kind,
+                ExprKind::Name(_)
+                    | ExprKind::Call(..)
+                    | ExprKind::New(..)
+                    | ExprKind::ClassConstFetch(..)
+                    | ExprKind::ClassNameFetch(_)
+                    | ExprKind::StaticPropertyFetch(..)
+                    | ExprKind::DynamicStaticPropertyFetch(..)
+                    | ExprKind::DynamicClassConstFetch(..)
+                    | ExprKind::StaticCall(..)
+                    | ExprKind::DynamicStaticCall(..)
+                    | ExprKind::Instanceof(..)
+            ) {
+                self.resolve_expr(expr);
+            } else {
+                walk_expr_mut(self, expr);
+            }
+        })
     }
 
     fn visit_class_def(&mut self, class: &mut ClassDef) {

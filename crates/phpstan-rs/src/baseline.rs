@@ -381,19 +381,21 @@ impl Baseline {
 }
 
 fn load_into(path: &Path, out: &mut Vec<Entry>, depth: usize) -> io::Result<()> {
-    if depth > 16 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "baseline includes nest too deeply",
-        ));
-    }
-    let file = read_file(path)?;
-    out.extend(file.entries);
-    let base = path.parent().unwrap_or(Path::new(""));
-    for include in file.includes {
-        load_into(&base.join(include), out, depth + 1)?;
-    }
-    Ok(())
+    stack::guard(|| {
+        if depth > 16 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "baseline includes nest too deeply",
+            ));
+        }
+        let file = read_file(path)?;
+        out.extend(file.entries);
+        let base = path.parent().unwrap_or(Path::new(""));
+        for include in file.includes {
+            load_into(&base.join(include), out, depth + 1)?;
+        }
+        Ok(())
+    })
 }
 
 /// Rewrites the baseline file at `path`, and every file it includes, in
@@ -404,20 +406,22 @@ pub fn convert(path: &Path) -> io::Result<usize> {
 }
 
 fn convert_into(path: &Path, depth: usize) -> io::Result<usize> {
-    if depth > 16 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "baseline includes nest too deeply",
-        ));
-    }
-    let file = read_file(path)?;
-    write_file(path, &file)?;
-    let base = path.parent().unwrap_or(Path::new(""));
-    let mut converted = 1;
-    for include in &file.includes {
-        converted += convert_into(&base.join(include), depth + 1)?;
-    }
-    Ok(converted)
+    stack::guard(|| {
+        if depth > 16 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "baseline includes nest too deeply",
+            ));
+        }
+        let file = read_file(path)?;
+        write_file(path, &file)?;
+        let base = path.parent().unwrap_or(Path::new(""));
+        let mut converted = 1;
+        for include in &file.includes {
+            converted += convert_into(&base.join(include), depth + 1)?;
+        }
+        Ok(converted)
+    })
 }
 
 /// Drops every diagnostic `baseline` absorbs from `results`, each entry

@@ -485,19 +485,21 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_param(&mut self, param: &'ast Param) {
-        for attr in &param.attrs {
-            self.visit_attribute(attr);
-        }
-        if let Some(hint) = &param.type_hint {
-            self.visit_type_hint(hint);
-        }
-        self.record_var_self(param.name.span, &param.name.name);
-        if let Some(default) = &param.default {
-            self.visit_expr(default);
-        }
-        if let Some(hooks) = &param.hooks {
-            self.visit_property_hooks(hooks);
-        }
+        stack::guard(|| {
+            for attr in &param.attrs {
+                self.visit_attribute(attr);
+            }
+            if let Some(hint) = &param.type_hint {
+                self.visit_type_hint(hint);
+            }
+            self.record_var_self(param.name.span, &param.name.name);
+            if let Some(default) = &param.default {
+                self.visit_expr(default);
+            }
+            if let Some(hooks) = &param.hooks {
+                self.visit_property_hooks(hooks);
+            }
+        })
     }
 
     fn visit_function_decl(&mut self, function: &'ast FunctionDecl) {
