@@ -145,10 +145,10 @@ be reevaluated together". The 20 G plan's unbuilt rows, and what they are worth:
 ## Proposed order
 
 The decisions below change it in five places: W1 is a correctness backlog and partly runs before
-item 9 (#22); W2 lands REG-4.15 with level 2 (H3.6); W3 includes Stage F1 and F2 (19), the six passes' per-file
-facts (39) and STUB-7.5, the lazy Composer locator, which leaves W4 (H4.1); W5 builds C7 on F41's lowering (14);
-W7 includes item 18's reconciled inference core and scopes (16), F69 with CHECK-9 and CHECK-7's checker half (D2) and
-CHECK-10's operator sites (D3).
+item 9 (#22); W2 lands REG-4.15 with level 2 (H3.6); W3 includes Stage F1 and F2 (#19), the six passes' per-file
+facts (#39) and STUB-7.5, the lazy Composer locator, which leaves W4 (H4.1); W5 builds C7 on F41's lowering (#14);
+W7 includes item 18's reconciled inference core and scopes (#16), F69 with CHECK-9 and CHECK-7's checker half (the crate
+split's D2) and CHECK-10's operator sites (the crate split's D3).
 
 | step | what | rows, in order | notes |
 |---|---|---|---|
@@ -207,7 +207,7 @@ CHECK-10's operator sites (D3).
 ## Rulings (Part D; the questions and their answers)
 
 1. **The order.** W2 and W3 (the engine slice and its prizes) before C5 to C10, with Stages D to G as
-   a separate decision (recommended); or the crate split's own order, C4 to G, which puts CACHE-13.2
+   a separate decision (recommended; answered: #19); or the crate split's own order, C4 to G, which puts CACHE-13.2
    behind Stage F, where its text is stale.
 2. **Item 18's inference core and scopes** (CHECK-6.1, 6.2, 6.3, 6.7, 6.13 to 6.15): build them in
    batch 7 as planned and re-read D1, D3 and D4 against what they leave, or leave them to Stage D and
@@ -219,7 +219,7 @@ CHECK-10's operator sites (D3).
    on tracked work. (Answered: #20, at approval.)
 4. **Whether Stages D to G are built as designed**, or re-planned after W6 on what the engine and the
    flat tree leave. No tracked row needs them. (Answered: #21.)
-5. **DOC-2.1 is built with C7** and stays deferred until then. (Answered otherwise: #14.)
+5. **DOC-2.1 is built with C7**, and it is undeferred: F41 builds its lowering first, in batch 6, and C7 builds on it. (Answered: #14.)
 6. **VAL-1's tooling before W2** (it is a precondition for no row): the printers and `registry-dump`
    would make REG-7's change to the registry visible. Say if it goes first. (Answered: #13, batch 0.)
 7. **The fillers (W1)**: used only between heavy runs, or left for after the prizes. Their value is

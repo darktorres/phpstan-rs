@@ -43,7 +43,7 @@ Each task is listed in the C1 batch that builds it. The state is the ledger's, a
 | PROD-5.6 | READY | 5 |
 | REG-14.1 | OPEN | 5 |
 | CHECK-13 | OPEN | 5 |
-| DOC-2.1 | READY (deferred) | 6 |
+| DOC-2.1 | READY (deferred in the ledger; #14 undefers it) | 6 |
 | DOC-2.2 | OPEN | 6 |
 | DOC-2.3 | READY | 6 |
 | DOC-2.4 | READY | 6 |
