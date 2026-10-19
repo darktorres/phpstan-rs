@@ -4,6 +4,8 @@ system's thp_fault_alloc before and after. Extra NAME=VALUE arguments go into
 the environment.
 
 usage: thp-probe.py <binary> <out.json> [NAME=VALUE]...
+
+Linux only: /proc/<pid>/smaps_rollup and /proc/vmstat.
 """
 import hashlib
 import os

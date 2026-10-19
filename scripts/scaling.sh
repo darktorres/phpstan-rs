@@ -1,7 +1,8 @@
 #!/bin/bash
 # Scaling curve of the gate binary on Piwigo: hyperfine -N over the worker
 # counts, off mode and warm mode. hyperfine discards stdout, so one more run
-# per mode writes it, and its sha256 must be the oracle's.
+# per mode writes it, and its sha256 must be the oracle's. Linux only: it
+# reads /proc/loadavg.
 W=/home/torres/.cache/prs-profile/wall-2026-10-17
 BIN=$W/target-gate/gate/phpstan-rs
 PIW=/home/torres/piwigo17-frozen

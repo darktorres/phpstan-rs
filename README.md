@@ -18,12 +18,35 @@ Pre-built binaries are published on the
 | `x86_64-pc-windows-msvc` | |
 
 Each asset is a `.gz`-compressed binary with a `.sha256` checksum file
-alongside it - verify before running:
+alongside it - verify before running. On Linux:
 
 ```sh
 sha256sum -c phpstan-rs-x86_64-unknown-linux-gnu.gz.sha256
 gunzip phpstan-rs-x86_64-unknown-linux-gnu.gz
 chmod +x phpstan-rs-x86_64-unknown-linux-gnu
+```
+
+On macOS, which has no `sha256sum`, `shasum` reads the same checksum file:
+
+```sh
+shasum -a 256 -c phpstan-rs-aarch64-apple-darwin.gz.sha256
+gunzip phpstan-rs-aarch64-apple-darwin.gz
+chmod +x phpstan-rs-aarch64-apple-darwin
+```
+
+On Windows, the asset is named `phpstan-rs-x86_64-pc-windows-msvc.exe.gz`. In
+PowerShell, its hash must be the checksum file's first word, and `GzipStream`
+unpacks it:
+
+```powershell
+$asset = "phpstan-rs-x86_64-pc-windows-msvc.exe"
+$expected = (Get-Content "$asset.gz.sha256").Split(" ")[0]
+$actual = (Get-FileHash "$asset.gz" -Algorithm SHA256).Hash
+if ($actual -ine $expected) { throw "checksum mismatch" }
+$in = [IO.File]::OpenRead("$asset.gz")
+$out = [IO.File]::Create($asset)
+(New-Object IO.Compression.GzipStream($in, [IO.Compression.CompressionMode]::Decompress)).CopyTo($out)
+$out.Close(); $in.Close()
 ```
 
 ### Linux glibc compatibility
@@ -50,7 +73,12 @@ via System Settings.
 
 ## Building from source
 
+The build embeds the sources in the `vendor/phpstan-src` submodule, and
+the repository pins a nightly toolchain (`rust-toolchain.toml`), which
+`rustup` installs on the first `cargo` command in the checkout:
+
 ```sh
+git submodule update --init vendor/phpstan-src
 cargo build --release -p phpstan-rs
 ```
 
@@ -59,6 +87,25 @@ regex-pattern-validity diagnostic); `pcre2-sys` vendors and compiles its
 own C source via `cc-rs` when no system libpcre2/pkg-config is found, so
 a working C toolchain for your target is required unless you build with
 `--no-default-features`.
+
+`.cargo/config.toml` builds with the compiler's parallel front end
+(`-Z threads=8`) on every platform. On x86_64 Linux it links with clang
+and mold; install both, or link with the system linker. `RUSTFLAGS`
+replaces the flags in the configuration, so the front end's is given
+again:
+
+```sh
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc RUSTFLAGS="-Z threads=8" \
+  cargo build --release -p phpstan-rs
+```
+
+Two caches make later runs faster: the built-in stubs' registry and each
+file's analysis. They are in `phpstan-rs` under the platform's cache
+directory - `$XDG_CACHE_HOME` or `~/.cache` on Linux, `~/Library/Caches` on
+macOS, `%LOCALAPPDATA%` on Windows - and each build keeps its own entries.
+`PHPSTAN_RS_CACHE_DIR` chooses another directory, and
+`PHPSTAN_RS_NO_STUB_CACHE` and `PHPSTAN_RS_NO_FILE_CACHE` turn the caches
+off.
 
 ## Profiling
 

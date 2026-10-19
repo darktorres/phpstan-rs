@@ -4,7 +4,7 @@
 # purging): mimalloc's exit statistics for each, two hyperfine rounds in
 # alternating order on the gate binary, then one perf recording of each on
 # the frame-pointer binary of Step 0. Every output is checked against the
-# oracle's sha256.
+# oracle's sha256. Linux only: it reads /proc and records with perf.
 W=/home/torres/.cache/prs-profile/mimalloc-2026-10-17
 GATE=/home/torres/.cache/prs-profile/wall-2026-10-17/target-gate/gate/phpstan-rs
 CG=/home/torres/.cache/prs-profile/regress-item5/bin/head-cg

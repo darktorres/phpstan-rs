@@ -4,6 +4,8 @@ same rate), the first at fewer threads. Each sample is put in one class by its
 leaf, then the classes and the roles (perfdump.ROLES) are compared.
 
 usage: cpugrowth.py <dump at few threads> <dump at more threads> [hz]
+
+The dumps come from `perf`, which is Linux's; this script only reads them.
 """
 import os
 import re

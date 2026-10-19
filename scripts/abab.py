@@ -12,6 +12,8 @@ A name is a directory of .corpus-runs/gate/bin with a gate/phpstan-rs in it.
 Warm mode gives each binary a cache dir of its own in <out dir>, filled by
 two unrecorded runs of each, which also warm the off mode's stub reads.
 Run it under nice -n 19; the runs inherit it.
+
+Linux only: it reads /proc/loadavg.
 """
 import hashlib
 import json

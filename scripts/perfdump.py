@@ -6,6 +6,8 @@ matches a frame that contains it; a regex is searched for in the frame.
 <main tid> is the thread that runs the command, named `phpstan-rs-main`; the
 process's own main thread only waits for it.
 
+The dump comes from `perf`, which is Linux's; this script only reads it.
+
 usage: perfdump.py <command> <dump> [args]
   threads                         per thread: first and last sample, samples, roles
   phases <main tid> [window] [hz] per window: cores busy, the role mix, the main
