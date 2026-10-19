@@ -1,0 +1,9 @@
+{
+    "description": "sebastian/comparator 4.0.10, the version crates/types/src/tests/data/comparator-4.json records (PHPUnit 9's). The README installs it.",
+    "require": {
+        "sebastian/comparator": "4.0.10"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
