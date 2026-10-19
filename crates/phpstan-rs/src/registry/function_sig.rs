@@ -825,14 +825,14 @@ impl FunctionReflection {
                     })
                 });
 
-        let param_names: Vec<&str> = f.params.iter().map(|p| p.name.as_ref()).collect();
+        let has_param = |name: &str| f.params.iter().any(|p| p.name.as_ref() == name);
         let (assert_if_true, assert_if_false, assert) = doc
             .as_ref()
             .map(|d| {
                 (
-                    resolve_assert_tags(&d.assert_if_true, &param_names, &template_params, ctx),
-                    resolve_assert_tags(&d.assert_if_false, &param_names, &template_params, ctx),
-                    resolve_assert_tags(&d.assert, &param_names, &template_params, ctx),
+                    resolve_assert_tags(&d.assert_if_true, &has_param, &template_params, ctx),
+                    resolve_assert_tags(&d.assert_if_false, &has_param, &template_params, ctx),
+                    resolve_assert_tags(&d.assert, &has_param, &template_params, ctx),
                 )
             })
             .unwrap_or_default();

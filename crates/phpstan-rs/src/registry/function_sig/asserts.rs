@@ -68,12 +68,12 @@ pub struct AssertInfo {
 /// bare `$name` not matching any real parameter, still
 /// produces a real `AssertTarget` variant (`Unknown`/`NotFound`) rather
 /// than being silently dropped, so the checker can report real PHPStan's
-/// own `assert.unknownExpr`/`parameter.notFound` for it. `param_names` is
-/// this declaration's own parameter name list, checked so a target naming
-/// a parameter that doesn't actually exist (a stale doc comment, or
-/// simply a name this project failed to match for some other reason)
-/// isn't silently misread as some other shape instead.
-fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
+/// own `assert.unknownExpr`/`parameter.notFound` for it. `has_param` says
+/// whether a name is one of this declaration's own parameters, checked so
+/// a target naming a parameter that doesn't actually exist (a stale doc
+/// comment, or simply a name this project failed to match for some other
+/// reason) isn't silently misread as some other shape instead.
+fn classify_assert_target(target: &str, has_param: &dyn Fn(&str) -> bool) -> AssertTarget {
     if target == "$this" {
         return AssertTarget::ThisSelf;
     }
@@ -87,7 +87,7 @@ fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
         && !name.is_empty()
         && name.chars().all(|c| c.is_alphanumeric() || c == '_')
     {
-        return if param_names.contains(&name) {
+        return if has_param(name) {
             AssertTarget::Param(Name::from(name))
         } else {
             AssertTarget::NotFound(Name::from(name))
@@ -106,13 +106,13 @@ fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
 /// declaration already goes through.
 pub(crate) fn resolve_assert_tags(
     tags: &[docblock::AssertTag],
-    param_names: &[&str],
+    has_param: &dyn Fn(&str) -> bool,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> Vec<AssertInfo> {
     tags.iter()
         .map(|tag| {
-            let target = classify_assert_target(&tag.target, param_names);
+            let target = classify_assert_target(&tag.target, has_param);
             let ty = parse_type_node(&tag.ty);
             let ty = mark_template_params(ty, template_params);
             let mut case_refs = Vec::new();
