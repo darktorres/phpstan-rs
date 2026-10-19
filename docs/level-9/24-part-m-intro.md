@@ -1,20 +1,9 @@
 # Part M. Ledger of the workflow review's findings (2026-10-18)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
+None. Part M is a review record: the findings, their checks, and the rulings on them. A finding is not a ledger task. Each one the plan applied changed the part it cites, and those parts own the rows the finding touched.
 
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| REG-15 | OPEN | OPEN | 06 |
-| REG-15.1 | OPEN | OPEN | 06 23 |
-| REG-17.2 | OPEN | OPEN | 10 11 20 |
-| STUB-11 | OPEN | OPEN | 05 06 07 10 12 21 23 |
-| CHECK-9 | READY | READY | 05 06 07 10 11 12 23 31 |
-
-<!-- status:end -->
 
 A workflow (run `wf_cd83ade2-42f`) of 13 independent, read-only reviewers read the whole plan, one part or aspect each, and
 returned **267 findings: 1 blocker, 84 major, 163 minor, 19 nit**. By basis, 182 cite lines the reviewer read (q), 72 are

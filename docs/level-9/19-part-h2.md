@@ -1,41 +1,8 @@
 ## H2. The engine (Part F 13)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| LOAD-3.1 | OPEN | OPEN | 02 04 05 06 10 12 21 |
-| LOAD-3.3 | PART | PART. **The load: DONE `a5a4d85f`.** In a project built once `keeps_tree` is a function of the role, which LOAD-2.2's … | 05 08 10 |
-| LOAD-3.4 | DONE | DONE `845efaab`. Every file is read into its worker's buffer, one for each pool thread beside its name cache … | — |
-| LOAD-3.5 | OPEN | OPEN | 05 10 12 13 |
-| LOAD-5.1 | OPEN | OPEN | 04 05 06 07 10 12 21 23 31 |
-| LOAD-5.2 | OPEN | OPEN | 05 06 07 10 12 21 22 |
-| LOAD-5.3 | SUPERSEDED | SUPERSEDED by REG-16.4 (decision 3): the server and the batch run keep trees alike, as parse results the engine evicts … | — |
-| SYN-3.1 | READY | READY | 05 08 09 10 11 |
-| PROD-4.2 | DONE | DONE (decided 2026-10-13; built in PROD-1, `7726dacf`) | — |
-| PROD-5.8 | READY | READY | 02 05 07 10 11 12 21 |
-| DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 05 06 07 10 11 12 13 17 |
-| TYPE-4 | OPEN | OPEN | 05 06 10 18 21 |
-| REG-1 | DONE | DONE `c0dd2788` | 06 20 |
-| REG-4.12 | READY | READY | 06 08 10 11 12 18 20 |
-| REG-4.14 | READY | READY; a delta, approved (decision 14), fixtured | 06 10 |
-| REG-7 | OPEN | OPEN | 05 06 08 12 18 20 21 23 |
-| REG-7.9 | OPEN | OPEN | 06 08 10 20 |
-| REG-7.10 | OPEN | OPEN | 06 10 20 |
-| REG-7.12 | OPEN | OPEN | 06 10 20 23 |
-| REG-12 | OPEN | OPEN | 06 10 20 22 |
-| REG-16.1 | DONE | DONE (2026-10-15): salsa, with each name asked once per file (its record) | 06 08 18 22 |
-| REG-17 | OPEN | OPEN | 05 06 08 10 12 20 21 |
-| CACHE-13.1 | OPEN | OPEN | 05 06 07 10 11 12 21 22 |
-| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 11 12 13 15 16 |
-| COMP-2 | OPEN | OPEN. Not part of Part A; before the baseline (batch 0), since it changes a range and so a dump | 07 12 23 31 |
-| COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 02 03 04 07 12 31 |
-
-<!-- status:end -->
+None. H2 is the engine's design: the contract the code above it may rely on (H2.1), its inputs, queries, the `Provider`, the check, revisions, concurrency, cancellation and memory. Part H1 says H2 to H4 are what the wall's W2 and W3 build, so the rows are Part D's: REG-16.2 and REG-16.3 in W2, and REG-16.4, CACHE-13.1 and CACHE-13.2 in W3. The rows it mentions as inputs (REG-16.1, S-3, S-5, S-7) are owned elsewhere.
 
 ### H2.1 The contract, and what it is built on
 

@@ -1,88 +1,9 @@
 # Part L. The second pass, at the grain of the ledger's rows (2026-10-18)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
+None. Part L is a review of the ledger's rows: its verdicts (L1, L1b, L2), what it leaves for the user (L3) and the review of its own findings (L4). The rows are owned by the parts that build them.
 
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| LOAD-1.3 | DONE | DONE `c9f6a85c` | 06 |
-| LOAD-2.2 | PART | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 03 04 10 12 |
-| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone | 01 02 04 05 07 10 12 |
-| LOAD-7.5 | READY | READY | 06 10 12 |
-| SYN-1.3 | OPEN | OPEN | 07 10 12 13 |
-| SYN-1.4 | OPEN | OPEN | 07 10 12 13 31 |
-| SYN-1.6 | SUPERSEDED | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies … | 08 10 12 13 16 |
-| SYN-1.9 | OPEN | OPEN | 05 07 08 10 12 13 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 05 06 07 12 13 22 |
-| SYN-2 | OPEN | OPEN; the target grew | 05 07 09 10 12 13 31 |
-| SYN-3.1 | READY | READY | 05 08 09 10 19 |
-| SYN-3.4 | OPEN | OPEN | 05 10 12 13 17 18 |
-| SYN-4.1 | OPEN | OPEN | 05 07 09 10 12 |
-| SYN-4.2 | READY | READY | 05 10 31 |
-| SYN-4.3 | OPEN | OPEN | 05 07 09 10 |
-| SYN-4.4 | READY | READY | 05 10 31 |
-| SYN-4.5 | READY | READY | 05 07 10 12 18 31 |
-| SYN-4.6 | READY | READY | 05 10 31 |
-| SYN-4.7 | OPEN | OPEN | 05 10 31 |
-| SYN-4.8 | READY | READY | 05 07 09 10 12 17 |
-| SYN-4.9 | READY | READY | 05 07 09 10 12 |
-| SYN-4.10 | READY | READY | 05 10 31 |
-| SYN-6 | OPEN | OPEN | 05 07 08 10 12 15 16 |
-| PROD-5.1 | OPEN | OPEN | 05 07 10 12 13 18 20 22 |
-| PROD-5.2 | READY | READY | 02 05 09 10 23 |
-| PROD-5.3 | READY | READY | 05 10 |
-| PROD-5.8 | READY | READY | 02 05 07 10 12 19 21 |
-| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) | 05 06 07 08 09 10 12 |
-| DOC-2.3 | READY | READY | 07 10 |
-| DOC-2.4 | READY | READY | 05 07 10 |
-| DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 05 06 07 10 12 13 17 19 |
-| NAME-1 | OPEN | OPEN | 05 06 |
-| NAME-1.1 | READY | READY | 05 10 18 |
-| NAME-1.2 | READY | READY; the container-field keys are a delta, approved (VAL-2.7) | 05 06 07 10 12 18 |
-| NAME-1.5 | READY | READY | 05 10 18 22 |
-| NAME-1.6 | READY | READY | 05 10 18 |
-| NAME-2.1 | READY | READY | 05 07 08 10 12 18 |
-| TYPE-5 | READY | READY | 05 07 09 10 12 31 |
-| REG-4.9 | READY | READY | 06 10 12 |
-| REG-4.10 | READY | READY; overlaps DOC-2.6 | 05 06 07 10 12 |
-| REG-4.12 | READY | READY | 06 08 10 12 18 19 20 |
-| REG-4.15 | OPEN | OPEN | 05 06 07 10 12 18 20 22 |
-| REG-7.2 | OPEN | OPEN | 04 05 06 10 20 |
-| REG-11.13 | OPEN | OPEN | 10 18 |
-| REG-16.2 | READY | READY | 05 06 07 08 10 12 22 31 |
-| REG-16.3 | OPEN | OPEN | 05 06 10 |
-| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 12 13 20 21 22 23 31 |
-| REG-17.2 | OPEN | OPEN | 10 20 24 |
-| REG-18.6 | READY | READY | 03 06 10 12 20 |
-| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) | 05 06 07 08 10 12 13 23 |
-| CACHE-13.1 | OPEN | OPEN | 05 06 07 10 12 19 21 22 |
-| CHECK-6.4 | READY | READY | 05 06 07 08 |
-| CHECK-6.5 | READY | READY | 05 06 07 |
-| CHECK-6.8 | READY | READY | 05 06 10 12 23 |
-| CHECK-9 | READY | READY | 05 06 07 10 12 23 24 31 |
-| VAL-1.1 | OPEN | OPEN | 07 08 10 12 |
-| VAL-1.2 | OPEN | OPEN | 08 10 12 |
-| VAL-1.3 | OPEN | OPEN | 08 10 12 |
-| VAL-1.4 | OPEN | OPEN | 05 08 09 10 12 |
-| VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 07 08 10 12 13 |
-| VAL-1.6 | OPEN | OPEN | 05 08 10 12 |
-| VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 05 08 09 10 12 |
-| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 07 08 10 12 |
-| VAL-1.9 | OPEN | OPEN | 08 10 12 |
-| VAL-1.10 | OPEN | OPEN | 08 10 12 |
-| VAL-1.11 | OPEN | OPEN; MEAS-2 has the whole-stack profile at this code | 08 10 12 |
-| VAL-1.12 | OPEN | OPEN | 06 08 10 12 |
-| VAL-1.13 | OPEN | OPEN; the last step of the 20 G plan | 06 10 13 |
-| VAL-1.14 | OPEN | OPEN | 10 |
-| VAL-1.15 | OPEN | OPEN | 10 |
-| Q-2 | DONE | DONE (2026-10-16): probed under PHP 5.6–8.5.4 in Docker (`~/.cache/prs-ledger/q2/php-matrix.txt`), and with `check` and … | 05 15 |
-| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 12 13 15 16 19 |
-| Q-11 | DONE | DONE (2026-10-15): of the 20 follow-ups, 1 is done for one version, 5 are partly done and 14 are not; their section … | 06 07 12 31 |
-
-<!-- status:end -->
 
 Asked again as: "go through all tasks, one by one, in order and review them. maximum churn/properness". Part K
 went through the tasks in groups and marked many "sound"; this pass reads each row's ledger text (its task, state and

@@ -1,22 +1,8 @@
 ## G3. The error-node model and parse recovery (Part F 3, 9)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 13 16 21 22 |
-| SYN-6 | OPEN | OPEN | 05 07 08 10 11 12 16 |
-| CHECK-12 | OPEN | OPEN | 07 12 31 |
-| VAL-2.10 | OPEN | OPEN: read at VAL-1, as they land | 05 06 07 12 20 |
-| Q-1 | DONE | DONE (2026-10-15): none. `check` over D6's 18 trees with HEAD's gate build (`7a449c44`) read 111,974 files: D6's … | — |
-| Q-2 | DONE | DONE (2026-10-16): probed under PHP 5.6–8.5.4 in Docker (`~/.cache/prs-ledger/q2/php-matrix.txt`), and with `check` and … | 05 11 |
-| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 11 12 13 16 19 |
-
-<!-- status:end -->
+None. G3 is a design: the error-node model (G3.1 to G3.5), the contract for readers (G3.6), and the oracles (G3.7). The rows its design serves are owned where they are built: SYN-1.9, Q-10 and SYN-6 by Part C's batch 3 (C1), CHECK-12 by Part D's wall step W7, and CHECK-13 by Part H1 (H1.4).
 
 ### G3 why now
 

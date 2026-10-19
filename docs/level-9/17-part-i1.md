@@ -1,18 +1,8 @@
 ## I1. Node layout per variant (Part F 5)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| SYN-3.4 | OPEN | OPEN | 05 10 11 12 13 18 |
-| SYN-4.8 | READY | READY | 05 07 09 10 11 12 |
-| DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 05 06 07 10 11 12 13 19 |
-
-<!-- status:end -->
+None. I1 is a design: the node layout per variant, its budgets, and the assertions that check it. The layout is built by Part B (SYN-1.2, 1.4, 1.5, 1.7, 1.8, in B7's step 2), and the sizes it asserts are checked there. The rows it mentions are owned elsewhere: SYN-3.4 and SYN-4.8 by Part C, DOC-2.9 by Part C's batch 6, and the spike S-12, which decides spans or token indices, by Part E.
 
 Written from `syntax/src/ast.rs` (1,691 lines at `ffa7cccb`, 1,680 when it was read whole), against B3's budgets: `ExprNode` 32 bytes,
 `StmtNode` 40, no element that needs a drop. The census of step 0 confirms the distributions; it can move a

@@ -1,44 +1,8 @@
 ## H5. What no reading settles: spikes S-1 to S-12
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 02 03 04 21 |
-| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … | 02 05 06 07 10 12 21 31 |
-| LOAD-5.2 | OPEN | OPEN | 05 06 07 10 12 19 21 |
-| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 13 15 16 21 |
-| SYN-1.10 | OPEN | OPEN | 05 06 07 11 12 13 |
-| PROD-5.1 | OPEN | OPEN | 05 07 10 11 12 13 18 20 |
-| PROD-5.4 | OPEN | OPEN | 05 06 07 10 12 21 31 |
-| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 | 02 05 07 10 12 21 31 |
-| NAME-1.5 | READY | READY | 05 10 11 18 |
-| REG-4.11 | OPEN | OPEN; the comments can be corrected now | 06 10 12 18 20 |
-| REG-4.15 | OPEN | OPEN | 05 06 07 10 11 12 18 20 |
-| REG-7.5 | OPEN | OPEN | 01 02 04 05 06 07 10 12 20 |
-| REG-8 | OPEN | OPEN | 06 08 18 20 |
-| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 06 07 08 10 12 18 20 |
-| REG-12 | OPEN | OPEN | 06 10 19 20 |
-| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … | 01 02 04 07 10 12 31 |
-| REG-16.1 | DONE | DONE (2026-10-15): salsa, with each name asked once per file (its record) | 06 08 18 19 |
-| REG-16.2 | READY | READY | 05 06 07 08 10 11 12 31 |
-| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 11 12 13 20 21 23 31 |
-| REG-16.5 | OPEN | OPEN | 06 10 12 20 21 |
-| REG-18.4 | READY | READY; a delta | 05 06 07 08 10 12 18 31 |
-| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 06 07 08 10 12 21 31 |
-| CACHE-8 | READY | READY | 05 07 10 12 31 |
-| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 06 10 12 21 |
-| CACHE-10 | BLOCKED | BLOCKED: as CACHE-9 | 06 10 12 21 |
-| CACHE-11 | OPEN | OPEN | 06 10 12 |
-| CACHE-13.1 | OPEN | OPEN | 05 06 07 10 11 12 19 21 |
-| CACHE-13.2 | OPEN | OPEN | 05 06 07 08 10 12 21 23 |
-| CHECK-4.2 | READY | READY | 05 07 10 12 31 |
-
-<!-- status:end -->
+None in the ledger. The spikes S-1 to S-12 are this part's own work, defined in the table below, and they are not ledger rows (the ledger has no state for them). Each runs at the gate point the intro gives, and its result is recorded where the design it settles says so. The ledger rows the spikes gate are owned by the parts that build them.
 
 Each is a short build with a measurement and a stated accept and kill. None changes this plan's decisions;
 each can send one design to its stated alternative. S-1 runs before batch 4, since it decides the name's layout.
@@ -74,6 +38,10 @@ stamps and dependency lists, early cutoff, a cancellation flag and cycle handlin
 module changes, which is why only that module names salsa.
 
 ## H6. What the engine cluster changes elsewhere
+
+## Tasks this part owns
+
+None. H6 lists the edits the engine cluster implies in other parts and documents; each edit is made by the part that owns the affected row, and Part N lists the ledger edits.
 
 - **Part B and G.** G1's rule on ids gains a home: engine ids are named in the engine module only (H1.6), beside
   `syntax`, the infer cache and the `ProbeScope` module. G4's rooted `ProbeScope` takes its `Arc<Ast>` from

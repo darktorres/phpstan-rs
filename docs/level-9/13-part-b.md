@@ -1,38 +1,21 @@
 # Part B. Item 9: the flat tree (SYN-1.2 to 1.10)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
+Written by hand. Each task is listed in the B7 step that builds it. The state is the ledger's, as of `a3931d49d`. SYN-1.11 and SYN-1.12 are not in the ledger yet: B11 adds them.
 
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
+| id | task | state | step |
 |---|---|---|---|
-| LOAD-3.5 | OPEN | OPEN | 05 10 12 19 |
-| LOAD-5 | OPEN | OPEN | 10 |
-| SYN-1.2 | READY | READY | 02 04 05 06 07 10 12 31 |
-| SYN-1.3 | OPEN | OPEN | 07 10 11 12 |
-| SYN-1.4 | OPEN | OPEN | 07 10 11 12 31 |
-| SYN-1.5 | OPEN | OPEN | 07 10 12 |
-| SYN-1.6 | SUPERSEDED | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies … | 08 10 11 12 16 |
-| SYN-1.7 | OPEN | OPEN | 07 10 12 |
-| SYN-1.8 | OPEN | OPEN | 07 10 12 |
-| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 05 06 07 11 12 22 |
-| SYN-2 | OPEN | OPEN; the target grew | 05 07 09 10 11 12 31 |
-| SYN-3.4 | OPEN | OPEN | 05 10 11 12 17 18 |
-| PROD-3 | DONE | DONE `791d29cb` | 05 08 |
-| PROD-5.1 | OPEN | OPEN | 05 07 10 11 12 18 20 22 |
-| DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 05 06 07 10 11 12 17 19 |
-| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 11 12 20 21 22 23 31 |
-| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) | 05 06 07 08 10 11 12 23 |
-| STUB-7.3 | OPEN | OPEN; a delta, approved (decision 14) | 05 06 08 10 |
-| CHECK-6.3 | OPEN | OPEN | 05 06 07 12 14 23 |
-| VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 07 08 10 11 12 |
-| VAL-1.13 | OPEN | OPEN; the last step of the 20 G plan | 06 10 11 |
-| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 11 12 15 16 19 |
+| SYN-1.11 | prerequisites on the old tree: `xtask tree-stats`, the fabrication sites | new (B11), not in the ledger | 0 |
+| SYN-1.3 | nodes as ids: `Expr` and `Stmt` become ids, and the readers read through the tree | OPEN | 1 |
+| SYN-1.12 | the read API: handles, views, lists, `Visitor`, dump, `Ast` container | new (B11), not in the ledger | 1 |
+| SYN-1.2 | the tree: the `Ast` owns its source, one typed vector per node kind, a child is a `u32` id | READY | 2 |
+| SYN-1.4 | payloads are spans (doc comments, unescaped literals, names, bodies) | OPEN | 2 |
+| SYN-1.5 | nothing in a tree needs a drop of its own; names live in the file's name table | OPEN | 2 |
+| SYN-1.7 | no growth inside the tree: children are gathered in scratch stacks, appended once at their exact size | OPEN | 2 |
+| SYN-1.8 | nodes the size of their variant; a large variant's payload goes in a side table | OPEN | 2 |
 
-<!-- status:end -->
+Three of item 9's rows are scheduled by Part C, not here, so each has one owner. SYN-1.9 (step 4) is in Part C's C1 table, batch 3. SYN-1.10 (step 5) is in Part C's C3, batch 9, because it opens when PROD-5.1 and STUB-7.3 land. LOAD-3.5 (step 3) is in Part C's C3, because it opens when SYN-1.2 lands. SYN-1.6 is SUPERSEDED by SYN-1.2 (decision 4), so no part owns work for it.
 
 ## B1. What exists (code facts verified at `0fb1a4de` and re-counted at `ffa7cccb`; figures marked with their commit)
 

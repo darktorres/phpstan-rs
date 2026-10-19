@@ -1,20 +1,8 @@
 ## G4. The probe (Part F 4)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| SYN-1.6 | SUPERSEDED | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies … | 08 10 11 12 13 |
-| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 13 15 21 22 |
-| SYN-6 | OPEN | OPEN | 05 07 08 10 11 12 15 |
-| CHECK-6.18 | READY | READY | 05 06 10 12 14 23 |
-| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 08 10 11 12 13 15 19 |
-
-<!-- status:end -->
+None. G4 to G6 are designs and the edits they imply: the probe (G4, G4a, G4b) and G6's list of changes elsewhere. They add no ledger row. The rows they touch are owned where they are built: the probe's tail (G4a) is built in Part B's step 2, the live tree (G4b) with SYN-1.9 in Part C's batch 3, and CHECK-6.18 by Part C's batch 7. The ledger edits G6 implies are listed in Part N.
 
 ### G4 what exists (verified)
 

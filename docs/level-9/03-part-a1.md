@@ -1,22 +1,14 @@
 ## A1. LOAD-2.2, last part: the name floor
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
+Written by hand. The state is the ledger's, as of `a3931d49d`.
 
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| LOAD-2.2 | PART | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 04 10 11 12 |
-| LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 02 04 21 22 |
-| LOAD-7.8 | OPEN | OPEN | 04 08 12 31 |
-| LOAD-8.10 | DONE | DONE `9513479b`. **The rule:** a walk hands a directory's files over when it is the one walk of their strongest role … | 04 21 |
-| REG-18.6 | READY | READY | 06 10 11 12 20 |
-| COMP-7 | DONE | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a … | 01 02 04 07 10 12 31 |
-| COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 02 04 07 12 19 31 |
-
-<!-- status:end -->
+| task | state | built by |
+|---|---|---|
+| LOAD-2.2 | PART | the name floor's replacement, `097c164b`, `40d889bb`, `df9640fe`, `c14aa865`, `fc1c65eca`, `00081301`, `2e1728bb`; the name list's deletion waits for LOAD-7.8 (OPEN) |
+| COMP-1 | DONE | `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` |
+| COMP-7 | DONE | the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865` |
 
 **Now.** `DEFAULT_SCAN_EXCLUDED_DIR_NAMES = ["vendor", ".git", "node_modules"]`
 (`project.rs:3415` at `ffa7cccb`) and `path_under_excluded_dir` (`:3421`, which now takes the walk's `Excluded`, since

@@ -1,58 +1,8 @@
 ## H3. REG-7 and REG-8 on the engine (Part F 14)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| PROD-5.1 | OPEN | OPEN | 05 07 10 11 12 13 18 22 |
-| REG-1 | DONE | DONE `c0dd2788` | 06 19 |
-| REG-4.2 | READY | READY; a delta, approved in the plan, fixtured | 05 06 10 18 |
-| REG-4.11 | OPEN | OPEN; the comments can be corrected now | 06 10 12 18 22 |
-| REG-4.12 | READY | READY | 06 08 10 11 12 18 19 |
-| REG-4.15 | OPEN | OPEN | 05 06 07 10 11 12 18 22 |
-| REG-7 | OPEN | OPEN | 05 06 08 12 18 19 21 23 |
-| REG-7.1 | OPEN | OPEN | 06 10 23 |
-| REG-7.2 | OPEN | OPEN | 04 05 06 10 11 |
-| REG-7.3 | OPEN | OPEN | 06 10 23 |
-| REG-7.4 | OPEN | OPEN | 05 06 10 23 |
-| REG-7.5 | OPEN | OPEN | 01 02 04 05 06 07 10 12 22 |
-| REG-7.6 | OPEN | OPEN; a delta, approved (VAL-2.5) | 06 10 |
-| REG-7.7 | OPEN | OPEN | 06 10 |
-| REG-7.8 | OPEN | OPEN | 06 10 |
-| REG-7.9 | OPEN | OPEN | 06 08 10 19 |
-| REG-7.10 | OPEN | OPEN | 06 10 19 |
-| REG-7.11 | OPEN | OPEN; it lands with the snapshots | 06 10 |
-| REG-7.12 | OPEN | OPEN | 06 10 19 23 |
-| REG-8 | OPEN | OPEN | 06 08 18 22 |
-| REG-8.1 | OPEN | OPEN; a delta: no declaration's members merge into another's, and the server and the batch run bind a name alike … | 06 10 |
-| REG-8.2 | SUPERSEDED | SUPERSEDED by REG-16.3 (decision 3): the read sets are the dependencies the engine records, absent names included | 06 10 |
-| REG-8.3 | OPEN | OPEN | 02 05 06 10 |
-| REG-8.4 | OPEN | OPEN | 06 10 |
-| REG-8.5 | OPEN | OPEN; a delta, approved and corrected (decision 14; nsrt `property-hooks.php`) | 06 10 |
-| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 06 07 08 10 12 18 22 |
-| REG-8.7 | OPEN | OPEN | 06 10 |
-| REG-9 | OPEN | OPEN; deltas, approved in the plan | 06 |
-| REG-10 | OPEN | OPEN | 06 |
-| REG-11 | OPEN | OPEN; each a delta, approved in the plan | 06 10 |
-| REG-12 | OPEN | OPEN | 06 10 19 22 |
-| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 11 12 13 21 22 23 31 |
-| REG-16.5 | OPEN | OPEN | 06 10 12 21 22 |
-| REG-17 | OPEN | OPEN | 05 06 08 10 12 19 21 |
-| REG-17.1 | OPEN | OPEN | 10 23 |
-| REG-17.2 | OPEN | OPEN | 10 11 24 |
-| REG-17.3 | OPEN | OPEN | 10 |
-| REG-17.4 | OPEN | OPEN | 10 |
-| REG-18.2 | READY | READY | 06 10 |
-| REG-18.3 | READY | READY | 06 10 23 |
-| REG-18.6 | READY | READY | 03 06 10 11 12 |
-| VAL-2.9 | DONE | DONE: approved (decision 14), STUB-7.2 and REG-8.5 corrected; each is read at VAL-1 as it lands | 06 07 12 |
-| VAL-2.10 | OPEN | OPEN: read at VAL-1, as they land | 05 06 07 12 15 |
-
-<!-- status:end -->
+None. H3 is a design: the five levels as queries (H3.1), the finishing passes, the three cycle rules, and what the REG-7 and REG-8 rows become (H3.5). Its work is built in the wall's W2 and W3, which Part D owns: the REG-7 rows (REG-7.1 to 7.12) and REG-4.x in W2, and REG-17 in W3. The rows that H3 names as inputs or outputs, such as REG-17.1 to 17.4, REG-8.6 and REG-10, are owned by the parts that build them, and the H3.5 rewording is an edit to the ledger, listed in Part N.
 
 ### H3.1 The five levels as queries
 

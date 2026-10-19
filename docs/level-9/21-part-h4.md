@@ -1,45 +1,8 @@
 ## H4. The pipeline, persistence and the Session (Part F 15)
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| LOAD-1.1 | DONE | DONE `aab67287` | — |
-| LOAD-1.2 | DONE | DONE `7bef998a` | — |
-| LOAD-1.4 | DONE | DONE `3334ebc9` | 06 |
-| LOAD-2 | OPEN | OPEN | — |
-| LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 02 03 04 22 |
-| LOAD-3.1 | OPEN | OPEN | 02 04 05 06 10 12 19 |
-| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … | 02 05 06 07 10 12 22 31 |
-| LOAD-5.1 | OPEN | OPEN | 04 05 06 07 10 12 19 23 31 |
-| LOAD-5.2 | OPEN | OPEN | 05 06 07 10 12 19 22 |
-| LOAD-8.10 | DONE | DONE `9513479b`. **The rule:** a walk hands a directory's files over when it is the one walk of their strongest role … | 03 04 |
-| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … | 01 02 04 10 12 |
-| SYN-1.9 | OPEN | OPEN | 05 07 08 10 11 12 13 15 16 22 |
-| PROD-5.4 | OPEN | OPEN | 05 06 07 10 12 22 31 |
-| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 | 02 05 07 10 12 22 31 |
-| PROD-5.8 | READY | READY | 02 05 07 10 11 12 19 |
-| TYPE-4 | OPEN | OPEN | 05 06 10 18 19 |
-| REG-7 | OPEN | OPEN | 05 06 08 12 18 19 20 23 |
-| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 08 10 11 12 13 20 22 23 31 |
-| REG-16.5 | OPEN | OPEN | 06 10 12 20 22 |
-| REG-17 | OPEN | OPEN | 05 06 08 10 12 19 20 |
-| STUB-3 | DONE | DONE (rode on `3d5434b3`) | — |
-| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 06 07 08 10 12 22 31 |
-| STUB-11 | OPEN | OPEN | 05 06 07 10 12 23 24 |
-| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 05 06 10 12 22 |
-| CACHE-10 | BLOCKED | BLOCKED: as CACHE-9 | 06 10 12 22 |
-| CACHE-12 | DONE | DONE `6705eedd`. `Lazy` keeps the file's number beside its encoded bytes: `bind_file` sets it without decoding, and … | — |
-| CACHE-13.1 | OPEN | OPEN | 05 06 07 10 11 12 19 22 |
-| CACHE-13.2 | OPEN | OPEN | 05 06 07 08 10 12 22 23 |
-| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) | 05 06 07 08 10 12 |
-| CHECK-8 | OPEN | OPEN | 06 08 10 |
-
-<!-- status:end -->
+None. H4 is a design: the batch run and the server (H4.1, H4.2), F1 and F2 reconciled (H4.3, H4.4), probes, persistence (H4.6), and W3's order (H4.7). H4.7 says W3 builds it, so the rows are Part D's W3 rows: REG-16.4, CACHE-13.1, CACHE-13.2, STUB-7.5 and LOAD-3.1, among others. The rows the design names beyond W3 are owned where they are built.
 
 REG-16.4, CACHE-13.2 and the crate split's F1 and F2 are one design: F2's own design was superseded by
 decision 3, and building F1 and then REG-16.4 would build the Session twice. What follows is that one design.

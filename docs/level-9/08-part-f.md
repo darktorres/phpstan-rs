@@ -1,80 +1,9 @@
 # Part F. What still needs designing
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
+None. Part F holds designs, not ledger tasks: the designs of G1 to G5, H1 to H4, I1 to I5 and J1 to J3, and the list of what still needs one. Each ledger task those designs serve is owned by the part that builds it (batch 0 by Part E, the wall by Part D, and so on).
 
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| LOAD-1 | DONE | DONE (LOAD-1.6 SUPERSEDED by REG-16.4) | 06 07 |
-| LOAD-3.3 | PART | PART. **The load: DONE `a5a4d85f`.** In a project built once `keeps_tree` is a function of the role, which LOAD-2.2's … | 05 10 19 |
-| LOAD-7.2 | OPEN | OPEN; the PHPUnit half needs a ruling | 06 07 12 31 |
-| LOAD-7.6 | READY | READY; a delta in the config's keys | 04 06 07 10 12 31 |
-| LOAD-7.8 | OPEN | OPEN | 03 04 12 31 |
-| SYN-1.6 | SUPERSEDED | SUPERSEDED by SYN-1.2 (decision 4): a tree of vectors is `Send + Sync` with no `unsafe`, and the workspace denies … | 10 11 12 13 16 |
-| SYN-1.9 | OPEN | OPEN | 05 07 10 11 12 13 15 16 21 22 |
-| SYN-3.1 | READY | READY | 05 09 10 11 19 |
-| SYN-3.2 | READY | READY, with SYN-3.1 | 05 07 09 10 12 |
-| SYN-6 | OPEN | OPEN | 05 07 10 11 12 15 16 |
-| PROD-1 | DONE | DONE `7726dacf` | 05 |
-| PROD-2 | DONE | DONE `11837a04` | 05 |
-| PROD-3 | DONE | DONE `791d29cb` | 05 13 |
-| DOC-1 | DONE | DONE `a4035361` | 05 |
-| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) | 05 06 07 09 10 11 12 |
-| DOC-2.2 | OPEN | OPEN | 05 07 09 10 12 23 |
-| NAME-2 | OPEN | OPEN | 07 |
-| NAME-2.1 | READY | READY | 05 07 10 11 12 18 |
-| REG-4 | PART | PART | 06 |
-| REG-4.12 | READY | READY | 06 10 11 12 18 19 20 |
-| REG-7 | OPEN | OPEN | 05 06 12 18 19 20 21 23 |
-| REG-7.9 | OPEN | OPEN | 06 10 19 20 |
-| REG-8 | OPEN | OPEN | 06 18 20 22 |
-| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 06 07 10 12 18 20 22 |
-| REG-16.1 | DONE | DONE (2026-10-15): salsa, with each name asked once per file (its record) | 06 18 19 22 |
-| REG-16.2 | READY | READY | 05 06 07 10 11 12 22 31 |
-| REG-16.4 | OPEN | OPEN | 02 04 05 06 07 10 11 12 13 20 21 22 23 31 |
-| REG-17 | OPEN | OPEN | 05 06 10 12 19 20 21 |
-| REG-18.4 | READY | READY; a delta | 05 06 07 10 12 18 22 31 |
-| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) | 05 06 07 10 11 12 13 23 |
-| STUB-7.2 | OPEN | OPEN; a delta, approved and corrected (decision 14) | 10 |
-| STUB-7.3 | OPEN | OPEN; a delta, approved (decision 14) | 05 06 10 13 |
-| STUB-7.4 | OPEN | OPEN | 10 23 |
-| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 04 06 07 10 12 21 22 31 |
-| STUB-7.6 | OPEN | OPEN | 06 10 12 23 |
-| STUB-7.7 | OPEN | OPEN | 10 |
-| STUB-7.8 | OPEN | OPEN | 06 10 |
-| STUB-7.9 | OPEN | OPEN; a delta, approved (decision 14) | 10 |
-| STUB-7.10 | OPEN | OPEN; a delta, approved (decision 14) | 10 |
-| STUB-7.11 | OPEN | OPEN | 10 23 |
-| STUB-7.12 | OPEN | OPEN | 10 |
-| STUB-12 | OPEN | OPEN | 06 23 |
-| STUB-12.2 | OPEN | OPEN | 06 10 12 23 |
-| CACHE-13.2 | OPEN | OPEN | 05 06 07 10 12 21 22 23 |
-| CHECK-4.1 | OPEN | OPEN | 05 09 12 23 |
-| CHECK-6.4 | READY | READY | 05 06 07 11 |
-| CHECK-6.10 | READY | READY | 05 06 07 09 12 23 |
-| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) | 05 06 07 10 12 21 |
-| CHECK-8 | OPEN | OPEN | 06 10 21 |
-| CHECK-10 | OPEN | OPEN | 05 06 07 10 12 23 |
-| CHECK-11 | READY | READY; a delta | 06 07 10 12 31 |
-| VAL-1.1 | OPEN | OPEN | 07 10 11 12 |
-| VAL-1.2 | OPEN | OPEN | 10 11 12 |
-| VAL-1.3 | OPEN | OPEN | 10 11 12 |
-| VAL-1.4 | OPEN | OPEN | 05 09 10 11 12 |
-| VAL-1.5 | OPEN | OPEN; `xtask front-end-dump` exists, and hashes only | 07 10 11 12 13 |
-| VAL-1.6 | OPEN | OPEN | 05 10 11 12 |
-| VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 05 09 10 11 12 |
-| VAL-1.8 | OPEN | OPEN; `cargo xtask corpus --full` exists | 07 10 11 12 |
-| VAL-1.9 | OPEN | OPEN | 10 11 12 |
-| VAL-1.10 | OPEN | OPEN | 10 11 12 |
-| VAL-1.11 | OPEN | OPEN; MEAS-2 has the whole-stack profile at this code | 10 11 12 |
-| VAL-1.12 | OPEN | OPEN | 06 10 11 12 |
-| VAL-2.7 | DONE | DONE: approved | 05 18 |
-| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 05 07 10 11 12 13 15 16 19 |
-
-<!-- status:end -->
 
 What exists: Parts A and B are designed (B has the open points below). The 20 G plan's items 0 to
 19 have designs written at `5fb858c9`. The ledger's rows carry specifications. Level 3's tasks carry

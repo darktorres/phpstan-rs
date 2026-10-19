@@ -1,38 +1,21 @@
 ## A2. LOAD-9: installed packages resolved once
 
-<!-- status:begin -->
+### Tasks this part owns (A2 to A8)
 
-## Status of this part's tasks
+Written by hand. The state is the ledger's, as of `a3931d49d`.
 
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+| task | state | built by |
+|---|---|---|
+| LOAD-9 | DONE | A2: `3dcb1192` |
+| REG-14.4 | DONE | A3: `8739437e` |
+| SYN-1.1 | DONE | A5: `2f9b1281` |
+| LOAD-5.4 | DONE | A5a: `a5ab84c4` |
+| COMP-4 | DONE | A7: `2c6f1eec` |
+| COMP-5 | PART | A7: `2c6f1eec`; the class is found through the maps by W3's lazy locator (STUB-7.5, OPEN), so no interim fix is built |
+| COMP-6 | DONE | A8: `088089ed` |
+| COMP-8 | DONE | A8: `5b76d855` |
 
-| task | status | ledger | also in |
-|---|---|---|---|
-| LOAD-2.2 | PART | Walk DONE in `85a4ecad`. PART: the name floor's replacement is built by Part A's A1 (`097c164b`, `40d889bb`, … | 02 03 10 11 12 |
-| LOAD-2.4 | DONE | DONE `df804239`. The walk hands each directory's files to the sink as it reads the listing, when one walk alone reaches … | 02 03 21 22 |
-| LOAD-2.8 | DONE | Parts 1 and 2 DONE: `27c3b093` (the manifests and `installed.json` read member by member; a repeated key keeps its last … | 02 07 |
-| LOAD-3.1 | OPEN | OPEN | 02 05 06 10 12 19 21 |
-| LOAD-5.1 | OPEN | OPEN | 05 06 07 10 12 19 21 23 31 |
-| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone | 01 02 05 07 10 11 12 |
-| LOAD-7.6 | READY | READY; a delta in the config's keys | 06 07 08 10 12 31 |
-| LOAD-7.8 | OPEN | OPEN | 03 08 12 31 |
-| LOAD-8.10 | DONE | DONE `9513479b`. **The rule:** a walk hands a directory's files over when it is the one walk of their strongest role … | 03 21 |
-| LOAD-9 | DONE | DONE `3dcb1192` (Part A's A2): discovery is spawned first, and `read_installed` reads each package's directory from the … | 01 02 10 12 21 |
-| SYN-1.1 | DONE | DONE `2f9b1281`: the loop, with a test at a depth the recursion needed a guard for; A6 (2026-10-19) found no standalone … | 02 07 10 |
-| SYN-1.2 | READY | READY | 02 05 06 07 10 12 13 31 |
-| REG-7.2 | OPEN | OPEN | 05 06 10 11 20 |
-| REG-7.5 | OPEN | OPEN | 01 02 05 06 07 10 12 20 22 |
-| REG-14 | PART | PART | — |
-| REG-14.4 | DONE | DONE `8739437e`; A6 (2026-10-19), off callgrind over the Piwigo run, the sum of `from_decl`'s inclusive Ir over all … | 01 02 10 12 |
-| REG-14.5 | FOLDED | FOLDED into REG-7.5 (Part E 41): REG-7.5's combination is written without the `Vec`, and the function it would replace … | 01 02 07 10 12 22 31 |
-| REG-16.4 | OPEN | OPEN | 02 05 06 07 08 10 11 12 13 20 21 22 23 31 |
-| STUB-7.5 | OPEN | OPEN; a delta, approved (decision 14) | 02 06 07 08 10 12 21 22 31 |
-| COMP-5 | PART | PART: A7's maps keep the root's entries (`2c6f1eec`); the flat lists stay filtered, and the class is found through the … | 02 07 12 31 |
-| COMP-6 | DONE | DONE `088089ed`: each installed package whose install directory holds a vendor directory by the same test as the root's … | 02 07 12 31 |
-| COMP-7 | DONE | DONE: the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865`. The batch delta for a … | 01 02 03 07 10 12 31 |
-| COMP-8 | DONE | DONE `5b76d855`: the nested roots load before the walk, so owners, roles and contexts are fixed before any task runs. … | 01 02 03 07 12 19 31 |
-
-<!-- status:end -->
+A4 has no task of its own (its work is REG-7.5's, OPEN in level 2). A6 is the validation, not a task.
 
 **Order.** A2 needs A1's `vendor_location` (its composer commit comes first); A3, A5 and A5a are independent of both.
 
@@ -101,13 +84,13 @@ Measure: the heap profile's block count at `from_decl` (the 20 G report gives th
 M10, which an instruction count does not show) and off callgrind, `from_decl` inclusive. The ledger's REG-14.4 text
 ("passes the parameters on") is reworded to the predicate (Part N).
 
-## A4. REG-14.5: folded into REG-7.5 (Part E 41)
+## A4. Folded into REG-7.5 (Part E 41)
 
 `reconcile_with_native` (`decide.rs:13`) is the build-time combination of a PHPDoc type with its native type.
 Decision 8's rule replaces it at the final level: REG-7.5's combination reads the class hierarchy, where `decide.rs:211`
 trusts a class member unjudged because the registry is still being built. Its callers are the passes that REG-7.2
 and 7.5 turn into levels (`function_sig/type_resolution.rs:157`, and `resolve.rs:1274`, `:1305`, `:1340`). Making it
-allocation-free now would be work on code W2 replaces, for 41,085 allocations, so REG-14.5 is not built on its own.
+allocation-free now would be work on code W2 replaces, for 41,085 allocations, so this row is not built on its own.
 What it found is how the replacement is written, and REG-7.5 starts from it: (1) the members are a borrowed slice,
 the union's own (`self.repr()`) or `std::slice::from_ref(&self)`, with no `vec![self]` and no `into_repr`, which
 copies the member list while the type is shared (`lib.rs:337`); (2) the branches that answer without building are

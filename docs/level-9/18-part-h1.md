@@ -1,40 +1,5 @@
 # Part H. The engine cluster: identity, the engine, REG-7 and REG-8 on it, the pipeline
 
-<!-- status:begin -->
-
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| SYN-3.4 | OPEN | OPEN | 05 10 11 12 13 17 |
-| SYN-4.5 | READY | READY | 05 07 10 11 12 31 |
-| PROD-5.1 | OPEN | OPEN | 05 07 10 11 12 13 20 22 |
-| NAME-1.1 | READY | READY | 05 10 11 |
-| NAME-1.2 | READY | READY; the container-field keys are a delta, approved (VAL-2.7) | 05 06 07 10 11 12 |
-| NAME-1.3 | OPEN | OPEN | 05 07 10 |
-| NAME-1.4 | OPEN | OPEN | 05 10 |
-| NAME-1.5 | READY | READY | 05 10 11 22 |
-| NAME-1.6 | READY | READY | 05 10 11 |
-| NAME-2.1 | READY | READY | 05 07 08 10 11 12 |
-| NAME-2.2 | READY | READY | 05 10 12 |
-| NAME-2.3 | READY | READY | 05 10 |
-| TYPE-4 | OPEN | OPEN | 05 06 10 19 21 |
-| REG-4.2 | READY | READY; a delta, approved in the plan, fixtured | 05 06 10 20 |
-| REG-4.11 | OPEN | OPEN; the comments can be corrected now | 06 10 12 20 22 |
-| REG-4.12 | READY | READY | 06 08 10 11 12 19 20 |
-| REG-4.15 | OPEN | OPEN | 05 06 07 10 11 12 20 22 |
-| REG-7 | OPEN | OPEN | 05 06 08 12 19 20 21 23 |
-| REG-8 | OPEN | OPEN | 06 08 20 22 |
-| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 05 06 07 08 10 12 20 22 |
-| REG-11.13 | OPEN | OPEN | 10 11 |
-| REG-16.1 | DONE | DONE (2026-10-15): salsa, with each name asked once per file (its record) | 06 08 19 22 |
-| REG-18.4 | READY | READY; a delta | 05 06 07 08 10 12 22 31 |
-| VAL-2 | PART | PART: VAL-2.1 to 2.9 decided 2026-10-15 (VAL-2.5 extended by decision 1, VAL-2.9 by decision 14); VAL-2.10 is read as … | 07 |
-| VAL-2.7 | DONE | DONE: approved | 05 08 |
-
-<!-- status:end -->
 
 Part F rows 10, 13, 14 and 15, designed together because each constrains the next. Written from the
 code at `8a1ca1e0` and from the source of **salsa 0.28.5**, the version REG-16.1 measured
@@ -46,6 +11,10 @@ REG-16.1's choice (done: salsa) stays reversible, with S-2 and S-3 re-testing it
 same contract as the fallback: only the engine module names salsa (a crate from G1: Part E 33).
 
 ## H1. Identity (Part F 10)
+
+## Tasks this part owns
+
+None. H1 is a design, and its batch-4 build (H1.7) lists rows that Part C's C1 table already schedules: NAME-1.1 to 1.6, NAME-2.1 to 2.3 and SYN-4.5, all in batch 4. CHECK-13 is decided in H1.4 (anonymous classes reach the class-shape parent-call rules), but no batch table lists it yet, so its build place is open. The row is OPEN and is read against the code when it is worked, as Part N says.
 
 ### H1.0 What the code and the crate showed
 

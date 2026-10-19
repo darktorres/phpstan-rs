@@ -1,126 +1,72 @@
 # Part C. What follows item 9
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
+Written by hand. Each task is listed in the C1 batch that builds it. The state is the ledger's, as of `a3931d49d`.
 
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
+| task | state | batch |
+|---|---|---|
+| SYN-2 (the token table, I2) | OPEN | 1 |
+| SYN-4.1 | OPEN | 1 |
+| SYN-4.8 | READY | 1 |
+| SYN-4.9 | READY | 1 |
+| SYN-3.1 | READY | 2 |
+| SYN-3.2 | READY | 2 |
+| SYN-3.3 | READY | 2 |
+| SYN-3.4 | OPEN | 2 |
+| SYN-4.2 | READY | 2 |
+| SYN-4.3 | OPEN | 2 |
+| SYN-4.4 | READY | 2 |
+| SYN-4.6 | READY | 2 |
+| SYN-4.7 | OPEN | 2 |
+| SYN-4.10 | READY | 2 |
+| SYN-1.9 | OPEN | 3 |
+| Q-10 | OPEN | 3 |
+| SYN-6 | OPEN | 3 |
+| NAME-2.1 | READY | 4 |
+| NAME-2.2 | READY | 4 |
+| NAME-2.3 | READY | 4 |
+| NAME-1.1 | READY | 4 |
+| NAME-1.2 | READY | 4 |
+| NAME-1.3 | OPEN | 4 |
+| NAME-1.4 | OPEN | 4 |
+| NAME-1.5 | READY | 4 |
+| NAME-1.6 | READY | 4 |
+| SYN-4.5 | READY | 4 |
+| REG-18.4 | READY | 4b |
+| CHECK-4.2 | READY | 4b |
+| PROD-5.8 | READY | 5 |
+| PROD-5.2 | READY | 5 |
+| PROD-5.1 | OPEN | 5 |
+| PROD-5.3 | READY | 5 |
+| PROD-5.5 | READY | 5 |
+| PROD-5.6 | READY | 5 |
+| REG-14.1 | OPEN | 5 |
+| DOC-2.1 | READY (deferred) | 6 |
+| DOC-2.2 | OPEN | 6 |
+| DOC-2.3 | READY | 6 |
+| DOC-2.4 | READY | 6 |
+| DOC-2.5 | OPEN | 6 |
+| DOC-2.6 | OPEN | 6 |
+| DOC-2.7 | READY | 6 |
+| DOC-2.8 | READY | 6 |
+| DOC-2.9 | OPEN | 6 |
+| REG-4.10 | READY | 6 (C1 folds it into DOC-2.9; the ledger keeps it READY and overlapping DOC-2.6, to reconcile) |
+| TYPE-5 | READY | 6 |
+| CHECK-6.4 | READY | 7 |
+| CHECK-6.5 | READY | 7 |
+| CHECK-6.6 | READY | 7 |
+| CHECK-6.8 | READY | 7 |
+| CHECK-6.9 | READY | 7 |
+| CHECK-6.10 | READY | 7 |
+| CHECK-6.11 | READY | 7 |
+| CHECK-6.12 | READY | 7 |
+| CHECK-6.16 | READY | 7 |
+| CHECK-6.17 | READY | 7 |
+| CHECK-6.18 | READY | 7 |
 
-| task | status | ledger | also in |
-|---|---|---|---|
-| LOAD-3.1 | OPEN | OPEN | 02 04 06 10 12 19 21 |
-| LOAD-3.3 | PART | PART. **The load: DONE `a5a4d85f`.** In a project built once `keeps_tree` is a function of the role, which LOAD-2.2's … | 08 10 19 |
-| LOAD-3.5 | OPEN | OPEN | 10 12 13 19 |
-| LOAD-4.7 | OPEN | OPEN, blocked. Its file-references part is one change with PROD-5.7 (OPEN), which needs PROD-5.8 and PROD-5.2, both … | 02 06 07 10 12 21 22 31 |
-| LOAD-5.1 | OPEN | OPEN | 04 06 07 10 12 19 21 23 31 |
-| LOAD-5.2 | OPEN | OPEN | 06 07 10 12 19 21 22 |
-| LOAD-5.4 | DONE | DONE `a5ab84c4` (Part A's A5a): the passes read through `ast_of`, and `FileState::ast` is gone | 01 02 04 07 10 11 12 |
-| SYN-1.2 | READY | READY | 02 04 06 07 10 12 13 31 |
-| SYN-1.9 | OPEN | OPEN | 07 08 10 11 12 13 15 16 21 22 |
-| SYN-1.10 | OPEN | OPEN | 06 07 11 12 13 22 |
-| SYN-2 | OPEN | OPEN; the target grew | 07 09 10 11 12 13 31 |
-| SYN-3.1 | READY | READY | 08 09 10 11 19 |
-| SYN-3.2 | READY | READY, with SYN-3.1 | 07 08 09 10 12 |
-| SYN-3.3 | READY | READY (its need, LOAD-1.4, is in: `3334ebc9`) | 10 |
-| SYN-3.4 | OPEN | OPEN | 10 11 12 13 17 18 |
-| SYN-4.1 | OPEN | OPEN | 07 09 10 11 12 |
-| SYN-4.2 | READY | READY | 10 11 31 |
-| SYN-4.3 | OPEN | OPEN | 07 09 10 11 |
-| SYN-4.4 | READY | READY | 10 11 31 |
-| SYN-4.5 | READY | READY | 07 10 11 12 18 31 |
-| SYN-4.6 | READY | READY | 10 11 31 |
-| SYN-4.7 | OPEN | OPEN | 10 11 31 |
-| SYN-4.8 | READY | READY | 07 09 10 11 12 17 |
-| SYN-4.9 | READY | READY | 07 09 10 11 12 |
-| SYN-4.10 | READY | READY | 10 11 31 |
-| SYN-6 | OPEN | OPEN | 07 08 10 11 12 15 16 |
-| PROD-1 | DONE | DONE `7726dacf` | 08 |
-| PROD-2 | DONE | DONE `11837a04` | 08 |
-| PROD-3 | DONE | DONE `791d29cb` | 08 13 |
-| PROD-5.1 | OPEN | OPEN | 07 10 11 12 13 18 20 22 |
-| PROD-5.2 | READY | READY | 02 09 10 11 23 |
-| PROD-5.3 | READY | READY | 10 11 |
-| PROD-5.4 | OPEN | OPEN | 06 07 10 12 21 22 31 |
-| PROD-5.5 | READY | READY | 10 12 |
-| PROD-5.6 | READY | READY | 10 |
-| PROD-5.7 | OPEN | OPEN; one change with LOAD-4.7 | 02 07 10 12 21 22 31 |
-| PROD-5.8 | READY | READY | 02 07 10 11 12 19 21 |
-| DOC-1 | DONE | DONE `a4035361` | 08 |
-| DOC-2.1 | READY | READY, deferred 2026-10-16 (see WORK_STACK level 7) | 06 07 08 09 10 11 12 |
-| DOC-2.2 | OPEN | OPEN | 07 08 09 10 12 23 |
-| DOC-2.4 | READY | READY | 07 10 11 |
-| DOC-2.5 | OPEN | OPEN. DOC-1 rewrote the tag parser to pull tokens; the borrowed token text is not built | 07 09 10 12 |
-| DOC-2.6 | OPEN | OPEN; overlaps REG-4.10 | 07 10 |
-| DOC-2.8 | READY | READY | 07 09 10 |
-| DOC-2.9 | OPEN | OPEN; overlaps DOC-2.6 | 06 07 10 11 12 13 17 19 |
-| NAME-1 | OPEN | OPEN | 06 11 |
-| NAME-1.1 | READY | READY | 10 11 18 |
-| NAME-1.2 | READY | READY; the container-field keys are a delta, approved (VAL-2.7) | 06 07 10 11 12 18 |
-| NAME-1.3 | OPEN | OPEN | 07 10 18 |
-| NAME-1.4 | OPEN | OPEN | 10 18 |
-| NAME-1.5 | READY | READY | 10 11 18 22 |
-| NAME-1.6 | READY | READY | 10 11 18 |
-| NAME-2.1 | READY | READY | 07 08 10 11 12 18 |
-| NAME-2.2 | READY | READY | 10 12 18 |
-| NAME-2.3 | READY | READY | 10 18 |
-| NAME-2.4 | OPEN | OPEN | 06 10 |
-| TYPE-4 | OPEN | OPEN | 06 10 18 19 21 |
-| TYPE-5 | READY | READY | 07 09 10 11 12 31 |
-| REG-4.2 | READY | READY; a delta, approved in the plan, fixtured | 06 10 18 20 |
-| REG-4.10 | READY | READY; overlaps DOC-2.6 | 06 07 10 11 12 |
-| REG-4.15 | OPEN | OPEN | 06 07 10 11 12 18 20 22 |
-| REG-7 | OPEN | OPEN | 06 08 12 18 19 20 21 23 |
-| REG-7.2 | OPEN | OPEN | 04 06 10 11 20 |
-| REG-7.4 | OPEN | OPEN | 06 10 20 23 |
-| REG-7.5 | OPEN | OPEN | 01 02 04 06 07 10 12 20 22 |
-| REG-8.3 | OPEN | OPEN | 02 06 10 20 |
-| REG-8.6 | OPEN | OPEN; overlaps NAME-1 and NAME-2 | 06 07 08 10 12 18 20 22 |
-| REG-14.1 | OPEN | OPEN; a delta, approved (VAL-2.6) | 02 12 |
-| REG-16.2 | READY | READY | 06 07 08 10 11 12 22 31 |
-| REG-16.3 | OPEN | OPEN | 06 10 11 |
-| REG-16.4 | OPEN | OPEN | 02 04 06 07 08 10 11 12 13 20 21 22 23 31 |
-| REG-17 | OPEN | OPEN | 06 08 10 12 19 20 21 |
-| REG-18.4 | READY | READY; a delta | 06 07 08 10 12 18 22 31 |
-| STUB-7.1 | OPEN | OPEN; a delta, approved (decision 14) | 06 07 08 10 11 12 13 23 |
-| STUB-7.3 | OPEN | OPEN; a delta, approved (decision 14) | 06 08 10 13 |
-| STUB-8 | OPEN | OPEN; a delta, approved, both parts (VAL-2.4) | 06 10 23 |
-| STUB-11 | OPEN | OPEN | 06 07 10 12 21 23 24 |
-| CACHE-8 | READY | READY | 07 10 12 22 31 |
-| CACHE-9 | BLOCKED | BLOCKED: its form follows the stub layer and, since decisions 3 and 7, the persistence's format | 06 10 12 21 22 |
-| CACHE-13.1 | OPEN | OPEN | 06 07 10 11 12 19 21 22 |
-| CACHE-13.2 | OPEN | OPEN | 06 07 08 10 12 21 22 23 |
-| CHECK-4.1 | OPEN | OPEN | 08 09 12 23 |
-| CHECK-4.2 | READY | READY | 07 10 12 22 31 |
-| CHECK-6.1 | READY | READY; approved in principle (VAL-2.8) | 06 07 12 23 |
-| CHECK-6.3 | OPEN | OPEN | 06 07 12 13 14 23 |
-| CHECK-6.4 | READY | READY | 06 07 08 11 |
-| CHECK-6.5 | READY | READY | 06 07 11 |
-| CHECK-6.6 | READY | READY | 06 07 |
-| CHECK-6.7 | OPEN | OPEN | 06 07 12 23 |
-| CHECK-6.8 | READY | READY | 06 10 11 12 23 |
-| CHECK-6.9 | READY | READY | 06 07 |
-| CHECK-6.10 | READY | READY | 06 07 08 09 12 23 |
-| CHECK-6.11 | READY | READY | 06 07 |
-| CHECK-6.12 | READY | READY | 06 07 |
-| CHECK-6.13 | OPEN | OPEN | 06 07 12 23 |
-| CHECK-6.14 | OPEN | OPEN | 06 07 12 23 |
-| CHECK-6.15 | OPEN | OPEN | 06 07 12 23 |
-| CHECK-6.16 | READY | READY | 06 07 |
-| CHECK-6.17 | READY | READY | 06 07 |
-| CHECK-6.18 | READY | READY | 06 10 12 14 16 23 |
-| CHECK-7 | OPEN | OPEN; a delta, approved (VAL-2.5) | 06 07 08 10 12 21 |
-| CHECK-9 | READY | READY | 06 07 10 11 12 23 24 31 |
-| CHECK-10 | OPEN | OPEN | 06 07 08 10 12 23 |
-| VAL-1 | OPEN | OPEN | 06 07 |
-| VAL-1.4 | OPEN | OPEN | 08 09 10 11 12 |
-| VAL-1.6 | OPEN | OPEN | 08 10 11 12 |
-| VAL-1.7 | OPEN | OPEN; `--dump-types` exists | 08 09 10 11 12 |
-| VAL-2.7 | DONE | DONE: approved | 08 18 |
-| VAL-2.10 | OPEN | OPEN: read at VAL-1, as they land | 06 07 12 15 20 |
-| Q-2 | DONE | DONE (2026-10-16): probed under PHP 5.6–8.5.4 in Docker (`~/.cache/prs-ledger/q2/php-matrix.txt`), and with `check` and … | 11 15 |
-| Q-10 | OPEN | OPEN, partly probed (2026-10-16, `~/.cache/prs-ledger/q10/`). The recovery is in place: a context file with a syntax … | 07 08 10 11 12 13 15 16 19 |
+Batch 0 and item 9 are Part E's and Part I's, and the batch 8 rows are other parts' (LOAD-5.4 is Part A's; CACHE-13.1, CACHE-8, LOAD-5.1, LOAD-5.2 and LOAD-3.1 are W3's). They are named in the text, not listed here.
 
-<!-- status:end -->
 
 Read from the 20 G plan's items 10 to 19 (its §10), the ledger's rows, needs and notes
 (`PROFILE_DRILL_PIWIGO_LEDGER.md` §2 to §13) and the code at `0fb1a4de`. The savings are the 20 G

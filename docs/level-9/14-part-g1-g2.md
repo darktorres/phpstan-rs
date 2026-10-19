@@ -1,17 +1,8 @@
 # Part G. The designs of Part F 1 to 4 and 6
 
-<!-- status:begin -->
+## Tasks this part owns
 
-## Status of this part's tasks
-
-From the ledger at `54abfd547` on 2026-10-19. Regenerate with `scripts/plan_status.py`; change the ledger, not this table. `also in` lists the other parts that name the task.
-
-| task | status | ledger | also in |
-|---|---|---|---|
-| CHECK-6.3 | OPEN | OPEN | 05 06 07 12 13 23 |
-| CHECK-6.18 | READY | READY | 05 06 10 12 16 23 |
-
-<!-- status:end -->
+None. Part G1 and G2 are designs: they decide how the checker holds a tree (G1) and what stored-alias identity means (G2), and they add no ledger row. The ledger rows they touch are owned elsewhere: CHECK-6.18 and CHECK-6.8 by the batch that builds them (Part C, batch 7), SYN-1.2 to SYN-1.10 by Part B. G3 and G4 hold the rows they add.
 
 Written from the code at `30aa2002` (the cross-platform plan's R7 is in; the stack's bookkeeping for it is not).
 G1 and G2 finish item 9's checker side; G3 is the error-node model; G4 is the probe; G5 is item 0.
