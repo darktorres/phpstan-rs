@@ -18,6 +18,7 @@
 //! `--profile gate`, like the fixture suite.
 
 use std::collections::BTreeSet;
+use std::hash::{DefaultHasher, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -546,19 +547,24 @@ fn docker_image_present(image: &str) -> bool {
 }
 
 /// The runtime packages' autoloader, installed from the committed lock
-/// file into the target directory on first use.
+/// file into the target directory on first use. The directory is named by
+/// the lock file's hash, so a changed lock installs its packages again.
 fn runtime_packages() -> Result<PathBuf, String> {
     static INSTALLED: OnceLock<Result<PathBuf, String>> = OnceLock::new();
     INSTALLED
         .get_or_init(|| {
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/runtime_oracle");
+            let lock = std::fs::read(dir.join("composer.lock"))
+                .map_err(|e| format!("composer.lock: {e}"))?;
+            let mut hasher = DefaultHasher::new();
+            hasher.write(&lock);
             let vendor = Path::new(env!("CARGO_TARGET_TMPDIR"))
                 .join("runtime_oracle")
-                .join("vendor");
+                .join(format!("vendor-{:016x}", hasher.finish()));
             let autoload = vendor.join("autoload.php");
             if autoload.is_file() {
                 return Ok(autoload);
             }
-            let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/runtime_oracle");
             let status = Command::new("composer")
                 .args(["install", "--no-interaction", "--no-progress", "--quiet"])
                 .arg("--working-dir")
