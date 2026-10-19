@@ -1,7 +1,7 @@
 {
     "description": "Libraries fixtures need at runtime (runtime_packages), for the runtime oracle.",
     "require": {
-        "phpunit/phpunit": "12.5.34"
+        "phpunit/phpunit": "13.4.3"
     },
     "config": {
         "sort-packages": true
