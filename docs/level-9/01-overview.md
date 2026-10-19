@@ -1,28 +1,10 @@
-## Overview
-
-## Tasks this part owns
-
-None. The overview names no task of its own: each part's own table lists the rows that part builds or decides, and the ledger is the only record of their states.
+# Overview: the conventions and the decisions
 
 The plan is written from the code at `0fb1a4de` (Parts A to F), `30aa2002` (G) and `8a1ca1e0` (H to J); the review passes re-read the code at `52844b07` and `ffa7cccb`. Line numbers
 are hints from those commits and the tree moves, so a citation is found by the symbol it names; "the fixes plan's R7"
 is `ITEMS_1_TO_3_FIXES_PLAN.md` (ledger LOAD-8.7) and "the cross-platform plan's R7" is `CROSS_PLATFORM_PLAN.md`.
-Part A is built and validated (its status is in Part A's intro, `02`). Nothing from Part B onward is built by this plan. The batch-0 fixes already in the tree are listed in the README's batch 0 rows. Part C (what follows item 9) and Part D (what follows that:
-levels 1 to 7) are at the end. Each pending decision is answered in the part that owns the design it changes, under its number
-(`#n`), and the README indexes them.
-Part F lists what needed designing; Part G holds the designs of its rows 1 to 4 and 6, Part H the engine cluster
-(rows 10, 13 to 15), Part I the designs the batches wait for (rows 5, 7, 8, 11, 12) and Part J the wall's later
-ones (rows 16 to 18). Part K records the review by task group, and Part L the second pass by ledger row;
-where either changed an earlier part, the change is made there. Part N lists the documents and the ledger and stack edits the plan implies.
 
-- **Part A** designs the batch that follows the cross-platform fixes: five rows (`WORK_STACK.md`: item 2's last part, item 8's
-  REG-14.4, item 9's first step, item 19's LOAD-5.4, and LOAD-9), the composer follow-ups A7 and A8 (#40).
-- **Part B** designs item 9 (SYN-1: the flat tree) as a staged migration. It needs nine
-  decisions settled first (B2, D1 to D9); the three that matter most are D1 (handles and
-  views, not bare ids), D2 (staged migration over the boxed tree first) and D3 (what a node
-  records of position, which the ledger leaves to a measurement: spike S-12 makes it before step 2).
-  D4 keeps the ledger's layout: the tree owns its source, a string is a span,
-  and a side buffer holds the bytes that no source has.
+Part A is built and validated (its status is in Part A's intro, [`02-part-a-intro.md`](02-part-a-intro.md)). Nothing from Part B onward is built by this plan. The batch-0 fixes already in the tree are listed in the README's batch 0 rows. The order of the parts and what each one designs are in the [README](README.md).
 
 Both start only after the cross-platform fixes have finished (`CROSS_PLATFORM_PLAN.md`, rows R0 to R18, finished at `a83b1675`). Its rows edit what this plan's first rows edit: `session.rs`, `project.rs`, `walk.rs` and
 `lsp.rs` (R5 to R7), `includes.rs` (R8), `composer` (R3, R9, R16), `main.rs` (R10) and the caches (R11). R18 moves
@@ -75,5 +57,49 @@ proper course for each.
 Decisions in force: the fixes plan's decisions 1 to 7 and the ledger's decisions 1 to 18, which the plan cites by number. Gates, not decisions: the go, and the start condition in the overview. Batch
 numbers are the order of the README's "The sequence". An answer that departs from a decision's wording says so.
 
+Each decision is a `### #n` section of the part that owns the design it changes; the index is below.
 
----
+| # | decision | part |
+|---|---|---|
+| 1 | D1: what consumers hold | [`08-part-b.md`](08-part-b.md) |
+| 2 | D2: how to migrate | [`08-part-b.md`](08-part-b.md) |
+| 3 | D3: position | [`08-part-b.md`](08-part-b.md) |
+| 4 | D4: payload bytes | [`08-part-b.md`](08-part-b.md) |
+| 5 | D5: names in nodes | [`08-part-b.md`](08-part-b.md) |
+| 6 | D6: the mutating passes | [`08-part-b.md`](08-part-b.md) |
+| 7 | D7: fabricated nodes | [`08-part-b.md`](08-part-b.md) |
+| 8 | D8: rows | [`08-part-b.md`](08-part-b.md) |
+| 9 | D9: error nodes | [`08-part-b.md`](08-part-b.md) |
+| 10 | SYN-3.2's SIMD | [`15-part-c.md`](15-part-c.md) |
+| 11 | the parse-recovery batch | [`15-part-c.md`](15-part-c.md) |
+| 12 | order of items 13, 16, 15, 14 | [`15-part-c.md`](15-part-c.md) |
+| 13 | oracle tools | [`07-part-f.md`](07-part-f.md) |
+| 14 | DOC-2.1 | [`15-part-c.md`](15-part-c.md) |
+| 15 | CACHE-13.1 for context files | [`06-part-d.md`](06-part-d.md) |
+| 16 | item 18 | [`20-part-j.md`](20-part-j.md) |
+| 17 | CHECK-9 and TYPE-5 | [`15-part-c.md`](15-part-c.md) |
+| 18 | when to reevaluate | [`16-part-h1.md`](16-part-h1.md) |
+| 19 | order of the wall | [`06-part-d.md`](06-part-d.md) |
+| 20 | rows for C6 to C9 and D to G | [`21-part-n.md`](21-part-n.md) |
+| 21 | Stages D to G | [`06-part-d.md`](06-part-d.md) |
+| 22 | level 3 and the Q-11 follow-ups | [`05-part-k.md`](05-part-k.md) |
+| 23 | Part A's validation | [`02-part-a-intro.md`](02-part-a-intro.md) |
+| 24 | item 9's validation | [`08-part-b.md`](08-part-b.md) |
+| 25 | LOAD-2.8's parts 1 and 2 | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
+| 26 | the LSP completion probe | [`11-part-g4-g6.md`](11-part-g4-g6.md) |
+| 27 | the step 1 codemod | [`08-part-b.md`](08-part-b.md) |
+| 28 | LOAD-5.2 batch-only | [`06-part-d.md`](06-part-d.md) |
+| 29 | NAME-2.1's thin name | [`15-part-c.md`](15-part-c.md) |
+| 30 | where Part B lives | [`21-part-n.md`](21-part-n.md) |
+| 31 | an analysed file with parse errors | [`10-part-g3.md`](10-part-g3.md) |
+| 32 | `PhpVersion` and its types move out of `types` | [`15-part-c.md`](15-part-c.md) |
+| 33 | the engine crate and `unsafe_code` | [`17-part-h3.md`](17-part-h3.md) |
+| 34 | positionless declarations | [`15-part-c.md`](15-part-c.md) |
+| 35 | PROD-5.7 and `deps::Collector` | [`15-part-c.md`](15-part-c.md) |
+| 36 | the server's snapshot model | [`18-part-h2.md`](18-part-h2.md) |
+| 37 | the persisted database's key | [`19-part-h4.md`](19-part-h4.md) |
+| 38 | REG-16.2's "never reused" | [`16-part-h1.md`](16-part-h1.md) |
+| 39 | LOAD-5.1's passes | [`06-part-d.md`](06-part-d.md) |
+| 40 | the composer crate's B8 follow-ups | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
+| 41 | rows whose code a later task replaces | [`17-part-h3.md`](17-part-h3.md) |
+| 42 | deltas the ledger marks READY or OPEN with half a ruling | [`06-part-d.md`](06-part-d.md) |
