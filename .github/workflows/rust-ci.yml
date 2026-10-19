@@ -221,7 +221,7 @@ jobs:
       # each platform's own grammar. The times are in the log.
       - name: The path_bytes bench
         if: ${{ !cancelled() }}
-        run: cargo bench -p phpstan-rs-path-bytes -- --warm-up-time 1 --measurement-time 2
+        run: cargo bench -p phpstan-rs-path-bytes --bench path_bytes -- --warm-up-time 1 --measurement-time 2
 
   platform-fixtures:
     strategy:
