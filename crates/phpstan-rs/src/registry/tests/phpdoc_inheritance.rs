@@ -269,7 +269,7 @@ fn an_ancestors_template_parameterized_type_is_never_inherited() {
     let sig = &r.classes["ConcreteContainer10"].methods["get"];
     assert_eq!(
         sig.return_type,
-        Type::mixed(),
+        Type::explicit_mixed(),
         "a template-parameterized ancestor type must never be inherited verbatim, got {:?}",
         sig.return_type
     );

@@ -461,7 +461,10 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
     assert_eq!(r.functions["ctype_punct"].return_type, Type::bool());
-    assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::mixed());
+    assert_eq!(
+        r.functions["ctype_punct"].params[0].ty,
+        Type::explicit_mixed()
+    );
 }
 
 // A vendored, unconditional, bare (guard-free) duplicate of a stub
