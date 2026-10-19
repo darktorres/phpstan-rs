@@ -4481,6 +4481,14 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// The type a read of the variable `name` has now.
+    pub(crate) fn variable_type(&self, name: &str, locals: &Locals) -> Type {
+        locals
+            .get_var(name)
+            .cloned()
+            .unwrap_or_else(|| unassigned_variable_type(name))
+    }
+
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
         stack::guard(|| {
             // Inferring is `&self`, so nothing moves under one call: an
@@ -4557,10 +4565,7 @@ impl<'a> Checker<'a> {
                     Literal::Bool(false) => Type::bool_literal(false),
                     Literal::Null => Type::null(),
                 },
-                ExprKind::Variable(name) => locals
-                    .get_var(name)
-                    .cloned()
-                    .unwrap_or_else(|| unassigned_variable_type(name)),
+                ExprKind::Variable(name) => self.variable_type(name, locals),
                 ExprKind::Grouping(inner)
                 | ExprKind::ErrorSuppress(inner)
                 | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
