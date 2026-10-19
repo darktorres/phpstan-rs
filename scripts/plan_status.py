@@ -4,7 +4,8 @@
 A task is a row of `PROFILE_DRILL_PIWIGO_LEDGER.md` (`| ID | task | item | state | needs |`).
 A part names a task anywhere in its text: in a heading, a table cell, or prose. A list
 after a prefixed ID names each member of it: `CHECK-6.4 to 6.6, 6.9` names CHECK-6.4,
-CHECK-6.5, CHECK-6.6 and CHECK-6.9. The status is the first known state word (OPEN, DONE,
+CHECK-6.5, CHECK-6.6 and CHECK-6.9; `SRV-1 to SRV-7` names SRV-1 to SRV-7, since a head with
+no minor number takes top-level numbers. The status is the first known state word (OPEN, DONE,
 READY, PART, SUPERSEDED, SKIP, BLOCKED) among the first words of the ledger's state cell.
 A part's table lists the tasks it names and the other parts that name them. The table sits
 between two markers under the part's first heading; running the script again replaces it.
@@ -70,19 +71,21 @@ def named(text, rows):
         tail = CHAIN.match(text, m.end())
         if not tail:
             continue
-        prefix, major_now, last, ranging = pre, major, int(minor) if minor else None, False
+        prefix, major_now, dotted = pre, major, minor is not None
+        last, ranging = (int(minor) if dotted else int(major)), False
         for t in TOKEN.finditer(tail.group(1)):
             if t.group(4):
                 ranging = True
                 continue
+            prefix = t.group(1) or prefix
             if t.group(3):
-                prefix, major_now, nums = t.group(1) or prefix, t.group(2), [int(t.group(3))]
+                major_now, dotted, nums = t.group(2), True, [int(t.group(3))]
             else:
                 nums = [int(t.group(2))]
-            if ranging and last is not None and nums and nums[0] > last:
+            if ranging and nums and nums[0] > last:
                 nums = list(range(last + 1, nums[0] + 1))
             for n in nums:
-                ident = f"{prefix}-{major_now}.{n}"
+                ident = f"{prefix}-{major_now}.{n}" if dotted else f"{prefix}-{n}"
                 if ident in rows:
                     found.add(ident)
             last = nums[-1] if nums else last
