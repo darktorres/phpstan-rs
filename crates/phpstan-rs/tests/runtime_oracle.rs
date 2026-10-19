@@ -7,8 +7,8 @@
 //! expect a diagnostic on every line PHP warned on. `runtime_packages`
 //! names libraries the fixture needs at runtime, installed from
 //! `runtime_oracle/composer.lock`. A fixture analysed for another PHP
-//! version runs in that version's `php:<v>-cli` Docker image when it is
-//! present.
+//! version runs in that version's `php:<v>-cli` Docker image, the one
+//! `runtime_oracle/php-images.lock` pins by digest, when it is present.
 //!
 //! A fixture that reaches no `assertType()` is `not executed`, and one
 //! that can't be run here is `skipped`; neither fails. The counts, and
@@ -146,10 +146,15 @@ fn run(name: &str, stem: &Path, stubs: Stubs, local: &str) -> Result<Outcome, Fa
     }
     let runner = match config.php_version() {
         Some(version) if major_minor(&version) != local => {
-            let image = format!("php:{}-cli", major_minor(&version));
+            let tag = format!("php:{}-cli", major_minor(&version));
+            let Some(image) = pinned_image(&tag)? else {
+                return Ok(Outcome::Skipped(format!(
+                    "`{tag}` has no digest in runtime_oracle/php-images.lock"
+                )));
+            };
             if !docker_image_present(&image) {
                 return Ok(Outcome::Skipped(format!(
-                    "needs the `{image}` Docker image"
+                    "needs the Docker image `{image}`"
                 )));
             }
             Runner::Docker(image)
@@ -528,6 +533,20 @@ fn local_php_version() -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// The line of `runtime_oracle/php-images.lock` that pins `tag` (`php:8.0-cli`)
+/// by digest, which is the image reference to run.
+fn pinned_image(tag: &str) -> std::io::Result<Option<String>> {
+    let lock = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/runtime_oracle/php-images.lock"),
+    )?;
+    let prefix = format!("{tag}@");
+    Ok(lock
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with(&prefix))
+        .map(str::to_string))
 }
 
 fn docker_image_present(image: &str) -> bool {
