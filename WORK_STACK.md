@@ -263,7 +263,7 @@ profile runs.
 Order, as the plan sets it:
 
 1. Part A's rows: built, as the ledger's rows record (A1, A2, A3, A5, A5a, A7 and A8,
-   with COMP-7 and COMP-8). The one validation (A6) runs after the build.
+   with COMP-7 and COMP-8). The one validation (A6) ran at `13694541` on 2026-10-19: the test suites, the fixtures, the gate build, the Piwigo digest, `vendor/monolog`, `vendor/laravel` and `vendor/rector-src` are as recorded in the ledger; the wall cost of the batch (COMP-6 bundled discovery) is accepted at option 1, and the LOAD-9 syscall saving is measured.
 2. Batch 0: the oracle tools and the baseline, the seven fixes the crate split puts
    first, and the findings that change a dump. Then item 9, the flat tree, steps 0 to
    3, with spike S-12 before step 2.
