@@ -5,9 +5,11 @@
 //! vendor directory is not judged for the includes of it. `--no-composer` runs
 //! none of this.
 
+use super::super::Project;
+use super::super::exclude_paths::Exclusions;
 use super::super::session::{ErrorPolicy, Overrides, Session};
+use super::super::walk::PathCut;
 use super::super::walk::{Excluded, Role, Walk};
-use super::super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, Project};
 use super::helpers::{TempDir, resolved};
 use crate::registry::stub_set::Stubs;
 use crate::test_links::link_dir;
@@ -161,11 +163,16 @@ fn the_scan_lists_the_manifests_the_walk_enters_once_each() {
     dir.write("proj/node_modules/p/composer.json", "{}");
     link_dir(root.join("tools/cs"), root.join("packages/b"));
     let composer = |dir: &Path| dir.ends_with("vendor");
+    let floor = Exclusions::default().with_floor();
     let found = Walk::new(Arc::default(), &NO_PACKAGES)
         .with_composer(&composer)
         .manifest_dirs(
             &root,
-            Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, CaseRule::Exact).leaving_out_composer(),
+            &Excluded::new(
+                PathCut::Analysis(std::sync::Arc::new(floor)),
+                CaseRule::Exact,
+            )
+            .leaving_out_composer(),
         );
     assert_eq!(
         found,

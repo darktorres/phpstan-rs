@@ -40,12 +40,15 @@ use crate::rules_settings::RulesSettings;
 use crate::{ext, ignore_errors};
 
 use super::configured_path;
+use super::exclude_paths::{ExcludePaths, Exclusions, unlisted_floor};
 use super::file_cache;
 use super::path_spelling;
 use super::source::FileSource;
-use super::walk::{Excluded, FileIndex, FinalFiles, Listed, Role, Root, Unstreamed, Walk, Walked};
+use super::walk::{
+    Excluded, FileIndex, FinalFiles, Listed, PathCut, Role, Root, Unstreamed, Walk, Walked,
+};
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
-use super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, FileText, ParsedFile, Project, ProjectSettings};
+use super::{FileText, ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, CaseRule, Diagnostic, DiagnosticBuilder};
 
 /// The level reported when neither the command line nor the config sets
@@ -72,6 +75,9 @@ pub struct SessionSettings {
     /// Report inline `@phpstan-ignore*` comments that suppress nothing
     /// (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`).
     pub report_unmatched_ignored_errors: bool,
+    /// The paths left out of the analysis, or out of the analysis and the scan
+    /// (`exclude_paths::ExcludePaths`).
+    pub exclude_paths: ExcludePaths,
 }
 
 impl config::Section for SessionSettings {
@@ -112,7 +118,7 @@ pub enum ErrorPolicy {
     Fail,
     /// Each problem is recorded in `Session::warnings`, and the part it
     /// concerns takes its default. Without a configured `paths`, the whole
-    /// root is analysed, less `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`.
+    /// root is analysed, less the editor's floor (`FLOOR` in `exclude_paths`).
     Degrade,
 }
 
@@ -190,10 +196,12 @@ pub struct Session {
     architecture_rules: Vec<architecture::ArchitectureRule>,
     check_mock_hygiene: bool,
     mock_banned_classes: Vec<String>,
-    /// The directory names the walk of the analysed directories leaves out:
-    /// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` when the root is analysed because no
-    /// `paths` are configured, nothing otherwise.
-    excluded_dir_names: &'static [&'static str],
+    /// Whether the root is analysed because no `paths` are configured, which
+    /// leaves out the directories Composer wrote into.
+    degrade_root: bool,
+    /// What the configuration leaves out of the analysis and the scan
+    /// (`exclude_paths`), with the degrade floor when `degrade_root`.
+    exclusions: Arc<Exclusions>,
     /// The directories of the packages Composer installed outside their
     /// project's vendor directory, below the root, sorted and unique: the
     /// walk that leaves out Composer's directories leaves these out too.
@@ -243,7 +251,7 @@ pub(crate) struct Listing {
     files: Vec<Listed>,
     /// Where each file is in `files`, by its path.
     index: FileIndex,
-    roots: Vec<Root<'static>>,
+    roots: Vec<Root>,
 }
 
 /// What each thread of a pool keeps through one load: the name cache it parses
@@ -360,7 +368,7 @@ pub(crate) fn identify_through(
     }
 }
 
-impl Root<'_> {
+impl Root {
     /// Whether the walk of this root lists `path`: it lies under the root's
     /// resolved path, and no directory below the root is one the walk leaves
     /// out (by name, as Composer's through `composer`, or as one of `seeds`).
@@ -374,7 +382,7 @@ impl Root<'_> {
             && !super::path_under_excluded_dir(
                 path,
                 Some(&self.path),
-                self.excluded,
+                self.excluded.clone(),
                 composer,
                 seeds,
             )
@@ -415,17 +423,21 @@ pub(crate) struct Classified {
 }
 
 /// The role of a file no root lists: context when a directory of `path` below
-/// `root` is one the walk leaves out by default (by name, as Composer's, or as
-/// one of `seeds`), analysed otherwise.
+/// `root` is left out by the editor's floor or by `paths`, or is Composer's
+/// or one of `seeds`, analysed otherwise.
 pub(crate) fn unlisted_role(
     path: &Path,
     root: Option<&Path>,
     case: CaseRule,
+    paths: PathCut,
     composer: &(dyn Fn(&Path) -> bool + Sync),
     seeds: &[PathBuf],
 ) -> Role {
-    let excluded = Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case).leaving_out_composer();
-    if super::path_under_excluded_dir(path, root, excluded, composer, seeds) {
+    let floor = Excluded::new(PathCut::Analysis(unlisted_floor()), case).leaving_out_composer();
+    let configured = Excluded::new(paths, case);
+    if super::path_under_excluded_dir(path, root, floor, composer, seeds)
+        || super::path_under_excluded_dir(path, root, configured, &|_: &Path| false, &[])
+    {
         Role::Context
     } else {
         Role::Analysed
@@ -437,7 +449,7 @@ pub(crate) fn unlisted_role(
 pub(crate) fn classify_unlisted(path: &Path) -> Classified {
     let path = composer::manifest::resolve(path);
     let role = with_unlisted_composer(|composer| {
-        unlisted_role(&path, None, CaseRule::Exact, composer, &[])
+        unlisted_role(&path, None, CaseRule::Exact, PathCut::None, composer, &[])
     });
     Classified {
         path,
@@ -725,6 +737,7 @@ fn nested_manifest_dirs(
     listings: &Arc<DirListings>,
     environment: &Environment,
     case: CaseRule,
+    exclusions: Arc<Exclusions>,
     seeds: &[PathBuf],
 ) -> Vec<PathBuf> {
     let packages = composer::PackageIndex::default();
@@ -736,7 +749,7 @@ fn nested_manifest_dirs(
             .with_seeds(seeds)
             .manifest_dirs(
                 root,
-                Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case).leaving_out_composer(),
+                &Excluded::new(PathCut::Analysis(exclusions), case).leaving_out_composer(),
             )
     })
 }
@@ -952,7 +965,7 @@ impl Session {
             })
             .map(resolve_against_config)
         };
-        let mut excluded_dir_names: &'static [&'static str] = &[];
+        let mut degrade_root = false;
         let mut dirs: Vec<PathBuf> = if !overrides.paths.is_empty() {
             overrides.paths
         } else {
@@ -971,12 +984,31 @@ impl Session {
                     );
                 }
                 ErrorPolicy::Degrade => {
-                    excluded_dir_names = DEFAULT_SCAN_EXCLUDED_DIR_NAMES;
+                    degrade_root = true;
                     dirs.push(root.clone());
                 }
             }
         }
         dirs = dirs.into_iter().map(&as_listed).collect();
+        // The degrade floor is added only to a root analysed because no `paths`
+        // are configured.
+        let exclude_base = match &config_dir {
+            Some(dir) => composer::manifest::resolve(dir),
+            None => absolute_root.clone(),
+        };
+        let (exclusions, exclude_errors) =
+            Exclusions::resolve(&session.exclude_paths, &exclude_base, &|path: &Path| {
+                path.exists()
+            });
+        for error in exclude_errors {
+            report(error, policy, &mut warnings)?;
+        }
+        let exclusions = if degrade_root {
+            exclusions.with_floor()
+        } else {
+            exclusions
+        };
+        let exclusions = Arc::new(exclusions);
         let configured_level = overrides.level.or(session.level);
         let level = overrides
             .report_level
@@ -1178,7 +1210,7 @@ impl Session {
             }
             // The nested Composer projects of a degrade root: found before the
             // walk, so their roots, owners and contexts are known when it starts.
-            if !excluded_dir_names.is_empty() {
+            if degrade_root {
                 let mut known_seeds = seeds.clone();
                 known_seeds.sort();
                 known_seeds.dedup();
@@ -1193,6 +1225,7 @@ impl Session {
                     &dir_listings,
                     &environment,
                     path_case,
+                    Arc::clone(&exclusions),
                     &known_seeds,
                 )
                 .into_iter()
@@ -1380,7 +1413,8 @@ impl Session {
             architecture_rules,
             check_mock_hygiene: mockstan.check_mock_hygiene.unwrap_or(extensions.mockstan),
             mock_banned_classes: mockstan.mock_banned_classes,
-            excluded_dir_names,
+            degrade_root,
+            exclusions,
             seeds: {
                 seeds.sort();
                 seeds.dedup();
@@ -1554,19 +1588,26 @@ impl Session {
             .with_seeds(Arc::clone(&self.seeds));
         // A degrade root leaves out the directories Composer wrote into, and a
         // root with configured paths does not.
-        let leaves_out_composer = !self.excluded_dir_names.is_empty();
+        let (analysed, scanned) = if self.exclusions.is_empty() {
+            (PathCut::None, PathCut::None)
+        } else {
+            (
+                PathCut::Analysis(Arc::clone(&self.exclusions)),
+                PathCut::Scan(Arc::clone(&self.exclusions)),
+            )
+        };
         for dir in &self.dirs {
             let path = self.root.join(dir);
             if self.promoted.contains(dir) {
-                walk.add(&path, Role::Analysed, &[]);
-            } else if leaves_out_composer {
-                walk.add_leaving_out_composer(&path, Role::Analysed, self.excluded_dir_names);
+                walk.add(&path, Role::Analysed, PathCut::None);
+            } else if self.degrade_root {
+                walk.add_leaving_out_composer(&path, Role::Analysed, analysed.clone());
             } else {
-                walk.add(&path, Role::Analysed, self.excluded_dir_names);
+                walk.add(&path, Role::Analysed, analysed.clone());
             }
         }
         for dir in &self.stub_dirs {
-            walk.add(&self.root.join(dir), Role::Stub, &[]);
+            walk.add(&self.root.join(dir), Role::Stub, PathCut::None);
         }
         let Walked {
             files,
@@ -1598,7 +1639,15 @@ impl Session {
                 context.add_file(&self.root.join(file));
             }
             for dir in &self.scan_dirs {
-                context.add(&self.root.join(dir));
+                context.add_scanned(&self.root.join(dir), scanned.clone());
+            }
+            // A directory the analysis leaves out is still scanned, so an analysed
+            // root is walked again as context when the configuration leaves out
+            // some of it from the analysis only.
+            if self.exclusions.has_analyse_only() {
+                for dir in self.dirs.iter().filter(|d| !self.promoted.contains(d)) {
+                    context.add_scanned(&self.root.join(dir), scanned.clone());
+                }
             }
         });
         Listing {
@@ -1648,6 +1697,7 @@ impl Session {
                         &path,
                         Some(self.absolute_root.as_path()),
                         self.path_case,
+                        PathCut::Analysis(Arc::clone(&self.exclusions)),
                         composer,
                         &self.seeds,
                     )

@@ -3,7 +3,8 @@
 //! and a target no root holds is listed once, with the strongest role of the
 //! links that reach it.
 
-use super::super::walk::{FileIndex, FinalFiles, Listed, Role, Unstreamed, Walk};
+use super::super::exclude_paths::Exclusions;
+use super::super::walk::{FileIndex, FinalFiles, Listed, PathCut, Role, Unstreamed, Walk};
 use super::helpers::*;
 use crate::test_links::{link_dir, link_file};
 use composer::dir_listings::DirListings;
@@ -16,6 +17,18 @@ use std::sync::{Arc, LazyLock, Mutex};
 /// owner.
 static NO_PACKAGES: LazyLock<composer::PackageIndex> =
     LazyLock::new(composer::PackageIndex::default);
+
+/// The exclusions that leave out each of `names` below `root`, at any depth,
+/// as a configuration's `exclude_paths` would. A name needs no file on disk.
+fn leaving_out(names: &[&str]) -> PathCut {
+    if names.is_empty() {
+        return PathCut::None;
+    }
+    let patterns = names
+        .iter()
+        .flat_map(|name| [name.to_string(), format!("*/{name}")]);
+    PathCut::Analysis(Arc::new(Exclusions::anywhere(patterns)))
+}
 
 /// Lists each `(root, role, excluded)` in order, and returns the listing
 /// sorted by path as `(path, role, stub)`.
@@ -30,7 +43,7 @@ fn listing(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
 fn in_walk_order(roots: &[(PathBuf, Role, &[&str])]) -> Vec<(PathBuf, Role, bool)> {
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
     for (path, role, excluded) in roots {
-        walk.add(path, *role, excluded);
+        walk.add(path, *role, leaving_out(excluded));
     }
     walk.finish(&crate::project::worker_pool(), &Unstreamed)
         .files
@@ -77,8 +90,8 @@ fn a_file_under_two_roots_is_listed_once_under_its_resolved_path() {
     dir.write("proj/top.php", "<?php");
     let base = resolved(&dir);
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    walk.add(&base.join("proj/src"), Role::Analysed, &[]);
-    walk.add(&base.join("proj"), Role::Analysed, &[]);
+    walk.add(&base.join("proj/src"), Role::Analysed, PathCut::None);
+    walk.add(&base.join("proj"), Role::Analysed, PathCut::None);
 
     assert_eq!(
         sorted(
@@ -165,7 +178,7 @@ fn a_directory_root_lists_only_php_files_but_an_explicit_file_is_listed_whatever
     let file = resolved(&dir).join("config/bootstrap.inc");
 
     let mut by_walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    by_walk.add(&file, Role::Context, &[]);
+    by_walk.add(&file, Role::Context, PathCut::None);
     assert!(
         by_walk
             .finish(&crate::project::worker_pool(), &Unstreamed)
@@ -497,7 +510,7 @@ fn a_missing_explicit_file_is_listed_under_its_path() {
 /// returns the listed files.
 fn walk_through(root: &Path, listings: &Arc<DirListings>) -> Vec<(PathBuf, Role, bool)> {
     let mut walk = Walk::new(Arc::clone(listings), &NO_PACKAGES);
-    walk.add(root, Role::Analysed, &[]);
+    walk.add(root, Role::Analysed, PathCut::None);
     sorted(
         walk.finish(&crate::project::worker_pool(), &Unstreamed)
             .files,
@@ -565,9 +578,9 @@ fn oracle_tree(dir: &TempDir) -> OracleTree {
 /// What `oracle_tree`'s roots list on `pool`, in the order the walk gives it.
 fn oracle_walk(tree: &OracleTree, pool: &rayon::ThreadPool) -> Vec<Listed> {
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    walk.add(&tree.app, Role::Analysed, &[]);
-    walk.add(&tree.app.join("pkg/src"), Role::Context, &[]);
-    walk.add(&tree.ctx, Role::Context, &[]);
+    walk.add(&tree.app, Role::Analysed, PathCut::None);
+    walk.add(&tree.app.join("pkg/src"), Role::Context, PathCut::None);
+    walk.add(&tree.ctx, Role::Context, PathCut::None);
     walk.add_file(&tree.ctx.join("c.php"), Role::Context);
     walk.finish(pool, &Unstreamed).files
 }
@@ -687,7 +700,7 @@ fn a_listed_file_carries_the_package_that_owns_its_directory() {
     );
 
     let mut walk = Walk::new(Arc::default(), &packages);
-    walk.add(&base.join("src"), Role::Analysed, &[]);
+    walk.add(&base.join("src"), Role::Analysed, PathCut::None);
     let files = walk
         .finish(&crate::project::worker_pool(), &Unstreamed)
         .files;
@@ -824,7 +837,7 @@ impl FinalFiles for Handed {
 
 /// Runs `walk` with a sink that keeps the files it hands over. Returns those
 /// files, in path order, and the listing.
-fn handed_over(walk: Walk<'_, '_>) -> (Vec<Listed>, Vec<Listed>) {
+fn handed_over(walk: Walk<'_>) -> (Vec<Listed>, Vec<Listed>) {
     let handed = Handed::default();
     let listing = walk.finish(&crate::project::worker_pool(), &handed).files;
     let mut handed = handed.0.into_inner().unwrap();
@@ -845,10 +858,10 @@ fn a_file_is_handed_over_by_the_one_walk_of_its_strongest_role_as_it_is_listed()
     let package = root.join("vendor/pkg");
 
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    walk.add(&root, Role::Analysed, &["vendor"]);
-    walk.add(&package, Role::Context, &[]);
-    walk.add(&root.join("ctx"), Role::Context, &[]);
-    walk.add(&root.join("stubs"), Role::Stub, &[]);
+    walk.add(&root, Role::Analysed, leaving_out(&["vendor"]));
+    walk.add(&package, Role::Context, PathCut::None);
+    walk.add(&root.join("ctx"), Role::Context, PathCut::None);
+    walk.add(&root.join("stubs"), Role::Stub, PathCut::None);
     let (handed, listing) = handed_over(walk);
 
     // The analysed root excludes `vendor`, so only the package root lists the
@@ -875,9 +888,9 @@ fn a_file_two_walks_of_its_strongest_role_list_is_handed_over_by_neither() {
     let root = resolved(&dir).join("proj");
 
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    walk.add(&root, Role::Stub, &["vendor"]);
-    walk.add(&root.join("src"), Role::Stub, &["vendor"]);
-    walk.add(&root.join("src"), Role::Context, &[]);
+    walk.add(&root, Role::Stub, leaving_out(&["vendor"]));
+    walk.add(&root.join("src"), Role::Stub, leaving_out(&["vendor"]));
+    walk.add(&root.join("src"), Role::Context, PathCut::None);
     let (handed, listing) = handed_over(walk);
 
     // Both stub roots list `src/s.php`, so its role is known when the walk
@@ -902,7 +915,7 @@ fn a_link_target_is_listed_but_never_handed_over() {
     link_dir("../outside", proj.join("out"));
 
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    walk.add(&proj, Role::Analysed, &[]);
+    walk.add(&proj, Role::Analysed, PathCut::None);
     let (handed, listing) = handed_over(walk);
 
     assert_eq!(
@@ -928,7 +941,7 @@ fn an_explicit_file_is_handed_over_by_the_one_walk_of_its_strongest_role() {
     let proj = base.join("proj");
 
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    walk.add(&proj, Role::Analysed, &[]);
+    walk.add(&proj, Role::Analysed, PathCut::None);
     walk.add_file(&proj.join("a.php"), Role::Context);
     walk.add_file(&base.join("other/b.php"), Role::Context);
     walk.add_file(&base.join("other/b.php"), Role::Stub);
@@ -956,8 +969,8 @@ fn a_context_root_under_a_covering_root_is_handed_over_under_the_covering_role()
     let root = resolved(&dir).join("proj");
 
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    walk.add(&root, Role::Analysed, &[]);
-    walk.add(&root.join("ctx"), Role::Context, &[]);
+    walk.add(&root, Role::Analysed, PathCut::None);
+    walk.add(&root.join("ctx"), Role::Context, PathCut::None);
     let (handed, listing) = handed_over(walk);
 
     // The analysed root excludes no names, so it covers `ctx`, whose walk
@@ -979,8 +992,8 @@ fn a_context_walk_stops_at_a_covering_root_below_it() {
     let root = resolved(&dir).join("proj");
 
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES);
-    walk.add(&root, Role::Context, &[]);
-    walk.add(&root.join("src"), Role::Analysed, &[]);
+    walk.add(&root, Role::Context, PathCut::None);
+    walk.add(&root.join("src"), Role::Analysed, PathCut::None);
     let (handed, listing) = handed_over(walk);
 
     // The context walk lists `x.php` and stops at `src`, which the analysed
@@ -998,7 +1011,7 @@ fn a_context_walk_stops_at_a_covering_root_below_it() {
 type Outcome = (Vec<Listed>, Vec<Listed>, Vec<(PathBuf, Role)>);
 
 /// Runs `walk` as `handed_over` does, and adds its roots.
-fn walked_with_roots(walk: Walk<'_, '_>) -> Outcome {
+fn walked_with_roots(walk: Walk<'_>) -> Outcome {
     let handed = Handed::default();
     let walked = walk.finish(&crate::project::worker_pool(), &handed);
     let mut handed = handed.0.into_inner().unwrap();
@@ -1083,10 +1096,12 @@ return array(
     let mut resolving = Walk::new(Arc::clone(&listings), &NO_PACKAGES);
     for dir in &found.dirs {
         match dir {
-            VendorPath::Resolved(dir) => taken.add_resolved_dir(dir.clone(), Role::Context, &[]),
-            VendorPath::Unresolved(dir) => taken.add(dir, Role::Context, &[]),
+            VendorPath::Resolved(dir) => {
+                taken.add_resolved_dir(dir.clone(), Role::Context, PathCut::None)
+            }
+            VendorPath::Unresolved(dir) => taken.add(dir, Role::Context, PathCut::None),
         }
-        resolving.add(dir.as_path(), Role::Context, &[]);
+        resolving.add(dir.as_path(), Role::Context, PathCut::None);
     }
     for file in &found.files {
         match file {
@@ -1134,8 +1149,8 @@ fn context_roots_given_while_the_stronger_walks_run_are_walked_as_when_given_fir
     let base = resolved(&dir);
     let root = base.join("proj");
     let lib = root.join("vendor/acme/lib");
-    let analysed = |walk: &mut Walk<'_, '_>| walk.add(&root, Role::Analysed, &["vendor"]);
-    let stub = |walk: &mut Walk<'_, '_>| walk.add(&root.join("stubs"), Role::Stub, &[]);
+    let analysed = |walk: &mut Walk<'_>| walk.add(&root, Role::Analysed, leaving_out(&["vendor"]));
+    let stub = |walk: &mut Walk<'_>| walk.add(&root.join("stubs"), Role::Stub, PathCut::None);
     let context_dirs = [lib.join("src"), root.join("ctx"), base.join("scan")];
     let context_files = [lib.join("Beside.php"), root.join("src/Kept.php")];
 
@@ -1143,7 +1158,7 @@ fn context_roots_given_while_the_stronger_walks_run_are_walked_as_when_given_fir
     let mut first = Walk::new(Arc::default(), &NO_PACKAGES);
     analysed(&mut first);
     for dir in &context_dirs {
-        first.add(dir, Role::Context, &[]);
+        first.add(dir, Role::Context, PathCut::None);
     }
     for file in &context_files {
         first.add_file(file, Role::Context);
@@ -1216,8 +1231,8 @@ fn a_degrade_root_leaves_out_a_composer_vendor_directory_and_its_context_walk_li
         let composer = |path: &Path| path == vendor.as_path();
 
         let mut walk = Walk::new(Arc::default(), &NO_PACKAGES).with_composer(&composer);
-        walk.add_leaving_out_composer(&root, Role::Analysed, &[]);
-        walk.add(&vendor, Role::Context, &[]);
+        walk.add_leaving_out_composer(&root, Role::Analysed, PathCut::None);
+        walk.add(&vendor, Role::Context, PathCut::None);
         let (handed, listing) = handed_over(walk);
 
         // Only the context walk lists the vendor directory's files, so it
@@ -1243,8 +1258,8 @@ fn a_configured_root_and_a_degrade_root_over_one_composer_project_list_each_file
     // analysed; the degrade root leaves the directory out, and the two walks
     // meet over the same files.
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES).with_composer(&composer);
-    walk.add_leaving_out_composer(&root, Role::Analysed, &[]);
-    walk.add(&vendor, Role::Analysed, &[]);
+    walk.add_leaving_out_composer(&root, Role::Analysed, PathCut::None);
+    walk.add(&vendor, Role::Analysed, PathCut::None);
     let (handed, listing) = handed_over(walk);
 
     let expected = vec![

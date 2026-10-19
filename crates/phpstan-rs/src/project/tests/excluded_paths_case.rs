@@ -1,24 +1,39 @@
-//! The directory names a walk leaves out are compared with the names it lists
-//! by the case rule of the root's directory: any case of their letters where
-//! the directory folds case, the exact spelling elsewhere. The rule is
+//! The paths a configuration leaves out are compared with the paths a walk
+//! lists by the case rule of the root's directory: any case of their letters
+//! where the directory folds case, the exact spelling elsewhere. The rule is
 //! injected, so a case sensitive disk shows what a folding one gives.
 
-use super::super::walk::{Excluded, Role, Unstreamed, Walk};
-use super::super::{DEFAULT_SCAN_EXCLUDED_DIR_NAMES, path_under_excluded_dir};
+use super::super::exclude_paths::Exclusions;
+use super::super::path_under_excluded_dir;
+use super::super::walk::{Excluded, PathCut, Role, Unstreamed, Walk};
 use super::helpers::{TempDir, resolved};
 use diagnostics::CaseRule;
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 static NO_PACKAGES: LazyLock<composer::PackageIndex> =
     LazyLock::new(composer::PackageIndex::default);
 
-/// The files a walk of `root` lists, with `excluded` left out, compared under
-/// `case`, relative to `root` and sorted.
-fn listed(root: &Path, excluded: &[&str], case: CaseRule) -> Vec<PathBuf> {
+/// The exclusions that leave out each of `names` below `root`, at any depth. A
+/// name needs no file on disk for its spelling to be compared.
+fn leaving_out(names: &[&str]) -> Exclusions {
+    Exclusions::anywhere(
+        names
+            .iter()
+            .flat_map(|name| [name.to_string(), format!("*/{name}")]),
+    )
+}
+
+/// The files a walk of `root` lists, with the paths `names` leave out, compared
+/// under `case`, relative to `root` and sorted.
+fn listed(root: &Path, names: &[&str], case: CaseRule) -> Vec<PathBuf> {
+    let exclusions = leaving_out(names);
     let mut walk = Walk::new(Arc::default(), &NO_PACKAGES).with_path_case(case);
-    walk.add(root, Role::Analysed, excluded);
+    walk.add(
+        root,
+        Role::Analysed,
+        PathCut::Analysis(Arc::new(exclusions)),
+    );
     let mut files: Vec<PathBuf> = walk
         .finish(&crate::project::worker_pool(), &Unstreamed)
         .files
@@ -80,26 +95,27 @@ fn an_excluded_name_written_in_capitals_is_found_under_a_folded_rule() {
 }
 
 #[test]
-fn excluded_names_compare_by_the_rule() {
-    let names = ["vendor", ".git"];
-    let folded = Excluded::new(&names, CaseRule::Folded);
-    let exact = Excluded::new(&names, CaseRule::Exact);
-    assert!(folded.excludes(OsStr::new("Vendor")));
-    assert!(folded.excludes(OsStr::new(".GIT")));
-    assert!(!folded.excludes(OsStr::new("vendors")));
-    assert!(exact.excludes(OsStr::new("vendor")));
-    assert!(!exact.excludes(OsStr::new("Vendor")));
-    assert!(!Excluded::default().excludes(OsStr::new("vendor")));
-    assert!(Excluded::default().is_empty());
+fn excluded_paths_compare_by_the_rule() {
+    let exclusions = leaving_out(&["vendor", ".git"]);
+    let folded = |path: &str| exclusions.excludes_scan(Path::new(path), CaseRule::Folded, None);
+    let exact = |path: &str| exclusions.excludes_scan(Path::new(path), CaseRule::Exact, None);
+    assert!(folded("/proj/Vendor"));
+    assert!(folded("/proj/.GIT"));
+    assert!(!folded("/proj/vendors"));
+    assert!(exact("/proj/vendor"));
+    assert!(!exact("/proj/Vendor"));
+    assert!(Exclusions::default().is_empty());
+    assert!(!Exclusions::default().excludes_scan(Path::new("/proj/vendor"), CaseRule::Exact, None));
 }
 
 #[test]
-fn a_path_below_a_default_excluded_directory_is_under_it_by_the_rule() {
+fn a_path_below_a_degrade_floor_directory_is_under_it_by_the_rule() {
+    let floor = Arc::new(Exclusions::default().with_floor());
     let under = |case| {
         path_under_excluded_dir(
-            Path::new(".GIT/hooks/a.php"),
+            Path::new("/proj/.GIT/hooks/a.php"),
             None,
-            Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, case),
+            Excluded::new(PathCut::Analysis(Arc::clone(&floor)), case),
             &|_: &Path| false,
             &[],
         )
@@ -111,21 +127,20 @@ fn a_path_below_a_default_excluded_directory_is_under_it_by_the_rule() {
 #[test]
 fn a_path_below_a_composer_directory_is_under_it_only_where_the_walk_leaves_composer_out() {
     let composer = |dir: &Path| dir == Path::new("/proj/libs");
-    let leaving_out =
-        Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, CaseRule::Exact).leaving_out_composer();
+    let leaving_out = Excluded::new(PathCut::None, CaseRule::Exact).leaving_out_composer();
     let path = Path::new("/proj/libs/acme/a.php");
     let root = Some(Path::new("/proj"));
     assert!(path_under_excluded_dir(
         path,
         root,
-        leaving_out,
+        leaving_out.clone(),
         &composer,
         &[]
     ));
     assert!(!path_under_excluded_dir(
         path,
         root,
-        Excluded::new(DEFAULT_SCAN_EXCLUDED_DIR_NAMES, CaseRule::Exact),
+        Excluded::new(PathCut::None, CaseRule::Exact),
         &composer,
         &[],
     ));
@@ -133,7 +148,7 @@ fn a_path_below_a_composer_directory_is_under_it_only_where_the_walk_leaves_comp
     assert!(!path_under_excluded_dir(
         Path::new("/proj/libs/a.php"),
         Some(Path::new("/proj/libs")),
-        leaving_out,
+        leaving_out.clone(),
         &composer,
         &[],
     ));

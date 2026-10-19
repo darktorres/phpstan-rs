@@ -237,7 +237,14 @@ fn a_never_seen_path_is_classified_alike_by_the_session_and_unlisted() {
         let path = root.join(rel);
         let by_session = role_of(&session, &path);
         let by_root = with_unlisted_composer(|composer| {
-            unlisted_role(&path, Some(&root), CaseRule::Exact, composer, &[])
+            unlisted_role(
+                &path,
+                Some(&root),
+                CaseRule::Exact,
+                crate::project::walk::PathCut::None,
+                composer,
+                &[],
+            )
         });
         let by_unlisted = classify_unlisted(&path).role;
         assert_eq!(by_session, expected, "session: {rel}");

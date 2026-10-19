@@ -44,6 +44,7 @@ pub(crate) mod duplicate_class_sites;
 mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
 mod duplicate_functions;
+pub(crate) mod exclude_paths;
 mod file_cache;
 mod file_declarations;
 mod file_table;
@@ -1968,6 +1969,7 @@ impl Project {
                 path,
                 self.absolute_root(),
                 self.settings.path_case,
+                walk::PathCut::None,
                 composer,
                 &[],
             )
@@ -3519,7 +3521,7 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
     // Only the paths are kept, so no packages are given to find owners in.
     let packages = composer::PackageIndex::default();
     let mut walk = walk::Walk::new(Arc::default(), &packages);
-    walk.add(path, walk::Role::Analysed, &[]);
+    walk.add(path, walk::Role::Analysed, walk::PathCut::None);
     out.extend(
         walk.finish(&worker_pool(), &walk::Unstreamed)
             .files
@@ -3528,34 +3530,30 @@ pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
     );
 }
 
-/// Directory names a workspace-wide scan skips by default when no real
-/// config (1.1's own `phpstan-rs.toml` `paths`) says otherwise - a
-/// hardcoded floor, not a substitute for real exclusion config. Matches
-/// exactly one path component, not a prefix (`vendor-utils/` is
-/// unaffected). A Composer vendor directory is left out by what Composer
-/// wrote into it, whatever it is called, not by its name.
-pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &[".git", "node_modules"];
-
 /// `true` if a directory below `root` (every ancestor of `path` when `root` is
-/// `None`, or does not hold `path`) is one of the `excluded` names, or is
-/// Composer's where `excluded` leaves those out and `composer` says so or it
-/// is one of `seeds` (the directories of packages Composer installed outside
-/// their vendor directory). The names and the seeds are compared with the
-/// case rule of `excluded`. A pure check of the path, with the filesystem only
-/// where `composer` reads it.
+/// `None`, or does not hold `path`) is left out by the exclusions of `excluded`,
+/// or is Composer's where `excluded` leaves those out and `composer` says so or
+/// it is one of `seeds` (the directories of packages Composer installed outside
+/// their vendor directory). The seeds are compared with the case rule of
+/// `excluded`. A pure check of the path, with the filesystem only where
+/// `composer` reads it.
 pub(crate) fn path_under_excluded_dir(
     path: &Path,
     root: Option<&Path>,
-    excluded: walk::Excluded<'_>,
+    excluded: walk::Excluded,
     composer: &dyn Fn(&Path) -> bool,
     seeds: &[PathBuf],
 ) -> bool {
     let root = root.filter(|root| path.starts_with(root));
+    let excluded = match root {
+        Some(root) => excluded.starting_at(root),
+        None => excluded,
+    };
     path.ancestors()
         .skip(1)
         .take_while(|dir| root.is_none_or(|root| *dir != root && dir.starts_with(root)))
         .any(|dir| {
-            dir.file_name().is_some_and(|name| excluded.excludes(name))
+            excluded.excludes_path(dir)
                 || (excluded.leaves_out_composer()
                     && (composer(dir) || walk::is_seed(seeds, excluded.case(), dir)))
         })

@@ -7,7 +7,7 @@
 
 use super::super::path_under_excluded_dir;
 use super::super::session::{ErrorPolicy, Overrides, Session};
-use super::super::walk::{Excluded, Role, Unstreamed, Walk, is_seed};
+use super::super::walk::{Excluded, PathCut, Role, Unstreamed, Walk, is_seed};
 use super::helpers::{TempDir, resolved};
 use crate::registry::stub_set::Stubs;
 use crate::test_links::link_dir;
@@ -43,9 +43,9 @@ fn walked(root: &Path, seeds: &[PathBuf], leave_out: bool) -> Vec<PathBuf> {
         .with_composer(&composer)
         .with_seeds(Arc::from(seeds));
     if leave_out {
-        walk.add_leaving_out_composer(root, Role::Analysed, &[]);
+        walk.add_leaving_out_composer(root, Role::Analysed, PathCut::None);
     } else {
-        walk.add(root, Role::Analysed, &[]);
+        walk.add(root, Role::Analysed, PathCut::None);
     }
     let mut files: Vec<PathBuf> = walk
         .finish(&crate::project::worker_pool(), &Unstreamed)
@@ -154,21 +154,21 @@ fn a_path_below_a_seed_is_under_it_only_where_the_walk_leaves_composer_out() {
     assert!(path_under_excluded_dir(
         path,
         root,
-        Excluded::new(&[], CaseRule::Exact).leaving_out_composer(),
+        Excluded::new(PathCut::None, CaseRule::Exact).leaving_out_composer(),
         &never,
         &seeds,
     ));
     assert!(!path_under_excluded_dir(
         path,
         root,
-        Excluded::new(&[], CaseRule::Exact),
+        Excluded::new(PathCut::None, CaseRule::Exact),
         &never,
         &seeds,
     ));
     assert!(!path_under_excluded_dir(
         Path::new("/proj/web/modules/custom/mine.php"),
         root,
-        Excluded::new(&[], CaseRule::Exact).leaving_out_composer(),
+        Excluded::new(PathCut::None, CaseRule::Exact).leaving_out_composer(),
         &never,
         &seeds,
     ));

@@ -49,6 +49,8 @@ use rayon::prelude::*;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use same_file::Handle;
 
+use super::exclude_paths::Exclusions;
+
 /// The role a listed file plays, weakest first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Role {
@@ -91,22 +93,55 @@ impl Listed {
     }
 }
 
-/// The directory names a walk leaves out below a root, and the case rule that
-/// compares the letters of a listed name with theirs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Excluded<'a> {
-    names: &'a [&'a str],
+/// Which of a configuration's exclusions a walk applies below its root: the
+/// analysis's, which a walk of analysed code applies, or the scan's, which
+/// every walk of the project's own code applies. Vendor context applies none.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) enum PathCut {
+    #[default]
+    None,
+    Analysis(Arc<Exclusions>),
+    Scan(Arc<Exclusions>),
+}
+
+/// What a walk leaves out below a root: the paths its configuration excludes,
+/// and whether it leaves out the directories Composer wrote into, and the case
+/// rule that compares the letters of a listed name with the paths' letters.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Excluded {
     case: CaseRule,
     /// Whether the walk also leaves out a directory that Composer wrote into.
     composer_vendor: bool,
+    paths: PathCut,
+    /// The directory the walk starts from, which its exclusions are not
+    /// applied to: a pattern leaves out what is below it, not what holds it.
+    start: Option<Arc<Path>>,
 }
 
-impl<'a> Excluded<'a> {
-    pub(crate) fn new(names: &'a [&'a str], case: CaseRule) -> Self {
+impl Excluded {
+    /// The exclusions of `paths`, which compare names as `case` compares them.
+    pub(crate) fn new(paths: PathCut, case: CaseRule) -> Self {
         Excluded {
-            names,
             case,
             composer_vendor: false,
+            paths,
+            start: None,
+        }
+    }
+
+    /// The same exclusions, for a walk that starts at `start`.
+    pub(crate) fn starting_at(mut self, start: &Path) -> Self {
+        self.start = Some(Arc::from(start));
+        self
+    }
+
+    /// Whether `path`, absolute, is left out by the walk's exclusions.
+    pub(crate) fn excludes_path(&self, path: &Path) -> bool {
+        let below = self.start.as_deref();
+        match &self.paths {
+            PathCut::None => false,
+            PathCut::Analysis(exclusions) => exclusions.excludes_analysis(path, self.case, below),
+            PathCut::Scan(exclusions) => exclusions.excludes_scan(path, self.case, below),
         }
     }
 
@@ -128,23 +163,7 @@ impl<'a> Excluded<'a> {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.names.is_empty() && !self.composer_vendor
-    }
-
-    /// Whether `name` is one of the names.
-    pub(crate) fn excludes(&self, name: &OsStr) -> bool {
-        let Some(name) = name.to_str() else {
-            return false;
-        };
-        match self.case {
-            CaseRule::Exact => self.names.contains(&name),
-            CaseRule::Folded => {
-                let key = self.case.key(name);
-                self.names
-                    .iter()
-                    .any(|excluded| self.case.key(excluded) == key)
-            }
-        }
+        self.paths == PathCut::None && !self.composer_vendor
     }
 }
 
@@ -172,13 +191,13 @@ pub(crate) fn is_seed(seeds: &[PathBuf], case: CaseRule, dir: &Path) -> bool {
 
 /// A root the walk was given, by its resolved path.
 #[derive(Clone, Debug)]
-pub(crate) struct Root<'a> {
+pub(crate) struct Root {
     pub(crate) path: PathBuf,
     pub(crate) role: Role,
     /// Whether this is a stub root.
     pub(crate) stub: bool,
     /// The directory names the walk leaves out below the root.
-    pub(crate) excluded: Excluded<'a>,
+    pub(crate) excluded: Excluded,
 }
 
 /// Where each listed file is in a walk's listing, by its path. The index
@@ -216,10 +235,10 @@ impl FileIndex {
 }
 
 /// What a walk listed, where each file is, and the roots it was given.
-pub(crate) struct Walked<'a> {
+pub(crate) struct Walked {
     pub(crate) files: Vec<Listed>,
     pub(crate) index: FileIndex,
-    pub(crate) roots: Vec<Root<'a>>,
+    pub(crate) roots: Vec<Root>,
 }
 
 /// Where a walk hands over the files whose roles are final. A directory's files
@@ -248,24 +267,24 @@ type Take<'t> = dyn Fn(Vec<Listed>) + Sync + 't;
 /// names it excludes, and a link's target with the names of the walk that
 /// met the link. Each file listed carries the package that owns its
 /// directory, found in the packages the walk was given.
-pub(crate) struct Walk<'a, 'p> {
+pub(crate) struct Walk<'p> {
     /// The roots given before the walk starts.
-    given: Roots<'a>,
+    given: Roots,
     /// Every root the walk was given, once it has started.
-    roots: Vec<Root<'a>>,
+    roots: Vec<Root>,
     /// The walks the roots of the roles above context start, by the path each
     /// starts from, so that a file is known to be listed by one walk of its
     /// strongest role before the walks run. Those walks are decided by these.
-    starts: Starts<'a>,
+    starts: Starts,
     /// The walks every root starts, for the context walks: known once the
     /// context roots are.
-    every_start: OnceLock<Starts<'a>>,
+    every_start: OnceLock<Starts>,
     /// The context walks: those of the context roots given before the walk
     /// started, then those of the ones given while the stronger walks ran.
-    context_jobs: OnceLock<Vec<Job<'a>>>,
+    context_jobs: OnceLock<Vec<Job>>,
     /// The targets of the links met so far, by the role of the walk that met
     /// each link, with the names that walk excludes.
-    targets: [VecDeque<(PathBuf, Excluded<'a>)>; 3],
+    targets: [VecDeque<(PathBuf, Excluded)>; 3],
     /// The directories that hold the listed files, with the files in them.
     tree: Tree,
     /// The listed files the tree cannot place: a file whose directory, or one
@@ -290,9 +309,9 @@ pub(crate) struct Walk<'a, 'p> {
 /// Roots given to a walk, with the walk of each, in the order they were
 /// given.
 #[derive(Default)]
-struct Roots<'a> {
-    roots: Vec<Root<'a>>,
-    jobs: Vec<Job<'a>>,
+struct Roots {
+    roots: Vec<Root>,
+    jobs: Vec<Job>,
     /// The resolved path of each directory an explicit file was listed in, by
     /// the directory as it was given.
     directories: hashbrown::HashMap<PathBuf, HashedPath, FxBuildHasher>,
@@ -303,17 +322,17 @@ struct Roots<'a> {
 
 /// The context roots a walk is given while its stronger walks run, which the
 /// context walks start from.
-pub(crate) struct ContextRoots<'a>(Roots<'a>);
+pub(crate) struct ContextRoots(Roots, CaseRule);
 
 /// The walk of one root, a directory, or of the file roots of one role in one
 /// directory, each of which is listed whatever its extension. The files of a
 /// directory share what reaches it and the package that owns it.
-enum Job<'a> {
-    Dir { path: HashedPath, scope: Scope<'a> },
+enum Job {
+    Dir { path: HashedPath, scope: Scope },
     Files { files: Vec<HashedPath>, role: Role },
 }
 
-impl Job<'_> {
+impl Job {
     /// The role of the files the walk lists.
     fn role(&self) -> Role {
         match self {
@@ -324,22 +343,22 @@ impl Job<'_> {
 }
 
 /// What a walk applies to the entries it meets.
-#[derive(Clone, Copy)]
-struct Scope<'a> {
+#[derive(Clone)]
+struct Scope {
     /// The role of the files the walk lists.
     role: Role,
     /// The directory names the walk leaves out below its directory.
-    excluded: Excluded<'a>,
+    excluded: Excluded,
     /// Whether the walk is of a link's target. Such a walk leaves the files
     /// under any root to that root's walk.
     outside: bool,
 }
 
-impl Scope<'_> {
+impl Scope {
     /// Whether a context walk leaves out a directory that `reaching` reaches,
     /// because a stronger root that excludes no names holds it. The walk of a
     /// link's target is not left out here.
-    fn prunes(self, reaching: &Reaching<'_>) -> bool {
+    fn prunes(&self, reaching: &Reaching) -> bool {
         self.role == Role::Context && !self.outside && reaching.covered
     }
 }
@@ -380,17 +399,17 @@ impl Reach {
 }
 
 /// A directory walk: its role and the names it excludes.
-type DirWalk<'a> = (Role, Excluded<'a>);
+type DirWalk = (Role, Excluded);
 
 /// Whether a walk with the exclusions it has leaves a directory out (`Walk::leaves_out_dir`).
-type Cut<'c, 'a> = &'c dyn Fn(Excluded<'a>, &Path) -> bool;
+type Cut<'c> = &'c dyn Fn(&Excluded, &Path) -> bool;
 
 /// The walks the roots start, by the path each starts from. Each walk is
 /// counted here before any runs, so a file's walks are known when it is listed.
 #[derive(Default)]
-struct Starts<'a> {
+struct Starts {
     /// The directory walks.
-    dirs: hashbrown::HashTable<(HashedPath, Vec<DirWalk<'a>>)>,
+    dirs: hashbrown::HashTable<(HashedPath, Vec<DirWalk>)>,
     /// The file walks, each with its role, by the file's resolved path.
     files: hashbrown::HashTable<(HashedPath, Vec<Role>)>,
     /// The resolved paths of the stronger roots that exclude no names. A
@@ -403,12 +422,12 @@ struct Starts<'a> {
 /// it. A walk carries it down from its root, a subdirectory's made from its
 /// directory's (`Starts::below`).
 #[derive(Clone, Default)]
-struct Reaching<'a> {
-    walks: Vec<DirWalk<'a>>,
+struct Reaching {
+    walks: Vec<DirWalk>,
     covered: bool,
 }
 
-impl Reaching<'_> {
+impl Reaching {
     /// What the directory walks that list the files of the directory decide
     /// for them. A context walk lists nothing under a covering root
     /// (`prunes`). A walk that cannot read a directory is counted too, which
@@ -424,19 +443,17 @@ impl Reaching<'_> {
     }
 }
 
-impl<'a> Starts<'a> {
+impl Starts {
     fn of<'j>(
-        jobs: impl IntoIterator<Item = &'j Job<'a>>,
-        roots: impl IntoIterator<Item = &'j Root<'a>>,
+        jobs: impl IntoIterator<Item = &'j Job>,
+        roots: impl IntoIterator<Item = &'j Root>,
     ) -> Self
-    where
-        'a: 'j,
-    {
+where {
         let mut starts = Starts::default();
         for job in jobs {
             match job {
                 Job::Dir { path, scope } => {
-                    held(&mut starts.dirs, path).push((scope.role, scope.excluded));
+                    held(&mut starts.dirs, path).push((scope.role, scope.excluded.clone()));
                 }
                 Job::Files { files, role } => {
                     for path in files {
@@ -462,33 +479,23 @@ impl<'a> Starts<'a> {
     /// What reaches `dir`, a resolved directory: what each directory above it
     /// passes down, from the top. `cut` says which directories a walk leaves
     /// out for Composer (`Walk::leaves_out_dir`).
-    fn reaching(&self, dir: &Path, cut: Cut<'_, 'a>) -> Reaching<'a> {
+    fn reaching(&self, dir: &Path, cut: Cut) -> Reaching {
         hashed_ancestors(dir)
             .rev()
-            .fold(Reaching::default(), |above, (ancestor, hash, name)| {
-                self.below(&above, ancestor, hash, name, cut)
+            .fold(Reaching::default(), |above, (ancestor, hash, _)| {
+                self.below(&above, ancestor, hash, cut)
             })
     }
 
-    /// What reaches `dir`, whose hash is `hash` and whose name is `name`, a
-    /// subdirectory of a directory that `above` reaches: the walks that reach
-    /// that directory and neither exclude `name` nor leave `dir` out, and the
-    /// walks that start at `dir`.
-    fn below(
-        &self,
-        above: &Reaching<'a>,
-        dir: &Path,
-        hash: PathHash,
-        name: Option<&OsStr>,
-        cut: Cut<'_, 'a>,
-    ) -> Reaching<'a> {
-        let mut walks: Vec<DirWalk<'a>> = above
+    /// What reaches `dir`, whose hash is `hash`, a subdirectory of a directory
+    /// that `above` reaches: the walks that reach that directory and do not
+    /// leave `dir` out, and the walks that start at `dir`.
+    fn below(&self, above: &Reaching, dir: &Path, hash: PathHash, cut: Cut) -> Reaching {
+        let mut walks: Vec<DirWalk> = above
             .walks
             .iter()
-            .copied()
-            .filter(|&(_, excluded)| {
-                !name.is_some_and(|name| excluded.excludes(name)) && !cut(excluded, dir)
-            })
+            .filter(|(_, excluded)| !cut(excluded, dir))
+            .cloned()
             .collect();
         if let Some((_, starting)) = self.dirs.find(hash, |(start, _)| start.as_path() == dir) {
             walks.extend_from_slice(starting);
@@ -527,33 +534,28 @@ impl<'a> Starts<'a> {
     /// covering root holds one, without what a walk carries down: the reading
     /// that `reaching` and `below` must agree with.
     #[cfg(test)]
-    fn reach_by_ancestors(&self, dir: &Path, cut: Cut<'_, 'a>) -> (Reach, bool) {
+    fn reach_by_ancestors(&self, dir: &Path, cut: Cut) -> (Reach, bool) {
         let covered = dir
             .ancestors()
             .any(|ancestor| self.covers(ancestor, path_hash(ancestor)));
         let mut reach = Reach::default();
-        // The names and paths of the directories below the ancestor being
-        // checked, down to `dir`.
-        let mut below: Vec<(&OsStr, &Path)> = Vec::new();
+        // The directories below the ancestor being checked, down to `dir`.
+        let mut below: Vec<&Path> = Vec::new();
         for ancestor in dir.ancestors() {
             let hash = path_hash(ancestor);
             let starting = self
                 .dirs
                 .find(hash, |(start, _)| start.as_path() == ancestor)
                 .map_or(&[][..], |(_, walks)| walks.as_slice());
-            for &(role, excluded) in starting {
+            for &(role, ref excluded) in starting {
                 if (covered && role == Role::Context)
-                    || below
-                        .iter()
-                        .any(|&(name, path)| excluded.excludes(name) || cut(excluded, path))
+                    || below.iter().any(|&path| cut(excluded, path))
                 {
                     continue;
                 }
                 reach.add(role);
             }
-            if let Some(name) = ancestor.file_name() {
-                below.push((name, ancestor));
-            }
+            below.push(ancestor);
         }
         (reach, covered)
     }
@@ -823,12 +825,12 @@ fn merge_unplaced(mut files: Vec<Listed>, unplaced: Vec<Listed>) -> Vec<Listed> 
     merged
 }
 
-impl<'a> Roots<'a> {
+impl Roots {
     /// Adds `path` as a root. A directory is walked; a file is listed when it
     /// is PHP. The names in `excluded` apply below the root: the walk does not
     /// enter a directory of such a name, nor follow a link of it, and the root
     /// itself is walked whatever its name.
-    fn add(&mut self, path: &Path, role: Role, excluded: Excluded<'a>) {
+    fn add(&mut self, path: &Path, role: Role, excluded: Excluded) {
         let identity = Resolved::resolve(path);
         if identity.as_path().is_dir() {
             self.add_resolved_dir(identity, role, excluded);
@@ -838,7 +840,7 @@ impl<'a> Roots<'a> {
             path: identity.as_path().to_path_buf(),
             role,
             stub: role == Role::Stub,
-            excluded,
+            excluded: excluded.clone(),
         });
         if is_php(identity.as_path()) {
             self.push_file(identity.into_hashed(), role);
@@ -847,12 +849,13 @@ impl<'a> Roots<'a> {
 
     /// Adds `dir`, a resolved directory, as a root, as `add` adds one, without
     /// resolving it again or asking the system what it is.
-    fn add_resolved_dir(&mut self, dir: Resolved, role: Role, excluded: Excluded<'a>) {
+    fn add_resolved_dir(&mut self, dir: Resolved, role: Role, excluded: Excluded) {
+        let excluded = excluded.starting_at(dir.as_path());
         self.roots.push(Root {
             path: dir.as_path().to_path_buf(),
             role,
             stub: role == Role::Stub,
-            excluded,
+            excluded: excluded.clone(),
         });
         let scope = Scope {
             role,
@@ -903,7 +906,7 @@ impl<'a> Roots<'a> {
             });
             return;
         };
-        let same = |job: &Job<'_>| match job {
+        let same = |job: &Job| match job {
             Job::Files { files, role: held } => {
                 *held == role && files[0].parent().is_some_and(|(held, _)| held == dir)
             }
@@ -949,10 +952,18 @@ impl<'a> Roots<'a> {
     }
 }
 
-impl<'a> ContextRoots<'a> {
-    /// Adds the context directory or file `path`, as `Walk::add` adds one.
+impl ContextRoots {
+    /// Adds the context directory or file `path`, as `Walk::add` adds one, with
+    /// no exclusions: vendor context is loaded whole.
     pub(crate) fn add(&mut self, path: &Path) {
         self.0.add(path, Role::Context, Excluded::default());
+    }
+
+    /// Adds the context directory `path` of the project's own code, which
+    /// `paths` leaves out of the scan as `Walk::add` leaves out its names.
+    pub(crate) fn add_scanned(&mut self, path: &Path, paths: PathCut) {
+        self.0
+            .add(path, Role::Context, Excluded::new(paths, self.1));
     }
 
     /// Adds the resolved context directory `dir`, as
@@ -993,7 +1004,7 @@ impl<'s, S: FinalFiles> Hand<'s, S> {
     }
 }
 
-impl<'a, 'p> Walk<'a, 'p> {
+impl<'p> Walk<'p> {
     /// A walk that reads its directories through `listings`, and finds each
     /// directory's owner in `packages`.
     pub(crate) fn new(listings: Arc<DirListings>, packages: &'p composer::PackageIndex) -> Self {
@@ -1038,15 +1049,16 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// Whether the walk leaves `dir` out for Composer: the walk's exclusions
     /// say so, and Composer wrote into `dir`, or `dir` is the directory of a
     /// package Composer installed outside its vendor directory.
-    fn leaves_out_dir(&self, excluded: Excluded<'_>, dir: &Path) -> bool {
-        excluded.leaves_out_composer()
-            && (self.composer.is_some_and(|test| test(dir))
-                || is_seed(&self.seeds, self.path_case, dir))
+    fn leaves_out_dir(&self, excluded: &Excluded, dir: &Path) -> bool {
+        excluded.excludes_path(dir)
+            || (excluded.leaves_out_composer()
+                && (self.composer.is_some_and(|test| test(dir))
+                    || is_seed(&self.seeds, self.path_case, dir)))
     }
 
     /// Whether a link to `target` is not followed: the same test as for a
     /// directory, and also a target below a seed.
-    fn leaves_out_link(&self, excluded: Excluded<'_>, target: &Path) -> bool {
+    fn leaves_out_link(&self, excluded: &Excluded, target: &Path) -> bool {
         excluded.leaves_out_composer()
             && (self.composer.is_some_and(|test| test(target))
                 || target
@@ -1061,7 +1073,7 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// `leaves_out_dir` leaves out (Composer's, and the seeds) are left out as
     /// the walk leaves them; a link is followed once, to a target below `root`.
     /// Sorted.
-    pub(crate) fn manifest_dirs(&self, root: &Path, excluded: Excluded<'_>) -> Vec<PathBuf> {
+    pub(crate) fn manifest_dirs(&self, root: &Path, excluded: &Excluded) -> Vec<PathBuf> {
         let root = HashedPath::new(root.to_path_buf());
         let mut visited = rustc_hash::FxHashSet::<PathBuf>::default();
         visited.insert(root.as_path().to_path_buf());
@@ -1084,10 +1096,10 @@ impl<'a, 'p> Walk<'a, 'p> {
                     continue;
                 };
                 let name = entry.name.as_os_str();
-                if excluded.excludes(name) {
+                let child = dir.child(name);
+                if excluded.excludes_path(child.as_path()) {
                     continue;
                 }
-                let child = dir.child(name);
                 if file_type.is_symlink() {
                     let Ok(target) = composer::canonical::canonicalize(child.as_path()) else {
                         continue;
@@ -1111,35 +1123,30 @@ impl<'a, 'p> Walk<'a, 'p> {
     }
 
     /// Adds `path` as a root, walked by `finish`. A directory is walked; a file
-    /// is listed when it is PHP. The names in `excluded` apply below the root:
-    /// the walk does not enter a directory of such a name, nor follow a link of
-    /// it, and the root itself is walked whatever its name.
-    pub(crate) fn add(&mut self, path: &Path, role: Role, excluded: &'a [&'a str]) {
+    /// is listed when it is PHP. The exclusions in `paths` apply below the root:
+    /// the walk does not enter a path they leave out, and the root itself is
+    /// walked whatever it is.
+    pub(crate) fn add(&mut self, path: &Path, role: Role, paths: PathCut) {
         self.given
-            .add(path, role, Excluded::new(excluded, self.path_case));
+            .add(path, role, Excluded::new(paths, self.path_case));
     }
 
     /// Adds `path` as `add` does, and also leaves out the directories below it
     /// that Composer wrote into.
-    pub(crate) fn add_leaving_out_composer(
-        &mut self,
-        path: &Path,
-        role: Role,
-        excluded: &'a [&'a str],
-    ) {
+    pub(crate) fn add_leaving_out_composer(&mut self, path: &Path, role: Role, paths: PathCut) {
         self.given.add(
             path,
             role,
-            Excluded::new(excluded, self.path_case).leaving_out_composer(),
+            Excluded::new(paths, self.path_case).leaving_out_composer(),
         );
     }
 
     /// Adds `dir`, a resolved directory, as a root, as `add` adds one, without
     /// resolving it again or asking the system what it is.
     #[cfg(test)]
-    pub(crate) fn add_resolved_dir(&mut self, dir: Resolved, role: Role, excluded: &'a [&'a str]) {
+    pub(crate) fn add_resolved_dir(&mut self, dir: Resolved, role: Role, paths: PathCut) {
         self.given
-            .add_resolved_dir(dir, role, Excluded::new(excluded, self.path_case));
+            .add_resolved_dir(dir, role, Excluded::new(paths, self.path_case));
     }
 
     /// Adds `file`, a resolved regular file, as a root, as `add_file` adds
@@ -1160,7 +1167,7 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// on `pool`, and returns the listed files with the roots they were given.
     /// A target is walked once for each set of excluded names that meets it.
     /// `sink` takes the files whose roles are final, as the walk lists them.
-    pub(crate) fn finish<S: FinalFiles>(self, pool: &rayon::ThreadPool, sink: &S) -> Walked<'a> {
+    pub(crate) fn finish<S: FinalFiles>(self, pool: &rayon::ThreadPool, sink: &S) -> Walked {
         self.finish_with(pool, sink, |_| {})
     }
 
@@ -1172,12 +1179,12 @@ impl<'a, 'p> Walk<'a, 'p> {
         mut self,
         pool: &rayon::ThreadPool,
         sink: &S,
-        context: impl FnOnce(&mut ContextRoots<'a>),
-    ) -> Walked<'a> {
+        context: impl FnOnce(&mut ContextRoots),
+    ) -> Walked {
         let Roots {
             mut roots, jobs, ..
         } = std::mem::take(&mut self.given);
-        let (stronger, given_context): (Vec<Job<'a>>, Vec<Job<'a>>) =
+        let (stronger, given_context): (Vec<Job>, Vec<Job>) =
             jobs.into_iter().partition(|job| job.role() > Role::Context);
         self.starts = Starts::of(&stronger, &roots);
         let hand = Hand {
@@ -1185,7 +1192,7 @@ impl<'a, 'p> Walk<'a, 'p> {
             #[cfg(test)]
             handed: Mutex::default(),
         };
-        let mut later = ContextRoots(Roots::default());
+        let mut later = ContextRoots(Roots::default(), self.path_case);
         let stronger_found = OnceLock::new();
         let context_found = OnceLock::new();
         let walk = &self;
@@ -1231,12 +1238,12 @@ impl<'a, 'p> Walk<'a, 'p> {
             );
         for (job, found) in found {
             match job {
-                Job::Dir { scope, .. } => self.merge(found, scope.role, scope.excluded),
+                Job::Dir { scope, .. } => self.merge(found, scope.role, scope.excluded.clone()),
                 Job::Files { role, .. } => self.merge(found, *role, Excluded::default()),
             }
         }
         pool.install(|| {
-            let mut walked: FxHashMap<PathBuf, Vec<Excluded<'a>>> = FxHashMap::default();
+            let mut walked: FxHashMap<PathBuf, Vec<Excluded>> = FxHashMap::default();
             while let Some((role, target, excluded)) = self.next_target() {
                 if self.under_root(&target) {
                     continue;
@@ -1245,10 +1252,10 @@ impl<'a, 'p> Walk<'a, 'p> {
                 if walks.contains(&excluded) {
                     continue;
                 }
-                walks.push(excluded);
+                walks.push(excluded.clone());
                 let scope = Scope {
                     role,
-                    excluded,
+                    excluded: excluded.clone().starting_at(&target),
                     outside: true,
                 };
                 let found = self.walk_target(&target, scope);
@@ -1290,7 +1297,7 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// The walks that a walk of `role` is decided by: for a role above
     /// context, those of the roots of such roles, which no context root
     /// changes; for a context walk, every root's.
-    fn starts_for(&self, role: Role) -> &Starts<'a> {
+    fn starts_for(&self, role: Role) -> &Starts {
         if role > Role::Context {
             &self.starts
         } else {
@@ -1307,16 +1314,16 @@ impl<'a, 'p> Walk<'a, 'p> {
 
     /// What the walk of one root lists. The files whose roles it makes final
     /// are handed to `take`, when it is given.
-    fn run(&self, job: &Job<'a>, take: Option<&Take<'_>>) -> Vec<Found> {
+    fn run(&self, job: &Job, take: Option<&Take>) -> Vec<Found> {
         match job {
-            Job::Dir { path, scope } => self.walk_root(path, *scope, take),
+            Job::Dir { path, scope } => self.walk_root(path, scope.clone(), take),
             Job::Files { files, role } => {
                 let dir = files[0].parent().map(|(dir, _)| dir);
                 let owner = dir.and_then(|dir| self.packages.owner_of_dir(dir));
                 if let Some(take) = take {
                     let starts = self.starts_for(*role);
                     // What the directory walks that reach the directory decide.
-                    let cut = |excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
+                    let cut = |excluded: &Excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
                     let reach =
                         dir.map_or_else(Reach::default, |dir| starts.reaching(dir, &cut).reach());
                     for path in files {
@@ -1342,7 +1349,7 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// the target itself when it is a PHP file. Nothing is handed over: a file
     /// outside every root can be listed by a link that another walk meets, so
     /// its role is not final until the walk ends.
-    fn walk_target(&self, target: &Path, scope: Scope<'a>) -> Vec<Found> {
+    fn walk_target(&self, target: &Path, scope: Scope) -> Vec<Found> {
         if target.is_dir() {
             self.walk_root(&HashedPath::new(target.to_path_buf()), scope, None)
         } else if is_php(target) {
@@ -1358,13 +1365,8 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// Walks the directory `path`, a resolved path, from the top. What reaches
     /// it is found for a root's walk, which can hand files over or be left
     /// out, and not for a link target's, which does neither.
-    fn walk_root(
-        &self,
-        path: &HashedPath,
-        scope: Scope<'a>,
-        take: Option<&Take<'_>>,
-    ) -> Vec<Found> {
-        let cut = |excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
+    fn walk_root(&self, path: &HashedPath, scope: Scope, take: Option<&Take>) -> Vec<Found> {
+        let cut = |excluded: &Excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
         let reaching =
             (!scope.outside).then(|| self.starts_for(scope.role).reaching(path.as_path(), &cut));
         if reaching
@@ -1399,10 +1401,10 @@ impl<'a, 'p> Walk<'a, 'p> {
     fn walk_dir(
         &self,
         dir: &HashedPath,
-        reaching: Option<&Reaching<'a>>,
-        scope: Scope<'a>,
-        ancestors: &Ancestors<'_>,
-        take: Option<&Take<'_>>,
+        reaching: Option<&Reaching>,
+        scope: Scope,
+        ancestors: &Ancestors,
+        take: Option<&Take>,
         owner_at: composer::OwnerAt<'p>,
     ) -> Vec<Found> {
         stack::guard(|| {
@@ -1410,7 +1412,7 @@ impl<'a, 'p> Walk<'a, 'p> {
                 return Vec::new();
             };
             let starts = self.starts_for(scope.role);
-            let cut = |excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
+            let cut = |excluded: &Excluded, dir: &Path| self.leaves_out_dir(excluded, dir);
             #[cfg(test)]
             if let Some(reaching) = reaching {
                 assert_eq!(
@@ -1448,13 +1450,13 @@ impl<'a, 'p> Walk<'a, 'p> {
                 let name = entry.name.as_os_str();
                 // A child's path is built only when the walk needs it.
                 if file_type.is_symlink() {
-                    if scope.excluded.excludes(name) {
+                    let child = dir.child(name);
+                    if scope.excluded.excludes_path(child.as_path()) {
                         continue;
                     }
-                    let child = dir.child(name);
                     match composer::canonical::canonicalize(child.as_path()) {
                         Ok(target) => {
-                            if !self.leaves_out_link(scope.excluded, &target) {
+                            if !self.leaves_out_link(&scope.excluded, &target) {
                                 steps.push(Step::Found(Found::Link(target)));
                             }
                         }
@@ -1469,18 +1471,15 @@ impl<'a, 'p> Walk<'a, 'p> {
                         Err(_) => {}
                     }
                 } else if file_type.is_dir() {
-                    if scope.excluded.excludes(name) {
-                        continue;
-                    }
                     let child = dir.child(name);
                     if scope.outside && self.under_root(child.as_path()) {
                         continue;
                     }
-                    if self.leaves_out_dir(scope.excluded, child.as_path()) {
+                    if self.leaves_out_dir(&scope.excluded, child.as_path()) {
                         continue;
                     }
                     let below = reaching.map(|reaching| {
-                        starts.below(reaching, child.as_path(), child.hash(), Some(name), &cut)
+                        starts.below(reaching, child.as_path(), child.hash(), &cut)
                     });
                     if below.as_ref().is_some_and(|below| scope.prunes(below)) {
                         continue;
@@ -1489,6 +1488,9 @@ impl<'a, 'p> Walk<'a, 'p> {
                     dirs.push((child, below, owner_at.child(name)));
                 } else if path_bytes::is_php_name(name) {
                     let child = dir.child(name);
+                    if scope.excluded.excludes_path(child.as_path()) {
+                        continue;
+                    }
                     if !(scope.outside && self.under_root(child.as_path())) {
                         if let Some(reach) = reach
                             && let Some(stub) =
@@ -1513,7 +1515,14 @@ impl<'a, 'p> Walk<'a, 'p> {
             let subtrees: Vec<Vec<Found>> = dirs
                 .par_iter()
                 .map(|(child, below, owner_at)| {
-                    self.walk_subdirectory(child, below.as_ref(), scope, ancestors, take, *owner_at)
+                    self.walk_subdirectory(
+                        child,
+                        below.as_ref(),
+                        &scope,
+                        ancestors,
+                        take,
+                        *owner_at,
+                    )
                 })
                 .collect();
             let mut subtrees = subtrees.into_iter();
@@ -1534,10 +1543,10 @@ impl<'a, 'p> Walk<'a, 'p> {
     fn walk_subdirectory(
         &self,
         child: &HashedPath,
-        reaching: Option<&Reaching<'a>>,
-        scope: Scope<'a>,
-        ancestors: &Ancestors<'_>,
-        take: Option<&Take<'_>>,
+        reaching: Option<&Reaching>,
+        scope: &Scope,
+        ancestors: &Ancestors,
+        take: Option<&Take>,
         owner_at: composer::OwnerAt<'p>,
     ) -> Vec<Found> {
         stack::guard(|| {
@@ -1552,7 +1561,7 @@ impl<'a, 'p> Walk<'a, 'p> {
             self.walk_dir(
                 child,
                 reaching,
-                scope,
+                scope.clone(),
                 &Ancestors {
                     handle: &handle,
                     parent: Some(ancestors),
@@ -1566,11 +1575,13 @@ impl<'a, 'p> Walk<'a, 'p> {
     /// Records what a walk listed, in the order it listed it: each file under
     /// the walk's role, and each link's target queued with the walk's role and
     /// names.
-    fn merge(&mut self, found: Vec<Found>, role: Role, excluded: Excluded<'a>) {
+    fn merge(&mut self, found: Vec<Found>, role: Role, excluded: Excluded) {
         for item in found {
             match item {
                 Found::File(path, owner) => self.place(path, role, owner),
-                Found::Link(target) => self.targets[role.index()].push_back((target, excluded)),
+                Found::Link(target) => {
+                    self.targets[role.index()].push_back((target, excluded.clone()))
+                }
             }
         }
     }
@@ -1591,7 +1602,7 @@ impl<'a, 'p> Walk<'a, 'p> {
         }
     }
 
-    fn next_target(&mut self) -> Option<(Role, PathBuf, Excluded<'a>)> {
+    fn next_target(&mut self) -> Option<(Role, PathBuf, Excluded)> {
         [Role::Analysed, Role::Stub, Role::Context]
             .into_iter()
             .find_map(|role| {
