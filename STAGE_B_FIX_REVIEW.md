@@ -283,8 +283,8 @@ through `check-project`.
   (is_int($j)) {}` stays `?string`; `strlen($j)` clean; the impossible
   branch has `$i` typed `*NEVER*` with no `deadCode.unreachable`; a
   function returning `never` still ends its branch.
-- [ ] **F5. The error type silences reads that report nothing**
-  (`11b428f4` with `43349c1a`). `unassigned_variable_type` gives
+- [x] **F5. The error type silences reads that report nothing**
+  (`11b428f4` with `43349c1a`; fixed by `731333697`). `unassigned_variable_type` gives
   `*ERROR*` for every read of a never-assigned variable. That includes
   the quiet reads, which report nothing, so the error type follows no
   report:
@@ -298,7 +298,14 @@ through `check-project`.
   certainty, a quiet read gives `null` for an undefined name and the type
   with `null` for a maybe-defined one, only a reported read gives the
   error type, and a probe of a never-defined name is reported, with
-  fixtures.
+  fixtures. A read of a maybe-defined variable reports
+  `variable.possiblyUndefined` ("Variable $v might not be defined."),
+  not `variable.undefined` as the design below said; that split was
+  decided. Narrowing defines a variable only where its narrowed type rules
+  `null` out (`Locals::narrow_to`), so `echo $v` after an `isset` whose
+  else branch leaves `$v` maybe-defined, or `echo $never` after
+  `isset($never)`, is still reported. The `never` side of a merge is dead
+  for its variable.
 
   Design: the error type comes from `unassigned_variable_type`, reached
   by both `check_expr`'s and `infer_expr`'s `Variable` arms and by every
@@ -322,8 +329,8 @@ through `check-project`.
   Then the reads:
 
   - `check_expr`'s `Variable` arm reports `variable.undefined` when the
-    name is absent or `Maybe`, with "Variable $v might not be defined."
-    for `Maybe`. It returns `Type::error()` only for an absent name; a
+    name is absent, and `variable.possiblyUndefined` ("Variable $v might
+    not be defined.") for `Maybe`. It returns `Type::error()` only for an absent name; a
     `Maybe` read returns the known type, since the value is that type
     whenever the read succeeds.
   - `infer_expr`'s `Variable` arm keeps the error type for an absent
@@ -346,8 +353,12 @@ through `check-project`.
   at level 1, from `check_pointless_null_probe`, which already owns the
   "always null" and "never null" verdicts for a bare variable. A `Maybe`
   name and any name under `any_variable_may_exist` (`extract`, `$$`,
-  `include`, `eval`) are not reported. Fixtures: the five expressions
-  above; `isset($m)` on a never-assigned `$m` reports
+  `include`, `eval`) are not reported. Fixtures: `checker/definedness/`
+  covers the quiet reads, a maybe read, the never-defined `isset` with
+  its dead branch, and the `isset` else branch of a maybe name. Not yet
+  a fixture: `$m->foo()` checked against `Foo` inside `if (isset($m))`
+  after a conditional `$m = new Foo`. The original list of expressions
+  was: `isset($m)` on a never-assigned `$m` reports
   `isset.variable`, and `isset($v)` after the conditional definition
   doesn't; `$m->foo()` inside `if
   (isset($m))` after a conditional `$m = new Foo` is checked against
