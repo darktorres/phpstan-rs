@@ -1108,7 +1108,9 @@ fn assert_edits_match_fresh_loads(
     edits: usize,
     pick: impl Fn(usize, usize) -> usize,
 ) {
-    let (loaded, replacements) = sources.split_at(sources.len() / 2);
+    // The loaded half takes the extra source of an odd count, so a group of
+    // one still has a file to load and edits can pick from it.
+    let (loaded, replacements) = sources.split_at(sources.len().div_ceil(2));
     let mut texts: Vec<(String, String)> = loaded
         .iter()
         .enumerate()
