@@ -1271,8 +1271,8 @@ in); it stays, being `Display`'s inverse.
   identifier and generic case lists, with a fixture per keyword: the string parser lacks `number`,
   `empty-scalar`, `non-empty-scalar`, `non-empty-literal-string`, `associative-array`, `static-closure`,
   `static-pure-closure`, `non-empty-mixed`, `callable-object`, `callable-array`, `empty`, the `__string*` pair,
-  and the generics `__benevolent`, `new` and `template-type` (checked in the vendored `phpstan-src` at 2.2.16,
-  and again at 2.3.1, the latest release, where every one is still in `TypeNodeResolver`), so each reads as a class today, is namespace-qualified and
+  and the generics `__benevolent`, `new` and `template-type` (checked in the vendored `phpstan-src`, at 2.3.1, the
+  latest release, where every one is in `TypeNodeResolver`), so each reads as a class today, is namespace-qualified and
   reaches `class.notFound`. `number`, like `scalar` and `numeric`, yields to a class or a `use` alias of that
   name (PHPStan's `tryResolvePseudoTypeClassType`), the one scope-dependent part, which C7 does; the rest of
   C7's "PHPDoc keyword types resolve before namespace qualification" is done here, and leaves C7's and RES-1's
