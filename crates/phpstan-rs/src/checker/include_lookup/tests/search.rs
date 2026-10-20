@@ -1,6 +1,8 @@
 //! Whether an include is found: missing only when no combination of the
 //! working directory, the include path and the world finds a file in the
-//! project, and found when a combination leaves the project.
+//! project, and found when a working-directory or include-path combination
+//! leaves the project. An absolute path is looked for where it is, inside
+//! the project or not.
 
 use super::super::*;
 
@@ -121,13 +123,20 @@ fn an_absolute_path_in_the_project_is_found_when_the_file_exists_and_missing_oth
 }
 
 #[test]
-fn an_absolute_path_outside_the_project_is_not_judged() {
-    let project = Site::new();
-    for text in ["/var/www/other/a.php", "/etc/passwd"] {
-        for world in World::ALL {
-            assert!(project.found(world, text), "{world:?} {text}");
-        }
-    }
+fn an_absolute_path_outside_the_project_is_found_when_the_file_exists_and_missing_otherwise() {
+    let outside = base().parent().unwrap().join("elsewhere").join("a.php");
+    let text = outside.to_string_lossy().into_owned();
+    assert!(!Site::new().found(World::machine(), &text));
+    let mut present = Site::new();
+    present.files.push(outside);
+    assert!(present.found(World::machine(), &text));
+}
+
+#[test]
+fn an_absolute_path_below_an_unbuilt_directory_is_not_judged() {
+    let mut project = Site::new();
+    project.unbuilt.push(base().join("vendor"));
+    assert!(project.found(World::machine(), &project.text("vendor/a.php")));
 }
 
 #[test]

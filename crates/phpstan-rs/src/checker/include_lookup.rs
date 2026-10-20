@@ -423,7 +423,10 @@ pub struct IncludeSettings {
     pub working_dirs: Option<Vec<PathBuf>>,
     /// The directories that Composer's autoloader adds to the include path.
     pub composer: Vec<PathBuf>,
-    /// The trees the project reads: an include that leaves them is not judged.
+    /// The trees the project reads. A relative or bare-name include whose file
+    /// leaves them is not judged, since where it is found depends on the
+    /// working directory or the include path; an absolute one is looked for
+    /// on disk.
     pub trees: Vec<PathBuf>,
     /// The directories a deployment builds and this checkout lacks, such as a
     /// Composer project's `vendor` before `composer install`. A file below
@@ -565,6 +568,29 @@ impl Place<'_> {
         }
     }
 
+    /// Whether the absolute `candidate` settles the include. Its place is the
+    /// same in every run, whatever the working directory and the include
+    /// path, so a file outside the project is looked for on disk as one
+    /// inside it is. Only a directory the deployment builds and this checkout
+    /// lacks is not judged.
+    fn settles_absolute(
+        &self,
+        candidate: Option<PathBuf>,
+        is_file: &dyn Fn(&Path) -> bool,
+    ) -> bool {
+        match candidate {
+            Some(path) if !self.below_unbuilt(&path) => is_file(&path),
+            _ => true,
+        }
+    }
+
+    fn below_unbuilt(&self, path: &Path) -> bool {
+        let path = folded(path);
+        self.unbuilt
+            .iter()
+            .any(|dir| path_bytes::starts_with(&path, dir))
+    }
+
     /// The directories a run can start in, the including file's own first:
     /// it is where a file is most likely to be.
     fn working_dirs_nearest_first(&self) -> impl Iterator<Item = &PathBuf> {
@@ -629,9 +655,10 @@ impl Place<'_> {
     /// Whether `text`, an include read in `world`, is found, or cannot be
     /// judged. `is_file` says whether a path in the project is a file.
     ///
-    /// A candidate that leaves the project settles the include whatever the
-    /// others are, so the candidates that need no file system are asked
-    /// first, and the rest in the order a file is most likely found.
+    /// A working-directory or include-path candidate that leaves the project
+    /// settles the include whatever the others are, so the candidates that
+    /// need no file system are asked first, and the rest in the order a file
+    /// is most likely found.
     pub(crate) fn is_found(
         &self,
         world: World,
@@ -642,7 +669,7 @@ impl Place<'_> {
             Target::Elsewhere => true,
             Target::Absolute(anchor, names) => {
                 let path = native_absolute(world, self.machine, self.root, &anchor, &names);
-                self.settles(path, is_file)
+                self.settles_absolute(path, is_file)
             }
             Target::Relative(names) => self.settles_in_working_dirs(&names, is_file),
             Target::Plain(names) => {
