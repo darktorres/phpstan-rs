@@ -126,7 +126,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 28 | LOAD-5.2 batch-only | [`05-part-d.md`](05-part-d.md) |
 | 29 | NAME-2.1's thin name | [`14-part-c.md`](14-part-c.md) |
 | 30 | where Part B lives | [`07-part-b.md`](07-part-b.md) |
-| 31 | an analysed file with parse errors | [`09-part-g3.md`](09-part-g3.md) |
+| 31 | an analysed file with parse errors | [`14-part-c.md`](14-part-c.md) |
 | 32 | `PhpVersion` and its types move out of `types` | [`14-part-c.md`](14-part-c.md) |
 | 33 | the engine crate and `unsafe_code` | [`05-part-d.md`](05-part-d.md) |
 | 34 | positionless declarations | [`14-part-c.md`](14-part-c.md) |

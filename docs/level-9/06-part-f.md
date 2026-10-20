@@ -14,13 +14,13 @@ against HEAD listed after the table.
 |---|---|---|---|
 | 1 | How the checker holds a tree (#1) | G1, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
 | 2 | Stored-alias identity | G2, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
-| 3 | The error-node model | G3, [`09-part-g3.md`](09-part-g3.md) | step 2 (layout); the rest before batch 3 |
+| 3 | The error-node model | G3, [`14-part-c.md`](14-part-c.md) | step 2 (layout); the rest before batch 3 |
 | 4 | The probe as a checker entry point (#26) | G4, [`10-part-g4-g6.md`](10-part-g4-g6.md) | step 2 |
 | 5 | Node layout per variant | I1, [`11-part-i1.md`](11-part-i1.md) | step 2, after step 0 |
 | 6 | Item 0's tooling plan (#13) | G5, this file | batch 0 |
 | 7 | Item 10's token payloads under decision 4 | I2, [`13-part-i.md`](13-part-i.md) | batch 1 |
 | 8 | SYN-3.2's kernel (#10) | I3, [`13-part-i.md`](13-part-i.md) | batch 2 |
-| 9 | Parse recovery as a whole | G3.4 and G3.8, [`09-part-g3.md`](09-part-g3.md) | batch 3 |
+| 9 | Parse recovery as a whole | G3.4 and G3.8, [`14-part-c.md`](14-part-c.md) | batch 3 |
 | 10 | The engine's identity model (#18) | H1, [`14-part-c.md`](14-part-c.md) | batch 4 |
 | 11 | The single grammar's lowering (#14) | I4, [`13-part-i.md`](13-part-i.md) | batch 6 |
 | 12 | The rule message type | I5, [`13-part-i.md`](13-part-i.md) | batch 7 |
