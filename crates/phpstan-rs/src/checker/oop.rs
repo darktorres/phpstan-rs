@@ -700,26 +700,34 @@ impl<'a> Checker<'a> {
     /// statement's own inline docblock isn't covered, since
     /// `@phpstan-*` tags are overwhelmingly declaration-level in
     /// practice.
-    pub(crate) fn check_unknown_phpstan_tags_in_class(&mut self, c: &ClassDecl) {
-        self.check_unknown_phpstan_tags_on(c.def.doc_comment.as_deref(), c.name.span);
+    pub(crate) fn check_unknown_phpstan_tags_in_class(&mut self, fqn: &str, c: &ClassDecl) {
+        let class = Some(fqn);
+        self.check_unknown_phpstan_tags_on(c.def.doc_comment.as_deref(), c.name.span, class);
         for m in &c.def.methods {
             self.check_unknown_phpstan_tags_on(
                 m.function.doc_comment.as_deref(),
                 m.function.name.span,
+                class,
             );
         }
         for p in &c.def.properties {
-            self.check_unknown_phpstan_tags_on(p.doc_comment.as_deref(), p.span);
+            self.check_unknown_phpstan_tags_on(p.doc_comment.as_deref(), p.span, class);
         }
         for cc in &c.def.consts {
-            self.check_unknown_phpstan_tags_on(cc.doc_comment.as_deref(), cc.name.span);
+            self.check_unknown_phpstan_tags_on(cc.doc_comment.as_deref(), cc.name.span, class);
         }
     }
 
     /// See `check_unknown_phpstan_tags_in_class`'s doc comment - the
     /// one-declaration-at-a-time worker both that function and
-    /// `check_function`'s top-level-function call site share.
-    pub(crate) fn check_unknown_phpstan_tags_on(&mut self, doc_comment: Option<&str>, span: Span) {
+    /// `check_function`'s top-level-function call site share. `class` is
+    /// the class the docblock belongs to, `None` for a top-level function.
+    pub(crate) fn check_unknown_phpstan_tags_on(
+        &mut self,
+        doc_comment: Option<&str>,
+        span: Span,
+        class: Option<&str>,
+    ) {
         let Some(doc) = doc_comment else {
             return;
         };
@@ -741,7 +749,7 @@ impl<'a> Checker<'a> {
         }
         let block = docblock::parse_shared(doc);
         self.report_invalid_tag_values_of(&block, span);
-        self.check_doc_see_tag_targets(&block, span);
+        self.check_doc_see_tag_targets(&block, span, class);
     }
 
     /// `InvalidPhpDocTagValueRule` (`phpDoc.parseError`), level 2: a tag
@@ -776,7 +784,16 @@ impl<'a> Checker<'a> {
     /// the registry. Anything else (a URL, free-text prose, a bare
     /// function name) is left alone - no upstream grammar exists to tell
     /// those apart from a real reference with any confidence.
-    fn check_doc_see_tag_targets(&mut self, block: &docblock::DocBlock, span: Span) {
+    ///
+    /// `self`, `parent` and `static` name the class the docblock belongs
+    /// to (`class`), so they resolve against it; with no class (a
+    /// top-level function) they are unknown classes.
+    fn check_doc_see_tag_targets(
+        &mut self,
+        block: &docblock::DocBlock,
+        span: Span,
+        class: Option<&str>,
+    ) {
         for target in &block.see {
             let (class_part, member) = match target.split_once("::") {
                 Some((c, m)) => (c, Some(m)),
@@ -811,7 +828,38 @@ impl<'a> Checker<'a> {
             // that could never resolve (a real, confirmed false positive:
             // `\Piwigo\Controller\Projection\PictureElement` from a
             // `Piwigo\Controller\Projection`-namespaced file).
-            let resolved = self.name_ctx.resolve(class_part);
+            let keyword = class_part.to_ascii_lowercase();
+            let (resolved, judge_member) = match (class, keyword.as_str()) {
+                (Some(class), "self") => (class.to_string(), true),
+                // A subclass may declare the member `static` names, so only
+                // the class itself is judged.
+                (Some(class), "static") => (class.to_string(), false),
+                (Some(class), "parent") => {
+                    let parent = self
+                        .registry
+                        .classes
+                        .get(class)
+                        .and_then(|info| info.extends().first())
+                        .map(|parent| parent.to_string());
+                    match parent {
+                        Some(parent) => (parent, true),
+                        None => {
+                            self.report(
+                                format!("PHPDoc tag @see contains unknown class {trimmed}"),
+                                span,
+                                2,
+                                "phpDoc.seeTag",
+                            );
+                            continue;
+                        }
+                    }
+                }
+                // `class_part`, not `trimmed`, is passed here - a leading `\`
+                // means "already fully qualified" to `NameContext::resolve`
+                // (`resolve_as`'s own `strip_prefix('\\')` check), matching
+                // real PHP name-resolution rules.
+                _ => (self.name_ctx.resolve(class_part), true),
+            };
             if self.registry.lookup_class(&resolved).is_none() {
                 self.report(
                     format!("PHPDoc tag @see contains unknown class {trimmed}"),
@@ -821,7 +869,9 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             }
-            let Some(member) = member else { continue };
+            let Some(member) = member.filter(|_| judge_member) else {
+                continue;
+            };
             let found = if let Some(method) = member.strip_suffix("()") {
                 self.registry.lookup_method(&resolved, method).is_some()
             } else if let Some(prop) = member.strip_prefix('$') {

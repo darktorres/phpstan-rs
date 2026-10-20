@@ -285,7 +285,7 @@ impl<'a> Checker<'a> {
         // class-declaration loop) - only a genuine top-level function
         // needs it here, or every method would get double-checked.
         if class_name.is_none() {
-            self.check_unknown_phpstan_tags_on(f.doc_comment.as_deref(), f.name.span);
+            self.check_unknown_phpstan_tags_on(f.doc_comment.as_deref(), f.name.span, None);
         }
         if self.settings.sidz.check_magic_numbers {
             self.check_magic_numbers_in_params(&f.params);

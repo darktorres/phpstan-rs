@@ -1741,7 +1741,7 @@ impl<'a> Checker<'a> {
                     self.check_require_tag_types(&c.def);
                     self.check_sealed_hierarchy(&fqn, c.def.span);
                     self.check_sealed_tag_types(&c.def);
-                    self.check_unknown_phpstan_tags_in_class(c);
+                    self.check_unknown_phpstan_tags_in_class(&fqn, c);
                     if self.settings.sidz.check_magic_numbers {
                         self.check_magic_numbers_in_properties(&c.def.properties);
                     }
