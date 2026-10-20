@@ -607,8 +607,8 @@ in); it stays, being `Display`'s inverse.
   identifier and generic case lists, with a fixture per keyword: the string parser lacks `number`,
   `empty-scalar`, `non-empty-scalar`, `non-empty-literal-string`, `associative-array`, `static-closure`,
   `static-pure-closure`, `non-empty-mixed`, `callable-object`, `callable-array`, `empty`, the `__string*` pair,
-  and the generics `__benevolent`, `new` and `template-type` (checked in the vendored `phpstan-src`, which is
-  past 2.2.16; a newer upstream was not fetched), so each reads as a class today, is namespace-qualified and
+  and the generics `__benevolent`, `new` and `template-type` (checked in the vendored `phpstan-src` at 2.2.16,
+  and again at 2.3.1, the latest release, where every one is still in `TypeNodeResolver`), so each reads as a class today, is namespace-qualified and
   reaches `class.notFound`. `number`, like `scalar` and `numeric`, yields to a class or a `use` alias of that
   name (PHPStan's `tryResolvePseudoTypeClassType`), the one scope-dependent part, which C7 does; the rest of
   C7's "PHPDoc keyword types resolve before namespace qualification" is done here, and leaves C7's and RES-1's
@@ -641,7 +641,7 @@ in); it stays, being `Display`'s inverse.
 | `Wildcard`, `VarianceArg` | for a class generic as `parse_generic_arg` does: any type; call-site variance |
 | `ArrayOf(t)`, `OffsetAccess(b, o)` | `array<t>` (list-ness as the string parser gives it today), the offset-access type with any type as the offset (the string parser read it as a shape key by name, a delta) |
 | `ArrayShape { keyword, fields, sealed, unsealed_type }` | the shape constructors with `list`, `non-empty` and `object` refinements kept (`STAGE_B_REVIEW` F40) |
-| `Callable { keyword, templates, params, return_type }` | `CallableSig` with its own templates marked; **without a return type** (`callable(int)`) the grammar records a PHPDoc syntax error for the missing return type, as phpdoc-parser and PHPStan do (the colon is mandatory there, and the port's `None` branch carries no note that its acceptance is deliberate), and the node is lowered as written, `callable(int): mixed`, so the tag keeps the parameters the author wrote, where the string parser's fallback, a bare `callable`, discarded them (the missing-token recovery of G3.2 item 1, applied to PHPDoc); `Closure(...)` is the intersection of `\Closure` and the callable (`parse.rs`), not the bare class |
+| `Callable { keyword, templates, params, return_type }` | `CallableSig` with its own templates marked; **without a return type** (`callable(int)`) the grammar records a PHPDoc syntax error for the missing return type, as phpdoc-parser and PHPStan do (at 2.3.6 `parseCallable` consumes the colon unconditionally, so it is mandatory there; the port's `None` branch carries no note that its acceptance is deliberate), and the node is lowered as written, `callable(int): mixed`, so the tag keeps the parameters the author wrote, where the string parser's fallback, a bare `callable`, discarded them (the missing-token recovery of G3.2 item 1, applied to PHPDoc); `Closure(...)` is the intersection of `\Closure` and the callable (`parse.rs`), not the bare class |
 | `IntRange`, `IntLiteral`, `FloatLiteral`, `StringLiteral` | the literal types; a float only from a `FloatLiteral` token |
 | `ConstFetch { class, const_name }` | the constant-fetch type, a trailing `*` kept; `Foo::class` is `class-string<Foo>` (`Type::class_string`, as the string parser has it) |
 | `Conditional { subject, negated, target, if_true, if_false }` | `ConditionalSubject` and the three lowered branches (each branch is the node the grammar built) |
@@ -654,7 +654,7 @@ takes the name scope.
 
 ### I4.3 What changes in behaviour (F41, with F19 and F40's grammar items)
 
-`lex_number` follows phpdoc-parser's lexemes (`Lexer.php`, read at 2.3.5; the latest release was not checked): an
+`lex_number` follows phpdoc-parser's lexemes (`Lexer.php`, read at 2.3.5 and unchanged at 2.3.6, the latest release; its patterns are matched with the `i` modifier): an
 optional sign, `0b`, `0o` and `0x` integers and plain decimal digit runs, all with `_` separators and
 case-insensitive (`0X1F`, `1E5`, `0B1`), and floats with a fraction or exponent, including a trailing dot (`1.`).
 There is no leading-`0` octal in phpdoc-parser (`017` is a plain digit run). The values follow PHP's source
