@@ -26,7 +26,7 @@ against HEAD listed after the table.
 | 12 | The rule message type | I5, [`13-part-i.md`](13-part-i.md) | batch 7 |
 | 13 | The engine | H2, [`17-part-h2.md`](17-part-h2.md) | W2 |
 | 14 | REG-7 and REG-8 as engine queries | H3, [`16-part-h3.md`](16-part-h3.md) | W2, after 13 |
-| 15 | The pipeline as queries, persistence and the Session | H4, [`18-part-h4.md`](18-part-h4.md) | W3 |
+| 15 | The pipeline as queries, persistence and the Session | H4, [`05-part-d.md`](05-part-d.md) | W3 |
 | 16 | C5's data model | J1, [`05-part-d.md`](05-part-d.md) | W4 |
 | 17 | C6 to C9 | J2, [`05-part-d.md`](05-part-d.md) | W5 |
 | 18 | Stages D to G reconciled | J3, [`05-part-d.md`](05-part-d.md) | W7 |

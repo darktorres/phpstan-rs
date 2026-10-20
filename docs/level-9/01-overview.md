@@ -132,7 +132,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 34 | positionless declarations | [`14-part-c.md`](14-part-c.md) |
 | 35 | PROD-5.7 and `deps::Collector` | [`14-part-c.md`](14-part-c.md) |
 | 36 | the server's snapshot model | [`17-part-h2.md`](17-part-h2.md) |
-| 37 | the persisted database's key | [`18-part-h4.md`](18-part-h4.md) |
+| 37 | the persisted database's key | [`05-part-d.md`](05-part-d.md) |
 | 38 | REG-16.2's "never reused" | [`15-part-h1.md`](15-part-h1.md) |
 | 39 | LOAD-5.1's passes | [`05-part-d.md`](05-part-d.md) |
 | 40 | the composer crate's B8 follow-ups | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
