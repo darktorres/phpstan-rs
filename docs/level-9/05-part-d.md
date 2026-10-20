@@ -102,7 +102,7 @@ Each task is listed under the wall step (W1 to W8, the table under "Proposed ord
 | W8 | VAL-1.14 | OPEN |
 | W8 | VAL-1.15 | OPEN |
 
-W5 also has the C6 to C10 rows, which are written with the plan's approval and have no ledger IDs yet. The ledger's rows for W5 are REG-15.1 and REG-15.2 above. W7's other rows are written after a re-read (rulings 2 to 4), so the four above are all the ledger rows it owns today.
+W5 also has the C6 to C10 rows, which are written with the plan's approval and have no ledger IDs yet. The ledger's rows for W5 are REG-15.1 and REG-15.2 above. W7's other rows are written after a re-read (#16, #20 and #21), so the four above are all the ledger rows it owns today.
 
 
 Sources: `WORK_STACK.md` (levels 1 to 7), the ledger's REG, STUB, CACHE, CHECK, TYPE, NAME, VAL and Q
@@ -163,7 +163,7 @@ split's D2) and CHECK-10's operator sites (the crate split's D3).
 | W4 | C5, the stub layer | STUB-7.1, then 7.3 (it opens SYN-1.10; PROD-5.4 is gone with REG-16.4) and 7.6 (CACHE-9/10/11 follow, once CACHE-13.2 has fixed the persistence's format); 7.2, 7.4, 7.7 to 7.11 (7.5 is W3's); the gate 7.12; STUB-8; STUB-12.1 to 12.5; CHECK-10's version table (its operator sites are D3's, W7); STUB-13.1 | STUB-7 needs REG-12 as a parent row, and 7.1, 7.2, 7.4, 7.7, 7.8 and 7.11 list no need of their own; deltas are VAL-2.4, 2.9 and 2.10 |
 | W5 | C6 to C9, then C10 | the rows are written with the plan's approval (#20, J3); then the overlay layer, `TypeNodeResolver` (built on F41's lowering, batch 6, which has already deleted `types::parse`: #14), the extension points, the summaries; REG-15.1 and 15.2 | the plan lists many approved deltas for each |
 | W6 | the embedding | STUB-10.1, then STUB-11; STUB-13.2 (what remains of the stub loader once W3's Session has replaced `Project`; the row is reworded when W3 lands) | the cold-run prize |
-| W7 | Stages D to G | CHECK-9, CHECK-7 (checker half), CHECK-10 (operator sites), CHECK-12 above; the rest are written after a re-read (rulings 2 to 4) | the architecture program |
+| W7 | Stages D to G | CHECK-9, CHECK-7 (checker half), CHECK-10 (operator sites), CHECK-12 above; the rest are written after a re-read (#16, #20 and #21) | the architecture program |
 | W8 | VAL-1, then level 1 | the end validation of what was built (VAL-1.13 against VAL-1.12's baseline, VAL-2.9 and 2.10 read as they landed); the roadmap lanes resume | |
 
 ## What bears on the order
@@ -208,31 +208,6 @@ split's D2) and CHECK-10's operator sites (the crate split's D3).
    expression-types dump) does not exist (#13 builds it in batch 0). `registry-dump` taken before and after REG-7 would show what
    the change does to the registry itself, beyond what the crate split's gates (corpus, type
    snapshot, baseline, nsrt) see.
-
-## Rulings (Part D; the questions and their answers)
-
-1. **The order.** W2 and W3 (the engine slice and its prizes) before C5 to C10, with Stages D to G as
-   a separate decision (recommended; answered: #19); or the crate split's own order, C4 to G, which puts CACHE-13.2
-   behind Stage F, where its text is stale.
-2. **Item 18's inference core and scopes** (CHECK-6.1, 6.2, 6.3, 6.7, 6.13 to 6.15): build them in
-   batch 7 as planned and re-read D1, D3 and D4 against what they leave, or leave them to Stage D and
-   build only the temporaries now. The first takes the largest check-phase saving (§12.10,
-   ≈1.0-1.3 G) early and makes Stage D's text partly redundant; the second keeps the structure in one
-   place and waits for the engine port. (Answered: #16 takes the second.)
-3. **Rows for C6 to C9, and for D to G.** A docs task that can run beside the engineering: re-read the
-   phases against decisions 1 to 18, write ledger rows with needs, so that REG-15 and STUB-11 depend
-   on tracked work. (Answered: #20, at approval.)
-4. **Whether Stages D to G are built as designed**, or re-planned after W6 on what the engine and the
-   flat tree leave. No tracked row needs them. (Answered: #21.)
-5. **DOC-2.1 is built with C7**, and it is undeferred: F41 builds its lowering first, in batch 6, and C7 builds on it. (Answered: #14.)
-6. **VAL-1's tooling before W2** (it is a precondition for no row): the printers and `registry-dump`
-   would make REG-7's change to the registry visible. Say if it goes first. (Answered: #13, batch 0.)
-7. **The fillers (W1)**: used only between heavy runs, or left for after the prizes. Their value is
-   not speed: level 3 is review findings, and the Q-11 follow-ups finish C1 to C3. (Answered otherwise: #22,
-   a correctness backlog placed in the sequence.)
-8. **Design next**: the spine's roots (REG-4.2, REG-4.12, REG-16.2, REG-16.3) in a session of their
-   own while batches 5 to 7 are built, as Part B was designed; and REG-16.4 once item 9's step 1
-   has fixed the tree API it reads. (Done in Part H; #18 asks for H1 before batch 4.)
 
 ## Decisions
 
