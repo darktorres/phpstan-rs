@@ -50,6 +50,15 @@ Approving this plan makes these edits. None is made before the go.
   unwind and the engine's two isolation modes (H2.8); the vendor-discovery panic-hook swap is deleted, not converted
   (#40). `UNSAFE_PLAN.md`: its end state changes only if S-2 finds the engine exception necessary (#33).
   `STAGE_B_FIX_REVIEW.md`: F14 superseded by TYPE-5's rule; F33's epoch lands in G1.5; F58's lazy construction in G1.9.
+- The ledger rows the engine cluster re-specifies: REG-8.6 (H1.3); REG-4.15 loses its span field and REG-4.11 becomes a
+  record over (`Origin`, site) (H1.5a); REG-16.2's and decision 3's "never reused" stand for `DeclKey` (#38), and decision 3's
+  member sentence is refined to PHP's namespaces (H1.4); REG-16.4 needs SYN-1.9; REG-16.5 is the event callback plus the
+  provider's trace of first readers (H3.5); PROD-5.4, PROD-5.7 and LOAD-4.7's file-references half are marked "deleted by
+  REG-16.4" (H4.8); CACHE-13.2 is H4.6, keyed without the version range (#37), and CACHE-9 to CACHE-11's form follows S-4;
+  CACHE-13.1 and decision 13 become `File.stamp` and the stat-time rule of #15; STUB-7.5 moves to W3 and needs the Composer
+  maps to keep their keys and gain PSR-0 (H4.1, A7); PROD-5.1 and SYN-1.10 keep anonymous classes out of the declaration
+  names and the global index (H1.4).
+- `crash_report::cache_dir()` moves into `project` (F2).
 
 Two gates hold every row that moves code, and they are cheap to different degrees. `cargo xtask modgraph` parses the
 graph and runs `cargo metadata`, so it runs per commit: a new crate gets its `crate` line and a new top-level module of

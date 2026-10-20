@@ -75,6 +75,9 @@ id).
 `statement_method_call`. (`calls/parameters.rs:485` compares registry `ParameterReflection`
 references, not tree nodes, and is not touched.)
 
+The rule on ids has a home: engine ids are named in the engine module only (H1.6), beside `syntax`, the infer cache
+and the `ProbeScope` module.
+
 ### G1.5 The infer cache
 
 keeps its dense slots indexed by `id.index()` and replaces `Entry.addr` with

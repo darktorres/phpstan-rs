@@ -243,7 +243,7 @@ are W3's and their collection moves into E1 (#39).
 **Ledger rows to write** in the docs commit series of #20: OVL, RES, EXT and SUM (J2), with the
 needs above; a D-row and an E-row per phase of Stage D and E that the plan lists, each citing its plan section and
 the oracle counts it carries; CHECK-6.1 to 6.3, 6.7, 6.13 to 6.15 re-pointed to "built by D1 to D4"; LOAD-5.1
-re-pointed to W3 (facts) and E1 (collection); and the corrections of H6.
+re-pointed to W3 (facts) and E1 (collection); and the ledger edits the engine cluster implies (`01-overview.md`, Edits at approval).
 
 ## Decisions
 

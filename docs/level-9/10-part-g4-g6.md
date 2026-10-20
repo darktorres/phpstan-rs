@@ -32,7 +32,8 @@ fallback:
 1. **`ProbeScope` is rooted:** `ProbeScope { ast: Arc<Ast>, at: ProbeAt }` with `ProbeAt::Function {
    decl: FunctionId, class: Option<ClassId>, is_static: bool }` or `ProbeAt::TopLevel`. The walker
    builds it from one `Arc` clone; nothing is cloned per function, and `Resolved` stays an owned,
-   lifetime-free value (built only when the anchor matches: G1.9).
+   lifetime-free value (built only when the anchor matches: G1.9). Its `Arc<Ast>` is the `Arc<Parsed>` of `parse_analysed` (an unmemoized
+   parse for a context file), which the probe holds for its own life.
 2. **A tail instead of two statements.** `Checker` gets `probe_tail: Option<ProbeTail>`,
    `ProbeTail { cut: Cut, receiver: Rooted<Expr> }`, where `Cut::BeforeLine(u32, &LineIndex)` selects the
    statements of the body whose end line is before the cut, as today, as a prefix view of the body's
