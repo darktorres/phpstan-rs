@@ -46,7 +46,7 @@ cites are indexed in the overview. Batch numbers are the numbers the steps use.
    I4's lowering, and W7 as J3 (item 18's reconciled core, F69 with CHECK-9 and CHECK-7's checker half in D2, exact
    include modelling, CHECK-12, on the scope model of D1 and D2, CHECK-10's operator sites in D3).
 
-Parts N and L are outside the sequence; read them after it, and they hold the plan's documents and its second pass.
+Part N is outside the sequence; read it after the sequence. It holds the plan's documents.
 
 ## Batch 0's rows
 

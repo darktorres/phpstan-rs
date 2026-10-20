@@ -33,7 +33,7 @@ body pays for none.
 
 | class | the lexer records | the parser's `take` does |
 |---|---|---|
-| identifier, keyword used as a name | kind (`Identifier` or the keyword's); the `WatchList` bits are set in the file facts from the spelling, by the perfect-hash table of SYN-4.1 | `b.name(&src[span])`: hash once, probe the tree's name table, intern into the global interner on a miss |
+| identifier, keyword used as a name | kind (`Identifier` or the keyword's); the `WatchList` bits are set in the file facts from the spelling, by the perfect-hash table of SYN-4.1 (`keyword_slot`, an existing `const fn`, is the precedent for it) | `b.name(&src[span])`: hash once, probe the tree's name table, intern into the global interner on a miss |
 | variable | `Variable`, span including the `$` | the name is `&src[span][1..]` |
 | qualified name written without spaces | one `QualifiedName` token (SYN-4.8) | `b.name` of the slice, split at the last `\` by the header |
 | number | `Number` (the lexer validates the lexeme and records an error for `08`, `1__0`) | parse the digits skipping `_` (SYN-4.9); an integer past `i64` becomes a float, as now |
