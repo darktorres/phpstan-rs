@@ -780,7 +780,8 @@ impl<'a> Checker<'a> {
     }
 
     /// Checks a `@see` value shaped like a bare class name or a
-    /// `Class::member()`/`Class::$prop`/`Class::CONST` reference against
+    /// `Class::method`, `Class::method()`, `Class::$prop` or `Class::CONST`
+    /// reference against
     /// the registry. Anything else (a URL, free-text prose, a bare
     /// function name) is left alone - no upstream grammar exists to tell
     /// those apart from a real reference with any confidence.
@@ -877,7 +878,10 @@ impl<'a> Checker<'a> {
             } else if let Some(prop) = member.strip_prefix('$') {
                 self.registry.lookup_property(&resolved, prop).is_some()
             } else if is_php_identifier(member) {
-                self.registry.lookup_const(&resolved, member).is_some()
+                // A bare name is a method (`Class::method`, the form phpDocumentor
+                // also reads) or a constant.
+                self.registry.lookup_method(&resolved, member).is_some()
+                    || self.registry.lookup_const(&resolved, member).is_some()
             } else {
                 // An unrecognized member shape (stray punctuation, a
                 // description that happened to contain "::") - don't
