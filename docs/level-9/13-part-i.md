@@ -300,7 +300,7 @@ in); it stays, being `Display`'s inverse.
 
 The explicit `mixed` of a node is the kind F21 gives (`Mixed(Explicit)`), set at the keyword by `phpdoc_keyword`, as
 the string parser already does at `Type::explicit_mixed()`; the text search for explicit `mixed` that C7 mentions is
-gone (a70a5b42). Template and alias references are marked by the same later passes as now, until C7's resolver
+gone. Template and alias references are marked by the same later passes as now, until C7's resolver
 takes the name scope.
 
 ### I4.3 What changes in behaviour (F41, with F19 and F40's grammar items)

@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-None. G3 is a design: the error-node model (G3.1 to G3.5), the contract for readers (G3.6), and the oracles (G3.7). The rows its design serves are owned where they are built: SYN-1.9, Q-10 and SYN-6 by Part C's batch 3 (C1), CHECK-12 by Part D's wall step W7, and CHECK-13 by Part H1 (H1.4).
+None. G3 is a design: the error-node model (G3.1 to G3.5), the contract for readers (G3.6), and the oracles (G3.7). The rows its design serves are owned where they are built: SYN-1.9, Q-10 and SYN-6 by Part C's batch 3 (C1), CHECK-12 by Part D's wall step W7, and CHECK-13 by batch 5 with PROD-5.1 (H1.4).
 
 ### G3 why now
 

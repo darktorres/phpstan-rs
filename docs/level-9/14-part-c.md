@@ -187,7 +187,7 @@ a format), 6.5, 6.6, 6.9, 6.10 with CHECK-4.1 (the `Message` of I5), 6.11, 6.12,
 of CHECK-6.8 and 6.18. CHECK-4.2 goes with REG-18.4 in batch 4b (#41). F69 and CHECK-9 are D2's: F69 records
 implicit calls' throw points on the recorders (`record_call_throw_point`, `current_function_throw_points`) that D2's
 `StatementResult` replaces, so by the crate split's Appendix F ("a bug in code a later phase rewrites gets a fixture
-now and its fix as that phase's behaviour commit") and this plan's own rule (K2) they get their fixtures in batch 0
+now and its fix as that phase's behaviour commit") and the same rule, they get their fixtures in batch 0
 and are built in D2, and CHECK-9 follows F69 there; CHECK-7's checker half goes to D2 and CHECK-10's operator
 sites to D3 for the same reason. TYPE-5 is batch 6's.
 CHECK-6.8 and 6.18 reuse allocations that hold no tree reference (the infer cache's slots, scratch vectors of types

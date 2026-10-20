@@ -295,7 +295,7 @@ does not exist yet (batch 0 comes after Part A), so this validation compares bin
 
 Bookkeeping when it lands (the ledger rows record each edit): ledger rows
 to DONE with hashes (LOAD-2.2 is DONE at `4f3d5c29`, which deletes `path_under_excluded_dir` and the constant; REG-14 stays PART; LOAD-9; SYN-1.1; LOAD-5.4; the COMP rows A1, A7 and A8
-close, N6), §1's Ir table, §2.1;
+close), §1's Ir table, §2.1;
 `WORK_STACK.md` (item 2's bullet goes, LOAD-9 leaves the "Outside the items" line, item 8 keeps 14.1 and 14.3, item 9
 leaves SYN-1.2 onward, item 19 loses LOAD-5.4, state line). The separate runs above measure LOAD-2.8's parts 1 and 2, which its row lists as not measured.
 

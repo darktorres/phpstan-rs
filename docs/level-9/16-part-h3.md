@@ -151,7 +151,7 @@ class as each candidate, an ancestor every candidate has being certain and one t
 Decision 8's rule replaces it at the final level: REG-7.5's combination reads the class hierarchy, where `decide.rs:211`
 trusts a class member unjudged because the registry is still being built. Its callers are the passes that REG-7.2
 and 7.5 turn into levels (`function_sig/type_resolution.rs:157`, and `resolve.rs:1274`, `:1305`, `:1340`). Making it
-allocation-free now would be work on code W2 replaces, for 41,085 allocations .
+allocation-free now would be work on code W2 replaces, for 41,085 allocations.
 The replacement is written as follows: (1) the members are a borrowed slice,
 the union's own (`self.repr()`) or `std::slice::from_ref(&self)`, with no `vec![self]` and no `into_repr`, which
 copies the member list while the type is shared (`lib.rs:337`); (2) the branches that answer without building are

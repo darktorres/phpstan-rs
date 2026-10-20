@@ -231,13 +231,12 @@ counts the distinct probes on the corpora, requires zero stat calls without a bu
 `deps::Collector`, `recorded_references`, `RefKey` and the dependents indexes exist only to decide which files to
 recheck (`deps.rs` says so: "used purely to decide which files might need re-checking"). PROD-5.7 (references as
 one vector per file), LOAD-4.7's file-references half and PROD-5.4's rewrite are work on them; REG-16.4 deletes the
-machinery whole. PROD-5.8 (the record of written names) stays: its readers are rules, not the dependents index.
-#35.
+machinery whole. PROD-5.8 (the record of written names) stays: its readers are rules, not the dependents index (#35).
 
 ## Decisions
 
 ### #37 the persisted database's key: one file per (build, root, config key) with the settings also inputs, or one per (build, root) with the settings only inputs, as CACHE-13.2's row words it
 
-**Per config key, with the settings also inputs, and the config key leaves out the PHP version range.** One file would thrash when two configurations alternate (the editor beside a `--set level=9` run), which F2's entry sets exist to prevent; the inputs keep a change inside a session exact. Decision 6 says no cache key holds a version, so the range stays an input and a changed range reruns only what read it; what changes is CACHE-13.2's wording ("the configuration ... are inputs, not keys"), which H6 lists. **The build identity** is `PHPSTAN_RS_SOURCE_HASH` plus the rustc version and a persistence-format constant (salsa orders its ingredients by type name, so the bytes follow the compiler's layout); F2's GNU build ID, executable size and modification time cannot work, since the project's builds write no build ID and size and mtime change on every relink
+**Per config key, with the settings also inputs, and the config key leaves out the PHP version range.** One file would thrash when two configurations alternate (the editor beside a `--set level=9` run), which F2's entry sets exist to prevent; the inputs keep a change inside a session exact. Decision 6 says no cache key holds a version, so the range stays an input and a changed range reruns only what read it; what changes is CACHE-13.2's wording ("the configuration ... are inputs, not keys"), which the ledger edits of `01-overview.md` (Edits at approval) list. **The build identity** is `PHPSTAN_RS_SOURCE_HASH` plus the rustc version and a persistence-format constant (salsa orders its ingredients by type name, so the bytes follow the compiler's layout); F2's GNU build ID, executable size and modification time cannot work, since the project's builds write no build ID and size and mtime change on every relink
 
 *Needed before:* W3
