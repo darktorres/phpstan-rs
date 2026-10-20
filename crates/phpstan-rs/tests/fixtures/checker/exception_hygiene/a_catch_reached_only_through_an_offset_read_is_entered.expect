@@ -1,0 +1,1 @@
+14:9-14:22 identical.alwaysFalse L4 | Strict comparison using === between true and false will always evaluate to false.
