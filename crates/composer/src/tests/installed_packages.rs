@@ -125,7 +125,14 @@ fn a_linked_composer_directory_resolves_the_install_path_as_it_did() {
     );
     let packages = installed(&dir);
     let lib = package(&packages, "acme/lib");
-    assert_eq!(lib.install_dir, expected(&dir, "elsewhere/acme/lib"));
+    // Windows takes a `..` out of the path before the system opens it, so
+    // through a junction it names `vendor`'s own `acme`, which is absent: the
+    // path resolves through the nearest directory that exists, `vendor`.
+    if cfg!(windows) {
+        assert_eq!(lib.install_dir, expected(&dir, "vendor").join("acme/lib"));
+    } else {
+        assert_eq!(lib.install_dir, expected(&dir, "elsewhere/acme/lib"));
+    }
 }
 
 #[test]
@@ -144,7 +151,13 @@ fn an_interior_parent_step_is_resolved_through_the_link_it_follows() {
     );
     let packages = installed(&dir);
     let lib = package(&packages, "acme/lib");
-    assert_eq!(lib.install_dir, expected(&dir, "elsewhere/lib"));
+    // As in the test above: on Windows the `..` after `q` is taken out
+    // textually, so `acme/lib` resolves through `vendor/acme`, which exists.
+    if cfg!(windows) {
+        assert_eq!(lib.install_dir, expected(&dir, "vendor/acme").join("lib"));
+    } else {
+        assert_eq!(lib.install_dir, expected(&dir, "elsewhere/lib"));
+    }
 }
 
 #[test]
