@@ -12,8 +12,8 @@ against HEAD listed after the table.
 
 | # | design | part | needed before |
 |---|---|---|---|
-| 1 | How the checker holds a tree (#1) | G1, [`08-part-g1-g2.md`](08-part-g1-g2.md) | item 9, step 1 |
-| 2 | Stored-alias identity | G2, [`08-part-g1-g2.md`](08-part-g1-g2.md) | item 9, step 1 |
+| 1 | How the checker holds a tree (#1) | G1, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
+| 2 | Stored-alias identity | G2, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
 | 3 | The error-node model | G3, [`09-part-g3.md`](09-part-g3.md) | step 2 (layout); the rest before batch 3 |
 | 4 | The probe as a checker entry point (#26) | G4, [`10-part-g4-g6.md`](10-part-g4-g6.md) | step 2 |
 | 5 | Node layout per variant | I1, [`11-part-i1.md`](11-part-i1.md) | step 2, after step 0 |
