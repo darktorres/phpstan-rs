@@ -1622,5 +1622,3 @@ differences as its delta, and rolls the baseline forward.
 - F69: implicit calls record no throw point, and CHECK-9 reads the throw points.
 - The 20 G plan's §9 makes the oracles dumps.
   `FileBodies` still keeps statements in debug builds for the old oracles.
-
----

@@ -488,7 +488,7 @@ has no lifetime, 415 mentions in 66 files (65 under `crates/phpstan-rs`), and te
 ### G1.1 No tree lifetime on any checker type
 
 Walks take and pass handles (`Expr<'_>`, `Stmt<'_>`,
-`Args<'_>` and the rest of Part B's) as parameters and locals, each with its own anonymous lifetime;
+`Args<'_>` and the rest of B's) as parameters and locals, each with its own anonymous lifetime;
 `Checker<'a>` keeps its name and its `impl<'a>` blocks (its `'a` is the registry's, settings' and
 rules' borrow, as now), and `Locals` stays lifetime-free. An expression that must outlive the walk that
 produced it is a `Rooted<Expr>` (item 8). **Why not a lifetime on `Locals`:** Stage D (D1 and D5 of the crate split, CHECK-6.3) replaces alias replay by conditional
@@ -554,7 +554,7 @@ walk that starts from a stored alias works on `get()` of its own clone), and `Ch
 clone as the tree being checked, which is what `Rooted::new` roots a handle in; the checker borrows
 nothing from it, so `checker_for_file` can go on returning the checker and the `AstRef`, and a test
 that builds a checker before it parses keeps its order. A kept tree is an `Arc` in step 1 already
-(Part B6).
+(B6).
 
 ### G1.8 The rooted form
 
@@ -641,7 +641,7 @@ is an argument that the two agree in practice, not a proof; the stamp costs noth
 ### G2.4 The `@var` memo
 
 (`var_tag_types.rs:290`) is keyed `(tree serial, doc start, doc len)`:
-`statement_var_tags` takes a `DocText<'a>` (Part B4's view of a statement's leading doc), whose
+`statement_var_tags` takes a `DocText<'a>` (B4's view of a statement's leading doc), whose
 `key()` is that triple. The class and method parts of the key are unchanged.
 
 ### G2 tests
@@ -1006,5 +1006,3 @@ and stack edits.
   `Rc<Expr>` sits in 11 places. `wide` comes in through `imbl`.
 - The probe splices a receiver parsed from the live buffer into the last-good function
   (`completion.rs`, `build_probe_scope`).
-
----
