@@ -249,7 +249,10 @@ re-pointed to W3 (facts) and E1 (collection); and the corrections of H6.
 
 ### #16 item 18
 
-**Reconcile, build once, as Stage D.** §12.10 ("PHPStan's `NodeScopeResolver`... record and replay") and D3 and D4 (`RecordingNodeCallback`, per-node results) are one architecture; D1 and CHECK-6.3 both specify the scope's storage; CHECK-6.2 is D2's `StatementResult`. The crate split builds the layers bottom-up, so the engine goes on the final reflection API, and the 25 G report's own no-interim rule (its §10.7) says not to build what the traversal replaces. So CHECK-6.1, 6.2, 6.3, 6.7, 6.13 to 6.15 (and the LOAD-5.1 passes that need CHECK-6.1) go to Stage D, reconciled first; batch 7 is the temporaries, with 6.10 and 4.1's message type designed as D6's `RuleErrorBuilder`. The cost: §12.10's ≈1.0-1.3 G and the slots' ≈0.15-0.25 G arrive with Stage D
+**Reconcile, build once, as Stage D.** §12.10 ("PHPStan's `NodeScopeResolver`... record and replay") and D3 and D4 (`RecordingNodeCallback`, per-node results) are one architecture; D1 and CHECK-6.3 both specify the scope's storage; CHECK-6.2 is D2's `StatementResult`. The crate split builds the layers bottom-up, so the engine goes on the final reflection API, and the 25 G report's own no-interim rule (its §10.7) says not to build what the traversal replaces. So CHECK-6.1, 6.2, 6.3, 6.7, 6.13 to 6.15 (and the LOAD-5.1 passes that need CHECK-6.1) go to Stage D, reconciled first; batch 7 is the temporaries, with 6.10 and 4.1's message type designed as D6's `RuleErrorBuilder`. The cost: §12.10's ≈1.0-1.3 G and the slots' ≈0.15-0.25 G arrive with Stage D.
+
+The split of item 18's groups stands as the plan gives it, and the inference core is validated by reading its diff family
+by family.
 
 *Needed before:* batch 7
 

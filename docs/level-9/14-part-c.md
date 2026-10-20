@@ -246,32 +246,6 @@ method keys) and **REG-16.2** (interned identity), then REG-16.3 (the engine), w
 TYPE-4, REG-16.4 and so LOAD-3.1, CACHE-13.2, LOAD-5.2 and REG-17. Levels 1 to 7 are deferred "to be reevaluated together"; level 8's READY list runs out at batch 8, so that is when.
 Design of REG-16.2 and REG-16.3 can run while batches 5 to 7 are built. Part D lays out what the wall holds and the proposed order.
 
-## C5. Rulings and risks (the questions; their answers are the decisions folded into this part)
-
-1. **SYN-3.2's SIMD** (batch 2). It specifies SSE2 16-byte blocks and AVX2 32-byte blocks behind
-   `is_x86_feature_detected!`. The workspace denies `unsafe_code`, nothing in it uses `core::arch`,
-   and `UNSAFE_PLAN.md` removes `unsafe` from everything but the PCRE FFI. Options: SSE2 through a
-   safe crate such as `wide` (baseline x86-64, no dispatch) and a `u64` word loop elsewhere, no
-   AVX2; or a small audited exemption like the PCRE one. The saving falls without AVX2 and has to
-   be measured (`LineIndex::new` was 270.4 M over 19,211 lexers in the 20 G profile: 63.5 M of per-line `memchr`
-   calls, 83.4 M of column tables, 116.3 M of its own, and 7.2 M unattributed; the ledger's later 363.4 M is over
-   25,753 builds, stub files included).
-2. **Item 14 closes whole** (#14 undefers DOC-2.1 as F41, and REG-4.10 is built with DOC-2.9: note 6).
-3. **Order inside batches 4 to 6** (13, 16, 15, 14 against 13, 14, 15, 16): the first leaves no item
-   half done and needs no return to a finished item, at the price of leaving the plan's numbering.
-4. **Oracles for items 13 to 16.** Their lines name `registry-dump`, `--dump-expr-types` and the
-   PHPDoc resolution record, which are VAL-1.4, 1.6, 1.7 and do not exist (`--dump-types` and O2 do).
-   VAL-1 "is not a precondition for any row", so the batch can go on Piwigo's output, O2 and
-   `--dump-types`; building the three tools first (4 to 6 commits) makes "exact" checkable beyond
-   what Piwigo exercises. (Answered in #13: they are built in batch 0.)
-5. **Item 18's groups**: confirm the split and that the inference core is validated by reading its
-   diff by family. The inference core and the scopes group also meet the crate split's Stage D
-   (Part D, "What bears on the order", 2), which decides whether they are built in batch 7.
-6. **CACHE-13.1 for context files early** (batch 8, or sooner): a warm-run wall lever, independent of
-   the engine. (Answered in #15: it is built once, as `File.stamp`, at W3.)
-7. **When to reevaluate levels 1 to 7** (C4), and whether the engine's roots (REG-4.2, REG-16.2)
-   start as design work before then. Part D has the proposed order and its rulings.
-
 ## Decisions
 
 ### #10 SYN-3.2's SIMD
