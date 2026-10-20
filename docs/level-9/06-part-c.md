@@ -68,7 +68,7 @@ Each task is listed in the C1 batch that builds it. The state is the ledger's, a
 
 Batch 0 is the README's, item 9 is Part B's, and the batch 8 rows are other parts' (LOAD-5.4 is Part A's; CACHE-13.1, CACHE-8, LOAD-5.1, LOAD-5.2 and LOAD-3.1 are W3's). They are named in the text, not listed here.
 
-The designs in this part own no rows of their own; each serves rows listed above or owned elsewhere. Level 3's placement and G5 (item 0's tooling) serve batch 0's rows and the review's findings. I2 serves batch 1 (SYN-2 and SYN-4.1 are above) and I3 batch 2 (SYN-3.2). G3 serves batch 3: SYN-1.9, Q-10 and SYN-6 are in C1's table, CHECK-12 is W7's, and CHECK-13 is batch 5's with PROD-5.1 (decided in H1.4). H1 serves batch 4 (NAME-1.1 to 1.6, NAME-2.1 to 2.3 and SYN-4.5, all in batch 4). I4 serves batch 6 (DOC-2.1 and F41), and I5 batch 7 (CHECK-6.10 and CHECK-4.1).
+The designs in this part own no rows of their own; each serves rows listed above or owned elsewhere. Level 3's placement and G5 (item 0's tooling) serve batch 0's rows and the review's findings. I2 serves batch 1 (SYN-2 and SYN-4.1 are above) and I3 batch 2 (SYN-3.2). G3 serves batch 3: SYN-1.9, Q-10 and SYN-6 are in C1's table, CHECK-12 is W7's, and CHECK-13 is batch 5's with PROD-5.1 (decided in H1.4). H1 serves batch 4 (NAME-1.1 to 1.6, NAME-2.1 to 2.3 and SYN-4.5, all in batch 4). I4 serves batch 6 (DOC-2.1 and F41), and I5 batch 7 (CHECK-6.10 and CHECK-4.1). The designs below are written from the code at `8a1ca1e0`, and the sections follow the order of the batches they serve.
 
 
 Read from the 20 G plan's items 10 to 19 (its §10), the ledger's rows, needs and notes
@@ -352,10 +352,6 @@ dump that costs minutes on Piwigo is acceptable; one that differs between runs i
 (engine or dump). Nothing here gates on Piwigo alone: each dump runs over the vendor projects and the
 fixtures too.
 
-## The designs the batches wait for (I2 to I5)
-
-Each is a section, written from the code at `8a1ca1e0`. I2 to I5 belong to batches 1, 2, 6 and 7; I1 is Part B's.
-
 ## I2. Token payloads under decision 4
 
 **The problem.** 20 G item 10 gives `TokenStream` a `payloads: Vec<Payload<'a>>` holding `&'a Name`, `&'a [u8]`
@@ -571,271 +567,6 @@ NEON instructions and a horizontal add and `memchr` itself avoids it. Otherwise 
 dropped, or the same API is written over `u64` words (eight bytes at a time, the classic zero-byte test). There is
 no scalar-fallback trigger: `wide` takes its scalar branch only where neither `sse2` nor `neon` is a target
 feature, which x86-64 and aarch64 never are.
-
-## I4. The single grammar's lowering
-
-F41 (`STAGE_B_FIX_REVIEW.md`), DOC-2.1 (the ledger) and C7's grammar item are one piece of work. (Finding numbers
-are ambiguous across the two review files: F40, F41, F51, F61 and F63 exist in both with different content; this part
-cites `STAGE_B_REVIEW` F40, the PHPDoc parsing one, and `STAGE_B_FIX_REVIEW` F41.) Sources: `types/src/parse.rs`
-(1,429 lines, outline and the keyword table), `phpdoc/src/grammar/ast.rs` (`TypeNode`, 19 variants),
-`phpdoc/src/doc_type.rs` and `registry/type_node.rs`, and the call sites (58 mentions of `parse_written_type`
-in 3 crates, 219 of `parse_type_string`, 156 of them in `types`' own tests).
-
-**Today.** A PHPDoc type is parsed twice. `phpdoc::grammar` lexes and parses it into a `TypeNode` (and reports
-`phpDoc.parseError`); then `DocType::ty` renders the node back to text (`to_source_string`) and
-`types::parse_written_type` parses that text again with a second, string-splitting parser, memoized by the text
-(2,048 entries in each of 64 shards: 131,072 entries and 64 MiB of text at most). Each of F41's bullets is a place
-where one of the two gets the language wrong. `types::parse_display`
-is a third reader, of a different language (a type's `Display`, which `assertType()` and the type dumps are written
-in); it stays, being `Display`'s inverse.
-
-### I4.1 Where it lives
-
-- **The lowering is `phpdoc::lower`.** `phpdoc` depends on `types` and `syntax`; `types` depends on `syntax` only.
-  F41 considered moving the grammar into a crate below `types` so `types` could keep a text entry point. It does
-  not need one: outside its own tests `types` calls its parser only from `parse.rs` itself. So `types` loses its
-  parser, as the crate split's §3.3 says ("`types::parse_type_string` deleted"), and the grammar stays where
-  DOC-2.1 put it. No new crate.
-- **The type knowledge stays in `types`:** the keyword table (`parse_type_keyword_or_class`, about 380 lines of
-  `int-mask`, `class-string`, `non-empty-lowercase-string`, `key-of`, ...) becomes `types::phpdoc_keyword(word, args:
-  &[Type]) -> Option<Type>`, taking lowered arguments where it takes argument text now, and the builders
-  the string parser's `try_parse_array_shape`, `try_parse_object_shape` and `try_parse_callable_shape` use become
-  public constructors (`Shape::from_fields`, `CallableSig::from_parts` and the like) that `lower` calls. The string
-  splitters (`split_top_level`, `top_level_find`, `matching_close`, `try_parse_conditional_type`,
-  `parse_type_atom`) are deleted. **The extraction also completes the table** against `TypeNodeResolver`'s
-  identifier and generic case lists, with a fixture per keyword: the string parser lacks `number`,
-  `empty-scalar`, `non-empty-scalar`, `non-empty-literal-string`, `associative-array`, `static-closure`,
-  `static-pure-closure`, `non-empty-mixed`, `callable-object`, `callable-array`, `empty`, the `__string*` pair,
-  and the generics `__benevolent`, `new` and `template-type` (checked in the vendored `phpstan-src` at 2.2.16,
-  and again at 2.3.1, the latest release, where every one is still in `TypeNodeResolver`), so each reads as a class today, is namespace-qualified and
-  reaches `class.notFound`. `number`, like `scalar` and `numeric`, yields to a class or a `use` alias of that
-  name (PHPStan's `tryResolvePseudoTypeClassType`), the one scope-dependent part, which C7 does; the rest of
-  C7's "PHPDoc keyword types resolve before namespace qualification" is done here, and leaves C7's and RES-1's
-  lists.
-- **Entry points** in `phpdoc` (one name across #14, F41 and here): `lower(&TypeNode) -> Type` (names as
-  written, a leading `\` kept: what `parse_written_type` returns), `parse_phpdoc_type(text) -> (Type,
-  Vec<ParseError>)` (lex, parse, lower) and `parse_global_type(text)` (the old `parse_type_string`: leading `\`
-  stripped). The text entry points return the errors, because a string a user supplied must not turn into the
-  error type, which accepts and is accepted by everything, with no report: `checker/constant_resolver.rs`,
-  `restricted_symbol_usage.rs` and `registry/assertion_table.rs` parse user-supplied texts today with no error
-  channel, and those callers report. Fixed texts (`predefined_constants.rs` parses nine per call) are statics
-  (a `LazyLock` table, as 25 G says), and the text memo goes unless a dynamic caller measures a need for it. An
-  error node lowers to the error type; a tag with an error contributes nothing when PHPStan parses that tag
-  family (a `phpstan-` prefixed tag, or one in `PLAIN_TAGS_PHPSTAN_PARSES`), and the others apply as they are
-  (`docblock.rs`). A *missing-token* error whose recovery is unambiguous (a `callable` with no return type, I4.2)
-  is not an error node: the grammar reports it and the lowering keeps what the author wrote, so the tag keeps the
-  recovered type.
-- **`lower` is a walk generic over a scope** (the identity scope gives `lower`), living in `phpdoc`, so that C7
-  adds an implementation (names, templates, aliases and `self` resolved in the walk) and not a second walk. It is
-  written against the node accessors that DOC-2.7 keeps (children by iterator), so DOC-2.5 and 2.7 change the
-  node's storage and not `lower`; after C7 `DocType` keeps the node, and the resolved type is DOC-2.2's memo value.
-
-### I4.2 The lowering, by `TypeNode` variant
-
-| node | lowers to |
-|---|---|
-| `Identifier(w)` | `phpdoc_keyword(w, [])`, else the class of that name as written; `$this`, `self`, `static`, `parent` as now |
-| `Nullable(t)`, `Union`, `Intersection`, `Paren` | the normalizing constructors (`Type::union_of`, `intersect_types`); `?T` is the normalizing union of `T` and `null` (the string parser builds a raw nested union, a delta: flattened), and `?mixed` is `mixed` (tested by `is_mixed()`); **the written width is bounded:** `union_types_many` flattens every operand with `push_member`, a linear scan per member, and runs its passes before `MAX_UNION_MEMBERS` applies, so a written union of n distinct members costs at least n²/2 comparisons, and `eager` `DocType` runs the lowering for every docblock read; the lowering caps the written width at a multiple of the cap and generalizes as the cap does (or dedupes through a hash set before the passes), with a 50,000-member union, a 100,000-deep nest and colliding-name inputs (`FxHasher` does not resist collisions) in I4.5 step 3's inputs and S-1's |
-| `Generic(w, args)` | `phpdoc_keyword(w, lowered args)`, else a generic class reference; `int<a, b>` is a range only for the exact word `int` (the string parser tests `ends_with("int")`, so `Point<1, 2>` becomes a range today, a delta); an argument of a keyword generic is lowered as the type it is, and a wildcard or a variance marker there is accepted as PHPStan does: phpdoc-parser turns `*` into `mixed` with bivariant variance and PHPStan's `array`, `list` and the other keyword generics ignore variances, so `array<*, int>` is `array<mixed, int>`; only the class arm used them (`parse_generic_arg`), and today a keyword argument that holds one fails, a delta |
-| `Wildcard`, `VarianceArg` | for a class generic as `parse_generic_arg` does: any type; call-site variance |
-| `ArrayOf(t)`, `OffsetAccess(b, o)` | `array<t>` (list-ness as the string parser gives it today), the offset-access type with any type as the offset (the string parser read it as a shape key by name, a delta) |
-| `ArrayShape { keyword, fields, sealed, unsealed_type }` | the shape constructors with `list`, `non-empty` and `object` refinements kept (`STAGE_B_REVIEW` F40) |
-| `Callable { keyword, templates, params, return_type }` | `CallableSig` with its own templates marked; **without a return type** (`callable(int)`) the grammar records a PHPDoc syntax error for the missing return type, as phpdoc-parser and PHPStan do (at 2.3.6 `parseCallable` consumes the colon unconditionally, so it is mandatory there; the port's `None` branch carries no note that its acceptance is deliberate), and the node is lowered as written, `callable(int): mixed`, so the tag keeps the parameters the author wrote, where the string parser's fallback, a bare `callable`, discarded them (the missing-token recovery of G3.2 item 1, applied to PHPDoc); `Closure(...)` is the intersection of `\Closure` and the callable (`parse.rs`), not the bare class |
-| `IntRange`, `IntLiteral`, `FloatLiteral`, `StringLiteral` | the literal types; a float only from a `FloatLiteral` token |
-| `ConstFetch { class, const_name }` | the constant-fetch type, a trailing `*` kept; `Foo::class` is `class-string<Foo>` (`Type::class_string`, as the string parser has it) |
-| `Conditional { subject, negated, target, if_true, if_false }` | `ConditionalSubject` and the three lowered branches (each branch is the node the grammar built) |
-| `Error` | the error type |
-
-The explicit `mixed` of a node is the kind F21 gives (`Mixed(Explicit)`), set at the keyword by `phpdoc_keyword`, as
-the string parser already does at `Type::explicit_mixed()`; the text search for explicit `mixed` that C7 mentions is
-gone. Template and alias references are marked by the same later passes as now, until C7's resolver
-takes the name scope.
-
-### I4.3 What changes in behaviour (F41, with F19 and F40's grammar items)
-
-`lex_number` follows phpdoc-parser's lexemes (`Lexer.php`, read at 2.3.5 and unchanged at 2.3.6, the latest release; its patterns are matched with the `i` modifier): an
-optional sign, `0b`, `0o` and `0x` integers and plain decimal digit runs, all with `_` separators and
-case-insensitive (`0X1F`, `1E5`, `0B1`), and floats with a fraction or exponent, including a trailing dot (`1.`).
-There is no leading-`0` octal in phpdoc-parser (`017` is a plain digit run). The values follow PHP's source
-reading and deliberately differ from PHPStan's `(int)` and `(float)` casts of the lexeme (php 8.5.4: `0x1F` reads
-31, `017` reads 15 and `0b11` reads 3, where `(int)"0x1F"` is 0 and `(int)"017"` is 17); an integer past `i64` is a
-float, as PHP reads such a literal, but `-9223372036854775808` is the int `PHP_INT_MIN`: the
-sign is part of the PHPDoc lexeme, where in PHP source the literal overflows before the minus applies (php 8.5.4:
-the source literal is `float(-9.2233720368547758E+18)` and `(int)"-9223372036854775808"` is
-`int(-9223372036854775808)`), and a float would make `@return -9223372036854775808` reject `PHP_INT_MIN`.
-Consequences, each with a fixture: a class named `Infinity`, `Nan` or `inf` is a class
-(it was `INF` or `NAN`); `@param 1_000 $u` and `0x1F` parse (they gave `phpDoc.parseError`); `1e25` is `1.0E+25`; a
-conditional's branches may hold `\Closure(): int`, `self::A` and `?T` (the first-`:` split gave `class.notFound`).
-The string parser's other known errors: `value-of` and `key-of` of a list (parsing saw only a bare array or
-shape; the lowering lowers the argument as a type, so `value-of<list<int>>` is `int`), and the differences listed
-in I4.2 (each a delta with a fixture, approved with the PHPDoc-lowering deltas; the consequences above are
-plain bug fixes). `numeric` and `non-decimal-int-string` already have their right types in
-`parse.rs` at this commit, and a bare `class-string` stays a plain `string` by design (the comment there says it
-has nothing to preserve); what needs the name scope is C7's. `TYPE-5` is not part of this: it is its own commit
-after step 5 (below).
-
-### I4.4 The consumers
-
-- **`DocType`** holds the node and the lowered `Type` made when the docblock is read (eager, DOC-2.1): the `OnceLock`
-  and the text memo go, and `WrittenType` for a bare `TypeNode` lowers it.
-- **DOC-2.2's memo key** needs no node identity. Written types are hash-consed, so the lowered `Type`'s node is the
-  identity of the written type (two docblocks that write `array<int, Foo>` share it), and the resolution context is
-  interned (PROD-5.2's `ImportScope`, the template names, the aliases, the `self` names). The key is the pair
-  (the interned `Type` itself, which the entry holds so its address cannot be reused, and the interned context's
-  id): equality is pointer identity on exact forms and costs 8 bytes, and the value is the whole resolved type.
-  A key made from a 128-bit fingerprint of the node's `exact` hash would be 64 bits of `FxHasher` from the
-  node, so a collision would hand back another type's resolution with no equality check, and `Node.exact` is
-  `pub(crate)`. If DOC-2.8's fingerprint is wanted it is a 128-bit hash over the node's structure behind a public
-  `Type` API. A test: `\StdClass` and `\stdClass`, `a|b` and `b|a`, and explicit and implicit `mixed` get
-  different keys.
-- **The 58 `parse_written_type` and the Rust-side `parse_type_string` sites** (about 20 files of `phpstan-rs`) become
-  `phpdoc::parse_phpdoc_type` / `parse_global_type` where the type is written as text for a reason (a builtin's
-  return rule, stub synthesis; `predefined_constants.rs` takes statics), and constructors where it is a literal
-  `Type::int()` in disguise.
-- **`types`' 156 test mentions:** a test that reads a type from text moves to `phpdoc/tests`, where it can use the
-  grammar and `Type`'s equality; a test of the relation, a union or a shape that only needs a type uses constructors
-  (the crate split's "about 150"). The relation tests keep their text form in the crate that has a grammar.
-
-### I4.5 Order and checks
-
-1. The lexemes: `lex_number` and the quoted-literal lexeme, with their grammar tests, one for each lexeme. The
-   string lexeme is a step-1 change and not C7's, since it needs no name scope: a backslash escapes any following
-   character inside the token (phpdoc-parser's lexer pairs a backslash with any non-newline character; ours
-   unescapes only backslash-plus-the-quote, so a literal ending in a backslash pair swallows its closing quote),
-   the unescape rules are phpdoc-parser's (`\\` and `\'` single-quoted; `\\ n r t f v e`, `\xHH`, octal and
-   `\u{..}` double-quoted), and `TypeNode::StringLiteral` and the shape key carry bytes (`PhpString`), not `String`.
-   Fixtures: the one-backslash literal in a union, an escaped quote, a double-quoted escape, a shape key with an
-   escape.
-2. `types::phpdoc_keyword` and the public shape and callable constructors, extracted with the string parser still
-   calling them (and the keyword table completed: I4.1).
-3. `phpdoc::lower`. Its baseline is VAL-1.7's PHPDoc record (batch 0), compared through VAL-1.4's canonical
-   printer, so the comparison is exact and the string parser need not stay alive; the per-`TypeNode` comparison
-   with `parse_written_type(node.to_source_string())` over the stubs, Piwigo, the vendor projects and the fixtures
-   runs for one stage only if that record cannot see what it finds (one of the policy's listed exceptions, #13). Either way the differences of I4.2 and I4.3 are the list the comparison starts from, and each new
-   difference is read and added to it with a fixture.
-4. `DocType` eager; the callers converted module by module; DOC-2.2 on the memo key.
-5. The string parser, its memo and `to_source_string`'s round-trip use deleted; `types::parse` is gone but for
-   `parse_display`. `registry/type_node.rs` (`parse_type_node`) becomes `phpdoc::lower`.
-6. TYPE-5, **its own commit after step 5** (batch 6), once template and alias references are marked: it is the
-   ledger's rule (the array member takes `K` as `array<K, V>` does, and a float or object key leaves only the empty
-   array), with fixtures for a template key, an alias key and a class key, because `K` is a template, an alias or
-   a class name when it is lowered and only the resolution step knows. F14's design text, which restricts `K` in
-   the iterable arm and drops the array member when the intersection with `int` or `string` is never, is
-   superseded by that rule; never inside `phpdoc_keyword`, which stays behaviour-exact.
-
-Oracle: O2 and `--dump-types` over the corpus, with I4.2's and I4.3's differences read. Exact otherwise.
-
-**C7 later** adds the name scope: `TypeNodeResolver` is an implementation of the scope that `lower` is generic over
-(I4.1), calling the same `phpdoc_keyword` and shape builders with the resolution of names, templates, aliases and
-`self` done in the walk, and `phpdoc::lower` is its context-free case; no second walk is written. C7 also keeps
-the pieces of the crate split's C7 text that no row names: `TypeNodeResolverExtension` (the extension point,
-registered through the `Extensions` input of J2) and the assert targets (`$param->prop`, `$param->method()` and
-`$this->method()` are kept), `@throws` and assert types getting alias substitution, and a written `Traversable`
-resolving like any name (J2's RES rows).
-
-## I5. The rule message type
-
-CHECK-6.10 (messages formatted only when reported, 37 rules), CHECK-4.1 (a message kept unformatted past the
-report) and the crate split's D6 (`RuleError`, `RuleErrorBuilder`) need one type. Read from `Checker::report`
-(`checker.rs:1507`), `report_builder`, `rewind_to` (`checker.rs:1295`), `reports_are_dropped` and
-`diagnostics::DiagnosticBuilder`.
-
-**Today.** `report(message: String, span, level, identifier)` has about 440 call sites in `checker/` (and 8 in
-`project/mock_hygiene.rs`) and `report_builder(DiagnosticBuilder)` 113; a message is `format!`ed at the call, so a
-type is displayed even when the report is dropped by `rewind_to` (a
-loop's second pass, 30 of the 55 `offsetAccess.mightNotExist` messages, about 409 K Ir each), by
-`reports_are_dropped()` (after the string is built), or by the level filter (22 more, which E5 removes by not
-running a rule above the level). Several rules format a subject for every element they check, reported or not
-(`phpdoc_type_compat.rs:359`, 21,919 of them). `report` builds the `Diagnostic` at once, converting the span to a
-line and column with the file's `LineIndex`, and pushes it; `rewind_to` truncates the vector. **Not everything
-pushed is a `report` call, and not every drop is before the check ends:** `check_trait_methods` checks a trait
-once per host, then sorts its own slice of the diagnostics by (span, message), dedups by span and message and
-retains by identifier and span (`function_decl.rs`, all before the check ends); the rules' `check_stmt` and
-`check_expr` return `Vec<Diagnostic>` that the checker extends (`stmt.rs`, `expr.rs`);
-`check_too_wide_property_types` and eleven `self.diagnostics.push(DiagnosticBuilder::new(..).build(self.line_index))`
-in `phpstan_api.rs` push ready-made `Diagnostic`s; and `sort_diagnostics` (in `diagnostics`) breaks ties by the
-rendered message.
-
-**The type.** One `Message`, with `Own` in `syntax` (the impl for `Name`), the impl for `Type` in `types`, and
-`Message`, `message!` and `RuleError` in `diagnostics`, which depends on `syntax` alone and so can name `Own` and
-`Name`; a `Message` is a boxed closure and names neither `Type` nor `Name`, only the `Own` impls do. That keeps
-`RuleError` where the crate split's 3.7 puts it (`diagnostics`).
-
-```rust
-pub struct Message(Repr);
-enum Repr { Text(String), Deferred(Box<dyn FnOnce() -> String>) }
-impl Message {
-    pub fn from_static(s: &'static str) -> Message;  pub fn text(s: String) -> Message;   // the only constructors
-    pub fn render(self) -> String;  pub fn rendered(&mut self) -> &str                   // rendered: caches into Text, for the dedup and the sort's tie-break
-}
-// interim, steps (1) to (3) only: impl From<String> for Message {}   (deleted in step 4)
-trait Own { type Owned: Display + Debug + 'static; fn own(self) -> Self::Owned }       // Type and Name by clone, &str by Arc<str>, numbers by copy, a Display newtype
-message!("Parameter #{} ${} of {} expects {}, {} given.", i, &name, &func, &expected, &given)   // deferred; each argument owned once
-message!("Offset {dim} might not exist on {container}.")                              // captures too
-```
-
-- `message!` is a proc-macro in a small `phpstan-rs-macros` crate (a new crate: #32's file set), because a
-  `macro_rules!` cannot number its arguments and 464 of the checker's 849 `format!` lines use inline captures
-  (`{dim}`, `{key:?}`). It parses the literal, owns every positional and captured argument through `Own` (once,
-  at the call: `Type` and `Name` clones are refcount increments), accepts `{x:?}` and width specs (so
-  `Own::Owned: Debug`), and defers the `format!`; its dependencies (`syn`, `quote`, `proc-macro2`) are judged on
-  merit like the others, and the build-time gate is checked. A message built from text stays `Text`: an
-  external rule's `RuleErrorBuilder::message("...")` costs what it does now.
-- **Pending reports.** The checker's `diagnostics` vector holds `Entry::Pending(Pending { message, tips:
-  Vec<Message>, span, level, identifier, non_ignorable, fix })` or `Entry::Done(Diagnostic)` (the ready-made
-  ones above, until D6 retires the external splices); `report` pushes a `Pending`; `rewind_to` truncates, so a
-  dropped report is never formatted and never converted to a line and column; `into_diagnostics()` renders the
-  survivors and builds their ranges, then sorts. So "displayed" means "the file's check ended", which is after
-  every drop the checker makes **except the trait path**: `check_trait_methods` renders its slice's messages
-  (`rendered`) before it dedups, because the dedup needs message equality, so a trait method costs hosts ×
-  findings renders. `Message` has no `PartialEq`; `rendered` is the only way to compare.
-- **Tips and fixes** are `Message`s too (a tip is a message; a fix's description is). A fix's replacement text,
-  which is code and not prose, stays a `String`.
-- **Identifiers** are `&'static str` (CHECK-6.10's "a closed set"): the sites that build one with `format!` are
-  about 52 (43 `report(` calls and 11 `DiagnosticBuilder::new(` calls, 21 files, e.g. `duplicates.rs`'s
-  `"{kind}.duplicateEnumCase"`), and they become members of the families the batch builds: a const table, kind ×
-  suffix, debug-asserted against the closed set, in step (3), so the sites are static now and D6 adopts it;
-  `Identifier` keeps its `Cow` for rules outside the package.
-- **`RuleError`** (D6) is a `Pending` without the file: `RuleErrorBuilder::message(impl Into<RuleMessage>)`,
-  `.identifier(...)`, `.tip(...)`, `.non_ignorable()`, `.fix(...)`, where `RuleMessage: From<String> +
-  From<Message>`, so an extension's string still works while the checker's own methods take `Message` only. The
-  dispatcher turns each into a `Pending` of the checker it runs in (or straight into a `Diagnostic` where no
-  checker is), attaching the file and the trait file.
-- **The engine boundary.** `FileCheck.diagnostics` holds rendered `Diagnostic`s, exact values that compare and
-  persist (H1.5b, H4.6); a `Message` never crosses it. A warm run that reads a persisted check renders nothing.
-
-**Order.** (1) `Message`, `Own`, `message!`, `Entry`, `report` taking `impl Into<Message>`, `into_diagnostics`
-rendering; the interim is `report`'s `impl Into<Message>` signature and `impl From<String> for Message`, so every
-existing call site compiles; the trait path's `rendered` and the `Entry::Done` pushes come here too. (2)
-`report_missing_offset` (CHECK-4.1's measured site). (3) CHECK-6.10's 37 rules, one commit each family, in two
-kinds: a site whose element is rarely reported carries borrowed parts or `Name`/`Type` newtypes (a lazy `Display`
-subject, as 20 G designs it) to the report and formats there, because `message!` allocates a `Box` and an
-`Arc<str>` on the kept path, and only a site that reports and then drops uses `message!`; kept-path allocations
-are measured before and after in the check phase's callgrind, as the plan already promises for the scalar-only
-sites. The identifier families (a const table) land here too. (4) Then every other site, about 440 of `report`
-and 113 of `report_builder`: the checker's own methods stop accepting a `String` (they take `Message`, and the
-interim `From<String>` is deleted), so the compiler names each remaining site and none is left to be converted
-someday. A literal becomes `Message::from_static`, anything with arguments `message!`, and `Message::text` is the
-explicit eager form: it is in `disallowed-methods` (a per-package list in `crates/phpstan-rs/clippy.toml`, so
-package-wide until the split makes `checker/` a crate, and the 20 or more existing
-`allow(clippy::disallowed_methods)` sites show how far that list already reaches), and each use carries
-`#[expect(clippy::disallowed_methods, reason = "...")]` that an `xtask` counts, so the count ignores the older
-allows. The end state is measured (callgrind of the check phase, O2): a net regression on the reports that are
-kept would send the scalar-only sites back to `Message::text` by that explicit, counted `expect`. D6 builds
-`RuleError` on the same `Message` when it is reached; the rule API takes `RuleMessage`, so an extension's string
-costs what it does now.
-
-**Checks.** `message!` renders as `format!` for each `Own` impl (integers, `&str`, `String`, `Type`, `Name`, a
-`Display` newtype, a Debug capture); a dropped deferred message is never rendered (a test-only counter in the
-closure); `rewind_to` then `into_diagnostics` gives the diagnostics of the kept passes only; a test of the trait
-path (hosts × findings, the dedup by `rendered`); a targeted test per family between conversion commits, and O2
-(every message and tip byte-identical) once, at the end of batch 7 (validation at the end of
-the item, never per commit). **Estimate, unmeasured:** CHECK-4.1's 22.5 M is for all 55 `offsetAccess` formats; the
-22 the level filter drops are dropped in the finalizer, after the checker returned, and E5 removes them by not
-running the rule, so this step saves about 13.5 M (33 messages, labelled an estimate) and the other 9 M waits for
-E5; the 37 rules' temporaries (21,919 and 46,005 allocations are two of them); nothing is claimed before a run.
-
-*Left as it is:* the items of I4.3 that wait for C7's name scope, which the lowering does not have.
 
 ## G3. The error-node model and parse recovery
 
@@ -1505,6 +1236,271 @@ rules of H1.5 are tested where they can be in batch 4: `Exact`, the same-node te
 of H1.2. The test that two `Provenance` values for one class at different lines are equal once the span is out
 moves to the commit that removes the span (REG-4.15, W2 step 5): from batch 5 (PROD-5.1's site table) until then
 declarations hold their spans and the site table at once.
+
+## I4. The single grammar's lowering
+
+F41 (`STAGE_B_FIX_REVIEW.md`), DOC-2.1 (the ledger) and C7's grammar item are one piece of work. (Finding numbers
+are ambiguous across the two review files: F40, F41, F51, F61 and F63 exist in both with different content; this part
+cites `STAGE_B_REVIEW` F40, the PHPDoc parsing one, and `STAGE_B_FIX_REVIEW` F41.) Sources: `types/src/parse.rs`
+(1,429 lines, outline and the keyword table), `phpdoc/src/grammar/ast.rs` (`TypeNode`, 19 variants),
+`phpdoc/src/doc_type.rs` and `registry/type_node.rs`, and the call sites (58 mentions of `parse_written_type`
+in 3 crates, 219 of `parse_type_string`, 156 of them in `types`' own tests).
+
+**Today.** A PHPDoc type is parsed twice. `phpdoc::grammar` lexes and parses it into a `TypeNode` (and reports
+`phpDoc.parseError`); then `DocType::ty` renders the node back to text (`to_source_string`) and
+`types::parse_written_type` parses that text again with a second, string-splitting parser, memoized by the text
+(2,048 entries in each of 64 shards: 131,072 entries and 64 MiB of text at most). Each of F41's bullets is a place
+where one of the two gets the language wrong. `types::parse_display`
+is a third reader, of a different language (a type's `Display`, which `assertType()` and the type dumps are written
+in); it stays, being `Display`'s inverse.
+
+### I4.1 Where it lives
+
+- **The lowering is `phpdoc::lower`.** `phpdoc` depends on `types` and `syntax`; `types` depends on `syntax` only.
+  F41 considered moving the grammar into a crate below `types` so `types` could keep a text entry point. It does
+  not need one: outside its own tests `types` calls its parser only from `parse.rs` itself. So `types` loses its
+  parser, as the crate split's §3.3 says ("`types::parse_type_string` deleted"), and the grammar stays where
+  DOC-2.1 put it. No new crate.
+- **The type knowledge stays in `types`:** the keyword table (`parse_type_keyword_or_class`, about 380 lines of
+  `int-mask`, `class-string`, `non-empty-lowercase-string`, `key-of`, ...) becomes `types::phpdoc_keyword(word, args:
+  &[Type]) -> Option<Type>`, taking lowered arguments where it takes argument text now, and the builders
+  the string parser's `try_parse_array_shape`, `try_parse_object_shape` and `try_parse_callable_shape` use become
+  public constructors (`Shape::from_fields`, `CallableSig::from_parts` and the like) that `lower` calls. The string
+  splitters (`split_top_level`, `top_level_find`, `matching_close`, `try_parse_conditional_type`,
+  `parse_type_atom`) are deleted. **The extraction also completes the table** against `TypeNodeResolver`'s
+  identifier and generic case lists, with a fixture per keyword: the string parser lacks `number`,
+  `empty-scalar`, `non-empty-scalar`, `non-empty-literal-string`, `associative-array`, `static-closure`,
+  `static-pure-closure`, `non-empty-mixed`, `callable-object`, `callable-array`, `empty`, the `__string*` pair,
+  and the generics `__benevolent`, `new` and `template-type` (checked in the vendored `phpstan-src` at 2.2.16,
+  and again at 2.3.1, the latest release, where every one is still in `TypeNodeResolver`), so each reads as a class today, is namespace-qualified and
+  reaches `class.notFound`. `number`, like `scalar` and `numeric`, yields to a class or a `use` alias of that
+  name (PHPStan's `tryResolvePseudoTypeClassType`), the one scope-dependent part, which C7 does; the rest of
+  C7's "PHPDoc keyword types resolve before namespace qualification" is done here, and leaves C7's and RES-1's
+  lists.
+- **Entry points** in `phpdoc` (one name across #14, F41 and here): `lower(&TypeNode) -> Type` (names as
+  written, a leading `\` kept: what `parse_written_type` returns), `parse_phpdoc_type(text) -> (Type,
+  Vec<ParseError>)` (lex, parse, lower) and `parse_global_type(text)` (the old `parse_type_string`: leading `\`
+  stripped). The text entry points return the errors, because a string a user supplied must not turn into the
+  error type, which accepts and is accepted by everything, with no report: `checker/constant_resolver.rs`,
+  `restricted_symbol_usage.rs` and `registry/assertion_table.rs` parse user-supplied texts today with no error
+  channel, and those callers report. Fixed texts (`predefined_constants.rs` parses nine per call) are statics
+  (a `LazyLock` table, as 25 G says), and the text memo goes unless a dynamic caller measures a need for it. An
+  error node lowers to the error type; a tag with an error contributes nothing when PHPStan parses that tag
+  family (a `phpstan-` prefixed tag, or one in `PLAIN_TAGS_PHPSTAN_PARSES`), and the others apply as they are
+  (`docblock.rs`). A *missing-token* error whose recovery is unambiguous (a `callable` with no return type, I4.2)
+  is not an error node: the grammar reports it and the lowering keeps what the author wrote, so the tag keeps the
+  recovered type.
+- **`lower` is a walk generic over a scope** (the identity scope gives `lower`), living in `phpdoc`, so that C7
+  adds an implementation (names, templates, aliases and `self` resolved in the walk) and not a second walk. It is
+  written against the node accessors that DOC-2.7 keeps (children by iterator), so DOC-2.5 and 2.7 change the
+  node's storage and not `lower`; after C7 `DocType` keeps the node, and the resolved type is DOC-2.2's memo value.
+
+### I4.2 The lowering, by `TypeNode` variant
+
+| node | lowers to |
+|---|---|
+| `Identifier(w)` | `phpdoc_keyword(w, [])`, else the class of that name as written; `$this`, `self`, `static`, `parent` as now |
+| `Nullable(t)`, `Union`, `Intersection`, `Paren` | the normalizing constructors (`Type::union_of`, `intersect_types`); `?T` is the normalizing union of `T` and `null` (the string parser builds a raw nested union, a delta: flattened), and `?mixed` is `mixed` (tested by `is_mixed()`); **the written width is bounded:** `union_types_many` flattens every operand with `push_member`, a linear scan per member, and runs its passes before `MAX_UNION_MEMBERS` applies, so a written union of n distinct members costs at least n²/2 comparisons, and `eager` `DocType` runs the lowering for every docblock read; the lowering caps the written width at a multiple of the cap and generalizes as the cap does (or dedupes through a hash set before the passes), with a 50,000-member union, a 100,000-deep nest and colliding-name inputs (`FxHasher` does not resist collisions) in I4.5 step 3's inputs and S-1's |
+| `Generic(w, args)` | `phpdoc_keyword(w, lowered args)`, else a generic class reference; `int<a, b>` is a range only for the exact word `int` (the string parser tests `ends_with("int")`, so `Point<1, 2>` becomes a range today, a delta); an argument of a keyword generic is lowered as the type it is, and a wildcard or a variance marker there is accepted as PHPStan does: phpdoc-parser turns `*` into `mixed` with bivariant variance and PHPStan's `array`, `list` and the other keyword generics ignore variances, so `array<*, int>` is `array<mixed, int>`; only the class arm used them (`parse_generic_arg`), and today a keyword argument that holds one fails, a delta |
+| `Wildcard`, `VarianceArg` | for a class generic as `parse_generic_arg` does: any type; call-site variance |
+| `ArrayOf(t)`, `OffsetAccess(b, o)` | `array<t>` (list-ness as the string parser gives it today), the offset-access type with any type as the offset (the string parser read it as a shape key by name, a delta) |
+| `ArrayShape { keyword, fields, sealed, unsealed_type }` | the shape constructors with `list`, `non-empty` and `object` refinements kept (`STAGE_B_REVIEW` F40) |
+| `Callable { keyword, templates, params, return_type }` | `CallableSig` with its own templates marked; **without a return type** (`callable(int)`) the grammar records a PHPDoc syntax error for the missing return type, as phpdoc-parser and PHPStan do (at 2.3.6 `parseCallable` consumes the colon unconditionally, so it is mandatory there; the port's `None` branch carries no note that its acceptance is deliberate), and the node is lowered as written, `callable(int): mixed`, so the tag keeps the parameters the author wrote, where the string parser's fallback, a bare `callable`, discarded them (the missing-token recovery of G3.2 item 1, applied to PHPDoc); `Closure(...)` is the intersection of `\Closure` and the callable (`parse.rs`), not the bare class |
+| `IntRange`, `IntLiteral`, `FloatLiteral`, `StringLiteral` | the literal types; a float only from a `FloatLiteral` token |
+| `ConstFetch { class, const_name }` | the constant-fetch type, a trailing `*` kept; `Foo::class` is `class-string<Foo>` (`Type::class_string`, as the string parser has it) |
+| `Conditional { subject, negated, target, if_true, if_false }` | `ConditionalSubject` and the three lowered branches (each branch is the node the grammar built) |
+| `Error` | the error type |
+
+The explicit `mixed` of a node is the kind F21 gives (`Mixed(Explicit)`), set at the keyword by `phpdoc_keyword`, as
+the string parser already does at `Type::explicit_mixed()`; the text search for explicit `mixed` that C7 mentions is
+gone. Template and alias references are marked by the same later passes as now, until C7's resolver
+takes the name scope.
+
+### I4.3 What changes in behaviour (F41, with F19 and F40's grammar items)
+
+`lex_number` follows phpdoc-parser's lexemes (`Lexer.php`, read at 2.3.5 and unchanged at 2.3.6, the latest release; its patterns are matched with the `i` modifier): an
+optional sign, `0b`, `0o` and `0x` integers and plain decimal digit runs, all with `_` separators and
+case-insensitive (`0X1F`, `1E5`, `0B1`), and floats with a fraction or exponent, including a trailing dot (`1.`).
+There is no leading-`0` octal in phpdoc-parser (`017` is a plain digit run). The values follow PHP's source
+reading and deliberately differ from PHPStan's `(int)` and `(float)` casts of the lexeme (php 8.5.4: `0x1F` reads
+31, `017` reads 15 and `0b11` reads 3, where `(int)"0x1F"` is 0 and `(int)"017"` is 17); an integer past `i64` is a
+float, as PHP reads such a literal, but `-9223372036854775808` is the int `PHP_INT_MIN`: the
+sign is part of the PHPDoc lexeme, where in PHP source the literal overflows before the minus applies (php 8.5.4:
+the source literal is `float(-9.2233720368547758E+18)` and `(int)"-9223372036854775808"` is
+`int(-9223372036854775808)`), and a float would make `@return -9223372036854775808` reject `PHP_INT_MIN`.
+Consequences, each with a fixture: a class named `Infinity`, `Nan` or `inf` is a class
+(it was `INF` or `NAN`); `@param 1_000 $u` and `0x1F` parse (they gave `phpDoc.parseError`); `1e25` is `1.0E+25`; a
+conditional's branches may hold `\Closure(): int`, `self::A` and `?T` (the first-`:` split gave `class.notFound`).
+The string parser's other known errors: `value-of` and `key-of` of a list (parsing saw only a bare array or
+shape; the lowering lowers the argument as a type, so `value-of<list<int>>` is `int`), and the differences listed
+in I4.2 (each a delta with a fixture, approved with the PHPDoc-lowering deltas; the consequences above are
+plain bug fixes). `numeric` and `non-decimal-int-string` already have their right types in
+`parse.rs` at this commit, and a bare `class-string` stays a plain `string` by design (the comment there says it
+has nothing to preserve); what needs the name scope is C7's. `TYPE-5` is not part of this: it is its own commit
+after step 5 (below).
+
+### I4.4 The consumers
+
+- **`DocType`** holds the node and the lowered `Type` made when the docblock is read (eager, DOC-2.1): the `OnceLock`
+  and the text memo go, and `WrittenType` for a bare `TypeNode` lowers it.
+- **DOC-2.2's memo key** needs no node identity. Written types are hash-consed, so the lowered `Type`'s node is the
+  identity of the written type (two docblocks that write `array<int, Foo>` share it), and the resolution context is
+  interned (PROD-5.2's `ImportScope`, the template names, the aliases, the `self` names). The key is the pair
+  (the interned `Type` itself, which the entry holds so its address cannot be reused, and the interned context's
+  id): equality is pointer identity on exact forms and costs 8 bytes, and the value is the whole resolved type.
+  A key made from a 128-bit fingerprint of the node's `exact` hash would be 64 bits of `FxHasher` from the
+  node, so a collision would hand back another type's resolution with no equality check, and `Node.exact` is
+  `pub(crate)`. If DOC-2.8's fingerprint is wanted it is a 128-bit hash over the node's structure behind a public
+  `Type` API. A test: `\StdClass` and `\stdClass`, `a|b` and `b|a`, and explicit and implicit `mixed` get
+  different keys.
+- **The 58 `parse_written_type` and the Rust-side `parse_type_string` sites** (about 20 files of `phpstan-rs`) become
+  `phpdoc::parse_phpdoc_type` / `parse_global_type` where the type is written as text for a reason (a builtin's
+  return rule, stub synthesis; `predefined_constants.rs` takes statics), and constructors where it is a literal
+  `Type::int()` in disguise.
+- **`types`' 156 test mentions:** a test that reads a type from text moves to `phpdoc/tests`, where it can use the
+  grammar and `Type`'s equality; a test of the relation, a union or a shape that only needs a type uses constructors
+  (the crate split's "about 150"). The relation tests keep their text form in the crate that has a grammar.
+
+### I4.5 Order and checks
+
+1. The lexemes: `lex_number` and the quoted-literal lexeme, with their grammar tests, one for each lexeme. The
+   string lexeme is a step-1 change and not C7's, since it needs no name scope: a backslash escapes any following
+   character inside the token (phpdoc-parser's lexer pairs a backslash with any non-newline character; ours
+   unescapes only backslash-plus-the-quote, so a literal ending in a backslash pair swallows its closing quote),
+   the unescape rules are phpdoc-parser's (`\\` and `\'` single-quoted; `\\ n r t f v e`, `\xHH`, octal and
+   `\u{..}` double-quoted), and `TypeNode::StringLiteral` and the shape key carry bytes (`PhpString`), not `String`.
+   Fixtures: the one-backslash literal in a union, an escaped quote, a double-quoted escape, a shape key with an
+   escape.
+2. `types::phpdoc_keyword` and the public shape and callable constructors, extracted with the string parser still
+   calling them (and the keyword table completed: I4.1).
+3. `phpdoc::lower`. Its baseline is VAL-1.7's PHPDoc record (batch 0), compared through VAL-1.4's canonical
+   printer, so the comparison is exact and the string parser need not stay alive; the per-`TypeNode` comparison
+   with `parse_written_type(node.to_source_string())` over the stubs, Piwigo, the vendor projects and the fixtures
+   runs for one stage only if that record cannot see what it finds (one of the policy's listed exceptions, #13). Either way the differences of I4.2 and I4.3 are the list the comparison starts from, and each new
+   difference is read and added to it with a fixture.
+4. `DocType` eager; the callers converted module by module; DOC-2.2 on the memo key.
+5. The string parser, its memo and `to_source_string`'s round-trip use deleted; `types::parse` is gone but for
+   `parse_display`. `registry/type_node.rs` (`parse_type_node`) becomes `phpdoc::lower`.
+6. TYPE-5, **its own commit after step 5** (batch 6), once template and alias references are marked: it is the
+   ledger's rule (the array member takes `K` as `array<K, V>` does, and a float or object key leaves only the empty
+   array), with fixtures for a template key, an alias key and a class key, because `K` is a template, an alias or
+   a class name when it is lowered and only the resolution step knows. F14's design text, which restricts `K` in
+   the iterable arm and drops the array member when the intersection with `int` or `string` is never, is
+   superseded by that rule; never inside `phpdoc_keyword`, which stays behaviour-exact.
+
+Oracle: O2 and `--dump-types` over the corpus, with I4.2's and I4.3's differences read. Exact otherwise.
+
+**C7 later** adds the name scope: `TypeNodeResolver` is an implementation of the scope that `lower` is generic over
+(I4.1), calling the same `phpdoc_keyword` and shape builders with the resolution of names, templates, aliases and
+`self` done in the walk, and `phpdoc::lower` is its context-free case; no second walk is written. C7 also keeps
+the pieces of the crate split's C7 text that no row names: `TypeNodeResolverExtension` (the extension point,
+registered through the `Extensions` input of J2) and the assert targets (`$param->prop`, `$param->method()` and
+`$this->method()` are kept), `@throws` and assert types getting alias substitution, and a written `Traversable`
+resolving like any name (J2's RES rows).
+
+## I5. The rule message type
+
+CHECK-6.10 (messages formatted only when reported, 37 rules), CHECK-4.1 (a message kept unformatted past the
+report) and the crate split's D6 (`RuleError`, `RuleErrorBuilder`) need one type. Read from `Checker::report`
+(`checker.rs:1507`), `report_builder`, `rewind_to` (`checker.rs:1295`), `reports_are_dropped` and
+`diagnostics::DiagnosticBuilder`.
+
+**Today.** `report(message: String, span, level, identifier)` has about 440 call sites in `checker/` (and 8 in
+`project/mock_hygiene.rs`) and `report_builder(DiagnosticBuilder)` 113; a message is `format!`ed at the call, so a
+type is displayed even when the report is dropped by `rewind_to` (a
+loop's second pass, 30 of the 55 `offsetAccess.mightNotExist` messages, about 409 K Ir each), by
+`reports_are_dropped()` (after the string is built), or by the level filter (22 more, which E5 removes by not
+running a rule above the level). Several rules format a subject for every element they check, reported or not
+(`phpdoc_type_compat.rs:359`, 21,919 of them). `report` builds the `Diagnostic` at once, converting the span to a
+line and column with the file's `LineIndex`, and pushes it; `rewind_to` truncates the vector. **Not everything
+pushed is a `report` call, and not every drop is before the check ends:** `check_trait_methods` checks a trait
+once per host, then sorts its own slice of the diagnostics by (span, message), dedups by span and message and
+retains by identifier and span (`function_decl.rs`, all before the check ends); the rules' `check_stmt` and
+`check_expr` return `Vec<Diagnostic>` that the checker extends (`stmt.rs`, `expr.rs`);
+`check_too_wide_property_types` and eleven `self.diagnostics.push(DiagnosticBuilder::new(..).build(self.line_index))`
+in `phpstan_api.rs` push ready-made `Diagnostic`s; and `sort_diagnostics` (in `diagnostics`) breaks ties by the
+rendered message.
+
+**The type.** One `Message`, with `Own` in `syntax` (the impl for `Name`), the impl for `Type` in `types`, and
+`Message`, `message!` and `RuleError` in `diagnostics`, which depends on `syntax` alone and so can name `Own` and
+`Name`; a `Message` is a boxed closure and names neither `Type` nor `Name`, only the `Own` impls do. That keeps
+`RuleError` where the crate split's 3.7 puts it (`diagnostics`).
+
+```rust
+pub struct Message(Repr);
+enum Repr { Text(String), Deferred(Box<dyn FnOnce() -> String>) }
+impl Message {
+    pub fn from_static(s: &'static str) -> Message;  pub fn text(s: String) -> Message;   // the only constructors
+    pub fn render(self) -> String;  pub fn rendered(&mut self) -> &str                   // rendered: caches into Text, for the dedup and the sort's tie-break
+}
+// interim, steps (1) to (3) only: impl From<String> for Message {}   (deleted in step 4)
+trait Own { type Owned: Display + Debug + 'static; fn own(self) -> Self::Owned }       // Type and Name by clone, &str by Arc<str>, numbers by copy, a Display newtype
+message!("Parameter #{} ${} of {} expects {}, {} given.", i, &name, &func, &expected, &given)   // deferred; each argument owned once
+message!("Offset {dim} might not exist on {container}.")                              // captures too
+```
+
+- `message!` is a proc-macro in a small `phpstan-rs-macros` crate (a new crate: #32's file set), because a
+  `macro_rules!` cannot number its arguments and 464 of the checker's 849 `format!` lines use inline captures
+  (`{dim}`, `{key:?}`). It parses the literal, owns every positional and captured argument through `Own` (once,
+  at the call: `Type` and `Name` clones are refcount increments), accepts `{x:?}` and width specs (so
+  `Own::Owned: Debug`), and defers the `format!`; its dependencies (`syn`, `quote`, `proc-macro2`) are judged on
+  merit like the others, and the build-time gate is checked. A message built from text stays `Text`: an
+  external rule's `RuleErrorBuilder::message("...")` costs what it does now.
+- **Pending reports.** The checker's `diagnostics` vector holds `Entry::Pending(Pending { message, tips:
+  Vec<Message>, span, level, identifier, non_ignorable, fix })` or `Entry::Done(Diagnostic)` (the ready-made
+  ones above, until D6 retires the external splices); `report` pushes a `Pending`; `rewind_to` truncates, so a
+  dropped report is never formatted and never converted to a line and column; `into_diagnostics()` renders the
+  survivors and builds their ranges, then sorts. So "displayed" means "the file's check ended", which is after
+  every drop the checker makes **except the trait path**: `check_trait_methods` renders its slice's messages
+  (`rendered`) before it dedups, because the dedup needs message equality, so a trait method costs hosts ×
+  findings renders. `Message` has no `PartialEq`; `rendered` is the only way to compare.
+- **Tips and fixes** are `Message`s too (a tip is a message; a fix's description is). A fix's replacement text,
+  which is code and not prose, stays a `String`.
+- **Identifiers** are `&'static str` (CHECK-6.10's "a closed set"): the sites that build one with `format!` are
+  about 52 (43 `report(` calls and 11 `DiagnosticBuilder::new(` calls, 21 files, e.g. `duplicates.rs`'s
+  `"{kind}.duplicateEnumCase"`), and they become members of the families the batch builds: a const table, kind ×
+  suffix, debug-asserted against the closed set, in step (3), so the sites are static now and D6 adopts it;
+  `Identifier` keeps its `Cow` for rules outside the package.
+- **`RuleError`** (D6) is a `Pending` without the file: `RuleErrorBuilder::message(impl Into<RuleMessage>)`,
+  `.identifier(...)`, `.tip(...)`, `.non_ignorable()`, `.fix(...)`, where `RuleMessage: From<String> +
+  From<Message>`, so an extension's string still works while the checker's own methods take `Message` only. The
+  dispatcher turns each into a `Pending` of the checker it runs in (or straight into a `Diagnostic` where no
+  checker is), attaching the file and the trait file.
+- **The engine boundary.** `FileCheck.diagnostics` holds rendered `Diagnostic`s, exact values that compare and
+  persist (H1.5b, H4.6); a `Message` never crosses it. A warm run that reads a persisted check renders nothing.
+
+**Order.** (1) `Message`, `Own`, `message!`, `Entry`, `report` taking `impl Into<Message>`, `into_diagnostics`
+rendering; the interim is `report`'s `impl Into<Message>` signature and `impl From<String> for Message`, so every
+existing call site compiles; the trait path's `rendered` and the `Entry::Done` pushes come here too. (2)
+`report_missing_offset` (CHECK-4.1's measured site). (3) CHECK-6.10's 37 rules, one commit each family, in two
+kinds: a site whose element is rarely reported carries borrowed parts or `Name`/`Type` newtypes (a lazy `Display`
+subject, as 20 G designs it) to the report and formats there, because `message!` allocates a `Box` and an
+`Arc<str>` on the kept path, and only a site that reports and then drops uses `message!`; kept-path allocations
+are measured before and after in the check phase's callgrind, as the plan already promises for the scalar-only
+sites. The identifier families (a const table) land here too. (4) Then every other site, about 440 of `report`
+and 113 of `report_builder`: the checker's own methods stop accepting a `String` (they take `Message`, and the
+interim `From<String>` is deleted), so the compiler names each remaining site and none is left to be converted
+someday. A literal becomes `Message::from_static`, anything with arguments `message!`, and `Message::text` is the
+explicit eager form: it is in `disallowed-methods` (a per-package list in `crates/phpstan-rs/clippy.toml`, so
+package-wide until the split makes `checker/` a crate, and the 20 or more existing
+`allow(clippy::disallowed_methods)` sites show how far that list already reaches), and each use carries
+`#[expect(clippy::disallowed_methods, reason = "...")]` that an `xtask` counts, so the count ignores the older
+allows. The end state is measured (callgrind of the check phase, O2): a net regression on the reports that are
+kept would send the scalar-only sites back to `Message::text` by that explicit, counted `expect`. D6 builds
+`RuleError` on the same `Message` when it is reached; the rule API takes `RuleMessage`, so an extension's string
+costs what it does now.
+
+**Checks.** `message!` renders as `format!` for each `Own` impl (integers, `&str`, `String`, `Type`, `Name`, a
+`Display` newtype, a Debug capture); a dropped deferred message is never rendered (a test-only counter in the
+closure); `rewind_to` then `into_diagnostics` gives the diagnostics of the kept passes only; a test of the trait
+path (hosts × findings, the dedup by `rendered`); a targeted test per family between conversion commits, and O2
+(every message and tip byte-identical) once, at the end of batch 7 (validation at the end of
+the item, never per commit). **Estimate, unmeasured:** CHECK-4.1's 22.5 M is for all 55 `offsetAccess` formats; the
+22 the level filter drops are dropped in the finalizer, after the checker returned, and E5 removes them by not
+running the rule, so this step saves about 13.5 M (33 messages, labelled an estimate) and the other 9 M waits for
+E5; the 37 rules' temporaries (21,919 and 46,005 allocations are two of them); nothing is claimed before a run.
+
+*Left as it is:* the items of I4.3 that wait for C7's name scope, which the lowering does not have.
 
 ## Decisions
 
