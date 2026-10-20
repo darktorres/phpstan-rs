@@ -39,6 +39,11 @@ pub(crate) struct Locals {
     // invalidates is among these few, not among every local. Kept by every
     // method that adds or removes a key.
     synthetic: KeySet,
+    // The variables that some path to here leaves undefined and another
+    // defines. Such a variable keeps the type its defining paths give, and a
+    // read of it reports `variable.possiblyUndefined`. Cleared by every write
+    // and by `unset`, which leaves the variable certainly undefined.
+    maybe_undefined: KeySet,
     // Each variable's native type - what PHP itself guarantees, ignoring
     // PHPDoc - where known: a parameter's native hint, or the native type
     // of the expression last assigned to it. Absent means unknown
@@ -116,6 +121,7 @@ impl Locals {
             class: class.map(syntax::name::Name::from),
             types: LocalsMap::default(),
             synthetic: KeySet::default(),
+            maybe_undefined: KeySet::default(),
             native: LocalsMap::default(),
             provenance: ProvenanceMap::default(),
             guarded_functions: GuardedFunctionSet::default(),
@@ -219,6 +225,11 @@ impl Locals {
             .is_some_and(|key| self.types.contains_key(&key))
     }
 
+    /// Whether the variable `name` is defined on every path to here.
+    pub(crate) fn is_certainly_defined_var(&self, name: &str) -> bool {
+        self.contains_var(name) && !self.is_maybe_undefined_var(name)
+    }
+
     /// See `may_have_member_narrowing`'s own doc comment.
     pub(crate) fn may_have_member_narrowing(&self) -> bool {
         self.may_have_member_narrowing
@@ -267,6 +278,7 @@ impl Locals {
     /// declaration site doesn't move just because its known type changed.
     pub(crate) fn insert(&mut self, key: LocalKey, ty: Type) -> Option<Type> {
         self.touch();
+        self.maybe_undefined.remove(&key);
         self.note_synthetic(key);
         self.types.insert(key, ty)
     }
@@ -326,6 +338,7 @@ impl Locals {
     /// makes anything tracked before it a dead candidate.
     pub(crate) fn declare(&mut self, key: LocalKey, ty: Type, span: Span) -> Option<Type> {
         self.touch();
+        self.maybe_undefined.remove(&key);
         self.native.remove(&key);
         if self.track {
             let mut set = ProvenanceSet::default();
@@ -477,8 +490,56 @@ impl Locals {
         self.provenance.get(&key)
     }
 
+    /// Whether the variable `key` is defined on some path to here and not on
+    /// every one.
+    pub(crate) fn is_maybe_undefined(&self, key: LocalKey) -> bool {
+        self.maybe_undefined.contains(&key)
+    }
+
+    /// The variables that are defined on some path to here and not on every
+    /// one.
+    pub(crate) fn maybe_undefined_keys(&self) -> impl Iterator<Item = &LocalKey> {
+        self.maybe_undefined.iter()
+    }
+
+    /// `is_maybe_undefined` for the variable `name`.
+    pub(crate) fn is_maybe_undefined_var(&self, name: &str) -> bool {
+        self.find_var(name)
+            .is_some_and(|key| self.maybe_undefined.contains(&key))
+    }
+
+    /// Marks the variable `key` as defined on some paths only, when it holds a
+    /// type here.
+    pub(crate) fn mark_maybe_undefined(&mut self, key: LocalKey) {
+        if self.types.contains_key(&key) {
+            self.touch();
+            self.maybe_undefined.insert(key);
+        }
+    }
+
+    /// Narrows `key` to `ty` on a branch. A variable undefined on the way in
+    /// reads as `null` to a narrowing, so only a `ty` that rules `null` out
+    /// defines it: otherwise it stays as it was, absent or maybe-defined. A
+    /// non-variable is inserted as is.
+    pub(crate) fn narrow_to(&mut self, key: LocalKey, ty: Type) {
+        if !self.is_real_variable(key) {
+            self.insert(key, ty);
+            return;
+        }
+        let excludes_null = ty.union_members().iter().all(|m| m.is_null().no());
+        if !self.types.contains_key(&key) && !excludes_null {
+            return;
+        }
+        let stays_maybe = !excludes_null && self.maybe_undefined.contains(&key);
+        self.insert(key, ty);
+        if stays_maybe {
+            self.mark_maybe_undefined(key);
+        }
+    }
+
     pub(crate) fn remove(&mut self, key: LocalKey) -> Option<Type> {
         self.touch();
+        self.maybe_undefined.remove(&key);
         self.provenance.remove(&key);
         self.native.remove(&key);
         if self.may_have_member_narrowing {
@@ -492,6 +553,7 @@ impl Locals {
     pub(crate) fn remove_type(&mut self, key: LocalKey) -> Option<Type> {
         debug_assert!(!self.track);
         self.touch();
+        self.maybe_undefined.remove(&key);
         if self.may_have_member_narrowing {
             self.synthetic.remove(&key);
         }
@@ -556,6 +618,7 @@ impl Locals {
             class: self.class.clone(),
             types: LocalsMap::default(),
             synthetic: KeySet::default(),
+            maybe_undefined: KeySet::default(),
             native: LocalsMap::default(),
             provenance: ProvenanceMap::default(),
             guarded_functions: GuardedFunctionSet::default(),

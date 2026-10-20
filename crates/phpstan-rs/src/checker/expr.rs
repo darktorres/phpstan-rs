@@ -121,6 +121,7 @@ impl<'a> Checker<'a> {
             identifier_prefix,
             operator_description,
             verdict_fn,
+            true,
         );
         self.check_pointless_offset_or_property_probe(
             operand,
@@ -1613,6 +1614,7 @@ impl<'a> Checker<'a> {
                     "nullCoalesce",
                     "on left side of ??",
                     null_probe_verdict,
+                    true,
                 );
                 self.check_pointless_offset_or_property_probe(
                     l,
@@ -1669,6 +1671,13 @@ impl<'a> Checker<'a> {
                         e.span,
                         0,
                         "variable.undefined",
+                    );
+                } else if locals.is_maybe_undefined_var(name) {
+                    self.report(
+                        format!("Variable ${name} might not be defined."),
+                        e.span,
+                        0,
+                        "variable.possiblyUndefined",
                     );
                 }
                 // See `Checker::probe_var_provenance`'s doc comment - the
@@ -2038,7 +2047,7 @@ impl<'a> Checker<'a> {
                     // by-reference argument does (see `calls.rs`), so the
                     // variable is written here, not read.
                     if let ExprKind::Variable(name) = &rhs.kind
-                        && !locals.contains_var(name)
+                        && !locals.is_certainly_defined_var(name)
                         && !is_superglobal(name)
                     {
                         locals.declare_var(name, Type::mixed(), rhs.span);
@@ -2171,6 +2180,7 @@ impl<'a> Checker<'a> {
                         "nullCoalesce",
                         "on left side of ??=",
                         null_probe_verdict,
+                        false,
                     );
                     self.check_pointless_offset_or_property_probe(
                         lhs,
@@ -3364,6 +3374,13 @@ impl<'a> Checker<'a> {
                             0,
                             "variable.undefined",
                         );
+                    } else if !u.by_ref && locals.is_maybe_undefined_var(&u.name) {
+                        self.report(
+                            format!("Variable ${} might not be defined.", u.name),
+                            u.name.span,
+                            0,
+                            "variable.possiblyUndefined",
+                        );
                     }
                     let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
                     // A captured variable's real declaration is wherever
@@ -4253,6 +4270,34 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| unassigned_variable_type(name))
     }
 
+    /// The type of the variable `name` in a quiet position (`??`, `isset`,
+    /// `empty`), where PHP reads an undefined variable as `null` and reports
+    /// nothing: `null` for an absent name, the type with `null` added for a
+    /// maybe-defined one, and `mixed` when any name may exist.
+    pub(crate) fn quiet_variable_type(&self, name: &str, locals: &Locals) -> Type {
+        if is_superglobal(name) {
+            return self.variable_type(name, locals);
+        }
+        if locals.any_variable_may_exist() {
+            return Type::mixed();
+        }
+        match locals.get_var(name) {
+            None => Type::null(),
+            Some(ty) if locals.is_maybe_undefined_var(name) => {
+                self.relation().union(ty.clone(), Type::null())
+            }
+            Some(ty) => ty.clone(),
+        }
+    }
+
+    /// The type of `l`, the left operand of `??`, read quietly.
+    fn quiet_left_type(&self, l: &Expr, locals: &Locals) -> Type {
+        match &l.kind {
+            ExprKind::Variable(name) => self.quiet_variable_type(name, locals),
+            _ => self.infer_expr(l, locals),
+        }
+    }
+
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
         stack::guard(|| {
             // Inferring is `&self`, so nothing moves under one call: an
@@ -5007,7 +5052,7 @@ impl<'a> Checker<'a> {
             // expression with `is_array($selection_raw)` immediately after
             // should still be checking a real `Mixed`.
             if r_ty.is_null().yes() {
-                let l_ty = self.infer_expr(l, locals);
+                let l_ty = self.quiet_left_type(l, locals);
                 // The no-op reasoning above only holds when `l` is a bare
                 // variable - `locals`'s tracked type for one already
                 // reflects every way it can be null (a prior narrowing, an
@@ -5028,7 +5073,7 @@ impl<'a> Checker<'a> {
                     self.relation().union(l_ty, Type::null())
                 };
             }
-            let l_ty = self.infer_expr(l, locals).without(&Type::null());
+            let l_ty = self.quiet_left_type(l, locals).without(&Type::null());
             // `$x ?? throw new Foo();` (or any other never-returning right
             // side: `exit`, a `never`-typed call) - falling through to the
             // generic `_ => r_ty` fallback below would make the whole

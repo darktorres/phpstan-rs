@@ -228,6 +228,13 @@ impl<'a> Checker<'a> {
                             0,
                             "variable.undefined",
                         );
+                    } else if !u.by_ref && locals.is_maybe_undefined_var(&u.name) {
+                        self.report(
+                            format!("Variable ${} might not be defined.", u.name),
+                            u.name.span,
+                            0,
+                            "variable.possiblyUndefined",
+                        );
                     }
                     let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
                     let provenance = locals

@@ -400,7 +400,7 @@ impl<'a> Checker<'a> {
                 if let Some(key) = key {
                     let current = self.current_narrowed_type(value, key, locals);
                     if let Some(narrowed) = f(&current) {
-                        locals.insert(key, narrowed);
+                        locals.narrow_to(key, narrowed);
                     }
                 }
             };
@@ -522,7 +522,7 @@ impl<'a> Checker<'a> {
                         self.apply_check(value, part, true, &mut branch);
                         joined.push(self.current_narrowed_type(value, key, &branch).into_owned());
                     }
-                    locals.insert(key, self.relation().union_of(joined));
+                    locals.narrow_to(key, self.relation().union_of(joined));
                 }
                 // A failed `And`, and the string and property checks failing,
                 // say nothing narrowable.

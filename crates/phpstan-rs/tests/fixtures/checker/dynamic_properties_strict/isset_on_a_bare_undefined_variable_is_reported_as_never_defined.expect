@@ -1,0 +1,1 @@
+3:30-3:40 isset.variable L1 | Variable $undefined in isset() is never defined.

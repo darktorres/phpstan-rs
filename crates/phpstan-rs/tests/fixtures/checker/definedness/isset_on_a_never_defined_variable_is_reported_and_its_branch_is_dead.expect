@@ -1,0 +1,2 @@
+4:15-4:21 isset.variable L1 | Variable $never in isset() is never defined.
+5:10-5:16 variable.undefined L0 | undefined variable $never

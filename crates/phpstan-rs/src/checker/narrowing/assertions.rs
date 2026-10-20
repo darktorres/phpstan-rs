@@ -47,6 +47,14 @@ impl<'a> Checker<'a> {
         key: LocalKey,
         locals: &'l Locals,
     ) -> std::borrow::Cow<'l, Type> {
+        // An absent or maybe-defined variable reads as its quiet type: the
+        // narrowing sees an undefined variable as null.
+        if locals.is_real_variable(key)
+            && (!locals.contains_key(key) || locals.is_maybe_undefined(key))
+            && let ExprKind::Variable(name) = &narrowing_infer_target(expr).kind
+        {
+            return std::borrow::Cow::Owned(self.quiet_variable_type(name, locals));
+        }
         match locals.get(key) {
             Some(ty) => std::borrow::Cow::Borrowed(ty),
             None => std::borrow::Cow::Owned(self.infer_expr(narrowing_infer_target(expr), locals)),
@@ -170,7 +178,7 @@ impl<'a> Checker<'a> {
                 && let Some(receiver_key) = locals.key_of(receiver)
             {
                 let current = self.current_narrowed_type(receiver, receiver_key, locals);
-                locals.insert(receiver_key, current.without(&Type::null()));
+                locals.narrow_to(receiver_key, current.without(&Type::null()));
             }
         }
         let Some((key, narrowed_expr, target_ty)) = pair else {
@@ -219,7 +227,7 @@ impl<'a> Checker<'a> {
             for discriminant in keys {
                 if let Some(implied) = locals.branch_implied_facts().get(&discriminant).cloned() {
                     for (implied_key, implied_ty) in implied.iter() {
-                        locals.insert(*implied_key, implied_ty.clone());
+                        locals.narrow_to(*implied_key, implied_ty.clone());
                     }
                 }
             }
@@ -241,9 +249,9 @@ impl<'a> Checker<'a> {
             && let [alias_target] = alias_targets.as_slice()
         {
             let current = self.current_narrowed_type(receiver, *alias_target, locals);
-            locals.insert(*alias_target, current.without(&Type::null()));
+            locals.narrow_to(*alias_target, current.without(&Type::null()));
         }
-        locals.insert(key, narrowed);
+        locals.narrow_to(key, narrowed);
         // With keys on both sides, the right one narrows against the left.
         if locals.key_of(l).is_some()
             && let Some(r_key) = locals.key_of(r)
@@ -258,7 +266,7 @@ impl<'a> Checker<'a> {
                 } else {
                     current.into_owned()
                 };
-                locals.insert(r_key, narrowed);
+                locals.narrow_to(r_key, narrowed);
             }
         }
     }
@@ -287,7 +295,7 @@ impl<'a> Checker<'a> {
                 equal,
                 self.comparison_php_version(),
             );
-            locals.insert(key, narrowed);
+            locals.narrow_to(key, narrowed);
         }
     }
 
@@ -322,7 +330,7 @@ impl<'a> Checker<'a> {
             let narrowed = self
                 .relation()
                 .narrow_ordering(&current, side_op, &other_ty, holds, version);
-            locals.insert(key, narrowed);
+            locals.narrow_to(key, narrowed);
         }
     }
 
@@ -420,7 +428,7 @@ impl<'a> Checker<'a> {
                 (true, true) if asserted.is_single_value() => self.exclude(&current, &asserted),
                 (true, true) => continue,
             };
-            locals.insert(key, narrowed);
+            locals.narrow_to(key, narrowed);
         }
     }
 

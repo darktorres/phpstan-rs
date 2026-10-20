@@ -110,7 +110,7 @@ pub(crate) fn propagate_container_field_facts(
             base: target,
             key: field.as_str().into(),
         });
-        locals.insert(key, ty.clone());
+        locals.narrow_to(key, ty.clone());
     }
 }
 

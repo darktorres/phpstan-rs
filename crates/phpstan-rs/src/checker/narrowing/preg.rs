@@ -114,7 +114,7 @@ impl Checker<'_> {
             && let Some(key) = locals.key_of(matches)
             && let Some(ty) = self.preg_matches_type(call, outcome, locals)
         {
-            locals.insert(key, ty);
+            locals.narrow_to(key, ty);
         }
         if !outcome.matched() {
             return;
@@ -150,6 +150,6 @@ impl Checker<'_> {
                 target
             };
         let current = self.current_narrowed_type(subject, key, locals);
-        locals.insert(key, self.refine_string_members(&current, &target, true));
+        locals.narrow_to(key, self.refine_string_members(&current, &target, true));
     }
 }

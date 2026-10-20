@@ -1,1 +1,2 @@
-no diagnostics
+5:27-5:36 isset.variable L1 | Variable $image_id in isset() is never defined.
+10:27-10:36 isset.variable L1 | Variable $image_id in isset() is never defined.

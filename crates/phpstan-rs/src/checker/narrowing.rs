@@ -227,7 +227,7 @@ impl<'a> Checker<'a> {
                 | ExprKind::DynamicPropertyAccess(base, _, _) => {
                     if let Some(base_key) = locals.key_of(base) {
                         let current = self.current_narrowed_type(base, base_key, locals);
-                        locals.insert(base_key, current.without(&Type::null()));
+                        locals.narrow_to(base_key, current.without(&Type::null()));
                     }
                     e = base.peeled();
                     continue;
@@ -238,7 +238,7 @@ impl<'a> Checker<'a> {
                 let current = self.current_narrowed_type(base, base_key, locals);
                 let narrowed = current.to_isset_container(lit_key.as_ref());
                 if !narrowed.is_never() {
-                    locals.insert(base_key, narrowed);
+                    locals.narrow_to(base_key, narrowed);
                 }
             }
             e = base.peeled();
@@ -317,7 +317,7 @@ impl<'a> Checker<'a> {
             .cloned()
         {
             for (implied_key, implied_ty) in implied.iter() {
-                locals.insert(*implied_key, implied_ty.clone());
+                locals.narrow_to(*implied_key, implied_ty.clone());
             }
         }
     }
@@ -343,7 +343,7 @@ impl<'a> Checker<'a> {
             .cloned()
         {
             for (implied_key, implied_ty) in implied.iter() {
-                locals.insert(*implied_key, implied_ty.clone());
+                locals.narrow_to(*implied_key, implied_ty.clone());
             }
         }
     }
@@ -788,7 +788,7 @@ impl<'a> Checker<'a> {
                         self.or_chain_narrowing_target(cond, locals)
                     {
                         let current = self.current_narrowed_type(repr_expr, key, locals);
-                        locals.insert(key, self.relation().narrow(&current, &target_ty));
+                        locals.narrow_to(key, self.relation().narrow(&current, &target_ty));
                     }
                 }
                 // `if ((! is_int($a) && ! is_string($a)) || (!
@@ -815,7 +815,7 @@ impl<'a> Checker<'a> {
                         self.and_chain_narrowing_target(cond, locals)
                     {
                         let current = self.current_narrowed_type(repr_expr, key, locals);
-                        locals.insert(key, self.relation().narrow(&current, &target_ty));
+                        locals.narrow_to(key, self.relation().narrow(&current, &target_ty));
                     }
                 }
                 ExprKind::Binary(op, l, r) => {
@@ -863,7 +863,7 @@ impl<'a> Checker<'a> {
                         for operand in operands {
                             if let Some(key) = locals.key_of(operand) {
                                 let current = self.current_narrowed_type(operand, key, locals);
-                                locals.insert(key, current.without(&Type::null()));
+                                locals.narrow_to(key, current.without(&Type::null()));
                             }
                             self.narrow_isset_containers(operand, locals);
                         }
@@ -881,7 +881,7 @@ impl<'a> Checker<'a> {
                         } else {
                             Type::null()
                         };
-                        locals.insert(key, null);
+                        locals.narrow_to(key, null);
                     }
                 }
                 ExprKind::Call(callee, args) => {
@@ -911,7 +911,7 @@ impl<'a> Checker<'a> {
                             // has no "prove empty" counterpart).
                             let current =
                                 self.current_narrowed_type(&single_arg.value, key, locals);
-                            locals.insert(key, current.to_non_empty_array());
+                            locals.narrow_to(key, current.to_non_empty_array());
                         } else if name == "array_is_list" {
                             // Passing proves list-ness. Failing proves the
                             // array non-empty, as an empty array is a list.
@@ -922,7 +922,7 @@ impl<'a> Checker<'a> {
                             } else {
                                 current.to_non_list()
                             };
-                            locals.insert(key, narrowed);
+                            locals.narrow_to(key, narrowed);
                         } else if name == "is_numeric" {
                             // Deliberately its own arm,
                             // not a `narrowing_type_for_predicate` table entry
@@ -972,7 +972,7 @@ impl<'a> Checker<'a> {
                                     })
                                     .with_string_accessory(AccessoryKind::NonDecimalIntegerString)
                             };
-                            locals.insert(key, narrowed);
+                            locals.narrow_to(key, narrowed);
                         } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
                             let current =
                                 self.current_narrowed_type(&single_arg.value, key, locals);
@@ -981,7 +981,7 @@ impl<'a> Checker<'a> {
                             } else {
                                 self.exclude(&current, &target_ty)
                             };
-                            locals.insert(key, narrowed);
+                            locals.narrow_to(key, narrowed);
                         } else if let ExprKind::Name(raw) = &callee.kind {
                             self.apply_function_conditional_asserts(raw, args, locals, branch_true);
                         }
@@ -1060,7 +1060,7 @@ impl<'a> Checker<'a> {
                                 AccessoryKind::NonFalsyString
                             };
                             let current = self.current_narrowed_type(&haystack.value, key, locals);
-                            locals.insert(key, current.with_string_accessory(kind));
+                            locals.narrow_to(key, current.with_string_accessory(kind));
                         }
                     } else if let ExprKind::Name(name) = &callee.kind
                         && matches!(name.trim_start_matches('\\'), "is_a")
@@ -1092,12 +1092,12 @@ impl<'a> Checker<'a> {
                         if let Some(resolved) = class {
                             let current = self.current_narrowed_type(&obj_arg.value, key, locals);
                             if branch_true {
-                                locals.insert(
+                                locals.narrow_to(
                                     key,
                                     self.relation().narrow_to_instance(&current, &resolved),
                                 );
                             } else {
-                                locals.insert(key, self.exclude(&current, &resolved));
+                                locals.narrow_to(key, self.exclude(&current, &resolved));
                             }
                         }
                     } else if let ExprKind::Name(name) = &callee.kind {
@@ -1164,13 +1164,13 @@ impl<'a> Checker<'a> {
                         if branch_true {
                             self.replay_object_discriminant_facts(key, &resolved, locals);
                             let current = self.current_narrowed_type(inner, key, locals);
-                            locals.insert(
+                            locals.narrow_to(
                                 key,
                                 self.relation().narrow_to_instance(&current, &resolved),
                             );
                         } else {
                             let current = self.current_narrowed_type(inner, key, locals);
-                            locals.insert(key, self.exclude(&current, &resolved));
+                            locals.narrow_to(key, self.exclude(&current, &resolved));
                         }
                     }
                 }
@@ -1236,7 +1236,7 @@ impl<'a> Checker<'a> {
                         } else {
                             current.only_falsy(&self.relation())
                         };
-                        locals.insert(key, narrowed);
+                        locals.narrow_to(key, narrowed);
                     }
                 }
                 // The narrow slice of real PHPStan's `ConditionalExpressionHolder`
@@ -1268,7 +1268,7 @@ impl<'a> Checker<'a> {
                     }
                     if branch_true {
                         let current = self.current_narrowed_type(cond, key, locals);
-                        locals.insert(key, current.without_falsy());
+                        locals.narrow_to(key, current.without_falsy());
                     }
                 }
                 // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
@@ -1280,7 +1280,7 @@ impl<'a> Checker<'a> {
                 _ if branch_true && locals.key_of(cond).is_some() => {
                     let key = locals.key_of(cond).expect("checked by guard above");
                     let current = self.current_narrowed_type(cond, key, locals);
-                    locals.insert(key, current.without_falsy());
+                    locals.narrow_to(key, current.without_falsy());
                 }
                 _ => {}
             }
@@ -1691,9 +1691,9 @@ impl Checker<'_> {
         };
         let current = self.current_narrowed_type(operand, key, locals);
         if !empty {
-            locals.insert(key, current.without_falsy());
+            locals.narrow_to(key, current.without_falsy());
         } else if known_defined {
-            locals.insert(key, current.only_falsy(&self.relation()));
+            locals.narrow_to(key, current.only_falsy(&self.relation()));
         }
     }
 
@@ -1722,9 +1722,9 @@ impl Checker<'_> {
                 base: arr_key,
                 key: lit_key.as_str().into(),
             });
-            locals.insert(element, value_ty);
+            locals.narrow_to(element, value_ty);
         }
-        locals.insert(arr_key, narrowed);
+        locals.narrow_to(arr_key, narrowed);
     }
 
     /// `in_array(needle, haystack, true)` was `contained`: the needle is
@@ -1750,7 +1750,7 @@ impl Checker<'_> {
             excluded_ty.map(|excluded| self.exclude(&current, &excluded))
         };
         if let Some(narrowed) = narrowed {
-            locals.insert(key, narrowed);
+            locals.narrow_to(key, narrowed);
         }
     }
 }
@@ -1816,7 +1816,7 @@ impl Checker<'_> {
                 None => None,
             };
             if let Some(narrowed) = narrowed {
-                locals.insert(key, narrowed);
+                locals.narrow_to(key, narrowed);
             }
         }
     }
@@ -1855,7 +1855,7 @@ impl Checker<'_> {
             })
         };
         if let Some(narrowed) = narrowed {
-            locals.insert(key, narrowed);
+            locals.narrow_to(key, narrowed);
         }
     }
 }

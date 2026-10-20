@@ -121,6 +121,7 @@ impl<'a> Checker<'a> {
         identifier_prefix: &str,
         operator_description: &str,
         verdict_fn: NullProbeVerdictFn,
+        reads_undefined: bool,
     ) {
         let ExprKind::Variable(name) = &e.kind else {
             return;
@@ -146,9 +147,25 @@ impl<'a> Checker<'a> {
         if self.static_var_names.contains(name.as_ref()) {
             return;
         }
+        // A name no path defines makes the probe dead code. A name some path
+        // defines has no verdict: the probe can change its outcome.
+        if locals.any_variable_may_exist() {
+            return;
+        }
         let Some(ty) = locals.get_var(name) else {
+            if reads_undefined {
+                self.report(
+                    format!("Variable ${name} {operator_description} is never defined."),
+                    e.span,
+                    1,
+                    format!("{identifier_prefix}.variable"),
+                );
+            }
             return;
         };
+        if locals.is_maybe_undefined_var(name) {
+            return;
+        }
         let Some(verdict) = verdict_fn(ty) else {
             return;
         };

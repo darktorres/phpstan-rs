@@ -100,8 +100,13 @@ impl<'a> Checker<'a> {
                 (name, widened)
             })
             .collect();
+        // Widening changes a type, not whether the variable is defined.
         for (name, ty) in changing {
+            let maybe = next_entry.is_maybe_undefined(name);
             next_entry.insert(name, ty);
+            if maybe {
+                next_entry.mark_maybe_undefined(name);
+            }
         }
     }
 
@@ -357,11 +362,46 @@ fn discriminant_may_hold(locals: &Locals, key: &Discriminant) -> bool {
     }
 }
 
+/// `scope` with each variable it holds as `never` taken from `other` instead:
+/// the branch that scope comes from is dead for that variable, so only the
+/// other branch says what the variable is at the join. `None` when `scope`
+/// holds no such variable.
+fn without_dead_variables(scope: &Locals, other: &Locals) -> Option<Locals> {
+    let dead: Vec<LocalKey> = scope
+        .iter()
+        .filter(|(key, ty)| scope.is_real_variable(*key) && ty.is_never())
+        .map(|(key, _)| key)
+        .collect();
+    if dead.is_empty() {
+        return None;
+    }
+    let mut live = scope.clone();
+    for key in dead {
+        match other.get(key) {
+            Some(ty) => {
+                let maybe = other.is_maybe_undefined(key);
+                live.insert(key, ty.clone());
+                if maybe {
+                    live.mark_maybe_undefined(key);
+                }
+            }
+            None => {
+                live.remove(key);
+            }
+        }
+    }
+    Some(live)
+}
+
 pub(crate) fn merge_scopes(
     relation: &Relation,
     then_locals: &Locals,
     else_locals: &Locals,
 ) -> Locals {
+    let then_live = without_dead_variables(then_locals, else_locals);
+    let else_live = without_dead_variables(else_locals, then_locals);
+    let then_locals = then_live.as_ref().unwrap_or(then_locals);
+    let else_locals = else_live.as_ref().unwrap_or(else_locals);
     // Two scopes with one version hold the same facts, so what joins them is
     // either of them: a branch that wrote nothing joins as it was.
     if then_locals.version() != 0 && then_locals.version() == else_locals.version() {
@@ -560,41 +600,83 @@ pub(crate) fn merge_scopes(
         };
     }
     if patched {
-        // Only the bindings the two scopes differ in change the copy: one
-        // only the then-scope holds is dropped, one both hold with another
-        // type is joined; one only the else-scope holds is not in it.
+        // Only the bindings the two scopes differ in change the copy: a
+        // variable only one scope holds stays, as maybe-defined, and a
+        // property chain or index only one holds is dropped; one both hold
+        // with another type is joined.
         for item in then_locals.types_diff(else_locals) {
             match item {
-                imbl::ordmap::DiffItem::Add(..) => {}
+                imbl::ordmap::DiffItem::Add(name, ty) => {
+                    if merged.is_real_variable(*name) {
+                        merged.insert(*name, ty.clone());
+                        merged.mark_maybe_undefined(*name);
+                    }
+                }
                 imbl::ordmap::DiffItem::Remove(name, _) => {
-                    merged.remove_type(*name);
+                    if merged.is_real_variable(*name) {
+                        merged.mark_maybe_undefined(*name);
+                    } else {
+                        merged.remove_type(*name);
+                    }
                 }
                 imbl::ordmap::DiffItem::Update { old, new } => {
-                    merged.insert(*old.0, relation.union(old.1.clone(), new.1.clone()));
+                    let key = *old.0;
+                    let maybe =
+                        then_locals.is_maybe_undefined(key) || else_locals.is_maybe_undefined(key);
+                    merged.insert(key, relation.union(old.1.clone(), new.1.clone()));
+                    if maybe {
+                        merged.mark_maybe_undefined(key);
+                    }
                 }
             }
+        }
+        // A variable both scopes hold with the same type is not in the diff,
+        // so one the else-scope holds as maybe-defined is marked here.
+        for key in else_locals.maybe_undefined_keys() {
+            merged.mark_maybe_undefined(*key);
         }
         return merged;
     }
     for (name, then_ty) in then_locals.iter() {
-        if let Some(else_ty) = else_locals.get(name) {
-            let mut provenance = then_locals
-                .get_provenance(name)
-                .cloned()
-                .unwrap_or_default();
+        let mut provenance = then_locals
+            .get_provenance(name)
+            .cloned()
+            .unwrap_or_default();
+        let merged_ty = if let Some(else_ty) = else_locals.get(name) {
             if let Some(else_provenance) = else_locals.get_provenance(name) {
                 provenance.extend(else_provenance.iter().copied());
             }
             // `Type::union` takes its operands by value, so equal types
             // (a variable neither branch reassigned, the common case) are
             // kept without cloning both.
-            let merged_ty = if then_ty == else_ty {
+            if then_ty == else_ty {
                 then_ty.clone()
             } else {
                 relation.union(then_ty.clone(), else_ty.clone())
-            };
-            merged.insert_with_provenance(name, merged_ty, provenance);
+            }
+        } else if then_locals.is_real_variable(name) {
+            then_ty.clone()
+        } else {
+            continue;
+        };
+        let maybe = !else_locals.contains_key(name)
+            || then_locals.is_maybe_undefined(name)
+            || else_locals.is_maybe_undefined(name);
+        merged.insert_with_provenance(name, merged_ty, provenance);
+        if maybe {
+            merged.mark_maybe_undefined(name);
         }
+    }
+    for (name, else_ty) in else_locals.iter() {
+        if then_locals.contains_key(name) || !else_locals.is_real_variable(name) {
+            continue;
+        }
+        let provenance = else_locals
+            .get_provenance(name)
+            .cloned()
+            .unwrap_or_default();
+        merged.insert_with_provenance(name, else_ty.clone(), provenance);
+        merged.mark_maybe_undefined(name);
     }
     merged
 }

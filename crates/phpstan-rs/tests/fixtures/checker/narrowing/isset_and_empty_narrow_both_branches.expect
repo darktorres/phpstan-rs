@@ -1,1 +1,1 @@
-no diagnostics
+15:16-15:29 isset.variable L1 | Variable $undefinedVar in isset() is never defined.

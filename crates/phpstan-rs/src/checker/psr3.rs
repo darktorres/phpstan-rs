@@ -166,10 +166,12 @@ impl<'a> Checker<'a> {
                 && let Some(name) = locals
                     .variables()
                     .into_iter()
-                    .filter(|(_, ty)| {
-                        self.registry
-                            .is_super_type_of(&Type::object("Throwable".into(), Vec::new()), ty)
-                            == types::TrinaryLogic::Yes
+                    .filter(|(name, ty)| {
+                        !locals.is_maybe_undefined_var(name)
+                            && self
+                                .registry
+                                .is_super_type_of(&Type::object("Throwable".into(), Vec::new()), ty)
+                                == types::TrinaryLogic::Yes
                     })
                     .map(|(name, _)| name)
                     .min()
