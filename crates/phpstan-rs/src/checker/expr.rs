@@ -2034,6 +2034,15 @@ impl<'a> Checker<'a> {
                 if matches!(&e.kind, ExprKind::AssignRef(..)) {
                     self.check_nullsafe_byref_target(rhs);
                     self.check_property_assign_by_ref(rhs, locals);
+                    // `$a = &$b;` creates `$b` when it does not exist, as a
+                    // by-reference argument does (see `calls.rs`), so the
+                    // variable is written here, not read.
+                    if let ExprKind::Variable(name) = &rhs.kind
+                        && !locals.contains_var(name)
+                        && !is_superglobal(name)
+                    {
+                        locals.declare_var(name, Type::mixed(), rhs.span);
+                    }
                 }
                 // `$r = &$a[];` legally creates the new element it refers to.
                 let rhs_ty = match &rhs.kind {
