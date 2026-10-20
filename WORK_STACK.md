@@ -272,7 +272,7 @@ Order, as the plan sets it:
    and the level-3 triage by probe is run: `LEVEL3_TRIAGE.md` has 120 rows, 60 of which reproduce and change a dump (plan #22). Then item 9, the flat tree, steps 0 to 3, with spike
    S-12 before step 2.
 3. Part C's batches (tokens, the lexer, parse recovery, names, products, PHPDoc, the
-   check's temporaries), then the wall (Part D), whose engine is Parts H (the spikes are in `docs/level-9/01-overview.md`; H1 is in `docs/level-9/14-part-c.md`, and H2 to H4 are in `docs/level-9/05-part-d.md`, which also holds the wall's designs).
+   check's temporaries), then the wall (Part D), whose engine is Parts H (the spikes are in `docs/level-9/01-overview.md`; H1 is in `docs/level-9/06-part-c.md`, and H2 to H4 are in `docs/level-9/07-part-d.md`, which also holds the wall's designs).
 
 Spikes S-1 to S-12 (Part H5) run before the designs they settle. Level 8's list is not
 reordered until the go.

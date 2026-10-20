@@ -43,12 +43,12 @@ Approving this plan makes these edits. None is made before the go.
   the `php-version` crate, names, the constant lookup, products, PHPDoc, the check's temporaries. Item 2's bullet goes,
   LOAD-9 leaves "Outside the items", item 8 keeps REG-14.1 and 14.3, item 19 loses LOAD-5.4, and the state line is
   rewritten. The "Documents with no place in the stack" list gains this plan's documents.
-- `CRATE_SPLIT_PLAN.md`: the docs commit series of #20 (below), which also writes the ledger rows of J2 (OVL, RES, EXT, SUM) and the D and E rows of J3, in [`05-part-d.md`](05-part-d.md).
+- `CRATE_SPLIT_PLAN.md`: the docs commit series of #20 (below), which also writes the ledger rows of J2 (OVL, RES, EXT, SUM) and the D and E rows of J3, in [`07-part-d.md`](07-part-d.md).
 - The ledger rows that decision 20 writes: OVL, RES, EXT and SUM (J2), with the
 needs above; a D-row and an E-row per phase of Stage D and E that the plan lists, each citing its plan section and
 the oracle counts it carries; CHECK-6.1 to 6.3, 6.7, 6.13 to 6.15 re-pointed to "built by D1 to D4"; LOAD-5.1
 re-pointed to W3 (facts) and E1 (collection); and the ledger edits the engine cluster implies (`01-overview.md`, Edits at approval).
-- The ledger's `needs` changes of D8, in [`07-part-b.md`](07-part-b.md) (B11).
+- The ledger's `needs` changes of D8, in [`05-part-b.md`](05-part-b.md) (B11).
 - Other documents. `CROSS_PLATFORM_PLAN.md`: R11's database-file follow-up and R16's `path_bytes` encoding pair (H4.6),
   and R13's CRLF probe files marked `-text` (G3.7.1). `CRASH_REPORTING_PLAN.md`: the stack guard's `LIMIT` restored on
   unwind and the engine's two isolation modes (H2.8); the vendor-discovery panic-hook swap is deleted, not converted
@@ -89,24 +89,24 @@ against HEAD listed after the table.
 
 | # | design | part | needed before |
 |---|---|---|---|
-| 1 | How the checker holds a tree (#1) | G1, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
-| 2 | Stored-alias identity | G2, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
-| 3 | The error-node model | G3, [`14-part-c.md`](14-part-c.md) | step 2 (layout); the rest before batch 3 |
-| 4 | The probe as a checker entry point (#26) | G4, [`07-part-b.md`](07-part-b.md) | step 2 |
-| 5 | Node layout per variant | I1, [`07-part-b.md`](07-part-b.md) | step 2, after step 0 |
-| 6 | Item 0's tooling plan (#13) | G5, [`14-part-c.md`](14-part-c.md) | batch 0 |
-| 7 | Item 10's token payloads under decision 4 | I2, [`14-part-c.md`](14-part-c.md) | batch 1 |
-| 8 | SYN-3.2's kernel (#10) | I3, [`14-part-c.md`](14-part-c.md) | batch 2 |
-| 9 | Parse recovery as a whole | G3.4 and G3.8, [`14-part-c.md`](14-part-c.md) | batch 3 |
-| 10 | The engine's identity model (#18) | H1, [`14-part-c.md`](14-part-c.md) | batch 4 |
-| 11 | The single grammar's lowering (#14) | I4, [`14-part-c.md`](14-part-c.md) | batch 6 |
-| 12 | The rule message type | I5, [`14-part-c.md`](14-part-c.md) | batch 7 |
-| 13 | The engine | H2, [`05-part-d.md`](05-part-d.md) | W2 |
-| 14 | REG-7 and REG-8 as engine queries | H3, [`05-part-d.md`](05-part-d.md) | W2, after 13 |
-| 15 | The pipeline as queries, persistence and the Session | H4, [`05-part-d.md`](05-part-d.md) | W3 |
-| 16 | C5's data model | J1, [`05-part-d.md`](05-part-d.md) | W4 |
-| 17 | C6 to C9 | J2, [`05-part-d.md`](05-part-d.md) | W5 |
-| 18 | Stages D to G reconciled | J3, [`05-part-d.md`](05-part-d.md) | W7 |
+| 1 | How the checker holds a tree (#1) | G1, [`05-part-b.md`](05-part-b.md) | item 9, step 1 |
+| 2 | Stored-alias identity | G2, [`05-part-b.md`](05-part-b.md) | item 9, step 1 |
+| 3 | The error-node model | G3, [`06-part-c.md`](06-part-c.md) | step 2 (layout); the rest before batch 3 |
+| 4 | The probe as a checker entry point (#26) | G4, [`05-part-b.md`](05-part-b.md) | step 2 |
+| 5 | Node layout per variant | I1, [`05-part-b.md`](05-part-b.md) | step 2, after step 0 |
+| 6 | Item 0's tooling plan (#13) | G5, [`06-part-c.md`](06-part-c.md) | batch 0 |
+| 7 | Item 10's token payloads under decision 4 | I2, [`06-part-c.md`](06-part-c.md) | batch 1 |
+| 8 | SYN-3.2's kernel (#10) | I3, [`06-part-c.md`](06-part-c.md) | batch 2 |
+| 9 | Parse recovery as a whole | G3.4 and G3.8, [`06-part-c.md`](06-part-c.md) | batch 3 |
+| 10 | The engine's identity model (#18) | H1, [`06-part-c.md`](06-part-c.md) | batch 4 |
+| 11 | The single grammar's lowering (#14) | I4, [`06-part-c.md`](06-part-c.md) | batch 6 |
+| 12 | The rule message type | I5, [`06-part-c.md`](06-part-c.md) | batch 7 |
+| 13 | The engine | H2, [`07-part-d.md`](07-part-d.md) | W2 |
+| 14 | REG-7 and REG-8 as engine queries | H3, [`07-part-d.md`](07-part-d.md) | W2, after 13 |
+| 15 | The pipeline as queries, persistence and the Session | H4, [`07-part-d.md`](07-part-d.md) | W3 |
+| 16 | C5's data model | J1, [`07-part-d.md`](07-part-d.md) | W4 |
+| 17 | C6 to C9 | J2, [`07-part-d.md`](07-part-d.md) | W5 |
+| 18 | Stages D to G reconciled | J3, [`07-part-d.md`](07-part-d.md) | W7 |
 
 ## Designed, but needs a read against HEAD (a check, not a design)
 
@@ -123,8 +123,8 @@ against HEAD listed after the table.
 
 ## Order
 
-Every row of the table is designed: 1 to 5 in Part B (`07-part-b.md`), 6 to 12 in Part C (`14-part-c.md`), and 13 to 18
-in Part D (`05-part-d.md`). What no reading settles is H5's twelve spikes (S-1 and S-2 before batch 4, the section below)
+Every row of the table is designed: 1 to 5 in Part B (`05-part-b.md`), 6 to 12 in Part C (`06-part-c.md`), and 13 to 18
+in Part D (`07-part-d.md`). What no reading settles is H5's twelve spikes (S-1 and S-2 before batch 4, the section below)
 and step 0's census, which confirms I1's layout. Row 9 is G3.4 and G3.8.
 
 ## What no reading settles: spikes S-1 to S-12 (H5)
@@ -178,48 +178,48 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 
 | # | decision | part |
 |---|---|---|
-| 1 | D1: what consumers hold | [`07-part-b.md`](07-part-b.md) |
-| 2 | D2: how to migrate | [`07-part-b.md`](07-part-b.md) |
-| 3 | D3: position | [`07-part-b.md`](07-part-b.md) |
-| 4 | D4: payload bytes | [`07-part-b.md`](07-part-b.md) |
-| 5 | D5: names in nodes | [`07-part-b.md`](07-part-b.md) |
-| 6 | D6: the mutating passes | [`07-part-b.md`](07-part-b.md) |
-| 7 | D7: fabricated nodes | [`07-part-b.md`](07-part-b.md) |
-| 8 | D8: rows | [`07-part-b.md`](07-part-b.md) |
-| 9 | D9: error nodes | [`07-part-b.md`](07-part-b.md) |
-| 10 | SYN-3.2's SIMD | [`14-part-c.md`](14-part-c.md) |
-| 11 | the parse-recovery batch | [`14-part-c.md`](14-part-c.md) |
-| 12 | order of items 13, 16, 15, 14 | [`14-part-c.md`](14-part-c.md) |
-| 13 | oracle tools | [`14-part-c.md`](14-part-c.md) |
-| 14 | DOC-2.1 | [`14-part-c.md`](14-part-c.md) |
-| 15 | CACHE-13.1 for context files | [`05-part-d.md`](05-part-d.md) |
-| 16 | item 18 | [`05-part-d.md`](05-part-d.md) |
-| 17 | CHECK-9 and TYPE-5 | [`14-part-c.md`](14-part-c.md) |
-| 18 | when to reevaluate | [`14-part-c.md`](14-part-c.md) |
-| 19 | order of the wall | [`05-part-d.md`](05-part-d.md) |
+| 1 | D1: what consumers hold | [`05-part-b.md`](05-part-b.md) |
+| 2 | D2: how to migrate | [`05-part-b.md`](05-part-b.md) |
+| 3 | D3: position | [`05-part-b.md`](05-part-b.md) |
+| 4 | D4: payload bytes | [`05-part-b.md`](05-part-b.md) |
+| 5 | D5: names in nodes | [`05-part-b.md`](05-part-b.md) |
+| 6 | D6: the mutating passes | [`05-part-b.md`](05-part-b.md) |
+| 7 | D7: fabricated nodes | [`05-part-b.md`](05-part-b.md) |
+| 8 | D8: rows | [`05-part-b.md`](05-part-b.md) |
+| 9 | D9: error nodes | [`05-part-b.md`](05-part-b.md) |
+| 10 | SYN-3.2's SIMD | [`06-part-c.md`](06-part-c.md) |
+| 11 | the parse-recovery batch | [`06-part-c.md`](06-part-c.md) |
+| 12 | order of items 13, 16, 15, 14 | [`06-part-c.md`](06-part-c.md) |
+| 13 | oracle tools | [`06-part-c.md`](06-part-c.md) |
+| 14 | DOC-2.1 | [`06-part-c.md`](06-part-c.md) |
+| 15 | CACHE-13.1 for context files | [`07-part-d.md`](07-part-d.md) |
+| 16 | item 18 | [`07-part-d.md`](07-part-d.md) |
+| 17 | CHECK-9 and TYPE-5 | [`06-part-c.md`](06-part-c.md) |
+| 18 | when to reevaluate | [`06-part-c.md`](06-part-c.md) |
+| 19 | order of the wall | [`07-part-d.md`](07-part-d.md) |
 | 20 | rows for C6 to C9 and D to G | this file, below |
-| 21 | Stages D to G | [`05-part-d.md`](05-part-d.md) |
-| 22 | level 3 and the Q-11 follow-ups | [`14-part-c.md`](14-part-c.md) |
+| 21 | Stages D to G | [`07-part-d.md`](07-part-d.md) |
+| 22 | level 3 and the Q-11 follow-ups | [`06-part-c.md`](06-part-c.md) |
 | 23 | Part A's validation | [`02-part-a-intro.md`](02-part-a-intro.md) |
-| 24 | item 9's validation | [`07-part-b.md`](07-part-b.md) |
+| 24 | item 9's validation | [`05-part-b.md`](05-part-b.md) |
 | 25 | LOAD-2.8's parts 1 and 2 | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
-| 26 | the LSP completion probe | [`07-part-b.md`](07-part-b.md) |
-| 27 | the step 1 codemod | [`07-part-b.md`](07-part-b.md) |
-| 28 | LOAD-5.2 batch-only | [`05-part-d.md`](05-part-d.md) |
-| 29 | NAME-2.1's thin name | [`14-part-c.md`](14-part-c.md) |
-| 30 | where Part B lives | [`07-part-b.md`](07-part-b.md) |
-| 31 | an analysed file with parse errors | [`14-part-c.md`](14-part-c.md) |
-| 32 | `PhpVersion` and its types move out of `types` | [`14-part-c.md`](14-part-c.md) |
-| 33 | the engine crate and `unsafe_code` | [`05-part-d.md`](05-part-d.md) |
-| 34 | positionless declarations | [`14-part-c.md`](14-part-c.md) |
-| 35 | PROD-5.7 and `deps::Collector` | [`14-part-c.md`](14-part-c.md) |
-| 36 | the server's snapshot model | [`05-part-d.md`](05-part-d.md) |
-| 37 | the persisted database's key | [`05-part-d.md`](05-part-d.md) |
-| 38 | REG-16.2's "never reused" | [`14-part-c.md`](14-part-c.md) |
-| 39 | LOAD-5.1's passes | [`05-part-d.md`](05-part-d.md) |
+| 26 | the LSP completion probe | [`05-part-b.md`](05-part-b.md) |
+| 27 | the step 1 codemod | [`05-part-b.md`](05-part-b.md) |
+| 28 | LOAD-5.2 batch-only | [`07-part-d.md`](07-part-d.md) |
+| 29 | NAME-2.1's thin name | [`06-part-c.md`](06-part-c.md) |
+| 30 | where Part B lives | [`05-part-b.md`](05-part-b.md) |
+| 31 | an analysed file with parse errors | [`06-part-c.md`](06-part-c.md) |
+| 32 | `PhpVersion` and its types move out of `types` | [`06-part-c.md`](06-part-c.md) |
+| 33 | the engine crate and `unsafe_code` | [`07-part-d.md`](07-part-d.md) |
+| 34 | positionless declarations | [`06-part-c.md`](06-part-c.md) |
+| 35 | PROD-5.7 and `deps::Collector` | [`06-part-c.md`](06-part-c.md) |
+| 36 | the server's snapshot model | [`07-part-d.md`](07-part-d.md) |
+| 37 | the persisted database's key | [`07-part-d.md`](07-part-d.md) |
+| 38 | REG-16.2's "never reused" | [`06-part-c.md`](06-part-c.md) |
+| 39 | LOAD-5.1's passes | [`07-part-d.md`](07-part-d.md) |
 | 40 | the composer crate's B8 follow-ups | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
-| 41 | rows whose code a later task replaces | [`05-part-d.md`](05-part-d.md) |
-| 42 | deltas the ledger marks READY or OPEN with half a ruling | [`05-part-d.md`](05-part-d.md) |
+| 41 | rows whose code a later task replaces | [`07-part-d.md`](07-part-d.md) |
+| 42 | deltas the ledger marks READY or OPEN with half a ruling | [`07-part-d.md`](07-part-d.md) |
 
 ### #20 rows for C6 to C9 and D to G
 

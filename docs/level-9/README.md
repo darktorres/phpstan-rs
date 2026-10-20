@@ -1,6 +1,6 @@
 # The batch after the cross-platform fixes: the plan (index)
 
-This directory holds the plan, split into one file per part, and one file per section where a part was long. Section
+This directory holds the plan, split into one file per part. A design that builds another part's rows is a section of that part, and each part's own sections keep their numbers. Section
 numbers are kept, so a reference such as "#40" or "I4.5" reads the same in every file. Where the plan names its
 own documents (for example "call it `FLAT_TREE_PLAN.md`"), those are the plan's proposals, not the files here.
 

@@ -444,8 +444,8 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
 - The ledger's `needs` change with D8: SYN-1.3 needs SYN-1.12 and not SYN-1.2 (ledger SYN-1.3, 835), and SYN-1.2, 1.4,
   1.5, 1.7 and 1.8 need SYN-1.3 (SYN-1.8 already needs it).
 - `WORK_STACK.md` level 8, item 9: "SYN-1.11, then 1.12 (+1.3), then 1.2/1.4/1.5/1.7/1.8; this design".
-- Part B, I1 and the item-9 parts of G1 to G4 (G1's lifetimes, G2's stamp, G3.3's layout, G4a's probe tail) stay in this
-  directory, as the plan's own documents, and no `FLAT_TREE_PLAN.md` is written (#30).
+- Part B, with the item-9 designs of G1, G2, G4 and I1 as its own sections, stays in this directory (G3 is a section of
+  Part C), and no `FLAT_TREE_PLAN.md` is written (#30).
 
 ## The checker's side of item 9 (G1 and G2)
 
@@ -991,7 +991,7 @@ variant with an `ObjectOperator`), builds `Ident<'a>` from an `IdentAt`, and ret
 
 ### #30 where Part B lives
 
-**Part B stays in this directory, as `07-part-b.md`.** The plan's proposal to write it as a repository document of its own
+**Part B stays in this directory, as `05-part-b.md`.** The plan's proposal to write it as a repository document of its own
 (`FLAT_TREE_PLAN.md`, after `ITEMS_1_TO_3_FIXES_PLAN.md`) is superseded: the level-9 plan is already the repository's
 document set, one file per part, indexed by the README. Nothing is moved at approval for this part beyond B11's ledger
 and stack edits.
