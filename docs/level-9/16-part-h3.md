@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-None. H3 is a design: the five levels as queries (H3.1), the finishing passes, the three cycle rules, and what the REG-7 and REG-8 rows become (H3.5). Its work is built in the wall's W2 and W3, which Part D owns: the REG-7 rows (REG-7.1 to 7.12) and REG-4.x in W2, and REG-17 in W3. The rows that H3 names as inputs or outputs, such as REG-17.1 to 17.4, REG-8.6 and REG-10, are owned by the parts that build them, and the H3.5 rewording is an edit to the ledger, listed in Part N.
+None. H3 is a design: the five levels as queries (H3.1), the finishing passes, the three cycle rules, and what the REG-7 and REG-8 rows become (H3.5). Its work is built in the wall's W2 and W3, which Part D owns: the REG-7 rows (REG-7.1 to 7.12) and REG-4.x in W2, and REG-17 in W3. The rows that H3 names as inputs or outputs, such as REG-17.1 to 17.4, REG-8.6 and REG-10, are owned by the parts that build them, and the H3.5 rewording is an edit to the ledger, made on the rows it changes.
 
 ### H3.1 The five levels as queries
 

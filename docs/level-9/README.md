@@ -46,8 +46,6 @@ cites are indexed in the overview. Batch numbers are the numbers the steps use.
    I4's lowering, and W7 as J3 (item 18's reconciled core, F69 with CHECK-9 and CHECK-7's checker half in D2, exact
    include modelling, CHECK-12, on the scope model of D1 and D2, CHECK-10's operator sites in D3).
 
-Part N is outside the sequence; read it after the sequence. It holds the plan's documents.
-
 ## Batch 0's rows
 
 Batch 0 is the second step of the sequence. No part owns its rows: each row is listed here with its state, as of the ledger's `a3931d49d`. The level-3 findings that change a dump are W1's (Part D), and VAL-1.13 to VAL-1.15 are the wall's last step (Part D, W8).

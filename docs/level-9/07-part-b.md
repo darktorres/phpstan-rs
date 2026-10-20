@@ -442,11 +442,10 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
   bullet stays: the name is still positional, as types and messages show it, and only the identity is the
   ordinal (H1.4).
 - The ledger's `needs` change with D8: SYN-1.3 needs SYN-1.12 and not SYN-1.2 (ledger SYN-1.3, 835), and SYN-1.2, 1.4,
-  1.5, 1.7 and 1.8 need SYN-1.3 (SYN-1.8 already needs it); Part N lists every ledger and stack edit the plan implies.
+  1.5, 1.7 and 1.8 need SYN-1.3 (SYN-1.8 already needs it).
 - `WORK_STACK.md` level 8, item 9: "SYN-1.11, then 1.12 (+1.3), then 1.2/1.4/1.5/1.7/1.8; this design".
-- Write Part B, I1 and the item-9 parts of G1 to G4 (G1's lifetimes, G2's stamp, G3.3's layout, G4a's probe tail) into
-  the repository as `FLAT_TREE_PLAN.md` (the item is too large for the plan's item text) when this plan is approved; Part N
-  says where every other part goes.
+- Part B, I1 and the item-9 parts of G1 to G4 (G1's lifetimes, G2's stamp, G3.3's layout, G4a's probe tail) stay in this
+  directory, as the plan's own documents, and no `FLAT_TREE_PLAN.md` is written (#30).
 
 ## Decisions
 
@@ -515,6 +514,15 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
 **Use it, by span-based text edits;** never reprint a file (a `syn` printer drops comments), with `cargo check` as the oracle, one module at a time
 
 *Needed before:* step 1
+
+### #30 where Part B lives
+
+**Part B stays in this directory, as `07-part-b.md`.** The plan's proposal to write it as a repository document of its own
+(`FLAT_TREE_PLAN.md`, after `ITEMS_1_TO_3_FIXES_PLAN.md`) is superseded: the level-9 plan is already the repository's
+document set, one file per part, indexed by the README. Nothing is moved at approval for this part beyond B11's ledger
+and stack edits.
+
+*Needed before:* none (superseded)
 
 ## Facts the decisions rest on
 

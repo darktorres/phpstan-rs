@@ -29,6 +29,28 @@ at that point (a cheap run that stores output) and compared with the stored base
 fixtures and corpus passes run once there; the per-commit checks are `cargo fmt`, `cargo check`, `cargo clippy` and the
 touched module's tests.
 
+An old-versus-new comparison is deleted in the commit after its stage: I2's lexer `(kind, span)` fuzz when the old lexer
+is deleted; I4.5 step 3's per-`TypeNode` comparison, only if VAL-1.7's PHPDoc record cannot see what it finds; H3.6
+step 2's `Provider`-against-engine comparison and step 3's old passes, one level per stage. A2 keeps none.
+
+## Edits at approval
+
+Approving this plan makes these edits. None is made before the go.
+
+- `WORK_STACK.md`, section 9: level 8 is reordered so that item 0 (batch 0) comes before item 9, and Part A's rows come
+  before item 0. Item 9 reads "SYN-1.11, then 1.12 (+1.3), then 1.2/1.4/1.5/1.7/1.8, then step 3 (LOAD-3.5); the design
+  is Parts B, G1 to G4 and I1". The batches of C1 follow in order: tokens, the lexer's second pass, parse recovery with
+  the `php-version` crate, names, the constant lookup, products, PHPDoc, the check's temporaries. Item 2's bullet goes,
+  LOAD-9 leaves "Outside the items", item 8 keeps REG-14.1 and 14.3, item 19 loses LOAD-5.4, and the state line is
+  rewritten. The "Documents with no place in the stack" list gains this plan's documents.
+- `CRATE_SPLIT_PLAN.md`: the docs commit series of #20, in [`19-part-j.md`](19-part-j.md).
+- The ledger's `needs` changes of D8, in [`07-part-b.md`](07-part-b.md) (B11).
+- Other documents. `CROSS_PLATFORM_PLAN.md`: R11's database-file follow-up and R16's `path_bytes` encoding pair (H4.6),
+  and R13's CRLF probe files marked `-text` (G3.7.1). `CRASH_REPORTING_PLAN.md`: the stack guard's `LIMIT` restored on
+  unwind and the engine's two isolation modes (H2.8); the vendor-discovery panic-hook swap is deleted, not converted
+  (#40). `UNSAFE_PLAN.md`: its end state changes only if S-2 finds the engine exception necessary (#33).
+  `STAGE_B_FIX_REVIEW.md`: F14 superseded by TYPE-5's rule; F33's epoch lands in G1.5; F58's lazy construction in G1.9.
+
 Two gates hold every row that moves code, and they are cheap to different degrees. `cargo xtask modgraph` parses the
 graph and runs `cargo metadata`, so it runs per commit: a new crate gets its `crate` line and a new top-level module of
 the package its `module` line in `gates/module-graph.txt` in the commit that makes it, as does a nested module whose
@@ -80,7 +102,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 17 | CHECK-9 and TYPE-5 | [`14-part-c.md`](14-part-c.md) |
 | 18 | when to reevaluate | [`15-part-h1.md`](15-part-h1.md) |
 | 19 | order of the wall | [`05-part-d.md`](05-part-d.md) |
-| 20 | rows for C6 to C9 and D to G | [`20-part-n.md`](20-part-n.md) |
+| 20 | rows for C6 to C9 and D to G | [`19-part-j.md`](19-part-j.md) |
 | 21 | Stages D to G | [`05-part-d.md`](05-part-d.md) |
 | 22 | level 3 and the Q-11 follow-ups | [`06-part-f.md`](06-part-f.md) |
 | 23 | Part A's validation | [`02-part-a-intro.md`](02-part-a-intro.md) |
@@ -90,7 +112,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 27 | the step 1 codemod | [`07-part-b.md`](07-part-b.md) |
 | 28 | LOAD-5.2 batch-only | [`05-part-d.md`](05-part-d.md) |
 | 29 | NAME-2.1's thin name | [`14-part-c.md`](14-part-c.md) |
-| 30 | where Part B lives | [`20-part-n.md`](20-part-n.md) |
+| 30 | where Part B lives | [`07-part-b.md`](07-part-b.md) |
 | 31 | an analysed file with parse errors | [`09-part-g3.md`](09-part-g3.md) |
 | 32 | `PhpVersion` and its types move out of `types` | [`14-part-c.md`](14-part-c.md) |
 | 33 | the engine crate and `unsafe_code` | [`16-part-h3.md`](16-part-h3.md) |

@@ -41,7 +41,7 @@ module changes, which is why only that module names salsa.
 
 ## Tasks this part owns
 
-None. H6 lists the edits the engine cluster implies in other parts and documents; each edit is made by the part that owns the affected row, and Part N lists the ledger edits.
+None. H6 lists the edits the engine cluster implies in other parts and documents; each edit is made by the part that owns the affected row, and the ledger row it changes records it.
 
 - **Part B and G.** G1's rule on ids gains a home: engine ids are named in the engine module only (H1.6), beside
   `syntax`, the infer cache and the `ProbeScope` module. G4's rooted `ProbeScope` takes its `Arc<Ast>` from

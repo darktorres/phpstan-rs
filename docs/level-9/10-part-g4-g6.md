@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-None. G4 to G6 are designs and the edits they imply: the probe (G4, G4a, G4b) and G6's list of changes elsewhere. They add no ledger row. The rows they touch are owned where they are built: the probe's tail (G4a) is built in Part B's step 2, the live tree (G4b) with SYN-1.9 in Part C's batch 3, and CHECK-6.18 by Part C's batch 7. The ledger edits G6 implies are listed in Part N.
+None. G4 to G6 are designs and the edits they imply: the probe (G4, G4a, G4b) and G6's list of changes elsewhere. They add no ledger row. The rows they touch are owned where they are built: the probe's tail (G4a) is built in Part B's step 2, the live tree (G4b) with SYN-1.9 in Part C's batch 3, and CHECK-6.18 by Part C's batch 7. Each ledger edit G6 implies is made on the row it changes.
 
 ### G4 what exists (verified)
 

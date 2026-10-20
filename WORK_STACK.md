@@ -253,7 +253,7 @@ The off-run rows still open:
 
 Designed in plan mode on 2026-10-18 and 2026-10-19 (`~/.claude/plans/another-session-is-finishing-majestic-comet.md`).
 The plan is in `docs/level-9/`: one file per part, indexed by `docs/level-9/README.md`. It has no
-Part M; the review's rulings live in the parts. The ledger and stack edits its Part N lists follow.
+Part M; the review's rulings live in the parts. The ledger and stack edits that approval implies are listed in `docs/level-9/01-overview.md` (Edits at approval), and follow it.
 
 Start condition, as read on 2026-10-19: the cross-platform fixes are finished
 (`a83b1675`), this file has no other level 9, `git status` is clean, and no build or

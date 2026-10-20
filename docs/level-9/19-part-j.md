@@ -253,6 +253,29 @@ re-pointed to W3 (facts) and E1 (collection); and the corrections of H6.
 
 *Needed before:* batch 7
 
+### #20 rows for C6 to C9 and D to G
+
+**A docs pass at approval, in one commit series, edits `CRATE_SPLIT_PLAN.md` itself** so there is one source of truth.
+The series writes the rows of J2 (OVL, RES, EXT, SUM) and the D and E rows of J3, and marks each superseded paragraph
+in place, pointing at the section that replaces it:
+
+- Appendix F's "each level is a per-class `OnceLock`" and "constant reference cycles type as `mixed`" (H3.1, #1);
+- C4's "a change to any reflection input resets every memo" (the recorded reads);
+- F1's published snapshots (H4.3's cancellation) and its text on line starts (the PHP terminator rule is applied in the
+  lexer too: I3);
+- F2's resolved dependencies, fingerprints and entry sets (H4.4);
+- §3.9's text about the deleted `lsp/workspace_config.rs`;
+- the line "a file with parse errors is still not analysed" (around line 6883), superseded by #31;
+- G's "26 new packages" count and Appendix A, which gain the engine and `php-version` (J3);
+- B8's composer follow-ups (`config.vendor-dir`, Composer's constraint grammar, `psr-0`, the root package's autoload,
+  a package's bundled `vendor/`) point at A1, A7, A8 and #40 once they are built; the clamp of an open upper bound to
+  `MAX_PHP_VERSION` is marked superseded;
+- C6 to C9 and D to G gain the rows of J2 and J3.
+
+Effort is no reason to leave stale text that misleads until its phase is reached.
+
+*Needed before:* approval
+
 ## Facts the decisions rest on
 
 - §12.10 of the 25 G report and the crate split's D3 and D4 describe the same port of PHPStan's
