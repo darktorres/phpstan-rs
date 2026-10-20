@@ -1,4 +1,4 @@
-## A1. LOAD-2.2, last part: the name floor
+# Part A. A1
 
 ## Tasks this part owns
 
@@ -9,6 +9,8 @@ The state is the ledger's, as of `a3931d49d`.
 | LOAD-2.2 | PART | the name floor's replacement, `097c164b`, `40d889bb`, `df9640fe`, `c14aa865`, `fc1c65eca`, `00081301`, `2e1728bb`; the name list's deletion waits for LOAD-7.8 (OPEN) |
 | COMP-1 | DONE | `097c164b`, `40d889bb`, `df9640fe`, `00081301`, `2e1728bb` |
 | COMP-7 | DONE | the discovery admission `acf48fb8`, the walk's cut `16418a2c`, the tests `c14aa865` |
+
+## A1. LOAD-2.2, last part: the name floor
 
 **Now.** `DEFAULT_SCAN_EXCLUDED_DIR_NAMES = ["vendor", ".git", "node_modules"]`
 (`project.rs:3415` at `ffa7cccb`) and `path_under_excluded_dir` (`:3421`, which now takes the walk's `Excluded`, since
