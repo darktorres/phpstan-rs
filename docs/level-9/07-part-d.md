@@ -199,11 +199,11 @@ split's D2) and CHECK-10's operator sites (the crate split's D3).
    the change does to the registry itself, beyond what the crate split's gates (corpus, type
    snapshot, baseline, nsrt) see.
 
-Part F rows 10, 13, 14 and 15, designed together because each constrains the next. Written from the code at `8a1ca1e0` and from the source of **salsa 0.28.5**, the version REG-16.1 measured (`~/.cargo/registry/src/index.crates.io-*/salsa-0.28.5`). Everything said here about salsa was read from the crate, and none of it was run; H5 lists what a run must settle. **H1 is what batch 4 is built to** ([`06-part-c.md`](06-part-c.md)). H2 to H4 are what W2 and W3 build. They are written as a contract (what the code above the engine may rely on), so that REG-16.1's choice (salsa) stays reversible, with S-2 and S-3 re-testing it and an engine of our own with the same contract as the fallback: only the engine module names salsa (a crate from G1: #33).
-
 ## The engine (H2)
 
-The engine's rows are Part D's: REG-16.2 and REG-16.3 in W2, and REG-16.4, CACHE-13.1 and CACHE-13.2 in W3. The rows
+Rows 10, 13, 14 and 15 of the design index (in the overview) are designed together, because each constrains the next. Written from the code at `8a1ca1e0` and from the source of **salsa 0.28.5**, the version REG-16.1 measured (`~/.cargo/registry/src/index.crates.io-*/salsa-0.28.5`). Everything said here about salsa was read from the crate, and none of it was run; H5 lists what a run must settle. **H1 is what batch 4 is built to** ([`06-part-c.md`](06-part-c.md)). H2 to H4 are what W2 and W3 build. They are written as a contract (what the code above the engine may rely on), so that REG-16.1's choice (salsa) stays reversible, with S-2 and S-3 re-testing it and an engine of our own with the same contract as the fallback: only the engine module names salsa (a crate from G1: #33).
+
+The engine's rows are this part's: REG-16.2 and REG-16.3 in W2, and REG-16.4, CACHE-13.1 and CACHE-13.2 in W3. The rows
 that this section names as inputs (REG-16.1, S-3, S-5, S-7) are owned where they are built. The section is a contract
 (what the code above the engine may rely on), so that the choice of salsa stays reversible.
 
@@ -534,7 +534,7 @@ measures contention on shared levels, which REG-16.1 did not.
   analysed trees at exit) to the flat tree's size, so whether it is still wanted is S-7's to say, with the cost
   of freeing on another thread; **until S-7 says, W3 builds it as the ledger has it** (LOAD-5.2 needs LOAD-5.1,
   whose facts W3 builds, and LOAD-3.1; #39), and S-7 chooses between freeing on the checking worker and a
-  bounded eviction, or drops it explicitly in Part D. In the server
+  bounded eviction, or drops it explicitly in this part. In the server
   `parse_analysed` has an `lru` (`set_lru_capacity`), so the batch and the server hold trees alike (#28) and
   differ only in the capacity; a tree evicted is parsed again from the overlay or the disk, whose digest
   `file_digest` holds (LOAD-5.3). Eviction never loses cutoff for unchanged inputs (H2.1 3).
@@ -1043,7 +1043,7 @@ machinery whole. PROD-5.8 (the record of written names) stays: its readers are r
 
 W4 to W7 are far from batch 4, and the code they build on will have changed by then, so these sections settle what can be settled now: the data model that must be fixed first (J1), the rows that make C6 to C9 tracked work (J2), and how Stages D to G meet the ledger and the engine (J3).
 
-## J1. C5's data model on the engine (Part F 16)
+## J1. C5's data model on the engine
 
 Fixed already: decision 6 (gates as data, one parse per file, queries take a range), 7 (embed the builtin knowledge,
 read PHPStan's classes from the project), 10 (what php-src verifies bounds a type; other sources are claims inside
@@ -1193,7 +1193,7 @@ enumeration queries), 7.9 and 7.10 (range queries), 7.12 (the gate), STUB-8 (gua
 and the check, behind the pre-8.0 spike of J1.4), CHECK-10's version table (its operator sites are D3's), STUB-13.1
 (13.2 is W6's). STUB-11 (W6) embeds what STUB-12 builds.
 
-## J2. C6 to C9 as tracked work (Part F 17)
+## J2. C6 to C9 as tracked work
 
 REG-15.1 "needs C6 to C9 (not tracked here)". These are the rows to write into the ledger, with their needs, cut
 against decisions 1 to 18 and the engine. Nothing here changes the plan's behaviour lists; they become each row's
@@ -1237,7 +1237,7 @@ no `std::fs`, environment or clock in an extension's crates, which `xtask arch` 
 double run (each registered extension run twice over the fixtures, failing on a difference) cannot see a stable
 hidden input. With these rows REG-15.1's need reads "OVL, RES, EXT and SUM done".
 
-## J3. Stages D to G, reconciled (Part F 18)
+## J3. Stages D to G, reconciled
 
 Read against the crate split plan's D1, D3 and D4, and against E1, E7 and G1, and the ledger's rows. The plan's text
 stays the authority for what each phase does; this fixes how it meets the ledger, the engine and the designs above.
@@ -1354,5 +1354,3 @@ by family.
 **Each with a condition.** **LOAD-7.6** is approved as a rule: the commit opens with the full old-to-new key table, shown to the user before any key is renamed; the rename is hard, with no aliases (an alias is a second spelling kept forever), and the unknown-key error (LOAD-7.1) names the new key; the one casing is snake_case (only the `sql` section is camelCase today); and the PHP range and the extension activation of a file come from its owning manifest, which H2.2 defines and justifies (J1.2 and H2.2 change; activation is any owner's). **REG-18.4** is approved (php 8.5.4: `\APP\A` and `\app\A` find `App\A`, and `\App\a` does not). **CHECK-11** is approved with a definition its row lacks: the commit says which calls are template renderers (a configured list of methods, with defaults for Latte, Twig and Smarty when installed), the ORM half reads the resolved mapping attributes and annotations, and ROADMAP 182g later replaces the blanket with the properties templates read. **LOAD-7.2's PHPUnit half** stays ungated: the narrowing resolves the callee to `PHPUnit\Framework\Assert` (`checker/narrowing/phpunit.rs`), the mock types come from PHPUnit's own PHPDoc, and the code after an assertion only runs when it held. They are not fillers: W1's other rows do not wait for them. The first three change output on a project that uses them and each carries its fixture and a VAL-2.10 line
 
 *Needed before:* W1; batch 4b (REG-18.4)
-
----
