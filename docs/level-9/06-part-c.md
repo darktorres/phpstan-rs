@@ -66,7 +66,9 @@ Each task is listed in the C1 batch that builds it. The state is the ledger's, a
 | CHECK-6.17 | READY | 7 |
 | CHECK-6.18 | READY | 7 |
 
-Batch 0 is the README's, item 9 is Part B's and Part I's, and the batch 8 rows are other parts' (LOAD-5.4 is Part A's; CACHE-13.1, CACHE-8, LOAD-5.1, LOAD-5.2 and LOAD-3.1 are W3's). They are named in the text, not listed here.
+Batch 0 is the README's, item 9 is Part B's, and the batch 8 rows are other parts' (LOAD-5.4 is Part A's; CACHE-13.1, CACHE-8, LOAD-5.1, LOAD-5.2 and LOAD-3.1 are W3's). They are named in the text, not listed here.
+
+The designs in this part own no rows of their own; each serves rows listed above or owned elsewhere. Level 3's placement and G5 (item 0's tooling) serve batch 0's rows and the review's findings. I2 serves batch 1 (SYN-2 and SYN-4.1 are above) and I3 batch 2 (SYN-3.2). G3 serves batch 3: SYN-1.9, Q-10 and SYN-6 are in C1's table, CHECK-12 is W7's, and CHECK-13 is batch 5's with PROD-5.1 (decided in H1.4). H1 serves batch 4 (NAME-1.1 to 1.6, NAME-2.1 to 2.3 and SYN-4.5, all in batch 4). I4 serves batch 6 (DOC-2.1 and F41), and I5 batch 7 (CHECK-6.10 and CHECK-4.1).
 
 
 Read from the 20 G plan's items 10 to 19 (its §10), the ledger's rows, needs and notes
@@ -285,7 +287,7 @@ between heavy runs.
 | the comments (F24, F34, F37, F43, F51, F59, F80, F88, Stage C F13) and the fixtures (F23) | none | any gap; F23 before the baseline |
 | everything else (F2 to F6, F9, F11 to F13, F15 to F17, F25 to F32, F36, F38 to F40, F42 to F49, F52 to F56, F60 to F73, F79, F81 to F87, F89; Stage B W1, C2, M1, CMP-1, DF-1 to DF-7) | none | in the review's own order, F4 first |
 
-## G5. Item 0's tooling plan (Part F 6)
+## G5. Item 0's tooling plan
 
 The 20 G plan's item 0 (written at `5fb858c9`) is the design; this refreshes it against HEAD, builds
 on what the gates already have, and says in what order and with what acceptance.
@@ -352,12 +354,9 @@ fixtures too.
 
 ## The designs the batches wait for (I2 to I5)
 
-None. Part I holds designs (I2 to I5). The ledger tasks they serve are owned by the batches of Part C that build them (batches 1, 2, 6 and 7), and I1 is item 9's, in Part F's design list.
+Each is a section, written from the code at `8a1ca1e0`. I2 to I5 belong to batches 1, 2, 6 and 7; I1 is Part B's.
 
-Each is a section, written from the code at `8a1ca1e0`. I1 is item 9, step 2's layout; I2 to I5 belong to
-batches 1, 2, 6 and 7.
-
-## I2. Token payloads under decision 4 (Part F 7)
+## I2. Token payloads under decision 4
 
 **The problem.** 20 G item 10 gives `TokenStream` a `payloads: Vec<Payload<'a>>` holding `&'a Name`, `&'a [u8]`
 and `&'a str` into an arena. Decision 4 dropped the arena (a `bumpalo` arena is not `Sync`), and the tree's name
@@ -488,7 +487,7 @@ estimate (on the stubs and Piwigo), and if that work eats the saving the design 
 lexer that the parser can stop is the alternative); a measurement that does not show the saving is a finding, not
 a claim.
 
-## I3. SYN-3.2's kernel (Part F 8)
+## I3. SYN-3.2's kernel
 
 Read from `syntax/src/span.rs` (`LineIndex::new`: `memchr_iter` for `\n`, then `Utf8Chunks` for the columns of a
 non-ASCII file) and `wide` 0.7.33's source (`~/.cargo/registry/src/*/wide-0.7.33`), which #10 chose on merit
@@ -573,7 +572,7 @@ dropped, or the same API is written over `u64` words (eight bytes at a time, the
 no scalar-fallback trigger: `wide` takes its scalar branch only where neither `sse2` nor `neon` is a target
 feature, which x86-64 and aarch64 never are.
 
-## I4. The single grammar's lowering (Part F 11)
+## I4. The single grammar's lowering
 
 F41 (`STAGE_B_FIX_REVIEW.md`), DOC-2.1 (the ledger) and C7's grammar item are one piece of work. (Finding numbers
 are ambiguous across the two review files: F40, F41, F51, F61 and F63 exist in both with different content; this part
@@ -734,7 +733,7 @@ registered through the `Extensions` input of J2) and the assert targets (`$param
 `$this->method()` are kept), `@throws` and assert types getting alias substitution, and a written `Traversable`
 resolving like any name (J2's RES rows).
 
-## I5. The rule message type (Part F 12)
+## I5. The rule message type
 
 CHECK-6.10 (messages formatted only when reported, 37 rules), CHECK-4.1 (a message kept unformatted past the
 report) and the crate split's D6 (`RuleError`, `RuleErrorBuilder`) need one type. Read from `Checker::report`
@@ -838,9 +837,9 @@ E5; the 37 rules' temporaries (21,919 and 46,005 allocations are two of them); n
 
 *Left as it is:* the items of I4.3 that wait for C7's name scope, which the lowering does not have.
 
-## G3. The error-node model and parse recovery (Part F 3, 9)
+## G3. The error-node model and parse recovery
 
-None. G3 is a design: the error-node model (G3.1 to G3.5), the contract for readers (G3.6), and the oracles (G3.7). The rows its design serves are owned where they are built: SYN-1.9, Q-10 and SYN-6 by Part C's batch 3 (C1), CHECK-12 by Part D's wall step W7, and CHECK-13 by batch 5 with PROD-5.1 (H1.4).
+G3 is the design of batch 3's recovery: the error-node model (G3.1 to G3.5), the contract for readers (G3.6) and the oracles (G3.7).
 
 ### G3 why now
 
@@ -1144,9 +1143,9 @@ valid input (dump equality); the statement, expression, list, class-body and hea
 its golden dumps; the `php-version` crate and the marks; the matrix; the readers (G3.6); reporting
 and the editor. (c) SYN-6's rows are marks and error kinds in that table, not a separate pass.
 
-## H1. Identity (Part F 10)
+## H1. Identity
 
-None. H1 is a design, and its batch-4 build (H1.7) lists rows that Part C's C1 table already schedules: NAME-1.1 to 1.6, NAME-2.1 to 2.3 and SYN-4.5, all in batch 4. CHECK-13 is decided in H1.4 (anonymous classes reach the class-shape parent-call rules), and it is built in batch 5 with PROD-5.1, whose file-local anonymous-class identity its rule needs (Part C's C1 table lists it there).
+H1 is what batch 4 is built to. Its build (H1.7) takes rows that C1's table already schedules: NAME-1.1 to 1.6, NAME-2.1 to 2.3 and SYN-4.5, all in batch 4. CHECK-13 is decided in H1.4 (anonymous classes reach the class-shape parent-call rules) and built in batch 5 with PROD-5.1, whose file-local anonymous-class identity its rule needs.
 
 ### H1.0 What the code and the crate showed
 
