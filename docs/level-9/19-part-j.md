@@ -2,7 +2,7 @@
 
 ## Tasks this part owns
 
-None. J1 to J3 are designs. J2 proposes the rows that make C6 to C9 tracked work (OVL-1 to 8, RES-1 to 7, EXT-1 to 4, SUM-1 to 3); they are not in the ledger yet (their state is MISSING), and the wall's W5 builds them (Part D). J1's CHECK-10 read over the range is built in W4 (Part D), and J3's D-rows and E-rows are written when each phase is reached.
+None. J1 to J3 are designs. J2 proposes the rows that make C6 to C9 tracked work (OVL-1 to 8, RES-1 to 7, EXT-1 to 4, SUM-1 to 3); they are not in the ledger yet (their state is MISSING), and the wall's W5 builds them (Part D). J1's CHECK-10 read over the range is built in W4 (Part D), and J3's D-rows and E-rows are written in the approval series (#20).
 
 
 W4 to W7 are far from batch 4, and the code they build on will have changed by then, so this part settles what can
@@ -152,8 +152,7 @@ and by the digest-pinned `xtask stubs-dump --check` when docker is there.
 
 ### J1.6 Order (W4, with the engine in place)
 
-STUB-7.1 (the data model and one parse per file, with `Readings`; `VersionSet` and `Availability` are batch 3's, Part
-E 32), 7.3 (the attributes as data: the stub-attribute pass and `resolve_names` go), 7.2 and 7.4 (the locators;
+STUB-7.1 (the data model and one parse per file, with `Readings`; `VersionSet` and `Availability` are batch 3's, #32), 7.3 (the attributes as data: the stub-attribute pass and `resolve_names` go), 7.2 and 7.4 (the locators;
 7.5, `locate`, is W3's: H4.1), 7.6 (the stub layer as the database's corpus constant), 7.7 and 7.8 (provenance and
 enumeration queries), 7.9 and 7.10 (range queries), 7.12 (the gate), STUB-8 (guards), STUB-12.1 to 12.5 (the sources
 and the check, behind the pre-8.0 spike of J1.4), CHECK-10's version table (its operator sites are D3's), STUB-13.1
