@@ -301,7 +301,9 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(param.ty(), c),
                 None => param.ty().clone(),
             };
-            if !self.rule_level_accepts(&param_ty, &arg_ty).yes() {
+            if !self.rule_level_accepts(&param_ty, &arg_ty).yes()
+                && !self.mismatch_turns_on_unknown_class(&param_ty, &arg_ty)
+            {
                 let position = match &argument.name {
                     Some(name) => Position::Name(name),
                     None => Position::Index(i + 1),

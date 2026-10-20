@@ -1,0 +1,2 @@
+5:15-5:17 class.notFound L0 | parameter $m of take() has invalid type Missing
+8:10-8:11 argument.type L5 | Parameter #1 $m of function take expects Missing, 2 given.

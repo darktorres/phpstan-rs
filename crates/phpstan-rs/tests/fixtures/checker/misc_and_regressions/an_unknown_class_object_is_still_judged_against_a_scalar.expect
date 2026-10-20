@@ -1,0 +1,2 @@
+5:14-5:27 argument.type L5 | Parameter #1 $n of function count_it expects int, Missing given.
+5:14-5:27 class.notFound L0 | instantiated class Missing not found

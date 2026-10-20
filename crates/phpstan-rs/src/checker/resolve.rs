@@ -369,6 +369,21 @@ impl<'a> Checker<'a> {
         self.registry.lookup_class(name).is_some()
     }
 
+    /// Whether a mismatch between `param` and `arg` is withheld because it
+    /// turns on a class the project does not have. A class the registry
+    /// lacks may be a supertype or a subtype of the other side, so a pair
+    /// that names one is only judged where neither side can hold an object:
+    /// a scalar cannot be an instance of any class, whatever it is.
+    pub(crate) fn mismatch_turns_on_unknown_class(&self, param: &Type, arg: &Type) -> bool {
+        let names_unknown = |ty: &Type| {
+            ty.referenced_class_names()
+                .into_iter()
+                .any(|name| !self.class_name_exists(name))
+        };
+        let may_be_object = |ty: &Type| !ty.is_object().no();
+        (names_unknown(param) || names_unknown(arg)) && may_be_object(param) && may_be_object(arg)
+    }
+
     /// `ClassCaseSensitivityCheck`'s equivalent, covering every
     /// *native-syntax* class-name reference: a class/enum declaration's
     /// own `extends`/`implements`/trait-`use` references, an attribute
