@@ -468,10 +468,12 @@ mod on_windows {
     }
 
     #[test]
-    fn a_drive_path_elsewhere_is_not_judged() {
-        let project = Site::new();
-        assert!(project.found(World::Windows, "D:\\other\\a.php"));
-        assert!(project.found(World::Windows, "\\\\server\\share\\a.php"));
+    fn a_drive_path_elsewhere_is_found_when_the_file_exists_and_missing_otherwise() {
+        let mut present = Site::new();
+        present.files.push(folded(Path::new("D:\\other\\a.php")));
+        assert!(present.found(World::Windows, "D:\\other\\a.php"));
+        assert!(!Site::new().found(World::Windows, "D:\\other\\a.php"));
+        assert!(!Site::new().found(World::Windows, "\\\\server\\share\\a.php"));
     }
 
     #[test]
@@ -480,13 +482,15 @@ mod on_windows {
         assert!(present.found(World::Unix, "/proj/lib/a.php"));
         let missing = Site::new();
         assert!(!missing.found(World::Unix, "/proj/lib/a.php"));
-        assert!(missing.found(World::Unix, "/other/a.php"));
+        assert!(!missing.found(World::Unix, "/other/a.php"));
     }
 
     #[test]
-    fn a_rooted_path_is_the_root_of_the_projects_drive() {
-        let project = Site::new();
-        assert!(project.found(World::Windows, "\\other\\a.php"));
+    fn a_rooted_path_is_on_the_projects_drive_and_judged_there() {
+        let mut present = Site::new();
+        present.files.push(folded(Path::new("C:\\other\\a.php")));
+        assert!(present.found(World::Windows, "\\other\\a.php"));
+        assert!(!Site::new().found(World::Windows, "\\other\\a.php"));
     }
 
     #[test]
