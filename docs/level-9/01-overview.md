@@ -43,7 +43,11 @@ Approving this plan makes these edits. None is made before the go.
   the `php-version` crate, names, the constant lookup, products, PHPDoc, the check's temporaries. Item 2's bullet goes,
   LOAD-9 leaves "Outside the items", item 8 keeps REG-14.1 and 14.3, item 19 loses LOAD-5.4, and the state line is
   rewritten. The "Documents with no place in the stack" list gains this plan's documents.
-- `CRATE_SPLIT_PLAN.md`: the docs commit series of #20, in [`19-part-j.md`](19-part-j.md).
+- `CRATE_SPLIT_PLAN.md`: the docs commit series of #20 (below), which also writes the ledger rows of J2 (OVL, RES, EXT, SUM) and the D and E rows of J3, in [`05-part-d.md`](05-part-d.md).
+- The ledger rows that decision 20 writes: OVL, RES, EXT and SUM (J2), with the
+needs above; a D-row and an E-row per phase of Stage D and E that the plan lists, each citing its plan section and
+the oracle counts it carries; CHECK-6.1 to 6.3, 6.7, 6.13 to 6.15 re-pointed to "built by D1 to D4"; LOAD-5.1
+re-pointed to W3 (facts) and E1 (collection); and the ledger edits the engine cluster implies (`01-overview.md`, Edits at approval).
 - The ledger's `needs` changes of D8, in [`07-part-b.md`](07-part-b.md) (B11).
 - Other documents. `CROSS_PLATFORM_PLAN.md`: R11's database-file follow-up and R16's `path_bytes` encoding pair (H4.6),
   and R13's CRLF probe files marked `-text` (G3.7.1). `CRASH_REPORTING_PLAN.md`: the stack guard's `LIMIT` restored on
@@ -107,11 +111,11 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 13 | oracle tools | [`06-part-f.md`](06-part-f.md) |
 | 14 | DOC-2.1 | [`14-part-c.md`](14-part-c.md) |
 | 15 | CACHE-13.1 for context files | [`05-part-d.md`](05-part-d.md) |
-| 16 | item 18 | [`19-part-j.md`](19-part-j.md) |
+| 16 | item 18 | [`05-part-d.md`](05-part-d.md) |
 | 17 | CHECK-9 and TYPE-5 | [`14-part-c.md`](14-part-c.md) |
 | 18 | when to reevaluate | [`15-part-h1.md`](15-part-h1.md) |
 | 19 | order of the wall | [`05-part-d.md`](05-part-d.md) |
-| 20 | rows for C6 to C9 and D to G | [`19-part-j.md`](19-part-j.md) |
+| 20 | rows for C6 to C9 and D to G | this file, below |
 | 21 | Stages D to G | [`05-part-d.md`](05-part-d.md) |
 | 22 | level 3 and the Q-11 follow-ups | [`06-part-f.md`](06-part-f.md) |
 | 23 | Part A's validation | [`02-part-a-intro.md`](02-part-a-intro.md) |
@@ -134,3 +138,27 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 40 | the composer crate's B8 follow-ups | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
 | 41 | rows whose code a later task replaces | [`16-part-h3.md`](16-part-h3.md) |
 | 42 | deltas the ledger marks READY or OPEN with half a ruling | [`05-part-d.md`](05-part-d.md) |
+
+### #20 rows for C6 to C9 and D to G
+
+**A docs pass at approval, in one commit series, edits `CRATE_SPLIT_PLAN.md` itself** so there is one source of truth.
+The series writes the rows of J2 (OVL, RES, EXT, SUM) and the D and E rows of J3, and marks each superseded paragraph
+in place, pointing at the section that replaces it:
+
+- Appendix F's "each level is a per-class `OnceLock`" and "constant reference cycles type as `mixed`" (H3.1, #1);
+- C4's "a change to any reflection input resets every memo" (the recorded reads);
+- F1's published snapshots (H4.3's cancellation) and its text on line starts (the PHP terminator rule is applied in the
+  lexer too: I3);
+- F2's resolved dependencies, fingerprints and entry sets (H4.4);
+- §3.9's text about the deleted `lsp/workspace_config.rs`;
+- the line "a file with parse errors is still not analysed" (around line 6883), superseded by #31;
+- G's "26 new packages" count and Appendix A, which gain the engine and `php-version` (J3);
+- B8's composer follow-ups (`config.vendor-dir`, Composer's constraint grammar, `psr-0`, the root package's autoload,
+  a package's bundled `vendor/`) point at A1, A7, A8 and #40 once they are built; the clamp of an open upper bound to
+  `MAX_PHP_VERSION` is marked superseded;
+- C6 to C9 and D to G gain the rows of J2 and J3.
+
+Effort is no reason to leave stale text that misleads until its phase is reached.
+
+*Needed before:* approval
+

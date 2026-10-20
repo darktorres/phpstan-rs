@@ -27,9 +27,9 @@ against HEAD listed after the table.
 | 13 | The engine | H2, [`17-part-h2.md`](17-part-h2.md) | W2 |
 | 14 | REG-7 and REG-8 as engine queries | H3, [`16-part-h3.md`](16-part-h3.md) | W2, after 13 |
 | 15 | The pipeline as queries, persistence and the Session | H4, [`18-part-h4.md`](18-part-h4.md) | W3 |
-| 16 | C5's data model | J1, [`19-part-j.md`](19-part-j.md) | W4 |
-| 17 | C6 to C9 | J2, [`19-part-j.md`](19-part-j.md) | W5 |
-| 18 | Stages D to G reconciled | J3, [`19-part-j.md`](19-part-j.md) | W7 |
+| 16 | C5's data model | J1, [`05-part-d.md`](05-part-d.md) | W4 |
+| 17 | C6 to C9 | J2, [`05-part-d.md`](05-part-d.md) | W5 |
+| 18 | Stages D to G reconciled | J3, [`05-part-d.md`](05-part-d.md) | W7 |
 
 ## Designed, but needs a read against HEAD (a check, not a design)
 
@@ -47,7 +47,7 @@ against HEAD listed after the table.
 ## Order
 
 Every row of the table is designed: 1 to 4 and 6 in Part G, 10 and 13 to 15 in Part H, 5, 7, 8, 11 and 12 in Part
-I, 16 to 18 in Part J. What no reading settles is H5's twelve spikes (S-1 and S-2 before batch 4) and step 0's
+I, 16 to 18 in Part D (J1 to J3). What no reading settles is H5's twelve spikes (S-1 and S-2 before batch 4) and step 0's
 census, which confirms Part I1's layout. Row 9 is G3.4 and G3.8.
 
 ## Level 3's placement
