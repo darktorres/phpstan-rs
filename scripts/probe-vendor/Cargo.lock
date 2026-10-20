@@ -87,6 +87,7 @@ version = "0.1.0"
 dependencies = [
  "hashbrown",
  "phpstan-rs-path-bytes",
+ "phpstan-rs-stack",
  "phpstan-rs-syntax",
  "rustc-hash",
  "serde",
@@ -98,15 +99,22 @@ name = "phpstan-rs-path-bytes"
 version = "0.1.0"
 
 [[package]]
+name = "phpstan-rs-stack"
+version = "0.1.0"
+dependencies = [
+ "stacker",
+]
+
+[[package]]
 name = "phpstan-rs-syntax"
 version = "0.1.0"
 dependencies = [
  "hashbrown",
  "hotpath",
  "memchr",
+ "phpstan-rs-stack",
  "rustc-hash",
  "serde",
- "stacker",
 ]
 
 [[package]]
