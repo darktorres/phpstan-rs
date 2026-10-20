@@ -121,7 +121,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 23 | Part A's validation | [`02-part-a-intro.md`](02-part-a-intro.md) |
 | 24 | item 9's validation | [`07-part-b.md`](07-part-b.md) |
 | 25 | LOAD-2.8's parts 1 and 2 | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
-| 26 | the LSP completion probe | [`10-part-g4-g6.md`](10-part-g4-g6.md) |
+| 26 | the LSP completion probe | [`07-part-b.md`](07-part-b.md) |
 | 27 | the step 1 codemod | [`07-part-b.md`](07-part-b.md) |
 | 28 | LOAD-5.2 batch-only | [`05-part-d.md`](05-part-d.md) |
 | 29 | NAME-2.1's thin name | [`14-part-c.md`](14-part-c.md) |
