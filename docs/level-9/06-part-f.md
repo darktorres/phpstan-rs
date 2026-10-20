@@ -18,12 +18,12 @@ against HEAD listed after the table.
 | 4 | The probe as a checker entry point (#26) | G4, [`07-part-b.md`](07-part-b.md) | step 2 |
 | 5 | Node layout per variant | I1, [`07-part-b.md`](07-part-b.md) | step 2, after step 0 |
 | 6 | Item 0's tooling plan (#13) | G5, this file | batch 0 |
-| 7 | Item 10's token payloads under decision 4 | I2, [`13-part-i.md`](13-part-i.md) | batch 1 |
-| 8 | SYN-3.2's kernel (#10) | I3, [`13-part-i.md`](13-part-i.md) | batch 2 |
+| 7 | Item 10's token payloads under decision 4 | I2, [`14-part-c.md`](14-part-c.md) | batch 1 |
+| 8 | SYN-3.2's kernel (#10) | I3, [`14-part-c.md`](14-part-c.md) | batch 2 |
 | 9 | Parse recovery as a whole | G3.4 and G3.8, [`14-part-c.md`](14-part-c.md) | batch 3 |
 | 10 | The engine's identity model (#18) | H1, [`14-part-c.md`](14-part-c.md) | batch 4 |
-| 11 | The single grammar's lowering (#14) | I4, [`13-part-i.md`](13-part-i.md) | batch 6 |
-| 12 | The rule message type | I5, [`13-part-i.md`](13-part-i.md) | batch 7 |
+| 11 | The single grammar's lowering (#14) | I4, [`14-part-c.md`](14-part-c.md) | batch 6 |
+| 12 | The rule message type | I5, [`14-part-c.md`](14-part-c.md) | batch 7 |
 | 13 | The engine | H2, [`05-part-d.md`](05-part-d.md) | W2 |
 | 14 | REG-7 and REG-8 as engine queries | H3, [`05-part-d.md`](05-part-d.md) | W2, after 13 |
 | 15 | The pipeline as queries, persistence and the Session | H4, [`05-part-d.md`](05-part-d.md) | W3 |
