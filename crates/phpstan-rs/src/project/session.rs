@@ -711,21 +711,17 @@ pub(crate) fn finalize_results(
     }
 }
 
-/// The directory a composer project containing `dirs` is rooted at: the
-/// nearest ancestor with a `composer.json`, per directory, falling back
-/// to `root`.
 /// The PHP versions a project's composer.json declares it runs on (its
-/// `config.platform.php`, else `require.php`): the known releases the
-/// constraint admits, a release counting when any of its patch versions
+/// `config.platform.php`, else `require.php`): the known releases whose
+/// series the constraint admits, a series counting when some version in it
 /// does.
 pub(crate) fn declared_php_versions(
     package: &composer::PackageContext,
 ) -> Option<types::PhpVersions> {
     let constraint = package.php_constraint()?;
     types::known_php_versions_where(|v| {
-        ["0", "99"].iter().any(|patch| {
-            composer::constraint::satisfies(constraint, &format!("{v}.{patch}")) == Some(true)
-        })
+        composer::constraint::allows_series(constraint, u64::from(v.major), u64::from(v.minor))
+            == Some(true)
     })
 }
 
@@ -754,6 +750,9 @@ fn nested_manifest_dirs(
     })
 }
 
+/// The directory a composer project containing `dirs` is rooted at: the
+/// nearest ancestor with a `composer.json`, per directory, falling back
+/// to `root`.
 fn composer_roots(dirs: &[PathBuf], root: &Path, layout: &Layout<'_>) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for dir in dirs {
