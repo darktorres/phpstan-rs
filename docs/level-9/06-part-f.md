@@ -16,7 +16,7 @@ against HEAD listed after the table.
 | 2 | Stored-alias identity | G2, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
 | 3 | The error-node model | G3, [`14-part-c.md`](14-part-c.md) | step 2 (layout); the rest before batch 3 |
 | 4 | The probe as a checker entry point (#26) | G4, [`07-part-b.md`](07-part-b.md) | step 2 |
-| 5 | Node layout per variant | I1, [`11-part-i1.md`](11-part-i1.md) | step 2, after step 0 |
+| 5 | Node layout per variant | I1, [`07-part-b.md`](07-part-b.md) | step 2, after step 0 |
 | 6 | Item 0's tooling plan (#13) | G5, this file | batch 0 |
 | 7 | Item 10's token payloads under decision 4 | I2, [`13-part-i.md`](13-part-i.md) | batch 1 |
 | 8 | SYN-3.2's kernel (#10) | I3, [`13-part-i.md`](13-part-i.md) | batch 2 |
