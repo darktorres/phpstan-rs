@@ -88,7 +88,7 @@ impl<T: Clone + Send + 'static> Built<T> {
             .name(name.to_string())
             .stack_size(crate::project::WORKER_STACK_SIZE)
             .spawn(move || {
-                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(build));
+                let outcome = stack::catch_quietly(build);
                 let mut slot = shared.slot.lock().unwrap_or_else(|e| e.into_inner());
                 *slot = match outcome {
                     Ok(value) => Slot::Done(value),

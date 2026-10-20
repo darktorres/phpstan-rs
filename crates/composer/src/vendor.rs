@@ -153,15 +153,6 @@ pub fn discover_vendor_context_with(
         return VendorContext::default();
     };
 
-    // Every generated file below is machine-written, stable, and small
-    // (a handful of files at most) - lex/parse panics are still possible
-    // (a future Composer/PHP syntax this parser doesn't handle yet), so
-    // the batch is wrapped in one silenced-panic-hook window, matching
-    // `main.rs::run_check`'s reasoning for doing the same over a much
-    // larger batch: avoid both a crash and unwind-noise on stderr for
-    // what should be a quiet "skip this source of context" degrade.
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
     let entries = discover_inner(
         &composer_dir,
         &vendor_dir,
@@ -170,7 +161,6 @@ pub fn discover_vendor_context_with(
         cache,
         outside,
     );
-    std::panic::set_hook(default_hook);
     entries.into_context(listings)
 }
 
@@ -316,7 +306,14 @@ fn read_generated(
     if let Some(entries) = cache.and_then(|cache| cache.load(reading, &bytes)) {
         return Some(entries);
     }
-    let stmts = syntax::parse(&bytes).ok()?.stmts;
+    // Every generated file is machine-written, but a future Composer or PHP
+    // syntax this parser doesn't handle yet can still panic it. That file is
+    // skipped as one that fails to parse is, so the panic is caught here and
+    // its message left off stderr.
+    let stmts = stack::catch_quietly(|| syntax::parse(&bytes))
+        .ok()?
+        .ok()?
+        .stmts;
     let entries = GeneratedEntries::read(&stmts, reading)?;
     if let Some(cache) = cache {
         cache.store(reading, &bytes, &entries);

@@ -2414,10 +2414,9 @@ impl Project {
             files,
             |&id| self.files.get_by_id(id).map_or(0, |file| file.source_len),
             |&id| {
-                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.run_checker(id, collect_member_refs, dump_types)
-                }))
-                .map_err(panic_message);
+                let outcome =
+                    stack::catch_quietly(|| self.run_checker(id, collect_member_refs, dump_types))
+                        .map_err(panic_message);
                 (id, outcome)
             },
         );
@@ -2486,10 +2485,7 @@ impl Project {
             .collect();
         others.sort_by_key(|&id| self.files.rank_of(id));
         let other_facts = map_on_pool(pool, &others, |&id| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.run_checker(id, false, false).property_assign_facts
-            }))
-            .ok()
+            stack::catch_quietly(|| self.run_checker(id, false, false).property_assign_facts).ok()
         });
         // Each source with its path's place, so the facts merge in path order.
         let mut sources: Vec<(u32, PropertyAssignFacts)> = others
@@ -2817,11 +2813,12 @@ impl Project {
 
     /// Same as `check_paths`, but a panic while checking one file is
     /// caught and reported rather than aborting every other file's
-    /// result, with the panic hook silenced meanwhile, since a
-    /// whole-workspace pass runs over uncurated code the caller doesn't
-    /// control, where one file's latent checker bug must not take down
-    /// every other file's diagnostics. `Registry.sql_reflector`'s only interior mutability is
-    /// a plain `OnceLock` - if its lazy-init closure panics mid-connection
+    /// result, and its message is left off stderr as `check_files` leaves
+    /// every caught panic's. A whole-workspace pass runs over uncurated
+    /// code the caller doesn't control, where one file's latent checker bug
+    /// must not take down every other file's diagnostics.
+    /// `Registry.sql_reflector`'s only interior mutability is a plain
+    /// `OnceLock` - if its lazy-init closure panics mid-connection
     /// attempt, the cell is left simply uninitialized (not corrupted;
     /// `OnceLock::get_or_init`'s own contract), so a later observer sees
     /// either "not yet initialized" or a real, valid reflector - never a
@@ -2832,10 +2829,7 @@ impl Project {
         paths: &[PathBuf],
         pool: &rayon::ThreadPool,
     ) -> CheckPathsIsolatingPanics {
-        let default_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
         let outcomes = self.check_files(&self.numbers_of(paths), Some(pool), false, false);
-        std::panic::set_hook(default_hook);
 
         let mut results = FxHashMap::default();
         let mut panics = Vec::new();

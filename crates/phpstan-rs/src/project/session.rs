@@ -1799,7 +1799,7 @@ impl Session {
             (true, true) => super::BodyText::AsText,
             (true, false) => super::BodyText::Skipped,
         };
-        let parsed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &text {
+        let parsed = match stack::catch_quietly(|| match &text {
             Cow::Borrowed(text) => super::parse_file_with_names(
                 path,
                 root,
@@ -1818,7 +1818,7 @@ impl Session {
                 Some(names),
                 analysed,
             ),
-        })) {
+        }) {
             Ok(parsed) => parsed,
             Err(payload) => return Read::Panicked(super::panic_message(payload)),
         };

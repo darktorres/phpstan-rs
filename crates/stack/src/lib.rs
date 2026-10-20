@@ -68,9 +68,43 @@ impl Drop for Restore {
     }
 }
 
+thread_local! {
+    // Whether a panic on this thread is left off stderr: set while
+    // `catch_quietly` runs its closure.
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `catch_unwind`, without the panic's message on stderr, for a caller that
+/// turns the panic into a result of its own, which the message would only
+/// repeat. The process's panic hook is never replaced, so a panic on any
+/// other thread is reported as it would be: a failing test beside this one
+/// keeps its message.
+pub fn catch_quietly<R>(f: impl FnOnce() -> R) -> std::thread::Result<R> {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if !QUIET.with(std::cell::Cell::get) {
+                previous(info);
+            }
+        }));
+    });
+    let _quiet = Quiet(QUIET.with(|quiet| quiet.replace(true)));
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+}
+
+/// Puts the quiet flag back to the value it had before a catch began.
+struct Quiet(bool);
+
+impl Drop for Quiet {
+    fn drop(&mut self) {
+        QUIET.with(|quiet| quiet.set(self.0));
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LIMIT, guard};
+    use super::{LIMIT, QUIET, catch_quietly, guard};
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     fn descend(depth: usize) -> usize {
@@ -139,5 +173,12 @@ mod tests {
             .expect("spawns")
             .join()
             .expect("does not overflow");
+    }
+
+    #[test]
+    fn a_quiet_catch_returns_the_panic_and_puts_the_flag_back() {
+        assert!(catch_quietly(|| panic!("caught quietly")).is_err());
+        assert!(!QUIET.with(std::cell::Cell::get));
+        assert_eq!(catch_quietly(|| 7).ok(), Some(7));
     }
 }

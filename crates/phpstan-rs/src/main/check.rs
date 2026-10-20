@@ -7,17 +7,13 @@ use rayon::prelude::*;
 /// `phpstan-rs check <file-or-dir>...` - parse every .php file under the
 /// given paths in a single process (no per-file fork/exec), split across
 /// the worker pool, report a pass/fail summary. Each file's parse runs
-/// under catch_unwind with the default panic hook silenced for the batch,
-/// so a bug that panics fails that file rather than the run (the hook is
-/// process-global, so this also covers the worker threads).
+/// under `stack::catch_quietly`, so a bug that panics fails that file
+/// rather than the run.
 pub(crate) fn run_check(paths: &[PathBuf]) {
     let mut files = Vec::new();
     for p in paths {
         project::collect_php_files(p, &mut files);
     }
-
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
 
     // One chunk per worker, on threads with the stack the parser needs.
     let pool = project::worker_pool();
@@ -28,8 +24,6 @@ pub(crate) fn run_check(paths: &[PathBuf]) {
             .flat_map_iter(check_chunk)
             .collect()
     });
-
-    std::panic::set_hook(default_hook);
 
     println!("{} files checked, {} failed", files.len(), failures.len());
     for (path, msg) in &failures {
@@ -50,7 +44,7 @@ pub(crate) fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
                 continue;
             }
         };
-        let result = std::panic::catch_unwind(|| {
+        let result = stack::catch_quietly(|| {
             let parsed = syntax::parse(&bytes)?;
             for w in &parsed.warnings {
                 eprintln!(
