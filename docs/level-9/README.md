@@ -39,7 +39,7 @@ cites are indexed in the overview. Batch numbers are the numbers the steps use.
 5. The spikes at their gate points (H5): S-12 before item 9's step 2 (it settles whether B3's nodes hold byte spans
    or token indices; step 0's census feeds it); S-1, S-2 and S-3 before batch 4, with H1 (the engine's identity
    model); S-4 right after S-3 and before W2's result types; S-6 before W2 step 3; S-8 with batch 4; S-10 before W3
-   step 2; S-11 before W3 step 4.
+   step 2; S-11 before W3 step 4; S-13 before STUB-12.2 (W4).
 
 6. The wall: Part D's W2 to W8, with W2 as H3.6, W3 as H4.7 (REG-16.4 also needs SYN-1.9), W3 including Stage F1
    and F2 (the seven fixed-first commits of F1 are batch 0's) and the six passes' facts, W4 as J1, W5 as J2 with C7 on

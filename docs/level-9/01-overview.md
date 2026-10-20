@@ -124,18 +124,18 @@ against HEAD listed after the table.
 ## Order
 
 Every row of the table is designed: 1 to 5 in Part B (`05-part-b.md`), 6 to 12 in Part C (`06-part-c.md`), and 13 to 18
-in Part D (`07-part-d.md`). What no reading settles is H5's twelve spikes (S-1 and S-2 before batch 4, the section below)
+in Part D (`07-part-d.md`). What no reading settles is H5's thirteen spikes (S-1 and S-2 before batch 4, the section below)
 and step 0's census, which confirms I1's layout. Row 9 is G3.4 and G3.8.
 
-## What no reading settles: spikes S-1 to S-12 (H5)
+## What no reading settles: spikes S-1 to S-13 (H5)
 
-None in the ledger. The spikes S-1 to S-12 are this part's own work, defined in the table below, and they are not ledger rows (the ledger has no state for them). Each runs at the gate point the intro gives, and its result is recorded where the design it settles says so. The ledger rows the spikes gate are owned by the parts that build them.
+None in the ledger. The spikes S-1 to S-13 are this part's own work, defined in the table below, and they are not ledger rows (the ledger has no state for them). Each runs at the gate point the intro gives, and its result is recorded where the design it settles says so. The ledger rows the spikes gate are owned by the parts that build them.
 
 Each is a short build with a measurement and a stated accept and kill. None changes this plan's decisions;
 each can send one design to its stated alternative. S-1 runs before batch 4, since it decides the name's layout.
 S-2 and S-3 run early too, since the choice of engine is cited by everything from batch 4's rules (H1.5) to the
 wall, and a skeleton is cheap against finding out at W2 that salsa is unfit. **Each spike has a gate point:** S-1,
-S-2 and S-3 before batch 4; S-12 before item 9's step 2; S-4 right after S-3 and before W2's result types (H4.6 states them); S-5 and
+S-2 and S-3 before batch 4; S-12 before item 9's step 2; S-13 before STUB-12.2 (W4); S-4 right after S-3 and before W2's result types (H4.6 states them); S-5 and
 S-9 on the S-3 skeleton, before W2 step 2; S-6 before W2 step 3; S-8 with batch 4; S-7 before W3 step 1; S-10
 before W3 step 2; S-11 before W3 step 4. **The measurement rules:** a wall-time accept is G5's wall-time rule
 (`abab` pairs, stated pair count and p-value); "the phase start" is REG-12's gate baseline (`xtask gatetime
@@ -159,6 +159,7 @@ Ir where Ir decides (proposed, stated once, so that no spike sets a rate of its 
 | S-10 | probes | `path_is_file` over `ProbeEpoch` on a file with 200 includes, warm, and the distinct probes counted on the corpora | warm `check_file` of an unchanged file verifies with zero stat calls (`strace -f -c`) without an epoch bump, and at most 5 ms for the 200 per bump | the probe's keys batched per directory |
 | S-11 | lazy context loading | the S-3 skeleton with `locate` (H4.1) over `vendor/symfony`, `vendor/monolog` and a package with PSR-0 and one with a classmap, and a link below a PSR-4 directory: list, then read on demand; the files read against today's (all of them); `locate` against Composer's `ClassLoader::findFile` on `php` for every class the old loader found | the files read are those the analysed files reach through `locate`, transitively; the listing costs no more than today's discovery; `locate` agrees with `findFile`; each class the old loader found and no mapping reaches (a link included) is listed as the delta | that case is a proposed change to decision 14, and the listed files of that package are read eagerly only after that decision, or the listing is made lazy by directory |
 | S-12 | spans or token indices (decision 4's last sentence; #3) | a scratch build over the corpus (Piwigo, two vendor projects, the stubs): the nodes of I1 once with `Span` fields and once with token indices, the token arrays a kept tree must then keep (kind plus start offset, about 5 B a token), the exact bytes of a kept tree under each, using the node and token counts of step 0's census, and the readers' hot paths under each (`span()`, an identifier's name, a string's bytes, the infer cache's key) as callgrind Ir over the checker's reads of a tree; the layout of I1 is otherwise held fixed | token indices are chosen only if the bytes they save in the kept trees (net of the token arrays they must keep) reach the exchange rate of this section against the readers' added Ir in the check phase (50 MiB for each 1%, proposed): on trees of the plan's estimated 35 to 60 MB that needs a reader cost near zero, which is why byte spans are the expectation; otherwise byte spans, which B3 to B5 and I1 assume | spans, the measurement recorded as the answer to decision 4's last sentence; tokens, a change confined to B3's `span` fields, the retained token arrays of I2 and `Rooted` |
+| S-13 | does Reflection report types, return types and defaults for internal functions before 8.0? | run the stub dump's script on the 7.4 image (J1.4) and count, per kind (parameter type, return type, default), the positions that have one; the probe of the failure value (J1.4) covers the rest | the counts are recorded per kind, and each kind Reflection reports at its positions is read from Reflection (no threshold is set here: the counts decide which kinds take which source) | the bound for 7.0 to 7.4 is the probe's accepted and refused argument kinds, or a claims-only declaration that STUB-12.5 reports as unverified; `type` and `default` leave the pre-8.0 format where they are not there (J1.4) |
 
 If S-2 or S-3 fails, the plan's contract (H2.1) is implemented by an engine of our own: memo tables with revision
 stamps and dependency lists, early cutoff, a cancellation flag and cycle handling. Nothing above the engine
