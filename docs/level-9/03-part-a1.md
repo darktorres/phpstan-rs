@@ -167,10 +167,9 @@ missing or does not read, need those two assignments evaluated (string literals,
 and `.`), with the vendor directory's parent kept only for a file without such a head. The generated cache keeps the head
 with the entries, so its key (the file's bytes) still holds.
 
-**The owning manifest is not A1's.** A file's owner for H2.2's range and the activation (#42) is the nearest ancestor
-that holds a `composer.json`, a second fact of the same listing: A8's scan finds a degrade root's nested manifests before
-the walk, `PackageIndex` holds them and the walk tags each file with its owner from it (COMP-8), and W2 reads the same
-directories into `Packages`; A1 builds the vendor fact only.
+**The owning manifest is not A1's.** A file's owner, which sets its range and its activation (H2.2, #42), is a second fact of the
+same listing: the walk tags each file with it from `PackageIndex`, which holds the nested manifests A8's scan finds
+before the walk (COMP-8), and W2 reads the same directories into `Packages`; A1 builds the vendor fact only.
 
 **The walk's reach follows from the listing.** The walk counts, for every directory, the walks that reach it (`Reaching`,
 made by `Starts::below` from the directory above's, and by `Starts::reaching` from the top for a root or a link
