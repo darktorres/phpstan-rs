@@ -17,6 +17,8 @@ Each task is listed in the B7 step that builds it. The state is the ledger's, as
 
 Three of item 9's rows are scheduled by Part C, not here, so each has one owner. SYN-1.9 (step 4) is in Part C's C1 table, batch 3. SYN-1.10 (step 5) is in Part C's C3, batch 9, because it opens when PROD-5.1 and STUB-7.3 land. LOAD-3.5 (step 3) is in Part C's C3, because it opens when SYN-1.2 lands. SYN-1.6 is SUPERSEDED by SYN-1.2 (decision 4), so no part owns work for it.
 
+The designs in this part own no rows of their own. Each serves rows that are owned where they are built. G1 and G2 serve CHECK-6.18 and CHECK-6.8, which are batch 7's. G4a, the probe's tail, is built in step 2; G4b, the live tree, is built with SYN-1.9 in Part C's batch 3; each ledger edit G6 implies is made on the row it changes. I1, the node layout, is built in step 2 and its sizes are checked there; SYN-3.4 and SYN-4.8 are Part C's, DOC-2.9 is batch 6's, and the spike S-12 is in the overview's H5 table.
+
 ## B1. What exists (code facts verified at `0fb1a4de` and re-counted at `ffa7cccb`; figures marked with their commit)
 
 - **The tree** (`syntax/src/ast.rs`, 1,691 lines at `ffa7cccb` since R18 moved `is_truthy_literal` in, 58 public
@@ -157,7 +159,7 @@ struct ExprNode { span: Span, repr: ExprRepr }           // asserted == 32 B (I1
   the debug build the tests run in and the release build, and the size assertions above could hold in only one.
   **A public id has no `Serialize`**, because the cache key hashes the sources and the target, not the build
   profile (`build.rs`), so a debug and a release build read each other's entries, and the public id's size
-  differs between them. Where B5, B6 and Part I write `ExprId`, `StmtId` and the like for what the builder
+  differs between them. Where B5, B6 and I1 write `ExprId`, `StmtId` and the like for what the builder
   returns or a node stores, they mean the raw ids.
 - **Size model (to be replaced by the census in step 0).** The 2,792 analysed files (2,793 in the 20 G report's M2)
   hold ≈1.1 M allocations at `5fb858c9`: mostly `Box<Expr>`/`Box<Stmt>` at 80/160 B plus lists. At 28-32 B an
@@ -449,12 +451,12 @@ not ported, B6) keep the old node types through a `legacy_mut()` on `Ast`. A cod
 
 ## The checker's side of item 9 (G1 and G2)
 
-None. Part G1 and G2 are designs: they decide how the checker holds a tree (G1) and what stored-alias identity means (G2), and they add no ledger row. The ledger rows they touch are owned elsewhere: CHECK-6.18 and CHECK-6.8 by the batch that builds them (Part C, batch 7), SYN-1.2 to SYN-1.10 by Part B. G3 and G4 hold the rows they add.
+G1 decides how the checker holds a tree, and G2 what stored-alias identity means. Neither adds a ledger row.
 
 Written from the code at `30aa2002`, which has the cross-platform plan's R7.
 G1 and G2 finish item 9's checker side; G3 is the error-node model; G4 is the probe; G5 is item 0.
 
-## G1. How the checker holds a tree (Part F 1)
+## G1. How the checker holds a tree
 
 ### G1 what is stored, and from where (verified)
 
@@ -603,7 +605,7 @@ Replacing alias replay by conditional holders created at assignment (Appendix D 
 crate split plan) is Stage D's; it deletes the two alias maps, the only tree references in `Locals`, and
 this design costs nothing else to remove.
 
-## G2. Stored-alias identity (Part F 2)
+## G2. Stored-alias identity
 
 ### G2 what the code means
 
@@ -649,9 +651,9 @@ events on two forks is dropped by the merge (pins the stamp's meaning); the flag
 store in two scopes survives); the memo returns the same tags for the same statement in a loop's
 second pass and different ones for another statement with an identical text.
 
-## G4. The probe (Part F 4)
+## G4. The probe
 
-None. G4 to G6 are designs and the edits they imply: the probe (G4, G4a, G4b) and G6's list of changes elsewhere. They add no ledger row. The rows they touch are owned where they are built: the probe's tail (G4a) is built in Part B's step 2, the live tree (G4b) with SYN-1.9 in Part C's batch 3, and CHECK-6.18 by Part C's batch 7. Each ledger edit G6 implies is made on the row it changes.
+G4 is the probe's design, and G6 lists what these designs change elsewhere. Neither adds a ledger row.
 
 ### G4 what exists (verified)
 
@@ -753,7 +755,7 @@ identifier, with a keyword and with `{`, a receiver inside a `foreach` body, a c
   B3 with its tree) that G2 uses. B6's LSP-probe row is replaced by G4a, and its `import` is dropped. B7 step 1
   loses "`Error` variants" and step 2 loses `import` and gains "the probe's tail (G4a)". B9's last
   bullet and B10 risk 1 follow. D9 is G3.3.
-- **Part F** rows 1 to 4 and 6 are designed here; row 9 (parse recovery as a whole) is G3.4 and G3.8.
+- The index's rows 1 to 4 and 6 are designed in this part; row 9 (parse recovery as a whole) is G3.4 and G3.8, in Part C.
 - **Part C** batch 3 (parse recovery) is G3.8(b); the sequence's batch 0 is G5 with F10's tests and F20 (the
   parser findings, whose designs are in the review) before item 9's baseline.
 - **Part D** W7 gains nothing; G1's alias maps are what Stage D1/D3 delete.
@@ -765,9 +767,9 @@ identifier, with a keyword and with `{`, a receiver inside a `foreach` body, a c
   infallible); `CachedFile`, which gains the error list (G3.6); the ledger rows CHECK-6.18 (G1.10), SYN-1.9,
   Q-10 and SYN-6, and `CRATE_SPLIT_PLAN.md:6883-6891` ("a file with parse errors is still not analysed"), which #31 supersedes; and #26, whose "observers replace it later" is G4b in batch 3.
 
-## I1. Node layout per variant (Part F 5)
+## I1. Node layout per variant
 
-None. I1 is a design: the node layout per variant, its budgets, and the assertions that check it. The layout is built by Part B (SYN-1.2, 1.4, 1.5, 1.7, 1.8, in B7's step 2), and the sizes it asserts are checked there. The rows it mentions are owned elsewhere: SYN-3.4 and SYN-4.8 by Part C, DOC-2.9 by Part C's batch 6, and the spike S-12, which decides spans or token indices, by Part H5 (the spikes).
+I1 is the node layout, its budgets and the assertions that check it. It adds no ledger row.
 
 Written from `syntax/src/ast.rs` (1,691 lines at `ffa7cccb`), against B3's budgets: `ExprNode` 32 bytes,
 `StmtNode` 40, no element that needs a drop. The census of step 0 confirms the distributions; it can move a
