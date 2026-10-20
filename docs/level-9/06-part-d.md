@@ -111,6 +111,11 @@ built or measured. Figures are the ledger's and the
 reports', and "none" means the ledger gives no instruction figure. Steps are W1 to W8 (W for wall),
 so they do not collide with Part B's D1-D9 or the crate split's phases D1-D6.
 
+**TYPE-4.2 (W3).** Its "provisional answers" cannot come from the hierarchy, which has no salsa cycle, and the relation
+reads resolved types, not constants' values.
+
+**REG-11.14 is superseded.** The other REG-11 rows stand.
+
 ## What is left when batch 8 is done
 
 Level 8's READY list is empty, so the stack's rule ("work the lowest item that has a READY row")

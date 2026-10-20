@@ -56,6 +56,45 @@ Every row of the table is designed: 1 to 4 and 6 in Part G, 10 and 13 to 15 in P
 I, 16 to 18 in Part J. What no reading settles is H5's eleven spikes (S-1 and S-2 before batch 4) and step 0's
 census, which confirms Part I1's layout. Row 9 is G3.4 and G3.8.
 
+## Level 3's placement
+
+The level-3 count overstates the work. `STAGE_B_FIX_REVIEW.md` has 88 open findings, a validation and 16 pointer lines
+(the earlier reviews' items that a finding re-opens, listed again under "Full review"); `STAGE_B_REVIEW.md` has 15 and a
+validation; `STAGE_C_REVIEW.md` has 14 and a validation, of which O1 and F5 are fixed (`e06f470c`, `1cdfe80d`; the fix
+review says so) and two are the same bug as a fix-review finding (Stage C's F4 is F55, its F8 is F30). That is about 115
+findings. Whether each still reproduces is settled by running its probe on the gate binary in batch 0, not by reading.
+
+**The rule for when each is fixed:** a finding in code that a later task rewrites gets its fixture now and its fix inside
+that task; one that changes what the baseline records is fixed before the baseline; the rest go in the review's own order
+between heavy runs.
+
+| finding | meets | placed |
+|---|---|---|
+| F10 | the item 0 baseline (a skipped file has no tree dump) | its symptom is fixed; tests and fixture before the baseline, the exhaustive predicate in batch 1 |
+| F21 | the canonical printers (`Repr::Mixed` changes) | before them |
+| F20 | the cross-platform plan's R10; item 9 | after R10 and before item 9, so the lint checks the recursion item 9 writes |
+| F77 | the item 0 baseline (a refused file must show in O2) and SYN-1.9 | batch 0, for analysed files (built: the analysed-file half and the context-file notice are in `4278ec2a`); the dump and the per-file cache record a context file's failure in batch 0 (needs VAL-1.8); batch 3 feeds it from `errors()` |
+| the seven fixes the crate split's F1 puts first (debounce stack, `latest_text`, `didClose`, `--generate-baseline`, `--fix`, the closed pipe, rename) | none: they are on today's code and independent | batch 0, each with its test (built: SRV-1 to SRV-7) |
+| F22 (closure `use` list), F8 and F7 (the use-site walk) | item 9 step 1 (`Visitor` over handles) | in step 1 |
+| F14, F41, F19 (the PHPDoc bullets) | DOC-2.1, TYPE-5 | batch 6 |
+| F69, T2 | CHECK-9, REG-17.2 | F69's fixtures in batch 0; F69 and CHECK-9 in D2, since they sit on the recorders D2 replaces; T2 with REG-17.2. T2 asks "decide whether callee throw points count" and is a decision row: they do, as PHPStan's `MissingCheckedExceptionInMethodThrowsRule` reads the throw points of calls, and F69's throw points for implicit calls and REG-17.2's inferred throws are what make it complete, so T2 is built with them and the rule reports both a direct call and `$o[…]` on an `ArrayAccess` object |
+| F5 (definedness certainty), F6 (closure-literal alias), F45 (reference groups), F61 (unset properties) | D1 and D5 (holder storage): each design adds per-variable state to `Locals`, and the fix review's own first step is one `ExpressionHolder` per narrowing key | fixture now, fix inside D1 and D5 (J3); F6's design stores an `Rc<Expr>`, which G1 and G2 replace by a rooted alias that D1 deletes |
+| F18 | the `&&`/`\|\|` and nested-`match` causes are Stage D's one inference; the trait chain is REG-7.2's; the `.` rope and the `elseif` suffix are local | fixture now (the scale scripts), local ones now, the rest in D3 and W2 |
+| F35, F50, F55 (Stage C F4), F75, F78, Stage B D1 | REG-4.2, REG-5, REG-11.4 and 11.5, REG-8.3, REG-7.5 | fixture now, fix in W1 and W2 |
+| F76 | REG-7.10 (namespace cycles) | W2 |
+| F58 | G1.9 and G4a (no per-function clone; the `Resolved` is built only when the anchor matches, in both walkers) | resolved by the design |
+| F33 (anonymous class names, infer cache assumption) | #34, G1.5, H1.4 | the name is the shown path and the line, as its design states (`File.shown`, H2.2); the infer cache's context epoch and the env-gated recompute-on-hit assertion are G1.5's |
+| F30 (Stage C F8) | REG-4.15's builder | fixture now |
+| Stage C F1 | decision 11, REG-8.1 | W2 |
+| Stage C F5, F6, F7 | REG-11.10 (F5, fixed), REG-18 and J1 (F6, F7) | W1, W4 |
+| Stage C F2, F3 | LOAD-7.3 and 7.4, STUB-7.3 | W1, W4 |
+| Stage C F9, F10, F12 | LOAD-7.6, LOAD-7.7 | W1 |
+| Stage C F11 | VAL-1.3, REG-8.5 | batch 0, W2 |
+| F74 | the composer follow-ups of #40 | with them |
+| Stage B "Typed purity", D2 | REG-17.4 and SUM-3, REG-11.6 and EXT-2 | W2, W5 |
+| the comments (F24, F34, F37, F43, F51, F59, F80, F88, Stage C F13) and the fixtures (F23) | none | any gap; F23 before the baseline |
+| everything else (F2 to F6, F9, F11 to F13, F15 to F17, F25 to F32, F36, F38 to F40, F42 to F49, F52 to F56, F60 to F73, F79, F81 to F87, F89; Stage B W1, C2, M1, CMP-1, DF-1 to DF-7) | none | in the review's own order, F4 first |
+
 ---
 
 
@@ -129,6 +168,37 @@ fixtures too.
 ### #13 oracle tools
 
 **Item 0 first.** Between Part A and item 9, in G5's order: read HEAD against the last validated state (VAL-1.1), build the canonical type printer (1.4, after F21), the full-field O2 (1.8), `registry-dump` (1.6), the expression-types dump and the PHPDoc record (1.7), the server session (1.9) and the edit replay (1.10) and the memory profile (1.11); run the `oracle` profile once over all of them (1.2, which includes the replay, so it comes after it); retire the debug oracles (1.3, which also shrinks item 9's reader set); take the baseline (1.12). VAL-1.5 is item 9's dump. The 20 G plan designed it so (oracles are dumps), Piwigo's 581 diagnostics are a weak oracle for exact refactors, and the rule is not to gate on Piwigo. **The policy on old implementations:** no row keeps one alive as a standing test; a comparison against the implementation being replaced is allowed for one stage where a dump cannot see the difference (every `Provider` answer for every name, H3.6 steps 2 and 3; I4.5 step 3 only if the PHPDoc record cannot see what a per-`TypeNode` comparison finds; I2's comparison of the old and new lexer's (kind, span) pairs), each is listed in Part N with the commit that deletes it, and A2 keeps none
+
+*Needed before:* batch 0
+
+### #22 level 3 and the Q-11 follow-ups
+
+**A correctness backlog, not fillers.** Triage the findings first (about 115 are distinct; F57, Stage C's O1 and F5 are
+built), by running each probe on the gate binary. F10's symptom is fixed (`can_begin_expression`'s list, `3b7e4d95`), so
+its parser tests and fixture go before item 9's baseline, which must not encode a parser bug, and its exhaustive predicate
+waits for SYN-2's `TokenKind`. F20 goes before item 9 (after the cross-platform plan's R10), so its lint checks the
+recursion that item 9 writes. F21 goes before the canonical printers. F41 goes in batch 6. F77 goes in batch 0, before
+item 9's baseline: an analysed file's diagnostic and exit status are the final ones, so a parser rewrite that newly
+refuses a file shows in O2, and batch 3 feeds it from `errors()`.
+
+**F77's context-file half** (`phpstanRs.contextParseError`, run-level, failing the run) is user-visible behaviour that
+decisions 9 and 15 ("nothing in a context file is reported") do not give. Those two decisions keep their text and gain one
+sentence: a context file that fails to parse is reported as a run-level notice (its path, line and column, and the first
+error; `phpstanRs.contextParseError`), printed where the "N file(s) skipped: parse error" count is, and it leaves the exit
+status as it is; an opt-in switch makes it fail the run. Batch 0 builds the notice and records each failure (the count and
+the first error per file) in the dump. F69's fixtures are batch 0's; F69 and CHECK-9 are D2's (#17).
+
+The seven fixes the crate split's F1 puts first (the debounce thread's stack size and the scan's parses on the pool,
+`queue_change` writing `latest_text`, `didClose` restoring the disk's content, `--generate-baseline` keeping the entries of
+files not analysed, `--fix` skipping a file changed since analysis, a closed output pipe ending the run quietly, rename
+refusing qualified names, imports and aliases) end the server, lose data or corrupt files, and are independent of
+everything else here. They are batch 0's, each with its test (built: SRV-1 to SRV-7 in the README's batch-0 table), and
+rows of the ledger and `WORK_STACK.md`, not part of W3.
+
+Where each finding sits is a place in the sequence: every finding or follow-up that changes a dump goes before the
+baseline, and the rest go in the review's own order (F4 first), fixture first where a later phase rewrites the code (the
+table under "Level 3's placement" names which). A later commit that changes behaviour runs `dumps-compare`, lists its
+differences as its delta, and rolls the baseline forward.
 
 *Needed before:* batch 0
 

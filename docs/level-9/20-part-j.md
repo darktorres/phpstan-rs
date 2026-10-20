@@ -205,9 +205,11 @@ hidden input. With these rows REG-15.1's need reads "OVL, RES, EXT and SUM done"
 
 ## J3. Stages D to G, reconciled (Part F 18)
 
-Read against the crate split plan's stage headers and D1 to D6, E1, E5 to E7, F and G, and the ledger's rows. The
-plan's text stays the authority for what each phase does; this fixes how it meets the ledger, the engine and the
-designs above.
+Read against the crate split plan's D1, D3 and D4, and against E1, E7 and G1, and the ledger's rows. The plan's text
+stays the authority for what each phase does; this fixes how it meets the ledger, the engine and the designs above.
+
+**Not read.** D5, D6, E2 to E6, F1 to F5 and G2 to G5 are not read. Their crate split text stays the authority for each
+phase, and a row in one of them is not checked by this part.
 
 | plan | ledger | resolution |
 |---|---|---|
