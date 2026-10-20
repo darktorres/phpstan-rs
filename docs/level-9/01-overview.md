@@ -82,6 +82,51 @@ and any other cheap gate (F20's recursion lint) is added in two places, `gate_st
 heavy tool (the dumps, the baseline, the `oracle` profile run) stays local: it needs the frozen Piwigo checkout and a
 quiet machine, and a dump spells paths and diagnostics as its platform does.
 
+## Where each design is
+
+Every design the plan needs is written, in the part named in the table below. The checks that remain are the reads
+against HEAD listed after the table.
+
+| # | design | part | needed before |
+|---|---|---|---|
+| 1 | How the checker holds a tree (#1) | G1, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
+| 2 | Stored-alias identity | G2, [`07-part-b.md`](07-part-b.md) | item 9, step 1 |
+| 3 | The error-node model | G3, [`14-part-c.md`](14-part-c.md) | step 2 (layout); the rest before batch 3 |
+| 4 | The probe as a checker entry point (#26) | G4, [`07-part-b.md`](07-part-b.md) | step 2 |
+| 5 | Node layout per variant | I1, [`07-part-b.md`](07-part-b.md) | step 2, after step 0 |
+| 6 | Item 0's tooling plan (#13) | G5, [`14-part-c.md`](14-part-c.md) | batch 0 |
+| 7 | Item 10's token payloads under decision 4 | I2, [`14-part-c.md`](14-part-c.md) | batch 1 |
+| 8 | SYN-3.2's kernel (#10) | I3, [`14-part-c.md`](14-part-c.md) | batch 2 |
+| 9 | Parse recovery as a whole | G3.4 and G3.8, [`14-part-c.md`](14-part-c.md) | batch 3 |
+| 10 | The engine's identity model (#18) | H1, [`14-part-c.md`](14-part-c.md) | batch 4 |
+| 11 | The single grammar's lowering (#14) | I4, [`14-part-c.md`](14-part-c.md) | batch 6 |
+| 12 | The rule message type | I5, [`14-part-c.md`](14-part-c.md) | batch 7 |
+| 13 | The engine | H2, [`05-part-d.md`](05-part-d.md) | W2 |
+| 14 | REG-7 and REG-8 as engine queries | H3, [`05-part-d.md`](05-part-d.md) | W2, after 13 |
+| 15 | The pipeline as queries, persistence and the Session | H4, [`05-part-d.md`](05-part-d.md) | W3 |
+| 16 | C5's data model | J1, [`05-part-d.md`](05-part-d.md) | W4 |
+| 17 | C6 to C9 | J2, [`05-part-d.md`](05-part-d.md) | W5 |
+| 18 | Stages D to G reconciled | J3, [`05-part-d.md`](05-part-d.md) | W7 |
+
+## Designed, but needs a read against HEAD (a check, not a design)
+
+- 20 G items 11 to 19, written at `5fb858c9`. The premise has moved for 13 (PROD-1 to 3), 14
+  (DOC-1), 15 and 18; the ledger's targets say where.
+- Level 3's "Design" paragraphs, written at `3eaddbd1`. F57 looks built; the 136 count has stale
+  items.
+- Part B's measurements, re-taken at step 0.
+
+## Left to their phases
+
+- REG-17, CHECK-7 and CHECK-8: the semantics are fixed by decisions 9, 17, 1 and 8; their designs belong to their phases.
+- Level 1: the roadmap's phases, not audited here.
+
+## Order
+
+Every row of the table is designed: 1 to 5 in Part B (`07-part-b.md`), 6 to 12 in Part C (`14-part-c.md`), and 13 to 18
+in Part D (`05-part-d.md`). What no reading settles is H5's twelve spikes (S-1 and S-2 before batch 4, the section below)
+and step 0's census, which confirms I1's layout. Row 9 is G3.4 and G3.8.
+
 ## What no reading settles: spikes S-1 to S-12 (H5)
 
 None in the ledger. The spikes S-1 to S-12 are this part's own work, defined in the table below, and they are not ledger rows (the ledger has no state for them). Each runs at the gate point the intro gives, and its result is recorded where the design it settles says so. The ledger rows the spikes gate are owned by the parts that build them.
@@ -145,7 +190,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 10 | SYN-3.2's SIMD | [`14-part-c.md`](14-part-c.md) |
 | 11 | the parse-recovery batch | [`14-part-c.md`](14-part-c.md) |
 | 12 | order of items 13, 16, 15, 14 | [`14-part-c.md`](14-part-c.md) |
-| 13 | oracle tools | [`06-part-f.md`](06-part-f.md) |
+| 13 | oracle tools | [`14-part-c.md`](14-part-c.md) |
 | 14 | DOC-2.1 | [`14-part-c.md`](14-part-c.md) |
 | 15 | CACHE-13.1 for context files | [`05-part-d.md`](05-part-d.md) |
 | 16 | item 18 | [`05-part-d.md`](05-part-d.md) |
@@ -154,7 +199,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 19 | order of the wall | [`05-part-d.md`](05-part-d.md) |
 | 20 | rows for C6 to C9 and D to G | this file, below |
 | 21 | Stages D to G | [`05-part-d.md`](05-part-d.md) |
-| 22 | level 3 and the Q-11 follow-ups | [`06-part-f.md`](06-part-f.md) |
+| 22 | level 3 and the Q-11 follow-ups | [`14-part-c.md`](14-part-c.md) |
 | 23 | Part A's validation | [`02-part-a-intro.md`](02-part-a-intro.md) |
 | 24 | item 9's validation | [`07-part-b.md`](07-part-b.md) |
 | 25 | LOAD-2.8's parts 1 and 2 | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
