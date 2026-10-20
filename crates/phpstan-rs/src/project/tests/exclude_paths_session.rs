@@ -2,7 +2,7 @@
 //! the analysis is still scanned, what it leaves out of both is not listed,
 //! and an entry that names nothing is reported.
 
-use super::super::session::{ErrorPolicy, Overrides, Session};
+use super::super::session::{ErrorPolicy, Overrides, Session, SessionSettings};
 use super::super::walk::Role;
 use super::helpers::{TempDir, resolved};
 use crate::registry::stub_set::Stubs;
@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 /// the project directory `proj` in `dir`.
 fn session(dir: &TempDir, config: &str, policy: ErrorPolicy) -> Result<Session, String> {
     let path = dir.write("proj/phpstan-rs.toml", config);
-    let config = ConfigFile::load(&path, &crate::app::config_schema())?;
+    let schema = config::Schema::new().section::<SessionSettings>();
+    let config = ConfigFile::load(&path, &schema)?;
     Session::resolve(
         &config,
         config.dir().map(Path::to_path_buf),
