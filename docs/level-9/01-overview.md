@@ -113,7 +113,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 15 | CACHE-13.1 for context files | [`05-part-d.md`](05-part-d.md) |
 | 16 | item 18 | [`05-part-d.md`](05-part-d.md) |
 | 17 | CHECK-9 and TYPE-5 | [`14-part-c.md`](14-part-c.md) |
-| 18 | when to reevaluate | [`15-part-h1.md`](15-part-h1.md) |
+| 18 | when to reevaluate | [`14-part-c.md`](14-part-c.md) |
 | 19 | order of the wall | [`05-part-d.md`](05-part-d.md) |
 | 20 | rows for C6 to C9 and D to G | this file, below |
 | 21 | Stages D to G | [`05-part-d.md`](05-part-d.md) |
@@ -128,15 +128,15 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 30 | where Part B lives | [`07-part-b.md`](07-part-b.md) |
 | 31 | an analysed file with parse errors | [`09-part-g3.md`](09-part-g3.md) |
 | 32 | `PhpVersion` and its types move out of `types` | [`14-part-c.md`](14-part-c.md) |
-| 33 | the engine crate and `unsafe_code` | [`16-part-h3.md`](16-part-h3.md) |
+| 33 | the engine crate and `unsafe_code` | [`05-part-d.md`](05-part-d.md) |
 | 34 | positionless declarations | [`14-part-c.md`](14-part-c.md) |
 | 35 | PROD-5.7 and `deps::Collector` | [`14-part-c.md`](14-part-c.md) |
-| 36 | the server's snapshot model | [`17-part-h2.md`](17-part-h2.md) |
+| 36 | the server's snapshot model | [`05-part-d.md`](05-part-d.md) |
 | 37 | the persisted database's key | [`05-part-d.md`](05-part-d.md) |
-| 38 | REG-16.2's "never reused" | [`15-part-h1.md`](15-part-h1.md) |
+| 38 | REG-16.2's "never reused" | [`14-part-c.md`](14-part-c.md) |
 | 39 | LOAD-5.1's passes | [`05-part-d.md`](05-part-d.md) |
 | 40 | the composer crate's B8 follow-ups | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
-| 41 | rows whose code a later task replaces | [`16-part-h3.md`](16-part-h3.md) |
+| 41 | rows whose code a later task replaces | [`05-part-d.md`](05-part-d.md) |
 | 42 | deltas the ledger marks READY or OPEN with half a ruling | [`05-part-d.md`](05-part-d.md) |
 
 ### #20 rows for C6 to C9 and D to G

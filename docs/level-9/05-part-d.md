@@ -199,6 +199,8 @@ split's D2) and CHECK-10's operator sites (the crate split's D3).
    the change does to the registry itself, beyond what the crate split's gates (corpus, type
    snapshot, baseline, nsrt) see.
 
+Part F rows 10, 13, 14 and 15, designed together because each constrains the next. Written from the code at `8a1ca1e0` and from the source of **salsa 0.28.5**, the version REG-16.1 measured (`~/.cargo/registry/src/index.crates.io-*/salsa-0.28.5`). Everything said here about salsa was read from the crate, and none of it was run; H5 lists what a run must settle. **H1 is what batch 4 is built to** ([`14-part-c.md`](14-part-c.md)). H2 to H4 are what W2 and W3 build. They are written as a contract (what the code above the engine may rely on), so that REG-16.1's choice (salsa) stays reversible, with S-2 and S-3 re-testing it and an engine of our own with the same contract as the fallback: only the engine module names salsa (a crate from G1: #33).
+
 ## The engine (H2)
 
 The engine's rows are Part D's: REG-16.2 and REG-16.3 in W2, and REG-16.4, CACHE-13.1 and CACHE-13.2 in W3. The rows

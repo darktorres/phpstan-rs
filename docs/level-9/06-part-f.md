@@ -21,11 +21,11 @@ against HEAD listed after the table.
 | 7 | Item 10's token payloads under decision 4 | I2, [`13-part-i.md`](13-part-i.md) | batch 1 |
 | 8 | SYN-3.2's kernel (#10) | I3, [`13-part-i.md`](13-part-i.md) | batch 2 |
 | 9 | Parse recovery as a whole | G3.4 and G3.8, [`09-part-g3.md`](09-part-g3.md) | batch 3 |
-| 10 | The engine's identity model (#18) | H1, [`15-part-h1.md`](15-part-h1.md) | batch 4 |
+| 10 | The engine's identity model (#18) | H1, [`14-part-c.md`](14-part-c.md) | batch 4 |
 | 11 | The single grammar's lowering (#14) | I4, [`13-part-i.md`](13-part-i.md) | batch 6 |
 | 12 | The rule message type | I5, [`13-part-i.md`](13-part-i.md) | batch 7 |
-| 13 | The engine | H2, [`17-part-h2.md`](17-part-h2.md) | W2 |
-| 14 | REG-7 and REG-8 as engine queries | H3, [`16-part-h3.md`](16-part-h3.md) | W2, after 13 |
+| 13 | The engine | H2, [`05-part-d.md`](05-part-d.md) | W2 |
+| 14 | REG-7 and REG-8 as engine queries | H3, [`05-part-d.md`](05-part-d.md) | W2, after 13 |
 | 15 | The pipeline as queries, persistence and the Session | H4, [`05-part-d.md`](05-part-d.md) | W3 |
 | 16 | C5's data model | J1, [`05-part-d.md`](05-part-d.md) | W4 |
 | 17 | C6 to C9 | J2, [`05-part-d.md`](05-part-d.md) | W5 |
