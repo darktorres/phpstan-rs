@@ -195,11 +195,11 @@ pub enum TypeNode {
 /// with no stack check.
 impl Drop for TypeNode {
     fn drop(&mut self) {
-        let mut children = Vec::new();
-        self.detach_children(&mut children);
-        if !children.is_empty() {
-            stack::guard(|| drop(children));
-        }
+        stack::guard(|| {
+            let mut children = Vec::new();
+            self.detach_children(&mut children);
+            drop(children);
+        });
     }
 }
 
