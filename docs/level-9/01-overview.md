@@ -61,45 +61,45 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 
 | # | decision | part |
 |---|---|---|
-| 1 | D1: what consumers hold | [`08-part-b.md`](08-part-b.md) |
-| 2 | D2: how to migrate | [`08-part-b.md`](08-part-b.md) |
-| 3 | D3: position | [`08-part-b.md`](08-part-b.md) |
-| 4 | D4: payload bytes | [`08-part-b.md`](08-part-b.md) |
-| 5 | D5: names in nodes | [`08-part-b.md`](08-part-b.md) |
-| 6 | D6: the mutating passes | [`08-part-b.md`](08-part-b.md) |
-| 7 | D7: fabricated nodes | [`08-part-b.md`](08-part-b.md) |
-| 8 | D8: rows | [`08-part-b.md`](08-part-b.md) |
-| 9 | D9: error nodes | [`08-part-b.md`](08-part-b.md) |
-| 10 | SYN-3.2's SIMD | [`15-part-c.md`](15-part-c.md) |
-| 11 | the parse-recovery batch | [`15-part-c.md`](15-part-c.md) |
-| 12 | order of items 13, 16, 15, 14 | [`15-part-c.md`](15-part-c.md) |
-| 13 | oracle tools | [`07-part-f.md`](07-part-f.md) |
-| 14 | DOC-2.1 | [`15-part-c.md`](15-part-c.md) |
-| 15 | CACHE-13.1 for context files | [`06-part-d.md`](06-part-d.md) |
-| 16 | item 18 | [`20-part-j.md`](20-part-j.md) |
-| 17 | CHECK-9 and TYPE-5 | [`15-part-c.md`](15-part-c.md) |
-| 18 | when to reevaluate | [`16-part-h1.md`](16-part-h1.md) |
-| 19 | order of the wall | [`06-part-d.md`](06-part-d.md) |
-| 20 | rows for C6 to C9 and D to G | [`21-part-n.md`](21-part-n.md) |
-| 21 | Stages D to G | [`06-part-d.md`](06-part-d.md) |
-| 22 | level 3 and the Q-11 follow-ups | [`07-part-f.md`](07-part-f.md) |
+| 1 | D1: what consumers hold | [`07-part-b.md`](07-part-b.md) |
+| 2 | D2: how to migrate | [`07-part-b.md`](07-part-b.md) |
+| 3 | D3: position | [`07-part-b.md`](07-part-b.md) |
+| 4 | D4: payload bytes | [`07-part-b.md`](07-part-b.md) |
+| 5 | D5: names in nodes | [`07-part-b.md`](07-part-b.md) |
+| 6 | D6: the mutating passes | [`07-part-b.md`](07-part-b.md) |
+| 7 | D7: fabricated nodes | [`07-part-b.md`](07-part-b.md) |
+| 8 | D8: rows | [`07-part-b.md`](07-part-b.md) |
+| 9 | D9: error nodes | [`07-part-b.md`](07-part-b.md) |
+| 10 | SYN-3.2's SIMD | [`14-part-c.md`](14-part-c.md) |
+| 11 | the parse-recovery batch | [`14-part-c.md`](14-part-c.md) |
+| 12 | order of items 13, 16, 15, 14 | [`14-part-c.md`](14-part-c.md) |
+| 13 | oracle tools | [`06-part-f.md`](06-part-f.md) |
+| 14 | DOC-2.1 | [`14-part-c.md`](14-part-c.md) |
+| 15 | CACHE-13.1 for context files | [`05-part-d.md`](05-part-d.md) |
+| 16 | item 18 | [`19-part-j.md`](19-part-j.md) |
+| 17 | CHECK-9 and TYPE-5 | [`14-part-c.md`](14-part-c.md) |
+| 18 | when to reevaluate | [`15-part-h1.md`](15-part-h1.md) |
+| 19 | order of the wall | [`05-part-d.md`](05-part-d.md) |
+| 20 | rows for C6 to C9 and D to G | [`20-part-n.md`](20-part-n.md) |
+| 21 | Stages D to G | [`05-part-d.md`](05-part-d.md) |
+| 22 | level 3 and the Q-11 follow-ups | [`06-part-f.md`](06-part-f.md) |
 | 23 | Part A's validation | [`02-part-a-intro.md`](02-part-a-intro.md) |
-| 24 | item 9's validation | [`08-part-b.md`](08-part-b.md) |
+| 24 | item 9's validation | [`07-part-b.md`](07-part-b.md) |
 | 25 | LOAD-2.8's parts 1 and 2 | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
-| 26 | the LSP completion probe | [`11-part-g4-g6.md`](11-part-g4-g6.md) |
-| 27 | the step 1 codemod | [`08-part-b.md`](08-part-b.md) |
-| 28 | LOAD-5.2 batch-only | [`06-part-d.md`](06-part-d.md) |
-| 29 | NAME-2.1's thin name | [`15-part-c.md`](15-part-c.md) |
-| 30 | where Part B lives | [`21-part-n.md`](21-part-n.md) |
-| 31 | an analysed file with parse errors | [`10-part-g3.md`](10-part-g3.md) |
-| 32 | `PhpVersion` and its types move out of `types` | [`15-part-c.md`](15-part-c.md) |
-| 33 | the engine crate and `unsafe_code` | [`17-part-h3.md`](17-part-h3.md) |
-| 34 | positionless declarations | [`15-part-c.md`](15-part-c.md) |
-| 35 | PROD-5.7 and `deps::Collector` | [`15-part-c.md`](15-part-c.md) |
-| 36 | the server's snapshot model | [`18-part-h2.md`](18-part-h2.md) |
-| 37 | the persisted database's key | [`19-part-h4.md`](19-part-h4.md) |
-| 38 | REG-16.2's "never reused" | [`16-part-h1.md`](16-part-h1.md) |
-| 39 | LOAD-5.1's passes | [`06-part-d.md`](06-part-d.md) |
+| 26 | the LSP completion probe | [`10-part-g4-g6.md`](10-part-g4-g6.md) |
+| 27 | the step 1 codemod | [`07-part-b.md`](07-part-b.md) |
+| 28 | LOAD-5.2 batch-only | [`05-part-d.md`](05-part-d.md) |
+| 29 | NAME-2.1's thin name | [`14-part-c.md`](14-part-c.md) |
+| 30 | where Part B lives | [`20-part-n.md`](20-part-n.md) |
+| 31 | an analysed file with parse errors | [`09-part-g3.md`](09-part-g3.md) |
+| 32 | `PhpVersion` and its types move out of `types` | [`14-part-c.md`](14-part-c.md) |
+| 33 | the engine crate and `unsafe_code` | [`16-part-h3.md`](16-part-h3.md) |
+| 34 | positionless declarations | [`14-part-c.md`](14-part-c.md) |
+| 35 | PROD-5.7 and `deps::Collector` | [`14-part-c.md`](14-part-c.md) |
+| 36 | the server's snapshot model | [`17-part-h2.md`](17-part-h2.md) |
+| 37 | the persisted database's key | [`18-part-h4.md`](18-part-h4.md) |
+| 38 | REG-16.2's "never reused" | [`15-part-h1.md`](15-part-h1.md) |
+| 39 | LOAD-5.1's passes | [`05-part-d.md`](05-part-d.md) |
 | 40 | the composer crate's B8 follow-ups | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |
-| 41 | rows whose code a later task replaces | [`17-part-h3.md`](17-part-h3.md) |
-| 42 | deltas the ledger marks READY or OPEN with half a ruling | [`06-part-d.md`](06-part-d.md) |
+| 41 | rows whose code a later task replaces | [`16-part-h3.md`](16-part-h3.md) |
+| 42 | deltas the ledger marks READY or OPEN with half a ruling | [`05-part-d.md`](05-part-d.md) |
