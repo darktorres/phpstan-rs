@@ -653,6 +653,30 @@ fn condition_alias_targets(rhs: &Expr, locals: &Locals) -> Option<Vec<LocalKey>>
     })
 }
 
+/// Defines the variables `e` assigns, for a branch on which `e` is known to
+/// have been evaluated: the right operand of a `&&` that is true, or of an
+/// `||` that is false. An operand that may be skipped (the right side of a
+/// nested `||` or `??`, a ternary's arms) is left alone.
+fn define_assigned_variables(e: &Expr, locals: &mut Locals) {
+    match &e.peeled().kind {
+        ExprKind::Assign(lhs, rhs) => {
+            if let ExprKind::Variable(name) = &lhs.kind
+                && let Some(key) = locals.find_var(name)
+            {
+                locals.clear_maybe_undefined(key);
+            }
+            define_assigned_variables(rhs, locals);
+        }
+        ExprKind::Binary(BinOp::Or | BinOp::LogicalOr | BinOp::Coalesce, _, _) => {}
+        ExprKind::Binary(_, l, r) => {
+            define_assigned_variables(l, locals);
+            define_assigned_variables(r, locals);
+        }
+        ExprKind::Unary(_, inner) => define_assigned_variables(inner, locals),
+        _ => {}
+    }
+}
+
 impl<'a> Checker<'a> {
     /// Narrows `locals` in place based on `cond` being true (`branch_true`)
     /// or false, along one branch of an `if`/`while`. Only handles the
@@ -768,10 +792,12 @@ impl<'a> Checker<'a> {
                 // for its own unrepresentable branch below.
                 ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) if branch_true => {
                     self.apply_narrowing(l, locals, true);
+                    define_assigned_variables(r, locals);
                     self.apply_narrowing(r, locals, true);
                 }
                 ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) if !branch_true => {
                     self.apply_narrowing(l, locals, false);
+                    define_assigned_variables(r, locals);
                     self.apply_narrowing(r, locals, false);
                 }
                 // "At least one is true, but not sure

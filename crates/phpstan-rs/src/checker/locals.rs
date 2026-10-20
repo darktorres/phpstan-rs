@@ -517,6 +517,15 @@ impl Locals {
         }
     }
 
+    /// Marks the variable `key` defined on every path to here, when the code
+    /// that assigns it is known to have run.
+    pub(crate) fn clear_maybe_undefined(&mut self, key: LocalKey) {
+        if self.maybe_undefined.contains(&key) {
+            self.touch();
+            self.maybe_undefined.remove(&key);
+        }
+    }
+
     /// Narrows `key` to `ty` on a branch. A variable undefined on the way in
     /// reads as `null` to a narrowing, so only a `ty` that rules `null` out
     /// defines it: otherwise it stays as it was, absent or maybe-defined. A
