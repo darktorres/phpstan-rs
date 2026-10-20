@@ -2,36 +2,34 @@
 
 ## Tasks this part owns
 
-None. Part F holds designs, not ledger tasks: the designs of G1 to G5, H1 to H4, I1 to I5 and J1 to J3, and the list of what still needs one. Each ledger task those designs serve is owned by the part that builds it (batch 0 by the README's batch 0 rows, the wall by Part D, and so on).
+None. Part F holds designs, not ledger tasks: the designs of G1 to G5, H1 to H4, I1 to I5 and J1 to J3, and the index of where each one is. Each ledger task those designs serve is owned by the part that builds it (batch 0 by the README's batch 0 rows, the wall by Part D, and so on).
 
 
-What exists: Parts A and B are designed (B has the open points below). The 20 G plan's items 0 to
-19 have designs written at `5fb858c9`. The ledger's rows carry specifications. Level 3's tasks carry
-"Design" paragraphs written at `3eaddbd1`. The crate split plan has designs for C6 to G. "Needs a design" below means the design is missing or no longer fits; a design that
-exists but needs a read against HEAD is a check, and is listed after the table.
+Every design the plan needs is written, in the part named in the table below. The checks that remain are the reads
+against HEAD listed after the table.
 
-## Needs a design, in the order the work needs it
+## Where each design is
 
-| # | design | what exists | what is missing | needed before |
-|---|---|---|---|---|
-| 1 | How the checker holds a tree (#1). **Designed: G1** | B4's rule for ids in checker state; `Checker<'a>` borrows registry and settings, `Locals` has no lifetime, `Checker::new` has 30 call sites, `Rc<Expr>` sits in 11 places | whether `Locals` and the checker take a tree lifetime or root what they store (rooted: Stage D deletes the lifetime again); the rooted form for an expression kept past its walk; skimmed bodies' short-lived trees; the infer cache key | item 9, step 1 (it fixes the API's signatures) |
-| 2 | Stored-alias identity. **Designed: G2** | `Rc::ptr_eq` merge tests on the condition and query-builder aliases (`control_flow.rs:446`, `:478`), meaning "both branches inherited this very store"; the `@var` memo keyed by a doc text's address (`var_tag_types.rs:290`) | whether the stored value keeps instance identity (a store stamp, or an `Rc` around the handle) or takes the node's identity, which would be a semantic change; the memo's new key | step 1 |
-| 3 | The error-node model. **Designed: G3** | decisions 4 and 15; Q-10, SYN-1.9 and SYN-6 as needs; F77's reporting design | what an error node keeps (salvaged children) and how readers treat it; recovery points on the token stream; marks for versions; how the registry gets "an entry of unknown shape" | step 2 (layout); the rest before batch 3 |
-| 4 | The probe as a checker entry point (#26). **Designed: G4** | the current probe (`completion.rs`: synthetic statements, sentinel spans) shared with hover through `probe_receiver_type` | the entry point's inputs and outputs (a statement prefix, an expression handle from another tree), the hover path, static and script scopes | step 2 |
-| 5 | Node layout per variant. **Designed: I1** (the census confirms it) | B3's shape and size limits | which of the 47 expression and 26 statement kinds are inline or in side tables, and the nested lists' layouts; it needs step 0's census | step 2, after step 0 |
-| 6 | Item 0's tooling plan (#13). **Designed: G5** | 20 G item 0: the printer, `registry-dump`, the expression-types dump, O2, the session, the edit replay | a refresh against HEAD (the registry's shape moved: templates, flags), the baseline procedure at a current commit, what is kept and for how long | batch 0 |
-| 7 | Item 10's token payloads under decision 4. **Designed: I2** | 20 G item 10: `TokenStream` with payloads as `&'a Name` and `&'a [u8]` into an arena | the arena was dropped (it is not `Sync`): payloads become ids into the builder's tables, which grow while the lexer runs, so references into them cannot be held | batch 1 |
-| 8 | SYN-3.2's kernel (#10). **Designed: I3** | SYN-3.1's two types; the old SSE2 and AVX2 plan | the fused newline and non-ASCII kernel on `wide`: block size, tails, line-terminator rules, the `memchr` oracle | batch 2 |
-| 9 | Parse recovery as a whole. **Designed: G3.4, G3.8** | (3) | the recovery algorithm; the load's failure reporting (F77); the editor's rule for a failed parse (`Project::update_from` parses before it unindexes, so a failed parse leaves the file's registry entries as they were) | batch 3 |
-| 10 | The engine's identity model (#18). **Designed: H1** | decision 3; REG-16.1's measurement; REG-16.2 and REG-8.6 as rows; NAME-2's weak tables | ids, interners and their lifecycle as one design; the API of `FoldedName`, `ConstName` and `ArrayKey`; NAME-2.1's thin name (a spike) | batch 4 |
-| 11 | The single grammar's lowering (#14). **Designed: I4** | F41's design (a `TypeNode` to `Type` lowering, the string parser deleted), DOC-2.1's (`phpdoc::lower`), C7's list | where the lowering lives (F41 moves the grammar to its own crate if `types` cannot depend on `phpdoc`), `parse_phpdoc_type`, how DOC-2.2's memo keys over it | batch 6 |
-| 12 | The rule message type. **Designed: I5** | CHECK-6.10 and 4.1; the crate split's D6 `RuleErrorBuilder` | one lazy message type that is also D6's | batch 7 |
-| 13 | The engine. **Designed: H2** | decision 3 (principles); REG-16.1 (cost of a query: 374 Ir, 67 per name per file) | the queries and their keys; read recording through REG-4.12's accessors (they are one design); early cutoff; threads and the pool (REG-16.1 did not measure queries on several threads); cancellation; panics (REG-7.9); cycles; revisions in a batch run | W2 |
-| 14 | REG-7 and REG-8 as engine queries. **Designed: H3** | rows 7.1 to 7.12, 8.1 to 8.7 | each level's query, key and cutoff, on (13) | W2, after (13) |
-| 15 | The pipeline as queries, persistence and the Session. **Designed: H4** | REG-16.4, CACHE-13.2, the crate split's F1 and F2 (F2's design superseded by decision 3) | one design: inputs, the result cache and its key, dependency fingerprints, `AnalysisResult`, `update(FileDelta)`, salsa's `persistence` or the cache's container | W3 |
-| 16 | C5's data model. **Designed: J1** | decisions 6, 7, 10, 11, 16, 18; rows STUB-7.1 to 7.12, STUB-12 | version ranges as data, the stub layer on the engine, STUB-12.2's generator and its format, CHECK-10 | W4 |
-| 17 | C6 to C9. **Designed: J2** (as rows) | the crate split's text (stale: per-class `OnceLock`, constant cycles typed `mixed`) | ledger rows with needs, and the text re-cut against decisions 1 to 18 | W5 |
-| 18 | Stages D to G reconciled. **Designed: J3** | the crate split's D to G; §12.10 of the 25 G report | one inference design from §12.10 and D1 to D6, the rule API, E1 to E7, F3 to F5, G | W7 |
+| # | design | part | needed before |
+|---|---|---|---|
+| 1 | How the checker holds a tree (#1) | G1, [`08-part-g1-g2.md`](08-part-g1-g2.md) | item 9, step 1 |
+| 2 | Stored-alias identity | G2, [`08-part-g1-g2.md`](08-part-g1-g2.md) | item 9, step 1 |
+| 3 | The error-node model | G3, [`09-part-g3.md`](09-part-g3.md) | step 2 (layout); the rest before batch 3 |
+| 4 | The probe as a checker entry point (#26) | G4, [`10-part-g4-g6.md`](10-part-g4-g6.md) | step 2 |
+| 5 | Node layout per variant | I1, [`11-part-i1.md`](11-part-i1.md) | step 2, after step 0 |
+| 6 | Item 0's tooling plan (#13) | G5, this file | batch 0 |
+| 7 | Item 10's token payloads under decision 4 | I2, [`13-part-i.md`](13-part-i.md) | batch 1 |
+| 8 | SYN-3.2's kernel (#10) | I3, [`13-part-i.md`](13-part-i.md) | batch 2 |
+| 9 | Parse recovery as a whole | G3.4 and G3.8, [`09-part-g3.md`](09-part-g3.md) | batch 3 |
+| 10 | The engine's identity model (#18) | H1, [`15-part-h1.md`](15-part-h1.md) | batch 4 |
+| 11 | The single grammar's lowering (#14) | I4, [`13-part-i.md`](13-part-i.md) | batch 6 |
+| 12 | The rule message type | I5, [`13-part-i.md`](13-part-i.md) | batch 7 |
+| 13 | The engine | H2, [`17-part-h2.md`](17-part-h2.md) | W2 |
+| 14 | REG-7 and REG-8 as engine queries | H3, [`16-part-h3.md`](16-part-h3.md) | W2, after 13 |
+| 15 | The pipeline as queries, persistence and the Session | H4, [`18-part-h4.md`](18-part-h4.md) | W3 |
+| 16 | C5's data model | J1, [`19-part-j.md`](19-part-j.md) | W4 |
+| 17 | C6 to C9 | J2, [`19-part-j.md`](19-part-j.md) | W5 |
+| 18 | Stages D to G reconciled | J3, [`19-part-j.md`](19-part-j.md) | W7 |
 
 ## Designed, but needs a read against HEAD (a check, not a design)
 
@@ -41,19 +39,15 @@ exists but needs a read against HEAD is a check, and is listed after the table.
   items.
 - Part B's measurements, re-taken at step 0.
 
-## Specified, or waiting on a ruling
+## Left to their phases
 
-- LOAD-7.2's PHPUnit half and the deltas of LOAD-7.6, REG-18.4 and CHECK-11 are settled (#42):
-  the PHPUnit half stays ungated, and the three deltas are approved with their conditions. LOAD-7.8's settings are
-  each "its phase".
-- REG-17, CHECK-7 and CHECK-8: the semantics are fixed by decisions 9, 17, 1 and 8; their designs
-  belong to their phases.
+- REG-17, CHECK-7 and CHECK-8: the semantics are fixed by decisions 9, 17, 1 and 8; their designs belong to their phases.
 - Level 1: the roadmap's phases, not audited here.
 
 ## Order
 
 Every row of the table is designed: 1 to 4 and 6 in Part G, 10 and 13 to 15 in Part H, 5, 7, 8, 11 and 12 in Part
-I, 16 to 18 in Part J. What no reading settles is H5's eleven spikes (S-1 and S-2 before batch 4) and step 0's
+I, 16 to 18 in Part J. What no reading settles is H5's twelve spikes (S-1 and S-2 before batch 4) and step 0's
 census, which confirms Part I1's layout. Row 9 is G3.4 and G3.8.
 
 ## Level 3's placement
