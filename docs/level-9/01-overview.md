@@ -82,7 +82,7 @@ Each decision is a `### #n` section of the part that owns the design it changes;
 | 19 | order of the wall | [`06-part-d.md`](06-part-d.md) |
 | 20 | rows for C6 to C9 and D to G | [`21-part-n.md`](21-part-n.md) |
 | 21 | Stages D to G | [`06-part-d.md`](06-part-d.md) |
-| 22 | level 3 and the Q-11 follow-ups | [`05-part-k.md`](05-part-k.md) |
+| 22 | level 3 and the Q-11 follow-ups | [`07-part-f.md`](07-part-f.md) |
 | 23 | Part A's validation | [`02-part-a-intro.md`](02-part-a-intro.md) |
 | 24 | item 9's validation | [`08-part-b.md`](08-part-b.md) |
 | 25 | LOAD-2.8's parts 1 and 2 | [`04-part-a2-to-a8.md`](04-part-a2-to-a8.md) |

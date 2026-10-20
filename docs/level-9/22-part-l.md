@@ -64,7 +64,7 @@ moves the cross-platform plan's R18 makes; (4) what checks it. A change needed i
 
 ## L2. Checked, and holding
 
-What this pass read and found as the plan has it (so that a "sound" in Part K has its evidence):
+What this pass read and found as the plan has it (so that a "sound" in the verdicts has its evidence):
 
 - **Part A.** The line references of A1 hold at HEAD (`session.rs:375`, `:386`, `:701`; `project.rs:1949`, `:3414`,
   `:3420`; `lsp.rs:541` for `classify_unlisted` has moved ten lines with R5); `phpstan_api.rs:268` is REG-18.6's, and
