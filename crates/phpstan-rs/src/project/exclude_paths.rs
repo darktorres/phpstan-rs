@@ -194,11 +194,14 @@ fn matches_any(patterns: &[String], path: &Path, case: CaseRule, below: Option<&
     path.ancestors()
         .take_while(|dir| below.is_none_or(|below| *dir != below && dir.starts_with(below)))
         .any(|dir| {
-            let Some(dir) = dir.to_str() else {
+            if dir.to_str().is_none() {
                 return false;
-            };
+            }
+            // The patterns are written with `/`, which a Windows path spells
+            // with `\`; a report path is the spelling both are compared in.
+            let dir = diagnostics::report_path(dir);
             patterns
                 .iter()
-                .any(|pattern| path_glob_matches(pattern, dir, case))
+                .any(|pattern| path_glob_matches(pattern, &dir, case))
         })
 }
