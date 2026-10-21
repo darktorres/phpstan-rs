@@ -426,6 +426,7 @@ fn absorb_contained_members(members: &mut Vec<Type>) {
                     let n = &members[j];
                     j != i
                         && !cannot_contain(n, m)
+                        && !distinct_closure_literals(n, m)
                         && relation.is_super_type_of(n, m).yes()
                         && (j < i || !relation.is_super_type_of(m, n).yes())
                 })
@@ -436,6 +437,18 @@ fn absorb_contained_members(members: &mut Vec<Type>) {
         index += 1;
         !dropped[index - 1]
     });
+}
+/// Whether `a` and `b` are two different closure literals. A union keeps
+/// each of them: a call of one is not a call of the other, so the checker
+/// must still see which literal a value may be.
+fn distinct_closure_literals(a: &Type, b: &Type) -> bool {
+    match (
+        a.callable_sig().and_then(|sig| sig.literal),
+        b.callable_sig().and_then(|sig| sig.literal),
+    ) {
+        (Some(x), Some(y)) => x != y,
+        _ => false,
+    }
 }
 
 /// Whether `container` provably does not hold every value of `member`
