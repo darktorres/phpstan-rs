@@ -31,6 +31,16 @@ impl WriteLog {
         self.any_name = true;
     }
 
+    /// Adds every write `other` holds to this log.
+    pub(crate) fn absorb(&mut self, other: &WriteLog) {
+        for (name, types) in &other.names {
+            for ty in types {
+                self.record(name.clone(), ty);
+            }
+        }
+        self.any_name |= other.any_name;
+    }
+
     /// The distinct types written to `name`.
     pub(crate) fn types_of(&self, name: &str) -> &[Type] {
         self.names
@@ -361,6 +371,15 @@ impl Locals {
     pub(crate) fn log_mixed_write_var(&self, name: &str) {
         let key = self.var_key(name);
         self.log_write(key, &Type::mixed());
+    }
+
+    /// Logs a write this scope cannot attribute to a variable, such as a
+    /// global that a magic `__get()` writes: a by-reference capture of any
+    /// variable may then hold any value.
+    pub(crate) fn log_untracked_write(&self) {
+        if let Some(log) = &self.write_log {
+            log.borrow_mut().record_any_name();
+        }
     }
 
     /// The variables that share a value with `key` by reference, other than

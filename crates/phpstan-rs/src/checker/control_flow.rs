@@ -164,8 +164,10 @@ impl<'a> Checker<'a> {
     /// write log still grows, when the body holds a by-reference capture
     /// (`use (&$x)`): a capture's closure starts from every value the body
     /// writes to the variable (`byref_writes`), and the writes its own check
-    /// logs are what the next pass starts from. Every pass starts from
-    /// `locals` as it was, and the log only grows across them, so the first
+    /// logs are what the next pass starts from. The log starts from the
+    /// writes the enclosing body already logged, which a capture sees too.
+    /// Every pass starts from `locals` as it was, and the log only grows
+    /// across them, so the first
     /// pass that adds no write is the fixed point: its `locals` and
     /// diagnostics are kept, and any earlier pass is rewound the way a loop
     /// pass is. Bounded by `MAX_PASSES`; the last pass is kept when the
@@ -181,6 +183,11 @@ impl<'a> Checker<'a> {
         }
         const MAX_PASSES: usize = 4;
         let log = locals.enable_write_log();
+        if let Some(outer) = &self.byref_writes
+            && !std::rc::Rc::ptr_eq(outer, &log)
+        {
+            log.borrow_mut().absorb(&outer.borrow());
+        }
         let entry = locals.clone();
         let outer_writes = self.byref_writes.replace(std::rc::Rc::clone(&log));
         for pass in 0..MAX_PASSES {

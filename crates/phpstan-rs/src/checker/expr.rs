@@ -518,6 +518,9 @@ impl<'a> Checker<'a> {
         // as real PHP.
         let mut closure_locals: Locals = locals.closure_scope();
         let mut captures: Vec<(types::Name, CapturedVariable)> = Vec::new();
+        // Each by-reference capture with the type it is seeded from, before
+        // the write log widens it (see the body check below).
+        let mut byref_seeds: Vec<(Ident, Type)> = Vec::new();
         for u in uses {
             // A call sees each capture as the literal's creation saw it.
             let at_creation = (mode == ClosureMode::Call)
@@ -614,6 +617,9 @@ impl<'a> Checker<'a> {
             // A by-reference capture can still gain keys from
             // anything else holding the reference before the
             // closure runs.
+            if u.by_ref {
+                byref_seeds.push((u.name.clone(), ty.clone()));
+            }
             let ty = match (u.by_ref, mode) {
                 (false, _) => ty,
                 (true, ClosureMode::Call) => self.widen_to_untracked_byref_writes(&u.name.name, ty),
@@ -883,10 +889,26 @@ impl<'a> Checker<'a> {
                 // the same way only its diagnostics survive.
                 this.current_function_return_points.clear();
                 this.current_function_saw_explicit_return = false;
+                // The body's own writes to its by-reference captures feed the
+                // next pass, whether the capture is made by this closure or by
+                // one nested in its body.
+                let holds_byref_capture = !byref_seeds.is_empty() || body_has_byref_capture(body);
                 body_terminates = this.check_body_to_writes_fixpoint(
                     pass_locals,
-                    body_has_byref_capture(body),
+                    holds_byref_capture,
                     |this, pass_locals| {
+                        // Re-widened each pass, since the body's own writes
+                        // logged by an earlier pass are not known when the
+                        // capture was first seeded.
+                        for (name, seed) in &byref_seeds {
+                            let widened = match mode {
+                                ClosureMode::Call => {
+                                    this.widen_to_untracked_byref_writes(&name.name, seed.clone())
+                                }
+                                _ => this.widen_to_byref_writes(&name.name, seed.clone()),
+                            };
+                            pass_locals.insert_var(name, widened);
+                        }
                         this.check_block(body, pass_locals, declared_return, label)
                             .completion
                             .terminates
@@ -3339,6 +3361,11 @@ impl<'a> Checker<'a> {
                 } else {
                     base_ty
                 };
+                // A magic `__get()` runs in place of the read, and its body may
+                // write a global the enclosing closure captures by reference.
+                if self.may_run_magic_get(&base_ty, prop.name.as_str()) {
+                    locals.log_untracked_write();
+                }
                 // `$x?->prop` is pointless once `$x`'s type already
                 // proves it's never null - mirrors real PHPStan's
                 // `NullsafePropertyFetchRule` exactly. Guarded by

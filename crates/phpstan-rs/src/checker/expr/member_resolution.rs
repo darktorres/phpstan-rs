@@ -390,6 +390,21 @@ impl<'a> Checker<'a> {
         self.declared_property_type(base_ty, prop)
     }
 
+    /// Whether reading `prop` of a value of type `base` may run a magic
+    /// `__get()`: a class with one, and no declared property of that name,
+    /// or a member whose class the checker cannot name.
+    pub(crate) fn may_run_magic_get(&self, base: &Type, prop: &str) -> bool {
+        base.union_members()
+            .iter()
+            .any(|member| match member.single_object_class() {
+                Some(class) => {
+                    self.registry.lookup_method(class, "__get").is_some()
+                        && self.registry.lookup_property(class, prop).is_none()
+                }
+                None => !member.is_object().no(),
+            })
+    }
+
     /// `property_access_type` once the property may exist.
     fn declared_property_type(&self, base_ty: &Type, prop: &str) -> Type {
         stack::guard(|| {
