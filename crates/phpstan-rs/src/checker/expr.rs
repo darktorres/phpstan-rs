@@ -3096,6 +3096,24 @@ impl<'a> Checker<'a> {
                     for c in conds {
                         self.check_expr(c, locals, label);
                     }
+                    // A variable an arm's condition assigned is in `locals`
+                    // but not yet in `accumulated`, which was taken before
+                    // the conditions ran: the arm's body is reached only
+                    // after its conditions, so it takes the definition
+                    // (and its maybe-defined mark) from `locals`.
+                    let assigned: Vec<_> = locals
+                        .iter()
+                        .filter(|(key, _)| {
+                            locals.is_real_variable(*key) && !accumulated.contains_key(*key)
+                        })
+                        .map(|(key, ty)| (key, ty.clone(), locals.is_maybe_undefined(key)))
+                        .collect();
+                    for (key, ty, maybe) in assigned {
+                        accumulated.insert(key, ty);
+                        if maybe {
+                            accumulated.mark_maybe_undefined(key);
+                        }
+                    }
                     if self.loop_depth == 0 && !next_arm_is_dead {
                         for c in conds {
                             let cond_ty = self.infer_expr(c, &accumulated);
@@ -5337,6 +5355,10 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
             // here, not fabricated fresh at this merge point.
             let provenance = narrowed.get_provenance(key).cloned().unwrap_or_default();
             locals.insert_with_provenance(key, ty.clone(), provenance);
+            // The right operand of `&&`/`||` may be skipped, so a variable
+            // it defined is defined on one path only; a branch that takes
+            // the operand narrows the mark away again.
+            locals.mark_maybe_undefined(key);
         }
     }
 }
