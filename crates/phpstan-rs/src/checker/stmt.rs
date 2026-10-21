@@ -1072,8 +1072,10 @@ impl<'a> Checker<'a> {
                     // anywhere in the corpus - fall back to `Mixed` only
                     // when it doesn't. `.declare` unconditionally
                     // overwrites, so it's only called when there's
-                    // nothing here yet to overwrite.
-                    if !locals.contains_var(name) {
+                    // nothing here yet to overwrite, or when the name
+                    // is only maybe defined: the `global` makes it
+                    // defined on every path.
+                    if !locals.contains_var(name) || locals.is_maybe_undefined_var(name) {
                         let ty = self
                             .registry
                             .global_variables
