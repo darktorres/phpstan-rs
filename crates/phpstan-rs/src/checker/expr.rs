@@ -468,6 +468,9 @@ impl<'a> Checker<'a> {
     /// A closure literal's own check: its body, its `use` captures and what
     /// its by-reference captures make of the enclosing scope. `mode` says
     /// which of the three checks this is (`ClosureMode`).
+    /// Checks a closure literal's body. `arguments` are the types of the
+    /// arguments a call passes, by position, when the call's arguments are
+    /// all positional.
     pub(crate) fn check_closure_literal(
         &mut self,
         span: Span,
@@ -475,9 +478,10 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
         mode: ClosureMode,
+        arguments: Option<&[Type]>,
     ) -> Type {
         let outer = std::mem::replace(&mut self.global_scope, super::global_writes::Scope::Other);
-        let ty = self.check_closure_literal_body(span, closure, locals, label, mode);
+        let ty = self.check_closure_literal_body(span, closure, locals, label, mode, arguments);
         self.global_scope = outer;
         ty
     }
@@ -489,6 +493,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
         mode: ClosureMode,
+        arguments: Option<&[Type]>,
     ) -> Type {
         let diagnostics_mark = self.diagnostics.len();
         let literal = self.closure_literal_id(span);
@@ -694,7 +699,7 @@ impl<'a> Checker<'a> {
             }
         }
         let closure_label = format!("{label} (closure)");
-        for p in params {
+        for (index, p) in params.iter().enumerate() {
             let (ty, case_refs) = self.resolve_type_hint_with_case_refs(p.type_hint.as_ref());
             // Mirrors real PHPStan's
             // `ExistingClassesInClosureTypehintsRule` - checked on
@@ -718,7 +723,18 @@ impl<'a> Checker<'a> {
             let ty = if p.variadic {
                 Type::array(Type::unknown_array_key(), ty)
             } else {
-                ty
+                // A call holds each parameter's argument, when the declared
+                // type accepts that argument as it is.
+                match arguments.and_then(|args| args.get(index)) {
+                    Some(argument)
+                        if mode == ClosureMode::Call
+                            && !p.by_ref
+                            && self.relation().is_super_type_of(&ty, argument).yes() =>
+                    {
+                        argument.clone()
+                    }
+                    _ => ty,
+                }
             };
             closure_locals.declare_var(&p.name, ty, p.name.span);
             closure_locals.set_native_var(&p.name, self.closure_param_native(p));
@@ -3994,7 +4010,7 @@ impl<'a> Checker<'a> {
                 } else {
                     ClosureMode::Plain
                 };
-                self.check_closure_literal(e.span, closure, locals, label, mode)
+                self.check_closure_literal(e.span, closure, locals, label, mode, None)
             }
             ExprKind::ArrowFn(arrow) => {
                 let syntax::ast::ArrowFnExpr {

@@ -833,6 +833,12 @@ impl Checker<'_> {
         label: &str,
     ) {
         let values = self.invocations.argument_values(args);
+        let positional = args.iter().all(|arg| !arg.spread && arg.name.is_none());
+        let arguments: Option<Vec<Type>> = positional.then(|| {
+            args.iter()
+                .map(|arg| self.infer_expr(&arg.value, locals))
+                .collect()
+        });
         for id in closure_literal_identities(callee) {
             let Some(tracked) = self.tracked_closures.get(&id).cloned() else {
                 continue;
@@ -845,10 +851,34 @@ impl Checker<'_> {
                 locals,
                 label,
                 ClosureMode::Call,
+                arguments.as_deref(),
             );
             let dead = self.invocations.dead_branches(&tracked.closure, &values);
             self.drop_in_dead_branches(before, &dead);
+            self.drop_call_specific_constancy(id, before);
             self.drop_repeated_diagnostics(before);
+        }
+    }
+
+    /// Drops what was reported from `from` on that a condition or narrowing
+    /// is constant, unless the literal's creation check reports it too. Such a
+    /// finding describes the body, which runs at every call, so the argument
+    /// values of one call must not decide it. A literal with no creation
+    /// record keeps its findings.
+    fn drop_call_specific_constancy(&mut self, id: ClosureLiteralId, from: usize) {
+        let Some(closure_wide) = self.pending_closure_diagnostics.get(&id) else {
+            return;
+        };
+        let mut index = from;
+        while index < self.diagnostics.len() {
+            let finding = &self.diagnostics[index];
+            let call_specific =
+                is_constancy(finding.identifier.as_str()) && !closure_wide.contains(finding);
+            if call_specific {
+                self.diagnostics.remove(index);
+            } else {
+                index += 1;
+            }
         }
     }
 
@@ -923,6 +953,20 @@ impl Checker<'_> {
             }
         }
     }
+}
+
+/// Whether a diagnostic identifier says that a condition or narrowing is
+/// constant: the finding holds for the body whatever its values are.
+fn is_constancy(identifier: &str) -> bool {
+    [
+        "alwaysTrue",
+        "alwaysFalse",
+        "AlwaysTrue",
+        "alwaysEmpty",
+        "alreadyNarrowedType",
+    ]
+    .iter()
+    .any(|suffix| identifier.ends_with(suffix))
 }
 
 /// The followed literals a value of type `ty` can be: the closure literal
