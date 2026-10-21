@@ -1,5 +1,6 @@
 use crate::checker::expr::type_definitely_excludes_null;
 use crate::checker::keys::{KeyData, LocalKey};
+use crate::checker::strict_rules::assigned_variables;
 use crate::checker::{Checker, Discriminant, Locals};
 use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
@@ -215,7 +216,119 @@ fn truthiness_discriminant_subject(cond: &Expr, locals: &Locals) -> Option<Local
     }
 }
 
+/// The builtins a `Checker::pure_atom` may call, each on its one argument.
+const PURE_ATOM_FUNCTIONS: &[&str] = &[
+    "strlen",
+    "is_array",
+    "is_bool",
+    "is_float",
+    "is_int",
+    "is_null",
+    "is_numeric",
+    "is_object",
+    "is_scalar",
+    "is_string",
+];
+
+/// Whether `e` is an integer or float literal.
+fn is_number_literal(e: &Expr) -> bool {
+    matches!(
+        e.peeled().kind,
+        ExprKind::Literal(Literal::Int(_) | Literal::Float(_))
+    )
+}
+
 impl<'a> Checker<'a> {
+    /// The canonical text of `e` when it is a pure atom, appending the
+    /// variables it reads to `operands`. A pure atom is built from literals,
+    /// variables, `!`, identity and boolean operators, loose comparisons
+    /// against a number literal, and calls to `PURE_ATOM_FUNCTIONS`. None of
+    /// those runs user code on the values it reads, so the same variable
+    /// values give the same truth at every test. A loose comparison needs a
+    /// number literal on one side because comparing an object with a string
+    /// or with another object can call `__toString`.
+    fn pure_atom(&self, e: &Expr, locals: &Locals, operands: &mut Vec<LocalKey>) -> Option<String> {
+        stack::guard(|| {
+            let e = e.peeled();
+            match &e.kind {
+                ExprKind::Literal(literal) => Some(format!("{literal:?}")),
+                ExprKind::Variable(name) => {
+                    let key = locals.key_of(e)?;
+                    if !locals.is_real_variable(key) {
+                        return None;
+                    }
+                    operands.push(key);
+                    Some(format!("${name}"))
+                }
+                ExprKind::Unary(UnaryOp::Not, inner) => {
+                    Some(format!("!{}", self.pure_atom(inner, locals, operands)?))
+                }
+                ExprKind::Binary(op, l, r) => {
+                    let allowed = match op {
+                        BinOp::Identical
+                        | BinOp::NotIdentical
+                        | BinOp::And
+                        | BinOp::Or
+                        | BinOp::LogicalAnd
+                        | BinOp::LogicalOr => true,
+                        BinOp::Eq
+                        | BinOp::NotEq
+                        | BinOp::Lt
+                        | BinOp::Gt
+                        | BinOp::LtEq
+                        | BinOp::GtEq => is_number_literal(l) || is_number_literal(r),
+                        _ => false,
+                    };
+                    if !allowed {
+                        return None;
+                    }
+                    let l_text = self.pure_atom(l, locals, operands)?;
+                    let r_text = self.pure_atom(r, locals, operands)?;
+                    Some(format!("({l_text} {op:?} {r_text})"))
+                }
+                ExprKind::Call(callee, args) => {
+                    let ExprKind::Name(name) = &callee.peeled().kind else {
+                        return None;
+                    };
+                    let (resolved, _) = self.registry.resolve_function(name)?;
+                    if !self.registry.is_builtin_function(resolved) {
+                        return None;
+                    }
+                    let short = resolved.rsplit('\\').next()?.to_ascii_lowercase();
+                    if !PURE_ATOM_FUNCTIONS.contains(&short.as_str()) {
+                        return None;
+                    }
+                    let [arg] = args.as_slice() else {
+                        return None;
+                    };
+                    if arg.spread || arg.name.is_some() {
+                        return None;
+                    }
+                    Some(format!(
+                        "{short}({})",
+                        self.pure_atom(&arg.value, locals, operands)?
+                    ))
+                }
+                _ => None,
+            }
+        })
+    }
+
+    /// The key of `cond` as a pure atom, when it is one and reads a
+    /// variable. A bare variable or `isset(...)` is a truthiness subject
+    /// instead (`truthiness_discriminant_subject`).
+    fn pure_atom_key(&self, cond: &Expr, locals: &Locals) -> Option<LocalKey> {
+        if matches!(cond.peeled().kind, ExprKind::Variable(_)) {
+            return None;
+        }
+        let mut operands = Vec::new();
+        let text = self.pure_atom(cond, locals, &mut operands)?;
+        if operands.is_empty() {
+            return None;
+        }
+        Some(locals.intern(KeyData::Atom { text, operands }))
+    }
+
     /// A true `isset($a['x'][$k])` also proves every container along the
     /// chain held an offset - see `Type::to_isset_container`.
     fn narrow_isset_containers(&self, arg: &Expr, locals: &mut Locals) {
@@ -292,15 +405,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The replay half of `record_branch_implied_facts`'s bare-
-    /// truthiness discriminant shape - `subject` is the same canonical
-    /// string `truthiness_discriminant_subject` would have produced for
-    /// the condition currently being narrowed (a bare variable's own
-    /// name, or `"isset(key)"`). Looked up under whichever of `true` and
-    /// `false` matches `branch_true`, mirroring how the
-    /// equality discriminant's own replay (`apply_equality_narrowing`)
+    /// The replay half of `record_branch_implied_facts`'s bool-valued
+    /// discriminant shapes: a bare truthiness subject (a variable, or
+    /// `isset(key)`, as `truthiness_discriminant_subject` keys them) and a
+    /// pure atom (`pure_atom_key`). `subject` is that key. Looked up under
+    /// whichever of `true` and `false` matches `branch_true`, mirroring how
+    /// the equality discriminant's own replay (`apply_equality_narrowing`)
     /// looks itself up by `(subject, value)`.
-    pub(crate) fn replay_truthiness_discriminant_facts(
+    pub(crate) fn replay_bool_discriminant_facts(
         &self,
         subject: LocalKey,
         locals: &mut Locals,
@@ -322,7 +434,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `replay_truthiness_discriminant_facts`'s own `instanceof` sibling -
+    /// `replay_bool_discriminant_facts`'s own `instanceof` sibling -
     /// `record_branch_implied_facts`'s own third subject shape (a variable
     /// that became a concrete `Object` type, not a boolean, specifically
     /// within the recording branch - `UploadService::addUploadedFile`'s
@@ -387,7 +499,9 @@ impl<'a> Checker<'a> {
         before: &Locals,
         branch_true: bool,
     ) -> Option<(LocalKey, Type)> {
-        if branch_true && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind {
+        let equality = if branch_true
+            && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind
+        {
             match (before.key_of(l), before.key_of(r)) {
                 (Some(key), _) => Some((key, self.infer_expr(r, before))),
                 (None, Some(key)) => Some((key, self.infer_expr(l, before))),
@@ -399,17 +513,16 @@ impl<'a> Checker<'a> {
                     || ty.string_literal_value().is_some()
             })
         } else {
-            truthiness_discriminant_subject(cond, before).map(|key| {
-                (
-                    key,
-                    if branch_true {
-                        Type::bool_literal(true)
-                    } else {
-                        Type::bool_literal(false)
-                    },
-                )
-            })
+            None
+        };
+        if equality.is_some() {
+            return equality;
         }
+        let value = Type::bool_literal(branch_true);
+        if let Some(subject) = truthiness_discriminant_subject(cond, before) {
+            return Some((subject, value));
+        }
+        self.pure_atom_key(cond, before).map(|atom| (atom, value))
     }
 
     /// The key facts under `cond`'s own discriminant for its `branch_true`
@@ -430,8 +543,26 @@ impl<'a> Checker<'a> {
         before: &Locals,
         after: &mut Locals,
         branch_true: bool,
+        branch: Option<&Stmt>,
     ) {
-        let primary_subject = self.primary_discriminant(cond, before, branch_true);
+        let mut primary_subject = self.primary_discriminant(cond, before, branch_true);
+        // An atom whose operand this branch writes is not the same atom
+        // once the branch has run, so its fact would describe a value the
+        // operand no longer has.
+        if let Some((subject, _)) = &primary_subject
+            && let KeyData::Atom { operands, .. } = before.data(*subject)
+        {
+            let written = branch
+                .map(|branch| assigned_variables(std::slice::from_ref(branch)))
+                .unwrap_or_default();
+            let writes_operand = operands.iter().any(|operand| {
+                matches!(before.data(*operand), KeyData::Var(name)
+                    if written.iter().any(|site| site.name() == name.as_str()))
+            });
+            if writes_operand {
+                primary_subject = None;
+            }
+        }
         let mut subjects: Vec<(LocalKey, Type)> = primary_subject.into_iter().collect();
         let mut flag_subjects: Vec<(LocalKey, Type)> = Vec::new();
         // Each loop below acts only on a binding this branch added or
@@ -680,6 +811,11 @@ impl<'a> Checker<'a> {
 
     fn apply_narrowing_unguarded(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
         stack::guard(|| {
+            // A pure atom this path already tested, over variables no branch
+            // has written since, replays the facts that test implied.
+            if let Some(atom) = self.pure_atom_key(cond, locals) {
+                self.replay_bool_discriminant_facts(atom, locals, branch_true);
+            }
             // A preg call's truthiness narrows its `$matches` and subject.
             self.apply_preg_result_narrowing(cond, locals, branch_true);
             // `function_exists('foo')`'s own true branch proves `foo` is
@@ -874,7 +1010,7 @@ impl<'a> Checker<'a> {
                         // what the first occurrence's matching branch learned
                         // (`truthiness_discriminant_subject`), both branches.
                         let isset = locals.intern(KeyData::Isset(key));
-                        self.replay_truthiness_discriminant_facts(isset, locals, branch_true);
+                        self.replay_bool_discriminant_facts(isset, locals, branch_true);
                     }
                     if branch_true {
                         for operand in operands {
@@ -1277,11 +1413,11 @@ impl<'a> Checker<'a> {
                         self.apply_narrowing(&alias, locals, branch_true);
                     }
                     let truthy = locals.intern(KeyData::Truthy(key));
-                    self.replay_truthiness_discriminant_facts(truthy, locals, branch_true);
+                    self.replay_bool_discriminant_facts(truthy, locals, branch_true);
                     // A bool is truthy exactly when it's `true`, so what its
                     // equality recorded holds too.
                     if locals.get(key).is_some_and(|t| t.is_bool().yes()) {
-                        self.replay_truthiness_discriminant_facts(key, locals, branch_true);
+                        self.replay_bool_discriminant_facts(key, locals, branch_true);
                     }
                     if branch_true {
                         let current = self.current_narrowed_type(cond, key, locals);

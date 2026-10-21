@@ -3491,6 +3491,16 @@ impl<'a> Checker<'a> {
                 let captured_names: rustc_hash::FxHashSet<&str> =
                     uses.iter().map(|u| u.name.as_ref()).collect();
                 for (key, implied) in locals.branch_implied_facts().iter() {
+                    // An atom reading an uncaptured name would test the
+                    // closure's own variable of that name, not the outer one.
+                    if let KeyData::Atom { operands, .. } = locals.data(key.subject)
+                        && !operands.iter().all(|operand| {
+                            matches!(locals.data(*operand), KeyData::Var(variable)
+                                if captured_names.contains(variable.as_str()))
+                        })
+                    {
+                        continue;
+                    }
                     let filtered: Vec<(LocalKey, Type)> = implied
                         .iter()
                         .filter(|(name, _)| match locals.data(*name) {

@@ -44,6 +44,14 @@ pub(crate) enum KeyData {
     Truthy(LocalKey),
     /// Whether the key is set.
     Isset(LocalKey),
+    /// A condition over variables, read without user code: its canonical
+    /// text and the variables it reads. Its truth is what a branch-implied
+    /// fact is filed under, so a second test of the same condition replays
+    /// the facts of the first (`Checker::pure_atom`).
+    Atom {
+        text: String,
+        operands: Vec<LocalKey>,
+    },
 }
 
 impl PartialEq for KeyData {
@@ -81,6 +89,13 @@ impl PartialEq for KeyData {
             (KeyData::Truthy(a), KeyData::Truthy(b)) | (KeyData::Isset(a), KeyData::Isset(b)) => {
                 a == b
             }
+            (
+                KeyData::Atom { text, operands },
+                KeyData::Atom {
+                    text: other_text,
+                    operands: other_operands,
+                },
+            ) => text == other_text && operands == other_operands,
             _ => false,
         }
     }
@@ -123,6 +138,13 @@ impl Hash for KeyData {
             KeyData::Isset(key) => {
                 state.write_u8(6);
                 state.write_u32(key.0);
+            }
+            KeyData::Atom { text, operands } => {
+                state.write_u8(7);
+                state.write(text.as_bytes());
+                for operand in operands {
+                    state.write_u32(operand.0);
+                }
             }
         }
     }
@@ -195,6 +217,13 @@ impl KeyTable {
             KeyData::Truthy(tested) | KeyData::Isset(tested) => {
                 self.dependents[tested.0 as usize].push(key);
             }
+            KeyData::Atom { operands, .. } => {
+                for operand in operands {
+                    if !self.dependents[operand.0 as usize].contains(&key) {
+                        self.dependents[operand.0 as usize].push(key);
+                    }
+                }
+            }
         }
         self.data.push(data);
         self.dependents.push(Vec::new());
@@ -237,6 +266,9 @@ impl KeyTable {
                     self.depends_on(*base, root) || self.depends_on(*subscript, root)
                 }
                 KeyData::Truthy(tested) | KeyData::Isset(tested) => self.depends_on(*tested, root),
+                KeyData::Atom { operands, .. } => operands
+                    .iter()
+                    .any(|operand| self.depends_on(*operand, root)),
             }
         })
     }
@@ -299,6 +331,11 @@ impl KeyTable {
             KeyData::Isset(tested) => {
                 out.push_str("isset(");
                 self.render_into(*tested, out);
+                out.push(')');
+            }
+            KeyData::Atom { text, .. } => {
+                out.push_str("atom(");
+                out.push_str(text);
                 out.push(')');
             }
         })

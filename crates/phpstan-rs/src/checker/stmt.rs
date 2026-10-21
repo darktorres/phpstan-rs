@@ -1476,7 +1476,13 @@ impl<'a> Checker<'a> {
             if or_disjuncts.is_some() {
                 self.pending_or_disjunctions.pop();
             }
-            self.record_branch_implied_facts(cond, locals, &mut then_locals, true);
+            self.record_branch_implied_facts(
+                cond,
+                locals,
+                &mut then_locals,
+                true,
+                Some(then_branch),
+            );
 
             let mut else_locals = locals.clone();
             self.apply_narrowing(cond, &mut else_locals, false);
@@ -1508,7 +1514,7 @@ impl<'a> Checker<'a> {
             if discriminant_subject.is_some() {
                 self.active_discriminant.pop();
             }
-            self.record_branch_implied_facts(cond, locals, &mut else_locals, false);
+            self.record_branch_implied_facts(cond, locals, &mut else_locals, false, else_branch);
 
             // The classic guard clause - `if ($x === null) { return; }` -
             // depends on this: a branch that unconditionally

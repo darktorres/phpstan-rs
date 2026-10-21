@@ -864,6 +864,12 @@ pub(crate) struct AssignedVariable {
     loops: Vec<syntax::span::Span>,
 }
 
+impl AssignedVariable {
+    pub(crate) fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
 /// Every site in `body` that binds a variable, outside nested functions,
 /// closures and classes.
 pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {
