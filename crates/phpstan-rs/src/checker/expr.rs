@@ -861,15 +861,23 @@ impl<'a> Checker<'a> {
         // having-run" merge the by-ref-`use` handling below used
         // to do by hand, so `closure_locals` already comes back
         // correctly converged for that too.
+        // A literal checked at one of its calls runs at least once there,
+        // so its exit state is the body's own, with no merge with never
+        // having run.
+        let zero_iterations = if mode == ClosureMode::Call {
+            LoopZeroIterations::Impossible
+        } else {
+            LoopZeroIterations::Possible {
+                subject_exempt: None,
+                subject_key: None,
+            }
+        };
         let mut body_terminates = false;
         let (converged, _) = self.converge_loop_body(
             &closure_locals,
             declared_return.as_ref(),
             &closure_label,
-            LoopZeroIterations::Possible {
-                subject_exempt: None,
-                subject_key: None,
-            },
+            zero_iterations,
             |this, pass_locals, declared_return, label, _pass| {
                 // Only the kept (last) pass's return points count,
                 // the same way only its diagnostics survive.
