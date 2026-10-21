@@ -19,6 +19,7 @@ const ANY_GLOBAL: &str = "*";
 #[derive(Default)]
 pub(crate) struct GlobalWrites {
     by_function: FxHashMap<String, FxHashSet<String>>,
+    exact: FxHashMap<String, FxHashMap<String, Expr>>,
 }
 
 impl GlobalWrites {
@@ -26,6 +27,13 @@ impl GlobalWrites {
     /// function of this file.
     pub(crate) fn of(&self, name: &str) -> Option<&FxHashSet<String>> {
         self.by_function.get(&key(name))
+    }
+
+    /// The literal `function name` leaves `global` holding on every normal or
+    /// exceptional exit, when its body writes nothing else to it
+    /// (`exact_exit_writes`).
+    pub(crate) fn exact_of(&self, name: &str, global: &str) -> Option<&Expr> {
+        self.exact.get(&key(name))?.get(global)
     }
 }
 
@@ -52,7 +60,10 @@ pub(crate) fn global_writes(program: &[Stmt]) -> GlobalWrites {
         collect.visit_stmt(stmt);
     }
     let Collect {
-        mut writes, calls, ..
+        mut writes,
+        calls,
+        exact,
+        ..
     } = collect;
     loop {
         let mut changed = false;
@@ -73,6 +84,7 @@ pub(crate) fn global_writes(program: &[Stmt]) -> GlobalWrites {
     }
     GlobalWrites {
         by_function: writes,
+        exact,
     }
 }
 
@@ -96,6 +108,7 @@ struct Collect {
     current: Option<String>,
     writes: FxHashMap<String, FxHashSet<String>>,
     calls: FxHashMap<String, FxHashSet<String>>,
+    exact: FxHashMap<String, FxHashMap<String, Expr>>,
 }
 
 impl Collect {
@@ -117,6 +130,9 @@ impl<'ast> Visitor<'ast> for Collect {
                 let name = key(f.namespaced_name.as_deref().unwrap_or(f.name.name.as_str()));
                 self.writes.entry(name.clone()).or_default();
                 self.calls.entry(name.clone()).or_default();
+                let imports = imported_globals(f.body_stmts());
+                self.exact
+                    .insert(name.clone(), exact_exit_writes(f.body_stmts(), &imports));
                 self.current = Some(name);
                 for stmt in f.body_stmts() {
                     self.visit_stmt(stmt);
@@ -184,9 +200,142 @@ impl Checker<'_> {
                 .collect(),
         };
         for name in visible {
-            if locals.contains_var(&name) {
-                locals.insert_var(&name, Type::mixed());
+            if !locals.contains_var(&name) {
+                continue;
             }
+            let ty = match self.global_writes.exact_of(callee, &name) {
+                Some(literal) if !any => self.infer_expr(literal, locals),
+                _ => Type::mixed(),
+            };
+            locals.insert_var(&name, ty);
         }
     }
+}
+
+/// The globals of `body` (the `imports` it declares with `global`) whose value
+/// at every exit is a literal the body wrote: an unconditional top-level write
+/// of a literal, with nothing before it that may leave the body early or call
+/// out, and nothing after it that may change the global again.
+fn exact_exit_writes(body: &[Stmt], imports: &FxHashSet<String>) -> FxHashMap<String, Expr> {
+    let mut exact = FxHashMap::default();
+    for (index, stmt) in body.iter().enumerate() {
+        let StmtKind::Expression(expr) = &stmt.kind else {
+            continue;
+        };
+        let ExprKind::Assign(lhs, rhs) = &expr.kind else {
+            continue;
+        };
+        let (ExprKind::Variable(name), ExprKind::Literal(_)) = (&lhs.kind, &rhs.kind) else {
+            continue;
+        };
+        let name = name.as_str();
+        if !imports.contains(name)
+            || body[..index].iter().any(|before| may_leave_early(before))
+            || body[index + 1..]
+                .iter()
+                .any(|after| may_change(after, name))
+        {
+            continue;
+        }
+        exact.insert(name.to_string(), (**rhs).clone());
+    }
+    exact
+}
+
+/// Whether running `stmt` may leave the body before a later statement:
+/// a `return`, a `throw`, an `exit`, or any call or yield, since a call may
+/// throw.
+fn may_leave_early(stmt: &Stmt) -> bool {
+    let mut finder = Changes {
+        name: "",
+        before: true,
+        found: false,
+    };
+    finder.visit_stmt(stmt);
+    finder.found
+}
+
+/// Whether running `stmt` may change the global `name`: a call, an include,
+/// an eval, a yield, an unset or `global`, an assignment or reference that
+/// mentions `name` or `$GLOBALS`.
+fn may_change(stmt: &Stmt, name: &str) -> bool {
+    let mut finder = Changes {
+        name,
+        before: false,
+        found: false,
+    };
+    finder.visit_stmt(stmt);
+    finder.found
+}
+
+/// Finds what `may_leave_early` and `may_change` look for. In the `before`
+/// mode it looks for early exits; otherwise for the writes that can change
+/// `name`.
+struct Changes<'n> {
+    name: &'n str,
+    before: bool,
+    found: bool,
+}
+
+impl<'ast> Visitor<'ast> for Changes<'_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            // A declaration runs nothing.
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
+            StmtKind::Return(_) | StmtKind::Throw(_) if self.before => self.found = true,
+            StmtKind::Global(_) | StmtKind::Unset(_) if !self.before => self.found = true,
+            _ => visit::walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        match &expr.kind {
+            ExprKind::Closure(_) | ExprKind::ArrowFn(_) => {}
+            ExprKind::Call(..)
+            | ExprKind::MethodCall(..)
+            | ExprKind::DynamicMethodCall(..)
+            | ExprKind::StaticCall(..)
+            | ExprKind::DynamicStaticCall(..)
+            | ExprKind::New(..)
+            | ExprKind::NewAnonymousClass(_)
+            | ExprKind::Include(..)
+            | ExprKind::Eval(_)
+            | ExprKind::Yield(..)
+            | ExprKind::YieldFrom(_) => self.found = true,
+            ExprKind::Throw(_) | ExprKind::Exit(..) if self.before => self.found = true,
+            ExprKind::Assign(lhs, _)
+            | ExprKind::AssignRef(lhs, _)
+            | ExprKind::CompoundAssign(_, lhs, _)
+                if !self.before && mentions(lhs, self.name) =>
+            {
+                self.found = true;
+            }
+            ExprKind::AssignRef(..) if !self.before => self.found = true,
+            _ => {}
+        }
+        if !self.found {
+            visit::walk_expr(self, expr);
+        }
+    }
+}
+
+/// Whether `expr` names `name` or `$GLOBALS` anywhere.
+fn mentions(expr: &Expr, name: &str) -> bool {
+    struct Mentions<'n> {
+        name: &'n str,
+        found: bool,
+    }
+    impl<'ast> Visitor<'ast> for Mentions<'_> {
+        fn visit_expr(&mut self, expr: &'ast Expr) {
+            if let ExprKind::Variable(var) = &expr.kind
+                && (var.as_str() == self.name || var.as_str() == "GLOBALS")
+            {
+                self.found = true;
+            }
+            visit::walk_expr(self, expr);
+        }
+    }
+    let mut finder = Mentions { name, found: false };
+    finder.visit_expr(expr);
+    finder.found
 }
