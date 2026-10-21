@@ -25,12 +25,13 @@ use diagnostics::Diagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::{
     Arg, ArrowFnExpr, CatchClause, ClosureExpr, ClosureUse, Expr, ExprKind, FunctionDecl,
-    GlobalVar, Literal, MethodDecl, Param, Stmt, StmtKind,
+    GlobalVar, Ident, Literal, MethodDecl, ObjectOperator, Param, Stmt, StmtKind,
 };
 use syntax::span::{Range, Span};
 use syntax::visit::{self, Visitor};
 use types::{ClosureLiteralId, Type};
 
+use super::global_writes::key;
 use crate::checker::invocation::Invocations;
 use crate::checker::{Checker, Locals};
 use crate::file_id::FileId;
@@ -93,7 +94,7 @@ pub(crate) fn tracked_closures(
     for stmt in program {
         flow.visit_stmt(stmt);
     }
-    found.extend(top.followed_literals());
+    found.extend(top.followed_literals(invocations));
     let mut discover = Discover {
         found: &mut found,
         invocations: Rc::clone(invocations),
@@ -119,6 +120,8 @@ enum Read {
     Callee,
     /// `$v[<literal>](...)`, `$v` holding an array.
     CalleeElement,
+    /// `($v->p)(...)`, `$v` holding a plain object (`Write::Object`).
+    PropertyCallee,
     /// `$v` as an element of the array literal assigned to `holder`.
     Element(String),
     /// `$v` as a positional argument of a same-file function whose parameter
@@ -139,6 +142,9 @@ enum Write {
     Closure(Span),
     /// `$v = [ ... ]`, with the elements that can be followed.
     Array(Vec<Element>),
+    /// `$v = new C()`, with `C` (its `global_writes::key`) a class whose
+    /// instances are reached only through the variables they are built into.
+    Object(String),
     /// `$v = $w`, or `$v = a ? b : c` with each branch a source.
     Sources(Vec<Source>),
     /// Any other write: a parameter, a capture, `foreach`, ...
@@ -173,6 +179,9 @@ enum Element {
 struct Scope {
     writes: FxHashMap<String, Vec<Write>>,
     reads: FxHashMap<String, Vec<Read>>,
+    /// Each closure literal written to a property: the variable holding the
+    /// object, the property, and the literal's span.
+    property_closures: Vec<(String, String, Span)>,
     /// The scope calls something that makes variables by name, or reads
     /// them through a name it computes: nothing in it is followed.
     dynamic: bool,
@@ -189,7 +198,7 @@ impl Scope {
 
     /// The literals this scope follows, once its variables are all seen: a
     /// literal is followed when every variable that may hold it is.
-    fn followed_literals(&self) -> Vec<Span> {
+    fn followed_literals(&self, invocations: &Invocations) -> Vec<Span> {
         if self.dynamic {
             return Vec::new();
         }
@@ -203,6 +212,14 @@ impl Scope {
                         found.push(*span);
                     }
                 }
+            }
+        }
+        for (holder, property, span) in &self.property_closures {
+            if let Some([Write::Object(class)]) = self.writes.get(holder).map(Vec::as_slice)
+                && self.object_holder_settles(holder)
+                && invocations.plain_object_property(class, property)
+            {
+                found.push(*span);
             }
         }
         // The literals each variable may hold, and the copies between variables.
@@ -225,7 +242,7 @@ impl Scope {
                             }
                         }
                     }
-                    Write::Array(_) | Write::Other => {}
+                    Write::Array(_) | Write::Object(_) | Write::Other => {}
                 }
             }
         }
@@ -275,9 +292,16 @@ impl Scope {
             reads.iter().all(|read| match read {
                 Read::Callee | Read::Passed | Read::Copied => true,
                 Read::Element(holder) => self.holder_followed(holder),
-                Read::CalleeElement | Read::Escape => false,
+                Read::CalleeElement | Read::PropertyCallee | Read::Escape => false,
             })
         })
+    }
+
+    /// Whether `name` is one plain object, read only as `($name->p)(...)`.
+    fn object_holder_settles(&self, name: &str) -> bool {
+        self.reads
+            .get(name)
+            .is_none_or(|reads| reads.iter().all(|read| *read == Read::PropertyCallee))
     }
 
     /// Whether `name` is one array literal, read only as `name[<literal>]
@@ -429,9 +453,16 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
                     self.scope.dynamic = true;
                 }
                 let plain = self.inside_arrow == 0;
-                match &callee.kind {
+                match &callee.peeled().kind {
                     ExprKind::Variable(name) if plain => {
                         self.scope.read(name.as_str(), Read::Callee);
+                    }
+                    ExprKind::PropertyAccess(base, _, ObjectOperator::Arrow)
+                        if plain && matches!(base.kind, ExprKind::Variable(_)) =>
+                    {
+                        if let ExprKind::Variable(holder) = &base.kind {
+                            self.scope.read(holder.as_str(), Read::PropertyCallee);
+                        }
                     }
                     ExprKind::Index(base, Some(index)) if plain && is_literal(index) => {
                         match &base.kind {
@@ -465,6 +496,11 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
                     let write = self.assigned_value(&name, rhs);
                     self.scope.write(&name, write);
                 }
+                ExprKind::PropertyAccess(base, property, ObjectOperator::Arrow)
+                    if self.inside_arrow == 0 && matches!(base.kind, ExprKind::Variable(_)) =>
+                {
+                    self.property_write(base, property, rhs);
+                }
                 _ => {
                     self.visit_expr(lhs);
                     self.visit_expr(rhs);
@@ -485,10 +521,48 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
 }
 
 impl ScopeFlow<'_> {
+    /// The class `rhs` builds an instance of with no arguments, when that
+    /// class's instances are reached only through the variable they are built
+    /// into.
+    fn plain_new(&self, rhs: &Expr) -> Option<String> {
+        let ExprKind::New(class, args) = &rhs.kind else {
+            return None;
+        };
+        let ExprKind::Name(name) = &class.kind else {
+            return None;
+        };
+        let declared = name.resolved_class()?;
+        (args.is_empty() && self.inside_arrow == 0 && self.invocations.plain_object_class(declared))
+            .then(|| key(declared))
+    }
+
+    /// A write of `rhs` to a property of the variable `holder`. A closure
+    /// literal written there is held by the property; the variable is not
+    /// read by the write.
+    fn property_write(&mut self, holder: &Expr, property: &Ident, rhs: &Expr) {
+        let ExprKind::Variable(holder) = &holder.kind else {
+            return;
+        };
+        match &rhs.kind {
+            ExprKind::Closure(closure) => {
+                self.escape_uses(&closure.uses);
+                self.scope.property_closures.push((
+                    holder.as_str().to_string(),
+                    property.name.as_str().to_string(),
+                    rhs.span,
+                ));
+            }
+            _ => self.visit_expr(rhs),
+        }
+    }
+
     /// The write an assignment of `rhs` to `name` makes. An array literal's
     /// elements that are variables or literals are followed only inside
     /// the array; anything else in them is walked as ordinary reads.
     fn assigned_value(&mut self, name: &str, rhs: &Expr) -> Write {
+        if let Some(class) = self.plain_new(rhs) {
+            return Write::Object(class);
+        }
         match &rhs.kind {
             ExprKind::Closure(closure) => {
                 self.escape_uses(&closure.uses);
@@ -618,7 +692,8 @@ impl<'ast> Visitor<'ast> for Discover<'_> {
                 }
                 let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invocations));
                 flow.visit_expr(&arrow.body);
-                self.found.extend(scope.followed_literals());
+                self.found
+                    .extend(scope.followed_literals(&self.invocations));
                 visit::walk_expr(self, &arrow.body);
             }
             _ => visit::walk_expr(self, expr),
@@ -639,7 +714,8 @@ impl Discover<'_> {
         for stmt in body {
             flow.visit_stmt(stmt);
         }
-        self.found.extend(scope.followed_literals());
+        self.found
+            .extend(scope.followed_literals(&self.invocations));
     }
 }
 

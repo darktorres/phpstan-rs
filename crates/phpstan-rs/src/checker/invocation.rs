@@ -16,8 +16,9 @@ use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::{
-    Arg, BinOp, CatchClause, ClosureExpr, ClosureUse, Expr, ExprKind, FunctionDecl, GlobalVar,
-    IfStmt, Literal, NativeType, Param, Stmt, StmtKind, TypeHint, TypeHintKind, UnaryOp,
+    Arg, BinOp, CatchClause, ClassDecl, ClassKind, ClosureExpr, ClosureUse, Expr, ExprKind,
+    FunctionDecl, GlobalVar, IfStmt, Literal, NativeType, Param, Stmt, StmtKind, TypeHint,
+    TypeHintKind, UnaryOp,
 };
 use syntax::span::Span;
 use syntax::visit::{self, Visitor};
@@ -38,6 +39,10 @@ pub(crate) enum Known {
     Bool(bool),
     Int(i64),
     Str(Vec<u8>),
+    EmptyArray,
+    /// An instance of the class with this `global_writes::key`. The value
+    /// names the class, not the instance: a method call resolves by class.
+    Object(String),
 }
 
 /// What a variable holds at a point of the walk.
@@ -64,6 +69,9 @@ pub(crate) struct Invocations {
     /// How many distinct keys end in each unqualified name. A call whose
     /// unqualified name is shared by two declarations may resolve to either.
     short_names: FxHashMap<String, usize>,
+    /// Each class the file declares as a plain class, by its key; `None` for a
+    /// name declared twice.
+    classes: FxHashMap<String, Option<ClassInfo>>,
     summaries: RefCell<FxHashMap<Call, Rc<Vec<bool>>>>,
     /// The calls whose summaries are being computed, for cycle detection.
     active: RefCell<Vec<Call>>,
@@ -87,8 +95,74 @@ impl Invocations {
         Invocations {
             functions: collect.functions,
             short_names,
+            classes: collect.classes,
             ..Invocations::default()
         }
+    }
+
+    /// Whether `name` is a class the file declares exactly once.
+    pub(crate) fn has_class(&self, name: &str) -> bool {
+        matches!(self.classes.get(&key(name)), Some(Some(_)))
+    }
+
+    /// Whether an instance of `class` built with no arguments is reached only
+    /// through the variable it is built into (`ClassInfo::is_plain`).
+    pub(crate) fn plain_object_class(&self, class: &str) -> bool {
+        matches!(self.classes.get(&key(class)), Some(Some(info)) if info.is_plain())
+    }
+
+    /// Whether `property` is an instance property `class` declares, for a
+    /// class `plain_object_class` accepts.
+    pub(crate) fn plain_object_property(&self, class: &str, property: &str) -> bool {
+        matches!(
+            self.classes.get(&key(class)),
+            Some(Some(info)) if info.is_plain() && info.properties.contains(property)
+        )
+    }
+
+    /// Whether the file declares a function whose unqualified name is `name`'s,
+    /// in any namespace: a call of `name` may then resolve to that one.
+    fn declares_short_name(&self, name: &str) -> bool {
+        let name = key(name);
+        let short = name.rsplit('\\').next().unwrap_or(name.as_str());
+        self.short_names.contains_key(short)
+    }
+
+    /// The method a call on an object of class `class` runs, as the file's
+    /// declarations show it: the class's own, else its parent's, up the chain.
+    /// `None` when the chain leaves the file, uses a trait, or has no such
+    /// method.
+    fn method(&self, class: &str, method: &str) -> Option<(String, Rc<FunctionDecl>)> {
+        let method = method.to_ascii_lowercase();
+        let mut current = key(class);
+        for _ in 0..=self.classes.len() {
+            let info = self.classes.get(&current)?.as_ref()?;
+            if info.uses_traits {
+                return None;
+            }
+            if let Some(decl) = info.methods.get(&method) {
+                return Some((format!("{current}::{method}"), Rc::clone(decl)));
+            }
+            match &info.parent {
+                Parent::Root | Parent::Unknown => return None,
+                Parent::Named(parent) => current = parent.clone(),
+            }
+        }
+        None
+    }
+
+    /// For a call of the method `method` on an object of class `class`, which
+    /// of its parameters may be invoked, given the argument values.
+    pub(crate) fn method_invocations(
+        &self,
+        class: &str,
+        method: &str,
+        values: &[Option<Known>],
+    ) -> Option<Rc<Vec<bool>>> {
+        let (id, decl) = self.method(class, method)?;
+        let mut values = values.to_vec();
+        values.resize(decl.params.len(), None);
+        Some(self.summary(id, &decl, values))
     }
 
     /// The declaration a call of `name` calls, when the file declares exactly
@@ -104,14 +178,20 @@ impl Invocations {
     }
 
     /// For a call of the function `name` with arguments of values `values`
-    /// (`None` where unknown), which of its parameters may be invoked. `None`
-    /// when no single function of the file is the callee.
+    /// (`None` where unknown), which of its arguments it may invoke, when that
+    /// is known. A function of the file is followed; a builtin is followed only
+    /// for the cases `builtin_invocations` knows.
     pub(crate) fn invoked_by_call(
         &self,
         name: &str,
         values: &[Option<Known>],
     ) -> Option<Rc<Vec<bool>>> {
-        let (name, decl) = self.declaration(name)?;
+        let Some((name, decl)) = self.declaration(name) else {
+            if self.declares_short_name(name) {
+                return None;
+            }
+            return builtin_invocations(name, values).map(Rc::new);
+        };
         let mut values = values.to_vec();
         values.resize(decl.params.len(), None);
         Some(self.summary(name, &decl, values))
@@ -181,25 +261,101 @@ impl Invocations {
     }
 }
 
-/// The functions a program declares, at any depth outside another function's
-/// body or class.
+/// The functions and plain classes a program declares.
 #[derive(Default)]
 struct Collect {
     functions: FxHashMap<String, Option<Rc<FunctionDecl>>>,
+    classes: FxHashMap<String, Option<ClassInfo>>,
 }
 
 impl<'ast> Visitor<'ast> for Collect {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        if let StmtKind::FunctionDecl(function) = &stmt.kind {
-            let name = key(function.fq_name());
-            let decl = Rc::new((**function).clone());
-            self.functions
-                .entry(name)
-                .and_modify(|slot| *slot = None)
-                .or_insert(Some(decl));
+        match &stmt.kind {
+            StmtKind::FunctionDecl(function) => {
+                let name = key(function.fq_name());
+                let decl = Rc::new((**function).clone());
+                self.functions
+                    .entry(name)
+                    .and_modify(|slot| *slot = None)
+                    .or_insert(Some(decl));
+            }
+            StmtKind::ClassDecl(class) if matches!(class.def.kind, ClassKind::Class) => {
+                self.classes
+                    .entry(key(class.fq_name()))
+                    .and_modify(|slot| *slot = None)
+                    .or_insert_with(|| Some(ClassInfo::of(class)));
+            }
+            _ => {}
         }
         visit::walk_stmt(self, stmt);
     }
+}
+
+/// A plain class the file declares, as a method call on an object of it
+/// resolves its methods.
+struct ClassInfo {
+    parent: Parent,
+    /// Whether the class uses a trait, whose methods the file's declarations
+    /// do not show in full.
+    uses_traits: bool,
+    /// Each method the class declares, by its lowercased name.
+    methods: FxHashMap<String, Rc<FunctionDecl>>,
+    /// The names of the class's instance properties.
+    properties: FxHashSet<String>,
+    /// Whether the class declares a method that runs when an instance is
+    /// built or destroyed, or when a property is accessed by name.
+    runs_hooks: bool,
+}
+
+impl ClassInfo {
+    fn of(class: &ClassDecl) -> ClassInfo {
+        let parent = match class.def.extends.first() {
+            None => Parent::Root,
+            Some(extends) => match extends.resolved_class() {
+                Some(name) => Parent::Named(key(name)),
+                None => Parent::Unknown,
+            },
+        };
+        let methods: FxHashMap<String, Rc<FunctionDecl>> = class
+            .def
+            .methods
+            .iter()
+            .map(|method| {
+                let name = method.function.name.name.as_str().to_ascii_lowercase();
+                (name, Rc::new(method.function.clone()))
+            })
+            .collect();
+        let runs_hooks = ["__construct", "__destruct", "__set", "__get"]
+            .iter()
+            .any(|hook| methods.contains_key(*hook));
+        ClassInfo {
+            parent,
+            uses_traits: !class.def.trait_uses.is_empty(),
+            methods,
+            properties: class
+                .def
+                .properties
+                .iter()
+                .filter(|property| !property.is_static)
+                .map(|property| property.name.name.as_str().to_string())
+                .collect(),
+            runs_hooks,
+        }
+    }
+
+    /// Whether an instance of the class is reached only through the variable
+    /// it is built into: no parent, no trait, and no hook that runs code
+    /// with the instance.
+    fn is_plain(&self) -> bool {
+        matches!(self.parent, Parent::Root) && !self.uses_traits && !self.runs_hooks
+    }
+}
+
+/// A class's parent: none, one the file declares, or one it does not.
+enum Parent {
+    Root,
+    Named(String),
+    Unknown,
 }
 
 /// One walk over a body: the parameters it may invoke, and the branches its
@@ -345,12 +501,16 @@ impl<'a> Walk<'a> {
                 body,
                 ..
             } => {
-                self.expr(subject, &mut env);
+                let items = self.expr(subject, &mut env);
                 self.havoc(&mentions_stmt(stmt), &mut env);
                 if *by_ref {
                     self.share(&mentions_expr(value), &mut env);
                 }
-                self.stmt(body, env.clone());
+                if matches!(items, Some(Known::EmptyArray)) {
+                    self.dead.push(body.span);
+                } else {
+                    self.stmt(body, env.clone());
+                }
                 Some(env)
             }
             StmtKind::Declare { body, .. } => match body {
@@ -503,6 +663,18 @@ impl<'a> Walk<'a> {
                 self.ternary(cond, then.as_deref(), otherwise, env)
             }
             ExprKind::Call(callee, args) => self.call(callee, args, env),
+            ExprKind::MethodCall(receiver, method, args, _) => {
+                let object = self.expr(receiver, env);
+                let invocations = self.invocations;
+                self.call_args(args, env, |values| match &object {
+                    Some(Known::Object(class)) => {
+                        invocations.method_invocations(class, method.name.as_str(), values)
+                    }
+                    _ => None,
+                })
+            }
+            ExprKind::New(class, args) => self.new_object(class, args, env),
+            ExprKind::ArrayLiteral(items) if items.is_empty() => Some(Known::EmptyArray),
             ExprKind::Closure(closure) => {
                 for closure_use in &closure.uses {
                     let name = closure_use.name.name.as_str();
@@ -645,18 +817,48 @@ impl<'a> Walk<'a> {
         }
     }
 
-    /// A call. A call of a function the file declares passes each argument
-    /// that is a variable to that function's summary: the parameters it holds
-    /// are invoked only when the function may invoke the argument. Any other
-    /// call invokes every argument.
+    /// A call of a named function. Its summary decides which arguments it
+    /// invokes; a callee the walk cannot follow invokes every argument.
     fn call(&mut self, callee: &Expr, args: &[Arg], env: &mut Env) -> Option<Known> {
-        let function = match &callee.kind {
-            ExprKind::Name(name) => Some(name.written.as_str()),
+        let invocations = self.invocations;
+        match &callee.kind {
+            ExprKind::Name(name) => self.call_args(args, env, |values| {
+                invocations.invoked_by_call(name.written.as_str(), values)
+            }),
             _ => {
                 self.expr(callee, env);
-                None
+                self.call_args(args, env, |_| None)
             }
+        }
+    }
+
+    /// An instance of a class the file declares once, built with no
+    /// arguments. The value's class is all it tells, so a method call on it
+    /// resolves through the class.
+    fn new_object(&mut self, class: &Expr, args: &[Arg], env: &mut Env) -> Option<Known> {
+        let declared = match &class.kind {
+            ExprKind::Name(name) if args.is_empty() && name.resolved_class().is_some() => {
+                name.resolved_class().map(key)
+            }
+            _ => None,
         };
+        self.call_args(args, env, |_| None);
+        let declared = declared.filter(|class| self.invocations.has_class(class))?;
+        Some(Known::Object(declared))
+    }
+
+    /// Walks the arguments of a call, then marks the parameters each argument
+    /// may hand to an invocation. `summary` gives, per argument, whether the
+    /// callee may invoke it, from the argument values; `None` (the callee is
+    /// not known, or an argument is spread or named) invokes every argument.
+    /// An invoked variable may be written through by reference, so its value
+    /// is forgotten.
+    fn call_args(
+        &mut self,
+        args: &[Arg],
+        env: &mut Env,
+        summary: impl FnOnce(&[Option<Known>]) -> Option<Rc<Vec<bool>>>,
+    ) -> Option<Known> {
         let mut values = Vec::with_capacity(args.len());
         let mut holds: Vec<Vec<usize>> = Vec::with_capacity(args.len());
         for arg in args {
@@ -677,10 +879,7 @@ impl<'a> Walk<'a> {
             }
         }
         let plain = args.iter().all(|arg| !arg.spread && arg.name.is_none());
-        let summary = match function {
-            Some(name) if plain => self.invocations.invoked_by_call(name, &values),
-            _ => None,
-        };
+        let summary = if plain { summary(&values[..]) } else { None };
         for (index, arg) in args.iter().enumerate() {
             let invoked = summary
                 .as_ref()
@@ -805,12 +1004,33 @@ fn truth(value: &Known) -> bool {
         Known::Bool(flag) => *flag,
         Known::Int(int) => *int != 0,
         Known::Str(string) => !(string.is_empty() || string.as_slice() == b"0"),
+        Known::EmptyArray => false,
+        Known::Object(_) => true,
     }
+}
+
+/// What a builtin that calls a callback argument invokes, when the array it
+/// iterates is known to be empty: nothing, since no element is visited.
+/// `None` for any other builtin, or when an array may have an element.
+fn builtin_invocations(name: &str, values: &[Option<Known>]) -> Option<Vec<bool>> {
+    let empty = |index: usize| matches!(values.get(index), Some(Some(Known::EmptyArray)));
+    let nothing_visited = match key(name).as_str() {
+        "array_map" => values.len() >= 2 && (1..values.len()).all(empty),
+        "array_filter" | "array_walk" | "array_reduce" | "usort" | "uasort" | "uksort" => empty(0),
+        _ => return None,
+    };
+    nothing_visited.then(|| vec![false; values.len()])
 }
 
 /// The value of a binary operator on two known values, when it is known.
 fn compute(op: BinOp, left: &Known, right: &Known) -> Option<Known> {
     Some(match op {
+        // Two instances of one class are not one object.
+        BinOp::Identical | BinOp::NotIdentical
+            if matches!(left, Known::Object(_)) || matches!(right, Known::Object(_)) =>
+        {
+            return None;
+        }
         BinOp::Identical => Known::Bool(left == right),
         BinOp::NotIdentical => Known::Bool(left != right),
         BinOp::Eq => Known::Bool(loosely_equal(left, right)?),
@@ -857,7 +1077,14 @@ fn fits(hint: Option<&TypeHint>, value: &Known) -> bool {
                 | (NativeType::Null, Known::Null)
                 | (NativeType::True, Known::Bool(true))
                 | (NativeType::False, Known::Bool(false))
+                | (NativeType::Array, Known::EmptyArray)
+                | (NativeType::Object, Known::Object(_))
         ),
+        // An instance of the named class, not of a subclass of it.
+        TypeHintKind::Name(name) => match (value, name.resolved_class()) {
+            (Known::Object(class), Some(declared)) => *class == key(declared),
+            _ => false,
+        },
         TypeHintKind::Nullable(inner) => {
             matches!(value, Known::Null) || fits(Some(inner.as_ref()), value)
         }
