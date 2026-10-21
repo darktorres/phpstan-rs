@@ -114,19 +114,50 @@ impl<'a> Checker<'a> {
     /// `name` (`byref_writes`): what a by-reference capture of it may hold
     /// when its closure runs, wherever the closure is created.
     pub(crate) fn widen_to_byref_writes(&self, name: &str, ty: types::Type) -> types::Type {
+        let Some(log) = &self.byref_writes else {
+            return ty.unsealed_shapes();
+        };
+        let log = log.borrow();
+        let relation = self.relation();
+        // A write that `ty` already covers adds no value the capture can
+        // hold, so the shape stays sealed; only a write outside `ty` (or
+        // one to an unknown name) widens it.
+        let outside_ty = log.any_name_written()
+            || log
+                .types_of(name)
+                .iter()
+                .any(|written| !relation.is_super_type_of(&ty, written).yes());
+        if !outside_ty {
+            return ty;
+        }
         let mut types = vec![ty];
-        if let Some(log) = &self.byref_writes {
-            let log = log.borrow();
-            types.extend(log.types_of(name).iter().cloned());
-            if log.any_name_written() {
-                types.push(types::Type::mixed());
-            }
+        types.extend(log.types_of(name).iter().cloned());
+        if log.any_name_written() {
+            types.push(types::Type::mixed());
         }
         types
             .into_iter()
-            .union_all_with(&self.relation())
+            .union_all_with(&relation)
             .unwrap_or_else(types::Type::mixed)
             .unsealed_shapes()
+    }
+
+    /// `ty` at a call of a closure capturing `name` by reference, widened
+    /// only when the body wrote `name` in a way its locals do not hold: an
+    /// element or property write, or a reference binding to one, logged as
+    /// mixed (`Locals::log_write`), or a write to an unknown name.
+    pub(crate) fn widen_to_untracked_byref_writes(
+        &self,
+        name: &str,
+        ty: types::Type,
+    ) -> types::Type {
+        let Some(log) = &self.byref_writes else {
+            return ty.unsealed_shapes();
+        };
+        let log = log.borrow();
+        let untracked =
+            log.any_name_written() || log.types_of(name).iter().any(|written| written.is_mixed());
+        if untracked { types::Type::mixed() } else { ty }
     }
 
     /// Runs `check` over a body's locals, repeating it while the body's
@@ -495,6 +526,9 @@ pub(crate) fn merge_scopes(
         then_locals.any_variable_may_exist() || else_locals.any_variable_may_exist(),
     );
     merged.share_write_log(then_locals);
+    // A reference binding survives the join only where both paths make it;
+    // the names one path alone bound are widened once the values are merged.
+    let unbound = merged.join_references(then_locals, else_locals);
     // A `function_exists()` guard only survives a merge
     // point when both incoming branches agree it's guaranteed - the same
     // reasoning every other narrowed fact here already gets (`Type::union`
@@ -753,6 +787,11 @@ pub(crate) fn merge_scopes(
             .unwrap_or_default();
         merged.insert_with_provenance(name, else_ty.clone(), provenance);
         merged.mark_maybe_undefined(name);
+    }
+    for key in unbound {
+        if merged.contains_key(key) {
+            merged.insert(key, types::Type::mixed());
+        }
     }
     merged
 }

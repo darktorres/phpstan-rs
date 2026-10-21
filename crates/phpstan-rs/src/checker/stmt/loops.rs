@@ -796,6 +796,11 @@ impl<'a> Checker<'a> {
                 // out) is checked against its declared type here too.
                 this.check_param_out_assignment(value, &element_ty);
                 this.check_by_ref_destructuring(value, &element_ty);
+                // A by-reference `foreach` rebinds the value variable to each
+                // element, which is not a write through a reference it held.
+                if by_ref && let ExprKind::Variable(name) = &value.kind {
+                    pass_locals.detach_reference_var(name);
+                }
                 this.bind_assignment_target(value, element_ty.clone(), pass_locals);
                 // Eager propagation: `value` was just bound from
                 // `subject`'s own (dynamic-keyed) element - if `subject`

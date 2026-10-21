@@ -292,6 +292,19 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// Whether `program` declares `strict_types=1`.
+pub(crate) fn declares_strict_types(program: &[Stmt]) -> bool {
+    collect_declares(program)
+        .iter()
+        .any(|(stmt, _)| match &stmt.kind {
+            StmtKind::Declare { directives, .. } => directives.iter().any(|(name, value)| {
+                name.eq_ignore_ascii_case("strict_types")
+                    && matches!(value.kind, ExprKind::Literal(Literal::Int(1)))
+            }),
+            _ => false,
+        })
+}
+
 /// Every `declare` statement, with whether it's the file's first
 /// statement.
 fn collect_declares(program: &[Stmt]) -> Vec<(&Stmt, bool)> {

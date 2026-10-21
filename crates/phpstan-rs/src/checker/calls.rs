@@ -463,7 +463,9 @@ impl<'a> Checker<'a> {
             // See the identical, earlier comment in this file's own
             // ordinary-call argument check for why no separate `Mixed`
             // bail-out is needed here.
-            if !self.rule_level_accepts(&param.ty, &arg_ty).yes() {
+            if !self.rule_level_accepts(&param.ty, &arg_ty).yes()
+                && !self.weakly_coerces(&param.ty, &arg_ty)
+            {
                 self.report(
                     format!(
                         "Closure() argument #{} expects {}, {} given",

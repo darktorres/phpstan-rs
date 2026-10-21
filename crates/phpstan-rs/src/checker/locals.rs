@@ -3,6 +3,7 @@
 use super::keys::KeyTableRef;
 use super::*;
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -140,6 +141,11 @@ pub(crate) struct Locals {
     // of one needs them (`enable_write_log`). Shared by every clone, so a
     // write in any branch, merge or loop pass of the body lands in it.
     write_log: Option<Rc<RefCell<WriteLog>>>,
+    // The pairs of variables that share one value by reference (`$g = &$x`),
+    // each ordered and closed under transitivity: a write to either name of a
+    // pair is a write to both (`insert`, `declare`), and a name a rebinding
+    // leaves the pairs it was in (`detach_reference`).
+    references: BTreeSet<(LocalKey, LocalKey)>,
     // Whether `declare`/`insert_with_provenance` do anything - `false` by
     // default for every ordinary check-project run, `true` only for the
     // LSP's own per-request variable-navigation probe. Carried on `Locals`
@@ -193,6 +199,7 @@ impl Locals {
             may_have_member_narrowing: false,
             any_variable_may_exist: false,
             write_log: None,
+            references: BTreeSet::new(),
             track: false,
             version: 0,
         }
@@ -356,6 +363,91 @@ impl Locals {
         self.log_write(key, &Type::mixed());
     }
 
+    /// The variables that share a value with `key` by reference, other than
+    /// `key` itself.
+    fn reference_partners(&self, key: LocalKey) -> Vec<LocalKey> {
+        self.references
+            .iter()
+            .filter_map(|&(a, b)| match (a == key, b == key) {
+                (true, _) => Some(b),
+                (_, true) => Some(a),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Gives every variable sharing a value with `key` the value `ty` just
+    /// written to `key`.
+    fn share_write(&mut self, key: LocalKey, ty: &Type) {
+        for partner in self.reference_partners(key) {
+            self.types.insert(partner, ty.clone());
+            self.maybe_undefined.remove(&partner);
+            self.native.remove(&partner);
+        }
+    }
+
+    /// Drops every reference pair naming `key`. The other names it shared a
+    /// value with still share it: the transitive closure keeps their pairs.
+    fn detach_reference(&mut self, key: LocalKey) {
+        if self.references.iter().any(|&(a, b)| a == key || b == key) {
+            self.touch();
+            self.references.retain(|&(a, b)| a != key && b != key);
+        }
+    }
+
+    /// Unbinds the variable `name` from every variable it shares a value
+    /// with, for a rebinding that is not a write through the reference
+    /// (`global`, `static`, a by-reference `foreach`).
+    pub(crate) fn detach_reference_var(&mut self, name: &str) {
+        if let Some(key) = self.find_var(name) {
+            self.detach_reference(key);
+        }
+    }
+
+    /// Makes `name` share a value with `target` (`$name = &$target;`): `name`
+    /// takes `target`'s value, and each later write to either reaches the
+    /// other. The caller has already bound `name` to a value of its own, which
+    /// this replaces.
+    pub(crate) fn bind_reference_var(&mut self, name: &str, target: &str) {
+        let key = self.var_key(name);
+        let target_key = self.var_key(target);
+        if key == target_key {
+            return;
+        }
+        self.detach_reference(key);
+        let mut group = self.reference_partners(target_key);
+        group.push(target_key);
+        self.touch();
+        for member in group {
+            self.references.insert(ordered_pair(key, member));
+        }
+        if let Some(ty) = self.types.get(&target_key).cloned() {
+            self.insert(key, ty);
+        }
+    }
+
+    /// Replaces this scope's reference pairs with those both `then` and
+    /// `else_` hold, as a branch join does: a pair only one path makes leaves
+    /// its names' value unknown after the join. Returns those names, which the
+    /// caller must widen.
+    pub(crate) fn join_references(&mut self, then: &Locals, else_: &Locals) -> Vec<LocalKey> {
+        let shared: BTreeSet<(LocalKey, LocalKey)> = then
+            .references
+            .intersection(&else_.references)
+            .copied()
+            .collect();
+        let mut unmatched: Vec<LocalKey> = then
+            .references
+            .symmetric_difference(&else_.references)
+            .flat_map(|&(a, b)| [a, b])
+            .collect();
+        unmatched.sort_unstable();
+        unmatched.dedup();
+        self.touch();
+        self.references = shared;
+        unmatched
+    }
+
     /// Logs the write of `ty` to `key` when it is a variable and the log
     /// is enabled.
     fn log_write(&self, key: LocalKey, ty: &Type) {
@@ -372,6 +464,11 @@ impl Locals {
                 KeyData::Var(name) => {
                     let written = if root == key { ty } else { &mixed };
                     log.borrow_mut().record(name, written);
+                    for partner in self.reference_partners(root) {
+                        if let KeyData::Var(partner_name) = self.data(partner) {
+                            log.borrow_mut().record(partner_name, written);
+                        }
+                    }
                     return;
                 }
                 KeyData::Prop { base, .. }
@@ -391,6 +488,7 @@ impl Locals {
         self.log_write(key, &ty);
         self.maybe_undefined.remove(&key);
         self.note_synthetic(key);
+        self.share_write(key, &ty);
         self.types.insert(key, ty)
     }
 
@@ -470,6 +568,7 @@ impl Locals {
         self.container_field_facts.remove(&key);
         self.purge_member_facts_about(key);
         self.note_synthetic(key);
+        self.share_write(key, &ty);
         self.types.insert(key, ty)
     }
 
@@ -596,6 +695,7 @@ impl Locals {
             self.provenance.insert(key, provenance);
         }
         self.note_synthetic(key);
+        self.share_write(key, &ty);
         self.types.insert(key, ty)
     }
 
@@ -662,6 +762,7 @@ impl Locals {
     pub(crate) fn remove(&mut self, key: LocalKey) -> Option<Type> {
         self.touch();
         self.log_write(key, &Type::null());
+        self.detach_reference(key);
         self.maybe_undefined.remove(&key);
         self.provenance.remove(&key);
         self.native.remove(&key);
@@ -677,6 +778,7 @@ impl Locals {
         debug_assert!(!self.track);
         self.touch();
         self.log_write(key, &Type::null());
+        self.detach_reference(key);
         self.maybe_undefined.remove(&key);
         if self.may_have_member_narrowing {
             self.synthetic.remove(&key);
@@ -759,6 +861,7 @@ impl Locals {
             may_have_member_narrowing: false,
             any_variable_may_exist: false,
             write_log: None,
+            references: BTreeSet::new(),
             track: self.track,
             version: NEXT_VERSION.fetch_add(1, Ordering::Relaxed),
         }
@@ -783,6 +886,11 @@ impl Locals {
         self.touch();
         self.track = track;
     }
+}
+
+/// `a` and `b` as a pair with its smaller key first.
+fn ordered_pair(a: LocalKey, b: LocalKey) -> (LocalKey, LocalKey) {
+    if a <= b { (a, b) } else { (b, a) }
 }
 
 impl PartialEq for Locals {

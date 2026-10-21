@@ -167,6 +167,45 @@ pub(crate) struct ParametersCheck<'a> {
 }
 
 impl<'a> Checker<'a> {
+    /// Whether PHP's weak mode coerces `arg` to `param`: without
+    /// `strict_types=1` in the calling file, every member of `arg` is either
+    /// accepted as it is or a scalar a scalar member of `param` takes by
+    /// coercion.
+    pub(crate) fn weakly_coerces(&self, param: &Type, arg: &Type) -> bool {
+        !self.strict_types
+            && arg
+                .union_members()
+                .iter()
+                .all(|member| self.member_coerces(param, member))
+    }
+
+    fn member_coerces(&self, param: &Type, member: &Type) -> bool {
+        if self.rule_level_accepts(param, member).yes() {
+            return true;
+        }
+        // A string coerces to a number only when it is numeric: any other
+        // string is a `TypeError` at the call, so one that may not be numeric
+        // is reported, as a `null` member is.
+        let numeric = member.is_numeric_string().yes();
+        param.union_members().iter().any(|target| {
+            let to_int = target.is_int().yes();
+            let to_float = target.is_float().yes();
+            let to_string = target.is_string().yes();
+            let to_bool = target.is_bool().yes();
+            if member.is_int().yes() {
+                to_float || to_string || to_bool
+            } else if member.is_float().yes() {
+                to_int || to_string || to_bool
+            } else if member.is_bool().yes() {
+                to_int || to_float || to_string
+            } else if member.is_string().yes() {
+                to_bool || (numeric && (to_int || to_float))
+            } else {
+                false
+            }
+        })
+    }
+
     /// `FunctionCallParametersCheck::check`.
     pub(crate) fn check_parameters(&mut self, check: ParametersCheck) {
         let ParametersCheck {
@@ -303,6 +342,7 @@ impl<'a> Checker<'a> {
             };
             if !self.rule_level_accepts(&param_ty, &arg_ty).yes()
                 && !self.mismatch_turns_on_unknown_class(&param_ty, &arg_ty)
+                && !self.weakly_coerces(&param_ty, &arg_ty)
             {
                 let position = match &argument.name {
                     Some(name) => Position::Name(name),

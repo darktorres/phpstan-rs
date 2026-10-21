@@ -1062,6 +1062,9 @@ impl<'a> Checker<'a> {
                         );
                         continue;
                     }
+                    // A `global $x;` rebinds `$x` to the global, so it no
+                    // longer shares a value with the names it was bound to.
+                    locals.detach_reference_var(name);
                     // A `global $x;` declares `$x` here. `Registry::
                     // global_variables` (`registry::global_vars::infer_
                     // global_variables`) may already have a real type
@@ -1104,6 +1107,9 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::mixed());
                     purge_stale_narrowing_for_var(locals, name);
                     self.probe_hit_at(stmt.span, &ty);
+                    // A `static $x;` rebinds `$x` to its own storage, as
+                    // `global` does.
+                    locals.detach_reference_var(name);
                     locals.declare_var(name, ty, name.span);
                     self.static_var_names.insert(name.name.clone());
                 }

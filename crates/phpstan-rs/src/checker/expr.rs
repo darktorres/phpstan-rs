@@ -3,6 +3,7 @@ use crate::checker::GotoState;
 use crate::checker::InferQuestion;
 use crate::checker::assignment::{assigned_part_of_variable, writes_dynamic_variable};
 use crate::checker::calls::parameters::Callee;
+use crate::checker::closure_flow::{self, CapturedVariable, ClosureMode};
 use crate::checker::control_flow::{body_has_byref_capture, body_has_call};
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::resolve::receiver_class;
@@ -465,14 +466,18 @@ impl<'a> Checker<'a> {
     }
 
     /// A closure literal's own check: its body, its `use` captures and what
-    /// its by-reference captures make of the enclosing scope.
-    fn check_closure_literal(
+    /// its by-reference captures make of the enclosing scope. `mode` says
+    /// which of the three checks this is (`ClosureMode`).
+    pub(crate) fn check_closure_literal(
         &mut self,
-        e: &Expr,
+        span: Span,
         closure: &syntax::ast::ClosureExpr,
         locals: &mut Locals,
         label: &str,
+        mode: ClosureMode,
     ) -> Type {
+        let diagnostics_mark = self.diagnostics.len();
+        let literal = self.closure_literal_id(span);
         let syntax::ast::ClosureExpr {
             params,
             uses,
@@ -498,7 +503,19 @@ impl<'a> Checker<'a> {
         // declared inside a method still auto-binds it, the same
         // as real PHP.
         let mut closure_locals: Locals = locals.closure_scope();
+        let mut captures: Vec<(types::Name, CapturedVariable)> = Vec::new();
         for u in uses {
+            // A call sees each capture as the literal's creation saw it.
+            let at_creation = (mode == ClosureMode::Call)
+                .then(|| self.captured_at_creation(literal, &u.name.name))
+                .flatten();
+            let defined = at_creation
+                .as_ref()
+                .map_or_else(|| locals.contains_var(&u.name), |c| c.ty.is_some());
+            let maybe_undefined = at_creation.as_ref().map_or_else(
+                || locals.is_maybe_undefined_var(&u.name),
+                |c| c.maybe_undefined,
+            );
             // Mirrors real PHPStan's
             // `InvalidLexicalVariablesInClosureUseRule` - `$this`,
             // a superglobal, or a name already used as a
@@ -541,14 +558,14 @@ impl<'a> Checker<'a> {
                     )
                     .non_ignorable(),
                 );
-            } else if !u.by_ref && !locals.contains_var(&u.name) {
+            } else if !u.by_ref && !defined {
                 self.report(
                     format!("undefined variable ${}", u.name),
                     u.name.span,
                     0,
                     "variable.undefined",
                 );
-            } else if !u.by_ref && locals.is_maybe_undefined_var(&u.name) {
+            } else if !u.by_ref && maybe_undefined {
                 self.report(
                     format!("Variable ${} might not be defined.", u.name),
                     u.name.span,
@@ -556,7 +573,11 @@ impl<'a> Checker<'a> {
                     "variable.possiblyUndefined",
                 );
             }
-            let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
+            let current = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
+            let ty = match &at_creation {
+                Some(captured) if !u.by_ref => captured.ty.clone().unwrap_or(Type::mixed()),
+                _ => current,
+            };
             // A captured variable's real declaration is wherever
             // the outer scope already says it is - copied across,
             // not fabricated fresh at this `use (...)` clause.
@@ -579,12 +600,24 @@ impl<'a> Checker<'a> {
             // A by-reference capture can still gain keys from
             // anything else holding the reference before the
             // closure runs.
-            let ty = if u.by_ref {
-                self.widen_to_byref_writes(&u.name.name, ty)
-            } else {
-                ty
+            let ty = match (u.by_ref, mode) {
+                (false, _) => ty,
+                (true, ClosureMode::Call) => self.widen_to_untracked_byref_writes(&u.name.name, ty),
+                (true, _) => self.widen_to_byref_writes(&u.name.name, ty),
             };
+            if mode == ClosureMode::Creation && !u.by_ref {
+                captures.push((
+                    u.name.name.clone(),
+                    CapturedVariable {
+                        ty: defined.then(|| ty.clone()),
+                        maybe_undefined,
+                    },
+                ));
+            }
             closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
+        }
+        if mode == ClosureMode::Creation {
+            self.closure_capture_snapshots.insert(literal, captures);
         }
         // The writes this body makes, logged from here on so the
         // seeding above is not one of them. The write-back below
@@ -676,15 +709,15 @@ impl<'a> Checker<'a> {
         self.check_type_class_names_exist(
             declared_return.as_ref().unwrap_or(&Type::mixed()),
             "return type of anonymous function",
-            e.span,
+            span,
         );
         self.check_type_trait_refs(
             declared_return.as_ref().unwrap_or(&Type::mixed()),
             "return type of anonymous function",
-            e.span,
+            span,
             "return.trait",
         );
-        self.check_type_class_name_case(&declared_return_case_refs, e.span);
+        self.check_type_class_name_case(&declared_return_case_refs, span);
         // `return.noParent` - `declared_return` above never went
         // through `resolve_pseudo` (unlike `current_declared_
         // return_type` further down), so a fresh, one-off resolve
@@ -698,7 +731,7 @@ impl<'a> Checker<'a> {
             self.check_no_parent_ref(
                 &resolved_return,
                 "return type of anonymous function",
-                e.span,
+                span,
                 "return.noParent",
             );
         }
@@ -708,7 +741,7 @@ impl<'a> Checker<'a> {
         self.check_internal_param_and_return_types_raw(
             params,
             return_type.as_deref(),
-            e.span,
+            span,
             false,
             current_class_for_internal_check.as_deref(),
             &closure_label,
@@ -716,7 +749,7 @@ impl<'a> Checker<'a> {
         self.check_restricted_param_and_return_types_raw(
             params,
             return_type.as_deref(),
-            e.span,
+            span,
             current_class_for_internal_check.as_deref(),
         );
         // A generator-returning closure needs the same
@@ -797,7 +830,7 @@ impl<'a> Checker<'a> {
         let previous_return_points = std::mem::take(&mut self.current_function_return_points);
         let previous_saw_explicit_return =
             std::mem::take(&mut self.current_function_saw_explicit_return);
-        self.check_generator_return_type(declared_return.as_ref(), e.span);
+        self.check_generator_return_type(declared_return.as_ref(), span);
         // A closure literal may run zero-to-many times (any
         // callback-accepting builtin, or simply being called more
         // than once through an ordinary variable) - a single
@@ -864,7 +897,7 @@ impl<'a> Checker<'a> {
             body_terminates,
             return_type.is_some(),
             declared_return.as_ref(),
-            e.span,
+            span,
         );
         // Captured before the restore below overwrites the live
         // field back to the *outer* scope's own snapshots - the
@@ -893,7 +926,7 @@ impl<'a> Checker<'a> {
         // own (see its doc comment), so every finding here
         // anchors to the whole closure expression's span instead
         // of the specific `$x` token.
-        self.check_unused_closure_uses(uses, body, e.span);
+        self.check_unused_closure_uses(uses, body, span);
         // A `use (&$x)` capture is a real reference - any
         // mutation the closure body makes to `$x` is visible in
         // the declaring scope too, from the closure literal's
@@ -918,7 +951,8 @@ impl<'a> Checker<'a> {
         // outer type it has: the body's own view of it only ever
         // reflects the body's narrowing, not an assignment.
         let body_calls = body_has_call(body);
-        for u in uses {
+        // A creation check has no effect on the scope it is written in.
+        for u in uses.iter().filter(|_| mode != ClosureMode::Creation) {
             if !u.by_ref {
                 continue;
             }
@@ -978,21 +1012,23 @@ impl<'a> Checker<'a> {
                 closure_falls_off_end,
             )
         });
-        let literal = self.closure_literal_id(e.span);
-        self.closure_literal_type_of(
+        let ty = self.closure_literal_type_of(
             Some(literal),
             params,
             return_type.as_deref(),
             inferred_return,
             None,
-        )
+        );
+        if mode == ClosureMode::Creation {
+            self.hold_closure_diagnostics(literal, diagnostics_mark);
+        }
+        ty
     }
 
     /// The identity of the closure literal starting at `span` in the file
     /// being checked (`types::ClosureLiteralId`).
     pub(crate) fn closure_literal_id(&self, span: Span) -> types::ClosureLiteralId {
-        let file = self.current_file_id.map_or(0, |file| file.number());
-        types::ClosureLiteralId((u64::from(file) << 32) | u64::from(span.start))
+        closure_flow::closure_literal_id_in(self.current_file_id, span)
     }
 
     fn check_expr_impl(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
@@ -1589,6 +1625,7 @@ impl<'a> Checker<'a> {
                     } else {
                         self.check_named_callable_invocation(&callee_ty, args, locals, e.span);
                     }
+                    self.check_tracked_closure_calls(&callee_ty, locals, label);
                     // A `Closure(...)`-shaped PHPDoc callable carries no
                     // `@throws` info of its own, and any other dynamic-
                     // callee shape has even less to go on - genuinely
@@ -2597,11 +2634,14 @@ impl<'a> Checker<'a> {
                     {
                         locals.declare_var(name, Type::mixed(), rhs.span);
                     }
-                    // Both names now refer to one value, so a write through
-                    // either reaches the other, and neither name's logged
-                    // writes say what it may hold.
-                    for side in [lhs, rhs] {
-                        if let ExprKind::Variable(name) = &side.kind {
+                    // A binding between two variables is modelled by
+                    // `bind_reference_var` below. Binding to anything else (a
+                    // property, an element) leaves the variable's value
+                    // untracked, so the write log holds it as mixed.
+                    for (side, other) in [(lhs, rhs), (rhs, lhs)] {
+                        if let ExprKind::Variable(name) = &side.kind
+                            && !matches!(&other.kind, ExprKind::Variable(_))
+                        {
                             locals.log_mixed_write_var(name);
                         }
                     }
@@ -2688,7 +2728,23 @@ impl<'a> Checker<'a> {
                     e.span,
                     (rhs_ty.clone(), native.as_ref().map(|(_, n)| n.clone())),
                 );
+                // Rebinding `lhs` by reference breaks its old link before
+                // the store below, so that store doesn't reach the variables
+                // it used to share a value with.
+                if let ExprKind::Variable(name) = &lhs.kind
+                    && matches!(&e.kind, ExprKind::AssignRef(..))
+                {
+                    locals.detach_reference_var(name);
+                }
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
+                if let (
+                    ExprKind::AssignRef(..),
+                    ExprKind::Variable(lhs_name),
+                    ExprKind::Variable(rhs_name),
+                ) = (&e.kind, &lhs.kind, &rhs.kind)
+                {
+                    locals.bind_reference_var(lhs_name, rhs_name);
+                }
                 if let Some((name, native)) = native {
                     locals.set_native_var(&name, native);
                 }
@@ -3878,7 +3934,15 @@ impl<'a> Checker<'a> {
                     .union_all_with(&self.relation())
                     .unwrap_or(Type::never())
             }
-            ExprKind::Closure(closure) => self.check_closure_literal(e, closure, locals, label),
+            ExprKind::Closure(closure) => {
+                let literal = self.closure_literal_id(e.span);
+                let mode = if self.tracked_closures.contains_key(&literal) {
+                    ClosureMode::Creation
+                } else {
+                    ClosureMode::Plain
+                };
+                self.check_closure_literal(e.span, closure, locals, label, mode)
+            }
             ExprKind::ArrowFn(arrow) => {
                 let syntax::ast::ArrowFnExpr {
                     params,

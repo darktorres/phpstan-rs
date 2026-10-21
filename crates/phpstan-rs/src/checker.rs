@@ -366,6 +366,10 @@ pub struct Checker<'a> {
     // which diagnostics came from that check, the whole body's diagnostics
     // are discarded if this ends up true (see check_function).
     pub(crate) saw_dynamic_var_construct: bool,
+    // Whether the file being checked declares `strict_types=1`. Without it, a
+    // scalar argument is coerced to the parameter's scalar type, as PHP's weak
+    // mode does (`calls/parameters.rs`).
+    pub(crate) strict_types: bool,
     // How many bodies enclosing the one being checked have
     // `saw_dynamic_var_construct` set, each of which drops every
     // diagnostic made since it began, the nested body's included.
@@ -859,6 +863,17 @@ pub struct Checker<'a> {
     // `record_member_class_escape` self-gates on it internally,
     // mirroring `record_enum_escape`'s own pattern.
     escaped_member_classes: RefCell<FxHashSet<String>>,
+    // The closure literals this file follows to their calls (`closure_flow`),
+    // by identity.
+    tracked_closures: closure_flow::TrackedClosures,
+    // Each followed literal's creation-time diagnostics, held until a call of
+    // it is checked (`flush_pending_closure_diagnostics`).
+    pending_closure_diagnostics: FxHashMap<types::ClosureLiteralId, Vec<Diagnostic>>,
+    // The followed literals a call has been checked at.
+    called_closures: FxHashSet<types::ClosureLiteralId>,
+    // What each followed literal captured by value when it was written.
+    closure_capture_snapshots:
+        FxHashMap<types::ClosureLiteralId, Vec<(Name, closure_flow::CapturedVariable)>>,
     // Disjunctive-syllogism narrowing: a stack, not a `Locals` field,
     // since it's scoped to the *traversal position* (currently inside
     // an outer `if ($a || $b)`'s own true branch, at any nesting depth)
@@ -926,6 +941,7 @@ mod by_ref_params;
 mod callable_values;
 mod calls;
 mod castable_arguments;
+pub(crate) mod closure_flow;
 mod coercion;
 mod comparisons;
 pub mod constant_resolver;
@@ -1159,6 +1175,7 @@ impl<'a> Checker<'a> {
             current_trait: None,
             current_scope_deprecated: false,
             saw_dynamic_var_construct: false,
+            strict_types: false,
             enclosing_dynamic_bodies: 0,
             #[cfg(debug_assertions)]
             reports_made_while_dropping: Vec::new(),
@@ -1228,6 +1245,10 @@ impl<'a> Checker<'a> {
             member_ref_sites: RefCell::new(FxHashSet::default()),
             escaped_enums: RefCell::new(FxHashSet::default()),
             escaped_member_classes: RefCell::new(FxHashSet::default()),
+            tracked_closures: closure_flow::TrackedClosures::default(),
+            pending_closure_diagnostics: FxHashMap::default(),
+            called_closures: FxHashSet::default(),
+            closure_capture_snapshots: FxHashMap::default(),
             semantic_tokens: Vec::new(),
             pending_or_disjunctions: Vec::new(),
             type_dump: None,
@@ -1912,6 +1933,11 @@ impl<'a> Checker<'a> {
                 .map(|p| Name::from(&p)),
         );
 
+        self.strict_types = keywords::declares_strict_types(program);
+        let file = self.current_file_id;
+        self.tracked_closures = closure_flow::tracked_closures(program, &|span| {
+            closure_flow::closure_literal_id_in(file, span)
+        });
         let mut top_locals: Locals = self.new_locals();
         top_locals.set_track(self.probe_span.get().is_some());
         let diagnostics_before = self.diagnostics.len();
@@ -1930,6 +1956,7 @@ impl<'a> Checker<'a> {
         } else {
             self.check_top_level_statements(program, &mut top_locals, true);
         }
+        self.flush_pending_closure_diagnostics();
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
             #[cfg(debug_assertions)]
