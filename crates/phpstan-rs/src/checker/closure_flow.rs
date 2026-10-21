@@ -87,12 +87,16 @@ pub(crate) fn tracked_closures(
     for name in &globals.imported {
         top.read(name, Read::Escape);
     }
-    let mut flow = ScopeFlow::new(&mut top);
+    let invoked = invoked_parameters(program);
+    let mut flow = ScopeFlow::new(&mut top, Rc::clone(&invoked));
     for stmt in program {
         flow.visit_stmt(stmt);
     }
     found.extend(top.followed_literals());
-    let mut discover = Discover { found: &mut found };
+    let mut discover = Discover {
+        found: &mut found,
+        invoked: Rc::clone(&invoked),
+    };
     for stmt in program {
         discover.visit_stmt(stmt);
     }
@@ -116,6 +120,9 @@ enum Read {
     CalleeElement,
     /// `$v` as an element of the array literal assigned to `holder`.
     Element(String),
+    /// `$v` as a positional argument of a same-file function whose parameter
+    /// its live code never invokes: no call reaches the value through it.
+    Passed,
     /// Any other use: the value is passed on or can be reached elsewhere.
     Escape,
 }
@@ -192,7 +199,7 @@ impl Scope {
     fn variable_followed(&self, name: &str) -> bool {
         self.reads.get(name).is_none_or(|reads| {
             reads.iter().all(|read| match read {
-                Read::Callee => true,
+                Read::Callee | Read::Passed => true,
                 Read::Element(holder) => self.holder_followed(holder),
                 Read::CalleeElement | Read::Escape => false,
             })
@@ -263,13 +270,15 @@ struct ScopeFlow<'s> {
     /// Inside an arrow function's body, which captures every variable it
     /// names by value: nothing there is followed.
     inside_arrow: u32,
+    invoked: Invoked,
 }
 
 impl<'s> ScopeFlow<'s> {
-    fn new(scope: &'s mut Scope) -> ScopeFlow<'s> {
+    fn new(scope: &'s mut Scope, invoked: Invoked) -> ScopeFlow<'s> {
         ScopeFlow {
             scope,
             inside_arrow: 0,
+            invoked,
         }
     }
 
@@ -360,7 +369,21 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
                     }
                     _ => self.visit_expr(callee),
                 }
-                visit::walk_args(self, args);
+                let uninvoked = self.uninvoked_parameters(callee).filter(|_| plain);
+                for (index, arg) in args.iter().enumerate() {
+                    match &arg.value.kind {
+                        ExprKind::Variable(name)
+                            if !arg.spread
+                                && arg.name.is_none()
+                                && uninvoked
+                                    .as_ref()
+                                    .is_some_and(|u| u.get(index) == Some(&true)) =>
+                        {
+                            self.scope.read(name.as_str(), Read::Passed);
+                        }
+                        _ => self.visit_arg(arg),
+                    }
+                }
             }
             ExprKind::Assign(lhs, rhs) => match &lhs.kind {
                 ExprKind::Variable(name) => {
@@ -457,6 +480,7 @@ fn is_dynamic_function(name: &str) -> bool {
 /// Finds every scope in the program and collects what it follows.
 struct Discover<'f> {
     found: &'f mut FxHashSet<Span>,
+    invoked: Invoked,
 }
 
 impl<'ast> Visitor<'ast> for Discover<'_> {
@@ -482,7 +506,7 @@ impl<'ast> Visitor<'ast> for Discover<'_> {
                 for param in &arrow.params {
                     scope.write(param.name.name.as_str(), Write::Other);
                 }
-                let mut flow = ScopeFlow::new(&mut scope);
+                let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invoked));
                 flow.visit_expr(&arrow.body);
                 self.found.extend(scope.followed_literals());
                 visit::walk_expr(self, &arrow.body);
@@ -501,7 +525,7 @@ impl Discover<'_> {
         for closure_use in uses {
             scope.write(closure_use.name.name.as_str(), Write::Other);
         }
-        let mut flow = ScopeFlow::new(&mut scope);
+        let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invoked));
         for stmt in body {
             flow.visit_stmt(stmt);
         }
@@ -619,4 +643,154 @@ fn closure_literal_identities(ty: &Type) -> Vec<ClosureLiteralId> {
         .iter()
         .filter_map(|member| member.callable_sig()?.literal)
         .collect()
+}
+
+/// For each function of the program, keyed as `global_writes::key` keys it,
+/// whether each of its parameters may be invoked (`invoked_params`).
+pub(crate) type Invoked = Rc<FxHashMap<String, Vec<bool>>>;
+
+fn invoked_parameters(program: &[Stmt]) -> Invoked {
+    struct Functions {
+        out: FxHashMap<String, Vec<bool>>,
+    }
+    impl<'ast> Visitor<'ast> for Functions {
+        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            if let StmtKind::FunctionDecl(f) = &stmt.kind {
+                let name = f.namespaced_name.as_deref().unwrap_or(f.name.name.as_str());
+                self.out
+                    .insert(super::global_writes::key(name), invoked_params(f));
+            }
+            visit::walk_stmt(self, stmt);
+        }
+    }
+    let mut functions = Functions {
+        out: FxHashMap::default(),
+    };
+    for stmt in program {
+        functions.visit_stmt(stmt);
+    }
+    Rc::new(functions.out)
+}
+
+/// Whether each parameter of `f` may be invoked: its name is read by the
+/// body's live code. Live code is what runs before an unconditional `return`,
+/// `throw` or `exit` at the top of the body, and before an unconditional
+/// rebinding of the parameter. A by-reference or variadic parameter is always
+/// invoked, and so is every parameter when the body reads variables by name.
+fn invoked_params(f: &FunctionDecl) -> Vec<bool> {
+    let mut read = FxHashSet::default();
+    let mut rebound = FxHashSet::default();
+    for stmt in f.body_stmts() {
+        let mut reads = Reads::default();
+        reads.visit_stmt(stmt);
+        if reads.dynamic {
+            return vec![true; f.params.len()];
+        }
+        read.extend(
+            reads
+                .names
+                .into_iter()
+                .filter(|name| !rebound.contains(name)),
+        );
+        if let Some(name) = unconditional_rebind(stmt) {
+            rebound.insert(name);
+        }
+        if leaves_body(stmt) {
+            break;
+        }
+    }
+    f.params
+        .iter()
+        .map(|param| param.by_ref || param.variadic || read.contains(param.name.name.as_str()))
+        .collect()
+}
+
+/// The variable names a statement reads, not counting the left-hand side of
+/// an assignment to a plain variable (a write), and whether it reads
+/// variables by a computed name.
+#[derive(Default)]
+struct Reads {
+    names: FxHashSet<String>,
+    dynamic: bool,
+}
+
+impl<'ast> Visitor<'ast> for Reads {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
+            _ => visit::walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        match &expr.kind {
+            ExprKind::Variable(name) => {
+                self.names.insert(name.as_str().to_string());
+            }
+            ExprKind::DynamicVariable(_) => {
+                self.dynamic = true;
+                visit::walk_expr(self, expr);
+            }
+            ExprKind::Assign(lhs, rhs) if matches!(lhs.kind, ExprKind::Variable(_)) => {
+                self.visit_expr(rhs);
+            }
+            ExprKind::Call(callee, _) => {
+                if let ExprKind::Name(name) = &callee.kind
+                    && (is_dynamic_function(name.written.as_str())
+                        || ["func_get_args", "func_get_arg"]
+                            .iter()
+                            .any(|f| name.written.as_str().eq_ignore_ascii_case(f)))
+                {
+                    self.dynamic = true;
+                }
+                visit::walk_expr(self, expr);
+            }
+            ExprKind::Closure(closure) => {
+                for closure_use in &closure.uses {
+                    self.names
+                        .insert(closure_use.name.name.as_str().to_string());
+                }
+                visit::walk_expr(self, expr);
+            }
+            _ => visit::walk_expr(self, expr),
+        }
+    }
+}
+
+/// The name a statement unconditionally rebinds, when it is a plain
+/// assignment to a variable.
+fn unconditional_rebind(stmt: &Stmt) -> Option<String> {
+    let StmtKind::Expression(expr) = &stmt.kind else {
+        return None;
+    };
+    match &expr.kind {
+        ExprKind::Assign(lhs, _) => match &lhs.kind {
+            ExprKind::Variable(name) => Some(name.as_str().to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether a top-level statement leaves the body for good.
+fn leaves_body(stmt: &Stmt) -> bool {
+    match &stmt.kind {
+        StmtKind::Return(_) | StmtKind::Throw(_) => true,
+        StmtKind::Expression(expr) => matches!(expr.kind, ExprKind::Exit(..)),
+        _ => false,
+    }
+}
+
+impl ScopeFlow<'_> {
+    /// For a call of a same-file function `callee` names: which of its
+    /// positional parameters are never invoked.
+    fn uninvoked_parameters(&self, callee: &Expr) -> Option<Vec<bool>> {
+        let ExprKind::Name(name) = &callee.kind else {
+            return None;
+        };
+        let invoked = self
+            .invoked
+            .get(&super::global_writes::key(name.written.as_str()))?;
+        Some(invoked.iter().map(|invoked| !invoked).collect())
+    }
 }

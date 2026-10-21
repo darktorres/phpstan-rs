@@ -48,7 +48,9 @@ pub(crate) enum Scope {
     Function(FxHashSet<String>),
 }
 
-fn key(name: &str) -> String {
+/// The key a function of the file is stored under: its name, lowercased,
+/// with no leading backslash.
+pub(crate) fn key(name: &str) -> String {
     name.trim_start_matches('\\').to_ascii_lowercase()
 }
 
