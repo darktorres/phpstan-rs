@@ -24,13 +24,14 @@ use std::rc::Rc;
 use diagnostics::Diagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::{
-    ArrowFnExpr, CatchClause, ClosureExpr, ClosureUse, Expr, ExprKind, FunctionDecl, GlobalVar,
-    Literal, MethodDecl, Param, Stmt, StmtKind,
+    Arg, ArrowFnExpr, CatchClause, ClosureExpr, ClosureUse, Expr, ExprKind, FunctionDecl,
+    GlobalVar, Literal, MethodDecl, Param, Stmt, StmtKind,
 };
-use syntax::span::Span;
+use syntax::span::{Range, Span};
 use syntax::visit::{self, Visitor};
 use types::{ClosureLiteralId, Type};
 
+use crate::checker::invocation::Invocations;
 use crate::checker::{Checker, Locals};
 use crate::file_id::FileId;
 
@@ -78,6 +79,7 @@ pub(crate) type TrackedClosures = FxHashMap<ClosureLiteralId, Rc<TrackedClosure>
 /// identity for its span.
 pub(crate) fn tracked_closures(
     program: &[Stmt],
+    invocations: &Rc<Invocations>,
     id_of: &dyn Fn(Span) -> ClosureLiteralId,
 ) -> TrackedClosures {
     let globals = global_scope_facts(program);
@@ -87,15 +89,14 @@ pub(crate) fn tracked_closures(
     for name in &globals.imported {
         top.read(name, Read::Escape);
     }
-    let invoked = invoked_parameters(program);
-    let mut flow = ScopeFlow::new(&mut top, Rc::clone(&invoked));
+    let mut flow = ScopeFlow::new(&mut top, Rc::clone(invocations));
     for stmt in program {
         flow.visit_stmt(stmt);
     }
     found.extend(top.followed_literals());
     let mut discover = Discover {
         found: &mut found,
-        invoked: Rc::clone(&invoked),
+        invocations: Rc::clone(invocations),
     };
     for stmt in program {
         discover.visit_stmt(stmt);
@@ -343,15 +344,15 @@ struct ScopeFlow<'s> {
     /// Inside an arrow function's body, which captures every variable it
     /// names by value: nothing there is followed.
     inside_arrow: u32,
-    invoked: Invoked,
+    invocations: Rc<Invocations>,
 }
 
 impl<'s> ScopeFlow<'s> {
-    fn new(scope: &'s mut Scope, invoked: Invoked) -> ScopeFlow<'s> {
+    fn new(scope: &'s mut Scope, invocations: Rc<Invocations>) -> ScopeFlow<'s> {
         ScopeFlow {
             scope,
             inside_arrow: 0,
-            invoked,
+            invocations,
         }
     }
 
@@ -442,7 +443,7 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
                     }
                     _ => self.visit_expr(callee),
                 }
-                let uninvoked = self.uninvoked_parameters(callee).filter(|_| plain);
+                let uninvoked = self.uninvoked_parameters(callee, args).filter(|_| plain);
                 for (index, arg) in args.iter().enumerate() {
                     match &arg.value.kind {
                         ExprKind::Variable(name)
@@ -579,7 +580,7 @@ fn is_literal(e: &Expr) -> bool {
 }
 
 /// Functions that make or read variables by a name they compute.
-fn is_dynamic_function(name: &str) -> bool {
+pub(crate) fn is_dynamic_function(name: &str) -> bool {
     let name = name.trim_start_matches('\\');
     ["compact", "extract", "get_defined_vars"]
         .iter()
@@ -589,7 +590,7 @@ fn is_dynamic_function(name: &str) -> bool {
 /// Finds every scope in the program and collects what it follows.
 struct Discover<'f> {
     found: &'f mut FxHashSet<Span>,
-    invoked: Invoked,
+    invocations: Rc<Invocations>,
 }
 
 impl<'ast> Visitor<'ast> for Discover<'_> {
@@ -615,7 +616,7 @@ impl<'ast> Visitor<'ast> for Discover<'_> {
                 for param in &arrow.params {
                     scope.write(param.name.name.as_str(), Write::Other);
                 }
-                let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invoked));
+                let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invocations));
                 flow.visit_expr(&arrow.body);
                 self.found.extend(scope.followed_literals());
                 visit::walk_expr(self, &arrow.body);
@@ -634,12 +635,18 @@ impl Discover<'_> {
         for closure_use in uses {
             scope.write(closure_use.name.name.as_str(), Write::Other);
         }
-        let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invoked));
+        let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invocations));
         for stmt in body {
             flow.visit_stmt(stmt);
         }
         self.found.extend(scope.followed_literals());
     }
+}
+
+/// Whether `inner` lies within `outer`.
+fn range_contains(outer: Range, inner: Range) -> bool {
+    (outer.start.line, outer.start.col) <= (inner.start.line, inner.start.col)
+        && (inner.end.line, inner.end.col) <= (outer.end.line, outer.end.col)
 }
 
 /// Copies each followed literal into the table, keyed by its identity.
@@ -668,13 +675,17 @@ impl<'ast> Visitor<'ast> for Collect<'_> {
 }
 
 impl Checker<'_> {
-    /// Checks each followed literal `callee` may be, at this call.
+    /// Checks each followed literal `callee` may be, at this call. The
+    /// branches of its body that `args`' literal values leave dead report
+    /// nothing.
     pub(crate) fn check_tracked_closure_calls(
         &mut self,
         callee: &Type,
+        args: &[Arg],
         locals: &mut Locals,
         label: &str,
     ) {
+        let values = self.invocations.argument_values(args);
         for id in closure_literal_identities(callee) {
             let Some(tracked) = self.tracked_closures.get(&id).cloned() else {
                 continue;
@@ -688,7 +699,29 @@ impl Checker<'_> {
                 label,
                 ClosureMode::Call,
             );
+            let dead = self.invocations.dead_branches(&tracked.closure, &values);
+            self.drop_in_dead_branches(before, &dead);
             self.drop_repeated_diagnostics(before);
+        }
+    }
+
+    /// Drops what was reported from `from` on inside one of the `dead` spans.
+    fn drop_in_dead_branches(&mut self, from: usize, dead: &[Span]) {
+        if dead.is_empty() {
+            return;
+        }
+        let ranges: Vec<Range> = dead
+            .iter()
+            .map(|span| self.line_index.range(*span))
+            .collect();
+        let mut index = from;
+        while index < self.diagnostics.len() {
+            let span = self.diagnostics[index].span;
+            if ranges.iter().any(|range| range_contains(*range, span)) {
+                self.diagnostics.remove(index);
+            } else {
+                index += 1;
+            }
         }
     }
 
@@ -754,152 +787,20 @@ fn closure_literal_identities(ty: &Type) -> Vec<ClosureLiteralId> {
         .collect()
 }
 
-/// For each function of the program, keyed as `global_writes::key` keys it,
-/// whether each of its parameters may be invoked (`invoked_params`).
-pub(crate) type Invoked = Rc<FxHashMap<String, Vec<bool>>>;
-
-fn invoked_parameters(program: &[Stmt]) -> Invoked {
-    struct Functions {
-        out: FxHashMap<String, Vec<bool>>,
-    }
-    impl<'ast> Visitor<'ast> for Functions {
-        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-            if let StmtKind::FunctionDecl(f) = &stmt.kind {
-                let name = f.namespaced_name.as_deref().unwrap_or(f.name.name.as_str());
-                self.out
-                    .insert(super::global_writes::key(name), invoked_params(f));
-            }
-            visit::walk_stmt(self, stmt);
-        }
-    }
-    let mut functions = Functions {
-        out: FxHashMap::default(),
-    };
-    for stmt in program {
-        functions.visit_stmt(stmt);
-    }
-    Rc::new(functions.out)
-}
-
-/// Whether each parameter of `f` may be invoked: its name is read by the
-/// body's live code. Live code is what runs before an unconditional `return`,
-/// `throw` or `exit` at the top of the body, and before an unconditional
-/// rebinding of the parameter. A by-reference or variadic parameter is always
-/// invoked, and so is every parameter when the body reads variables by name.
-fn invoked_params(f: &FunctionDecl) -> Vec<bool> {
-    let mut read = FxHashSet::default();
-    let mut rebound = FxHashSet::default();
-    for stmt in f.body_stmts() {
-        let mut reads = Reads::default();
-        reads.visit_stmt(stmt);
-        if reads.dynamic {
-            return vec![true; f.params.len()];
-        }
-        read.extend(
-            reads
-                .names
-                .into_iter()
-                .filter(|name| !rebound.contains(name)),
-        );
-        if let Some(name) = unconditional_rebind(stmt) {
-            rebound.insert(name);
-        }
-        if leaves_body(stmt) {
-            break;
-        }
-    }
-    f.params
-        .iter()
-        .map(|param| param.by_ref || param.variadic || read.contains(param.name.name.as_str()))
-        .collect()
-}
-
-/// The variable names a statement reads, not counting the left-hand side of
-/// an assignment to a plain variable (a write), and whether it reads
-/// variables by a computed name.
-#[derive(Default)]
-struct Reads {
-    names: FxHashSet<String>,
-    dynamic: bool,
-}
-
-impl<'ast> Visitor<'ast> for Reads {
-    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        match &stmt.kind {
-            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
-            _ => visit::walk_stmt(self, stmt),
-        }
-    }
-
-    fn visit_expr(&mut self, expr: &'ast Expr) {
-        match &expr.kind {
-            ExprKind::Variable(name) => {
-                self.names.insert(name.as_str().to_string());
-            }
-            ExprKind::DynamicVariable(_) => {
-                self.dynamic = true;
-                visit::walk_expr(self, expr);
-            }
-            ExprKind::Assign(lhs, rhs) if matches!(lhs.kind, ExprKind::Variable(_)) => {
-                self.visit_expr(rhs);
-            }
-            ExprKind::Call(callee, _) => {
-                if let ExprKind::Name(name) = &callee.kind
-                    && (is_dynamic_function(name.written.as_str())
-                        || ["func_get_args", "func_get_arg"]
-                            .iter()
-                            .any(|f| name.written.as_str().eq_ignore_ascii_case(f)))
-                {
-                    self.dynamic = true;
-                }
-                visit::walk_expr(self, expr);
-            }
-            ExprKind::Closure(closure) => {
-                for closure_use in &closure.uses {
-                    self.names
-                        .insert(closure_use.name.name.as_str().to_string());
-                }
-                visit::walk_expr(self, expr);
-            }
-            _ => visit::walk_expr(self, expr),
-        }
-    }
-}
-
-/// The name a statement unconditionally rebinds, when it is a plain
-/// assignment to a variable.
-fn unconditional_rebind(stmt: &Stmt) -> Option<String> {
-    let StmtKind::Expression(expr) = &stmt.kind else {
-        return None;
-    };
-    match &expr.kind {
-        ExprKind::Assign(lhs, _) => match &lhs.kind {
-            ExprKind::Variable(name) => Some(name.as_str().to_string()),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// Whether a top-level statement leaves the body for good.
-fn leaves_body(stmt: &Stmt) -> bool {
-    match &stmt.kind {
-        StmtKind::Return(_) | StmtKind::Throw(_) => true,
-        StmtKind::Expression(expr) => matches!(expr.kind, ExprKind::Exit(..)),
-        _ => false,
-    }
-}
-
 impl ScopeFlow<'_> {
-    /// For a call of a same-file function `callee` names: which of its
-    /// positional parameters are never invoked.
-    fn uninvoked_parameters(&self, callee: &Expr) -> Option<Vec<bool>> {
+    /// For a call of a same-file function `callee` names, with arguments
+    /// `args`: which of its positional parameters the call never invokes.
+    fn uninvoked_parameters(&self, callee: &Expr, args: &[Arg]) -> Option<Vec<bool>> {
         let ExprKind::Name(name) = &callee.kind else {
             return None;
         };
+        if args.iter().any(|arg| arg.spread || arg.name.is_some()) {
+            return None;
+        }
+        let values = self.invocations.argument_values(args);
         let invoked = self
-            .invoked
-            .get(&super::global_writes::key(name.written.as_str()))?;
+            .invocations
+            .invoked_by_call(name.written.as_str(), &values)?;
         Some(invoked.iter().map(|invoked| !invoked).collect())
     }
 }

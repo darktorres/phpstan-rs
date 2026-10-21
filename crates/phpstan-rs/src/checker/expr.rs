@@ -1640,7 +1640,7 @@ impl<'a> Checker<'a> {
                     } else {
                         self.check_named_callable_invocation(&callee_ty, args, locals, e.span);
                     }
-                    self.check_tracked_closure_calls(&callee_ty, locals, label);
+                    self.check_tracked_closure_calls(&callee_ty, args, locals, label);
                     // A `Closure(...)`-shaped PHPDoc callable carries no
                     // `@throws` info of its own, and any other dynamic-
                     // callee shape has even less to go on - genuinely

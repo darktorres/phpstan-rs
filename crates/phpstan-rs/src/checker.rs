@@ -9,6 +9,7 @@ use crate::registry::Registry;
 use control_flow::body_has_byref_capture;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use keys::{KeyData, LocalKey};
+use std::rc::Rc;
 use std::sync::Arc;
 use syntax::ast::*;
 use syntax::completion::Completion;
@@ -870,6 +871,9 @@ pub struct Checker<'a> {
     // The closure literals this file follows to their calls (`closure_flow`),
     // by identity.
     tracked_closures: closure_flow::TrackedClosures,
+    // The functions of the file, and what a call of each may invoke
+    // (`invocation`).
+    invocations: Rc<invocation::Invocations>,
     // Each followed literal's creation-time diagnostics, held until a call of
     // it is checked (`flush_pending_closure_diagnostics`).
     pending_closure_diagnostics: FxHashMap<types::ClosureLiteralId, Vec<Diagnostic>>,
@@ -969,6 +973,7 @@ mod include_values;
 mod includes;
 mod ini_directives;
 mod instantiation;
+pub(crate) mod invocation;
 pub mod rule_level_helper;
 pub mod settings;
 mod strict_idioms;
@@ -1253,6 +1258,7 @@ impl<'a> Checker<'a> {
             escaped_enums: RefCell::new(FxHashSet::default()),
             escaped_member_classes: RefCell::new(FxHashSet::default()),
             tracked_closures: closure_flow::TrackedClosures::default(),
+            invocations: Rc::new(invocation::Invocations::default()),
             pending_closure_diagnostics: FxHashMap::default(),
             called_closures: FxHashSet::default(),
             closure_capture_snapshots: FxHashMap::default(),
@@ -1944,9 +1950,11 @@ impl<'a> Checker<'a> {
         self.global_writes = global_writes::global_writes(program);
         self.global_scope = global_writes::Scope::Top;
         let file = self.current_file_id;
-        self.tracked_closures = closure_flow::tracked_closures(program, &|span| {
-            closure_flow::closure_literal_id_in(file, span)
-        });
+        self.invocations = Rc::new(invocation::Invocations::new(program));
+        self.tracked_closures =
+            closure_flow::tracked_closures(program, &self.invocations, &|span| {
+                closure_flow::closure_literal_id_in(file, span)
+            });
         let mut top_locals: Locals = self.new_locals();
         top_locals.set_track(self.probe_span.get().is_some());
         let diagnostics_before = self.diagnostics.len();
