@@ -1,0 +1,2 @@
+2:67-2:72 deadCode.unreachable L4 | Unreachable statement - code above always terminates.
+5:43-5:45 argument.type L5 | Parameter #1 $string of function strlen expects string, null given.
