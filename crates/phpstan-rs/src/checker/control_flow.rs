@@ -805,18 +805,59 @@ pub(crate) fn body_has_byref_capture(stmts: &[syntax::ast::Stmt]) -> bool {
     })
 }
 
-/// Whether a body makes a call of its own, outside any nested function or
-/// closure body - a call may write any variable a by-reference capture
-/// shares.
-pub(crate) fn body_has_call(stmts: &[syntax::ast::Stmt]) -> bool {
-    syntax::visit::any_expr_in_body(stmts, |e| {
-        matches!(
-            e.kind,
-            syntax::ast::ExprKind::Call(..)
-                | syntax::ast::ExprKind::New(..)
-                | syntax::ast::ExprKind::MethodCall(..)
-                | syntax::ast::ExprKind::StaticCall(..)
-                | syntax::ast::ExprKind::NewAnonymousClass(..)
-        )
-    })
+impl Checker<'_> {
+    /// Whether `stmts` may run code a by-reference capture could share: a call
+    /// other than one of a builtin every parameter of which takes a scalar by
+    /// value (`strlen`), and a method call, a static call or a `new`.
+    pub(crate) fn body_may_run_code(&self, stmts: &[syntax::ast::Stmt]) -> bool {
+        syntax::visit::any_expr_in_body(stmts, |e| match &e.kind {
+            syntax::ast::ExprKind::Call(callee, _) => match &callee.kind {
+                syntax::ast::ExprKind::Name(name) => !self.is_scalar_builtin(name),
+                _ => true,
+            },
+            syntax::ast::ExprKind::MethodCall(..)
+            | syntax::ast::ExprKind::DynamicMethodCall(..)
+            | syntax::ast::ExprKind::StaticCall(..)
+            | syntax::ast::ExprKind::DynamicStaticCall(..)
+            | syntax::ast::ExprKind::New(..)
+            | syntax::ast::ExprKind::NewAnonymousClass(..) => true,
+            _ => false,
+        })
+    }
+
+    fn is_scalar_builtin(&self, name: &str) -> bool {
+        let Some((_, sig)) = self.registry.lookup_function_with_name(name) else {
+            return false;
+        };
+        if !self.registry.is_builtin_function(name) {
+            return false;
+        }
+        // Functions that write variables by name, or take a reference.
+        let bare = name
+            .rsplit('\\')
+            .next()
+            .unwrap_or(name)
+            .to_ascii_lowercase();
+        if matches!(
+            bare.as_str(),
+            "extract"
+                | "compact"
+                | "get_defined_vars"
+                | "parse_str"
+                | "func_get_args"
+                | "func_get_arg"
+        ) {
+            return false;
+        }
+        sig.params().iter().all(|param| {
+            !param.by_ref()
+                && param.ty().union_members().iter().all(|member| {
+                    member.is_string().yes()
+                        || member.is_int().yes()
+                        || member.is_float().yes()
+                        || member.is_bool().yes()
+                        || member.is_null().yes()
+                })
+        })
+    }
 }

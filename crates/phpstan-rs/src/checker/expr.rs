@@ -4,7 +4,7 @@ use crate::checker::InferQuestion;
 use crate::checker::assignment::{assigned_part_of_variable, writes_dynamic_variable};
 use crate::checker::calls::parameters::Callee;
 use crate::checker::closure_flow::{self, CapturedVariable, ClosureMode};
-use crate::checker::control_flow::{body_has_byref_capture, body_has_call};
+use crate::checker::control_flow::body_has_byref_capture;
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::resolve::receiver_class;
 use crate::checker::suggest;
@@ -964,7 +964,7 @@ impl<'a> Checker<'a> {
         // A capture neither written nor exposed to a call keeps the
         // outer type it has: the body's own view of it only ever
         // reflects the body's narrowing, not an assignment.
-        let body_calls = body_has_call(body);
+        let body_calls = self.body_may_run_code(body);
         // A creation check has no effect on the scope it is written in.
         for u in uses.iter().filter(|_| mode != ClosureMode::Creation) {
             if !u.by_ref {
