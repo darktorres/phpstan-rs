@@ -147,6 +147,7 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
         params,
         return_type: Box::new(parse_written_type(ret_text)),
         templates,
+        literal: None,
     };
     let sig = mark_callable_templates(sig);
     // `Closure(...)` is a real `Closure` instance with that signature
@@ -279,6 +280,7 @@ fn mark_callable_templates(sig: CallableSig) -> CallableSig {
         params,
         return_type,
         templates: sig.templates,
+        literal: None,
     }
 }
 

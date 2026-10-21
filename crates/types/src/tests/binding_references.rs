@@ -22,6 +22,7 @@ fn nested(reference: Type) -> Type {
             }],
             return_type: Box::new(reference),
             templates: Vec::new(),
+            literal: None,
         }))),
     ])
 }

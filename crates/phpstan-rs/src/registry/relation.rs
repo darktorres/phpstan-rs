@@ -63,6 +63,7 @@ impl ClassHierarchy for Registry {
                 .collect(),
             return_type: Box::new(sig.return_type().clone()),
             templates: Vec::new(),
+            literal: None,
         })
     }
 

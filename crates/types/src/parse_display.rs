@@ -752,6 +752,7 @@ impl Parser<'_> {
                 params,
                 return_type: Box::new(return_type),
                 templates,
+                literal: None,
             })
         })
     }

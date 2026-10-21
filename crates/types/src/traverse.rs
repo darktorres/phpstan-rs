@@ -75,6 +75,7 @@ impl Type {
                     params,
                     return_type: Box::new(return_type),
                     templates,
+                    literal: None,
                 })))
             }
             Repr::VarianceArg(variance, inner) => {

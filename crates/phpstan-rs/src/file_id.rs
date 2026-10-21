@@ -11,6 +11,13 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(u32);
 
+impl FileId {
+    /// The number the project gave this file, unique within the project.
+    pub(crate) fn number(self) -> u32 {
+        self.0
+    }
+}
+
 /// A set of files by number, a bit for each.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct FileIdSet {

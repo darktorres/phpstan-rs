@@ -114,6 +114,7 @@ fn the_classes_the_syntax_names_itself_are_written_fully_qualified() {
                 params: Vec::new(),
                 return_type: Box::new(Type::void()),
                 templates: Vec::new(),
+                literal: None,
             }))),
         ]))
     );

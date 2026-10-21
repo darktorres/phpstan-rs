@@ -945,7 +945,18 @@ pub struct CallableSig {
     /// The callable's own templates; every occurrence inside `params`/
     /// `return_type` is a `TemplateParam` scoped `CALLABLE_TEMPLATE_SCOPE`.
     pub templates: Vec<TemplateParam>,
+    /// The closure literal this signature belongs to, when it is one's own
+    /// signature. Two literals with the same parameters are different
+    /// closures, so the identity keeps them apart in unions.
+    #[serde(default)]
+    pub literal: Option<ClosureLiteralId>,
 }
+
+/// A closure literal's identity: the file it is in and where it starts,
+/// packed into one number that stays the same for every type made from
+/// that literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ClosureLiteralId(pub u64);
 
 /// The `TemplateParam::scope` of a callable type's own template.
 pub const CALLABLE_TEMPLATE_SCOPE: &str = "callable";

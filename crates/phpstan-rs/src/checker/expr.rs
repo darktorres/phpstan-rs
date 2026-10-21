@@ -464,6 +464,537 @@ impl<'a> Checker<'a> {
         self.diagnostics.extend(found);
     }
 
+    /// A closure literal's own check: its body, its `use` captures and what
+    /// its by-reference captures make of the enclosing scope.
+    fn check_closure_literal(
+        &mut self,
+        e: &Expr,
+        closure: &syntax::ast::ClosureExpr,
+        locals: &mut Locals,
+        label: &str,
+    ) -> Type {
+        let syntax::ast::ClosureExpr {
+            params,
+            uses,
+            body,
+            goto_labels,
+            is_generator,
+            is_static,
+            return_type,
+            attrs,
+            ..
+        } = closure;
+        // Mirrors real PHPStan's `ClosureAttributesRule` -
+        // existence plus target-validity for a closure
+        // expression's own `#[Attr]` group.
+        self.check_attributes(attrs, label);
+        self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function");
+        // Unlike an arrow function, a plain closure does NOT
+        // automatically see the enclosing scope - only variables
+        // explicitly named in `use (...)` are captured (by value
+        // or by reference; either way, the type it starts with is
+        // whatever the outer scope currently has it as). `$this`
+        // is the one implicit exception: a non-static closure
+        // declared inside a method still auto-binds it, the same
+        // as real PHP.
+        let mut closure_locals: Locals = locals.closure_scope();
+        for u in uses {
+            // Mirrors real PHPStan's
+            // `InvalidLexicalVariablesInClosureUseRule` - `$this`,
+            // a superglobal, or a name already used as a
+            // parameter can never be captured via `use (...)` at
+            // all (a real PHP compile error), distinct from - and
+            // checked before - the plain "undefined variable"
+            // case below.
+            if u.name == "this" {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        "Cannot use $this as lexical variable.".to_string(),
+                        u.name.span,
+                        0,
+                        "closure.useThis",
+                    )
+                    .non_ignorable(),
+                );
+            } else if is_superglobal(&u.name) {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        format!(
+                            "Cannot use superglobal variable ${} as lexical variable.",
+                            u.name
+                        ),
+                        u.name.span,
+                        0,
+                        "closure.useSuperGlobal",
+                    )
+                    .non_ignorable(),
+                );
+            } else if params.iter().any(|p| p.name.name == u.name.name) {
+                self.report_builder(
+                    DiagnosticBuilder::new(format!(
+                            "Cannot use lexical variable ${} since a parameter with the same name already exists.",
+                            u.name
+                        ),
+                        u.name.span,
+                        0,
+                        "closure.useDuplicate",
+                    )
+                    .non_ignorable(),
+                );
+            } else if !u.by_ref && !locals.contains_var(&u.name) {
+                self.report(
+                    format!("undefined variable ${}", u.name),
+                    u.name.span,
+                    0,
+                    "variable.undefined",
+                );
+            } else if !u.by_ref && locals.is_maybe_undefined_var(&u.name) {
+                self.report(
+                    format!("Variable ${} might not be defined.", u.name),
+                    u.name.span,
+                    0,
+                    "variable.possiblyUndefined",
+                );
+            }
+            let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
+            // A captured variable's real declaration is wherever
+            // the outer scope already says it is - copied across,
+            // not fabricated fresh at this `use (...)` clause.
+            let provenance = locals
+                .get_provenance_var(&u.name)
+                .cloned()
+                .unwrap_or_default();
+            // The `use (...)` clause's capture token is itself a
+            // real reference to the outer `$x` - same probe hook
+            // `ExprKind::Variable` has.
+            if self.probe_span.get() == Some(u.name.span) {
+                *self.probe_var_provenance.borrow_mut() =
+                    Some(provenance.iter().copied().collect());
+            }
+            // Hovering the capture token itself must show its
+            // type too, not just resolve go-to-definition - the
+            // two probes (`probe_hit`/`probe_var_provenance`) are
+            // independent.
+            self.probe_hit_at(u.name.span, &ty);
+            // A by-reference capture can still gain keys from
+            // anything else holding the reference before the
+            // closure runs.
+            let ty = if u.by_ref {
+                self.widen_to_byref_writes(&u.name.name, ty)
+            } else {
+                ty
+            };
+            closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
+        }
+        // The writes this body makes, logged from here on so the
+        // seeding above is not one of them. The write-back below
+        // reads which by-reference captures the body wrote.
+        let closure_writes = uses
+            .iter()
+            .any(|u| u.by_ref)
+            .then(|| closure_locals.enable_write_log());
+        if !*is_static && let Some(this_ty) = locals.get_var("this") {
+            closure_locals.insert_var("this", this_ty.clone());
+        }
+        // `record_branch_implied_facts`'s own facts don't
+        // otherwise survive into a closure body at all -
+        // `fresh_scope()` starts `branch_implied_facts` empty,
+        // same as every other per-scope side-channel. A captured
+        // discriminant tested again inside the closure (`Rate
+        // Service::rate`'s own `$userAnonymous && $anonymousId
+        // !== $savedAnonymousId` replaying the outer `if
+        // ($userAnonymous) { $savedAnonymousId = ...; }`) still
+        // needs the fact available to replay. The *discriminant*
+        // side needs no filtering - the closure can only ever
+        // test a subject it actually captured, so a fact keyed to
+        // an uncaptured subject simply never gets looked up - but
+        // the *implied* side does: an implied fact naming a
+        // variable the closure never captured would otherwise
+        // spuriously `.insert()` it into `closure_locals`,
+        // masking a real `variable.undefined` on an unrelated,
+        // genuinely-uncaptured reference to the same bare name.
+        let captured_names: rustc_hash::FxHashSet<&str> =
+            uses.iter().map(|u| u.name.as_ref()).collect();
+        for (key, implied) in locals.branch_implied_facts().iter() {
+            // An atom reading an uncaptured name would test the
+            // closure's own variable of that name, not the outer one.
+            if let KeyData::Atom { operands, .. } = locals.data(key.subject)
+                && !operands.iter().all(|operand| {
+                    matches!(locals.data(*operand), KeyData::Var(variable)
+                        if captured_names.contains(variable.as_str()))
+                })
+            {
+                continue;
+            }
+            let filtered: Vec<(LocalKey, Type)> = implied
+                .iter()
+                .filter(|(name, _)| match locals.data(*name) {
+                    KeyData::Var(variable) => captured_names.contains(variable.as_str()),
+                    _ => false,
+                })
+                .cloned()
+                .collect();
+            if !filtered.is_empty() {
+                closure_locals
+                    .branch_implied_facts_mut()
+                    .insert(key.clone(), std::rc::Rc::new(filtered));
+            }
+        }
+        let closure_label = format!("{label} (closure)");
+        for p in params {
+            let (ty, case_refs) = self.resolve_type_hint_with_case_refs(p.type_hint.as_ref());
+            // Mirrors real PHPStan's
+            // `ExistingClassesInClosureTypehintsRule` - checked on
+            // the un-array-wrapped element type below (a variadic
+            // parameter's declared type, not the `array` it
+            // collects into) so a missing class inside e.g.
+            // `...Foo $items` is still reported by its real name,
+            // not `array`.
+            self.check_type_class_names_exist(
+                &ty,
+                format!("parameter ${} of anonymous function", p.name),
+                p.span,
+            );
+            self.check_type_trait_refs(
+                &ty,
+                format!("parameter ${} of anonymous function", p.name),
+                p.span,
+                "parameter.trait",
+            );
+            self.check_type_class_name_case(&case_refs, p.span);
+            let ty = if p.variadic {
+                Type::array(Type::unknown_array_key(), ty)
+            } else {
+                ty
+            };
+            closure_locals.declare_var(&p.name, ty, p.name.span);
+            closure_locals.set_native_var(&p.name, self.closure_param_native(p));
+        }
+        let (declared_return_ty, declared_return_case_refs) =
+            self.resolve_type_hint_with_case_refs(return_type.as_deref());
+        let declared_return = Some(declared_return_ty);
+        self.check_type_class_names_exist(
+            declared_return.as_ref().unwrap_or(&Type::mixed()),
+            "return type of anonymous function",
+            e.span,
+        );
+        self.check_type_trait_refs(
+            declared_return.as_ref().unwrap_or(&Type::mixed()),
+            "return type of anonymous function",
+            e.span,
+            "return.trait",
+        );
+        self.check_type_class_name_case(&declared_return_case_refs, e.span);
+        // `return.noParent` - `declared_return` above never went
+        // through `resolve_pseudo` (unlike `current_declared_
+        // return_type` further down), so a fresh, one-off resolve
+        // against the closure's enclosing class
+        // (`self.current_class`, not a `class_name` parameter - a
+        // closure has no signature of its own) is needed here
+        // too.
+        if let Some(c) = self.current_class.clone() {
+            let resolved_return =
+                self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::mixed()), &c);
+            self.check_no_parent_ref(
+                &resolved_return,
+                "return type of anonymous function",
+                e.span,
+                "return.noParent",
+            );
+        }
+        // The identical `@internal` type-hint check a named
+        // function/method's param/return list already gets.
+        let current_class_for_internal_check = self.current_class.clone();
+        self.check_internal_param_and_return_types_raw(
+            params,
+            return_type.as_deref(),
+            e.span,
+            false,
+            current_class_for_internal_check.as_deref(),
+            &closure_label,
+        );
+        self.check_restricted_param_and_return_types_raw(
+            params,
+            return_type.as_deref(),
+            e.span,
+            current_class_for_internal_check.as_deref(),
+        );
+        // A generator-returning closure needs the same
+        // current_function_is_generator save/set/restore
+        // check_function does for a named function/method -
+        // check_block never routes through check_function at
+        // all.
+        let previous_generator_flag = self.current_function_is_generator;
+        self.current_function_is_generator = *is_generator;
+        let previous_declared_return_type = self.current_declared_return_type.take();
+        self.current_declared_return_type =
+            declared_return.as_ref().map(|t| match &self.current_class {
+                Some(c) => self.resolve_pseudo(t, c),
+                None => t.clone(),
+            });
+        // A closure is a genuinely separate callable with its
+        // own `@throws` contract, independent of whatever the
+        // *enclosing* function declares - cleared, not
+        // inherited, same reasoning as every other
+        // `current_function_*` field already cleared just below
+        // for this same arm.
+        let previous_declared_throws_type = self.current_declared_throws_type.take();
+        let previous_goto_targets = std::mem::replace(
+            &mut self.current_function_goto_targets,
+            GotoState::new(goto_labels.clone()),
+        );
+        let previous_assigned_variables = self.enter_assigned_variables(body);
+        // Real PHPStan exempts an anonymous function entirely
+        // from both by-ref-parameter rules (`isInAnonymousFunction()`
+        // bails in `ParameterOutAssignedTypeRule`/
+        // `ParameterOutExecutionEndTypeRule`) - a closure
+        // capturing an outer by-ref parameter via `use (&$x)`
+        // and reassigning it inside its own body is a genuinely
+        // different question from the *enclosing* function's own
+        // by-ref contract, so this must not silently check the
+        // closure body's assignments against it. Emptied for the
+        // closure body's own `check_block` pass below, restored
+        // after, the same shape as every other `current_function_*`
+        // field here.
+        let previous_by_ref_params = std::mem::take(&mut self.current_function_by_ref_params);
+        let previous_by_ref_exit_snapshots =
+            std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
+        let previous_by_ref_params_with_tag =
+            std::mem::take(&mut self.current_function_by_ref_params_with_tag);
+        // Every `use (&$x)` capture needs its own exit-snapshot
+        // recorded (see `current_function_byref_snapshot_names`'s
+        // own doc comment) - unlike `current_function_by_ref_
+        // params` just above, this must NOT stay empty for a
+        // closure, or the write-back loop below has nothing but
+        // `closure_locals`'s single end-of-body snapshot to work
+        // from, silently losing any mutation that happened on an
+        // early-return path (the common `if (cond) { $x[] =
+        // ...; return ...; } return ...;` guard-clause shape).
+        let previous_byref_snapshot_names =
+            std::mem::take(&mut self.current_function_byref_snapshot_names);
+        self.current_function_byref_snapshot_names = uses
+            .iter()
+            .filter(|u| u.by_ref)
+            .map(|u| u.name.name.clone())
+            .collect();
+        // A closure's own throw points never belong to the
+        // enclosing function's count (calling the closure, not
+        // merely declaring it, is what would matter, and this
+        // project doesn't model that) - starts fresh, discarded
+        // on restore, same shape as
+        // `current_function_is_generator` above.
+        let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+        let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
+        let previous_unannotated_call =
+            std::mem::take(&mut self.current_function_has_unannotated_call);
+        let previous_explicit_throw_points =
+            std::mem::take(&mut self.current_function_explicit_throw_points);
+        let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
+        // The closure's own `return` statements belong to the
+        // closure, not the enclosing function's too-wide-return
+        // accumulator - saved/restored the same way, and read back
+        // below as the closure's own inferred return type.
+        let previous_return_points = std::mem::take(&mut self.current_function_return_points);
+        let previous_saw_explicit_return =
+            std::mem::take(&mut self.current_function_saw_explicit_return);
+        self.check_generator_return_type(declared_return.as_ref(), e.span);
+        // A closure literal may run zero-to-many times (any
+        // callback-accepting builtin, or simply being called more
+        // than once through an ordinary variable) - a single
+        // `check_block` pass here would only ever see one
+        // captured-by-ref variable's own *first* mutation, not a
+        // fixed point across repeated invocations (real corpus
+        // shape: `SearchService::positionalCondition`'s own
+        // `use (&$values)` closure passed to
+        // `preg_replace_callback`, mutated across however many
+        // regex matches the pattern finds). Routes through the
+        // same convergence primitive an ordinary loop body
+        // already gets - `LoopZeroIterations::Possible` performs
+        // exactly the "union the fixed-point result with never-
+        // having-run" merge the by-ref-`use` handling below used
+        // to do by hand, so `closure_locals` already comes back
+        // correctly converged for that too.
+        let mut body_terminates = false;
+        let (converged, _) = self.converge_loop_body(
+            &closure_locals,
+            declared_return.as_ref(),
+            &closure_label,
+            LoopZeroIterations::Possible {
+                subject_exempt: None,
+                subject_key: None,
+            },
+            |this, pass_locals, declared_return, label, _pass| {
+                // Only the kept (last) pass's return points count,
+                // the same way only its diagnostics survive.
+                this.current_function_return_points.clear();
+                this.current_function_saw_explicit_return = false;
+                body_terminates = this.check_body_to_writes_fixpoint(
+                    pass_locals,
+                    body_has_byref_capture(body),
+                    |this, pass_locals| {
+                        this.check_block(body, pass_locals, declared_return, label)
+                            .completion
+                            .terminates
+                    },
+                );
+            },
+        );
+        closure_locals = converged;
+        let closure_return_points = std::mem::replace(
+            &mut self.current_function_return_points,
+            previous_return_points,
+        );
+        let closure_saw_explicit_return = std::mem::replace(
+            &mut self.current_function_saw_explicit_return,
+            previous_saw_explicit_return,
+        );
+        let closure_is_generator = self.current_function_is_generator;
+        let closure_falls_off_end = !body_terminates;
+        // One final snapshot from the fully-converged post-body
+        // state - covers both "falls off the end with no
+        // explicit return" and "never actually invoked"
+        // uniformly, on top of whatever mid-body `StmtKind::
+        // Return` sites already recorded via `check_block`
+        // above (`stmt.rs`'s own `record_by_ref_exit_snapshot`
+        // call sites, which fire for a closure body exactly the
+        // same as a named function's, no special-casing needed
+        // there).
+        self.record_by_ref_exit_snapshot(&closure_locals);
+        self.check_closure_missing_return(
+            body_terminates,
+            return_type.is_some(),
+            declared_return.as_ref(),
+            e.span,
+        );
+        // Captured before the restore below overwrites the live
+        // field back to the *outer* scope's own snapshots - the
+        // write-back loop further down needs this closure's own
+        // accumulated data, not whatever the enclosing function
+        // had going into this closure literal.
+        let closure_byref_exit_snapshots = std::mem::replace(
+            &mut self.current_function_by_ref_exit_snapshots,
+            previous_by_ref_exit_snapshots,
+        );
+        self.current_function_is_generator = previous_generator_flag;
+        self.current_declared_return_type = previous_declared_return_type;
+        self.current_declared_throws_type = previous_declared_throws_type;
+        self.current_function_throw_points = previous_throw_points;
+        self.try_throw_states = previous_try_throw_states;
+        self.current_function_has_unannotated_call = previous_unannotated_call;
+        self.current_function_explicit_throw_points = previous_explicit_throw_points;
+        self.current_function_exit_points = previous_exit_points;
+        self.current_function_goto_targets = previous_goto_targets;
+        self.current_function_assigned_variables = previous_assigned_variables;
+        self.current_function_by_ref_params = previous_by_ref_params;
+        self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
+        self.current_function_byref_snapshot_names = previous_byref_snapshot_names;
+        // A `use(...)` capture never referenced anywhere in the
+        // closure's own body. `ClosureUse` carries no span of its
+        // own (see its doc comment), so every finding here
+        // anchors to the whole closure expression's span instead
+        // of the specific `$x` token.
+        self.check_unused_closure_uses(uses, body, e.span);
+        // A `use (&$x)` capture is a real reference - any
+        // mutation the closure body makes to `$x` is visible in
+        // the declaring scope too, from the closure literal's
+        // own point onward. `mutated` is the union of every real
+        // exit point's own snapshot (`closure_byref_exit_
+        // snapshots`, captured just above) - NOT just `closure_
+        // locals`'s own single post-convergence state, which
+        // only ever reflects whichever statement the body last
+        // fell through to. For the common `if (cond) { $x[] =
+        // ...; return ...; } return ...;` guard-clause shape,
+        // that's never the branch that actually mutated `$x` -
+        // every real mutation happened right before an early
+        // `return`, invisible to a single end-of-body read. Falls
+        // back to the old single-snapshot read only if somehow
+        // nothing was recorded (shouldn't happen - the post-
+        // convergence snapshot above is unconditional - but this
+        // project's own "don't guess wrong" precedent prefers a
+        // graceful degrade here over an `unwrap()`).
+        // A capture is written back when the body writes it, and
+        // when the body makes a call, which may write any of them.
+        // A capture neither written nor exposed to a call keeps the
+        // outer type it has: the body's own view of it only ever
+        // reflects the body's narrowing, not an assignment.
+        let body_calls = body_has_call(body);
+        for u in uses {
+            if !u.by_ref {
+                continue;
+            }
+            let written_here = closure_writes.as_ref().is_some_and(|writes| {
+                let writes = writes.borrow();
+                !writes.types_of(&u.name.name).is_empty() || writes.any_name_written()
+            });
+            if !written_here && !body_calls {
+                continue;
+            }
+            let mutated = if written_here {
+                closure_byref_exit_snapshots
+                    .get(&u.name.name)
+                    .and_then(|snapshots| {
+                        snapshots.iter().cloned().union_all_with(&self.relation())
+                    })
+                    .unwrap_or_else(|| {
+                        closure_locals
+                            .get_var(&u.name)
+                            .cloned()
+                            .unwrap_or(Type::mixed())
+                    })
+            } else {
+                let held = locals.get_var(&u.name).cloned().unwrap_or(Type::null());
+                self.widen_to_byref_writes(&u.name.name, held)
+            };
+            if !locals.contains_var(&u.name) {
+                // Real PHP auto-vivifies `$x` in the outer/
+                // declaring scope the moment `use (&$x)` captures
+                // an as-yet-undefined variable - the same by-ref-
+                // argument auto-vivification this project models
+                // in `predefine_byref_or_unknown_args`, now given
+                // a real, navigable declaration site.
+                locals.declare_var(&u.name, mutated, u.name.span);
+                // `locals.declare` above is this variable's only
+                // provenance site in this case (it didn't exist
+                // in the outer scope before), so the probe hook
+                // above (fired before this variable existed in
+                // `locals` at all) would have stashed an empty
+                // set - correct it now that the real site is
+                // known.
+                if self.probe_span.get() == Some(u.name.span) {
+                    *self.probe_var_provenance.borrow_mut() =
+                        Some([u.name.span].into_iter().collect());
+                }
+            } else {
+                locals.insert_var(&u.name, mutated);
+                // The closure may write anything to it.
+                locals.clear_native_var(&u.name);
+            }
+        }
+        let inferred_return = (!closure_is_generator).then(|| {
+            closure_inferred_return_type(
+                &self.relation(),
+                closure_return_points,
+                closure_saw_explicit_return,
+                closure_falls_off_end,
+            )
+        });
+        let literal = self.closure_literal_id(e.span);
+        self.closure_literal_type_of(
+            Some(literal),
+            params,
+            return_type.as_deref(),
+            inferred_return,
+            None,
+        )
+    }
+
+    /// The identity of the closure literal starting at `span` in the file
+    /// being checked (`types::ClosureLiteralId`).
+    pub(crate) fn closure_literal_id(&self, span: Span) -> types::ClosureLiteralId {
+        let file = self.current_file_id.map_or(0, |file| file.number());
+        types::ClosureLiteralId((u64::from(file) << 32) | u64::from(span.start))
+    }
+
     fn check_expr_impl(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         // See `Checker::in_bare_statement_position`'s doc comment - taken,
         // not just read, so it reads `true` only for the exact top-level
@@ -3347,517 +3878,7 @@ impl<'a> Checker<'a> {
                     .union_all_with(&self.relation())
                     .unwrap_or(Type::never())
             }
-            ExprKind::Closure(closure) => {
-                let syntax::ast::ClosureExpr {
-                    params,
-                    uses,
-                    body,
-                    goto_labels,
-                    is_generator,
-                    is_static,
-                    return_type,
-                    attrs,
-                    ..
-                } = &**closure;
-                // Mirrors real PHPStan's `ClosureAttributesRule` -
-                // existence plus target-validity for a closure
-                // expression's own `#[Attr]` group.
-                self.check_attributes(attrs, label);
-                self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function");
-                // Unlike an arrow function, a plain closure does NOT
-                // automatically see the enclosing scope - only variables
-                // explicitly named in `use (...)` are captured (by value
-                // or by reference; either way, the type it starts with is
-                // whatever the outer scope currently has it as). `$this`
-                // is the one implicit exception: a non-static closure
-                // declared inside a method still auto-binds it, the same
-                // as real PHP.
-                let mut closure_locals: Locals = locals.closure_scope();
-                for u in uses {
-                    // Mirrors real PHPStan's
-                    // `InvalidLexicalVariablesInClosureUseRule` - `$this`,
-                    // a superglobal, or a name already used as a
-                    // parameter can never be captured via `use (...)` at
-                    // all (a real PHP compile error), distinct from - and
-                    // checked before - the plain "undefined variable"
-                    // case below.
-                    if u.name == "this" {
-                        self.report_builder(
-                            DiagnosticBuilder::new(
-                                "Cannot use $this as lexical variable.".to_string(),
-                                u.name.span,
-                                0,
-                                "closure.useThis",
-                            )
-                            .non_ignorable(),
-                        );
-                    } else if is_superglobal(&u.name) {
-                        self.report_builder(
-                            DiagnosticBuilder::new(
-                                format!(
-                                    "Cannot use superglobal variable ${} as lexical variable.",
-                                    u.name
-                                ),
-                                u.name.span,
-                                0,
-                                "closure.useSuperGlobal",
-                            )
-                            .non_ignorable(),
-                        );
-                    } else if params.iter().any(|p| p.name.name == u.name.name) {
-                        self.report_builder(
-                            DiagnosticBuilder::new(format!(
-                                    "Cannot use lexical variable ${} since a parameter with the same name already exists.",
-                                    u.name
-                                ),
-                                u.name.span,
-                                0,
-                                "closure.useDuplicate",
-                            )
-                            .non_ignorable(),
-                        );
-                    } else if !u.by_ref && !locals.contains_var(&u.name) {
-                        self.report(
-                            format!("undefined variable ${}", u.name),
-                            u.name.span,
-                            0,
-                            "variable.undefined",
-                        );
-                    } else if !u.by_ref && locals.is_maybe_undefined_var(&u.name) {
-                        self.report(
-                            format!("Variable ${} might not be defined.", u.name),
-                            u.name.span,
-                            0,
-                            "variable.possiblyUndefined",
-                        );
-                    }
-                    let ty = locals.get_var(&u.name).cloned().unwrap_or(Type::mixed());
-                    // A captured variable's real declaration is wherever
-                    // the outer scope already says it is - copied across,
-                    // not fabricated fresh at this `use (...)` clause.
-                    let provenance = locals
-                        .get_provenance_var(&u.name)
-                        .cloned()
-                        .unwrap_or_default();
-                    // The `use (...)` clause's capture token is itself a
-                    // real reference to the outer `$x` - same probe hook
-                    // `ExprKind::Variable` has.
-                    if self.probe_span.get() == Some(u.name.span) {
-                        *self.probe_var_provenance.borrow_mut() =
-                            Some(provenance.iter().copied().collect());
-                    }
-                    // Hovering the capture token itself must show its
-                    // type too, not just resolve go-to-definition - the
-                    // two probes (`probe_hit`/`probe_var_provenance`) are
-                    // independent.
-                    self.probe_hit_at(u.name.span, &ty);
-                    // A by-reference capture can still gain keys from
-                    // anything else holding the reference before the
-                    // closure runs.
-                    let ty = if u.by_ref {
-                        self.widen_to_byref_writes(&u.name.name, ty)
-                    } else {
-                        ty
-                    };
-                    closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
-                }
-                // The writes this body makes, logged from here on so the
-                // seeding above is not one of them. The write-back below
-                // reads which by-reference captures the body wrote.
-                let closure_writes = uses
-                    .iter()
-                    .any(|u| u.by_ref)
-                    .then(|| closure_locals.enable_write_log());
-                if !*is_static && let Some(this_ty) = locals.get_var("this") {
-                    closure_locals.insert_var("this", this_ty.clone());
-                }
-                // `record_branch_implied_facts`'s own facts don't
-                // otherwise survive into a closure body at all -
-                // `fresh_scope()` starts `branch_implied_facts` empty,
-                // same as every other per-scope side-channel. A captured
-                // discriminant tested again inside the closure (`Rate
-                // Service::rate`'s own `$userAnonymous && $anonymousId
-                // !== $savedAnonymousId` replaying the outer `if
-                // ($userAnonymous) { $savedAnonymousId = ...; }`) still
-                // needs the fact available to replay. The *discriminant*
-                // side needs no filtering - the closure can only ever
-                // test a subject it actually captured, so a fact keyed to
-                // an uncaptured subject simply never gets looked up - but
-                // the *implied* side does: an implied fact naming a
-                // variable the closure never captured would otherwise
-                // spuriously `.insert()` it into `closure_locals`,
-                // masking a real `variable.undefined` on an unrelated,
-                // genuinely-uncaptured reference to the same bare name.
-                let captured_names: rustc_hash::FxHashSet<&str> =
-                    uses.iter().map(|u| u.name.as_ref()).collect();
-                for (key, implied) in locals.branch_implied_facts().iter() {
-                    // An atom reading an uncaptured name would test the
-                    // closure's own variable of that name, not the outer one.
-                    if let KeyData::Atom { operands, .. } = locals.data(key.subject)
-                        && !operands.iter().all(|operand| {
-                            matches!(locals.data(*operand), KeyData::Var(variable)
-                                if captured_names.contains(variable.as_str()))
-                        })
-                    {
-                        continue;
-                    }
-                    let filtered: Vec<(LocalKey, Type)> = implied
-                        .iter()
-                        .filter(|(name, _)| match locals.data(*name) {
-                            KeyData::Var(variable) => captured_names.contains(variable.as_str()),
-                            _ => false,
-                        })
-                        .cloned()
-                        .collect();
-                    if !filtered.is_empty() {
-                        closure_locals
-                            .branch_implied_facts_mut()
-                            .insert(key.clone(), std::rc::Rc::new(filtered));
-                    }
-                }
-                let closure_label = format!("{label} (closure)");
-                for p in params {
-                    let (ty, case_refs) =
-                        self.resolve_type_hint_with_case_refs(p.type_hint.as_ref());
-                    // Mirrors real PHPStan's
-                    // `ExistingClassesInClosureTypehintsRule` - checked on
-                    // the un-array-wrapped element type below (a variadic
-                    // parameter's declared type, not the `array` it
-                    // collects into) so a missing class inside e.g.
-                    // `...Foo $items` is still reported by its real name,
-                    // not `array`.
-                    self.check_type_class_names_exist(
-                        &ty,
-                        format!("parameter ${} of anonymous function", p.name),
-                        p.span,
-                    );
-                    self.check_type_trait_refs(
-                        &ty,
-                        format!("parameter ${} of anonymous function", p.name),
-                        p.span,
-                        "parameter.trait",
-                    );
-                    self.check_type_class_name_case(&case_refs, p.span);
-                    let ty = if p.variadic {
-                        Type::array(Type::unknown_array_key(), ty)
-                    } else {
-                        ty
-                    };
-                    closure_locals.declare_var(&p.name, ty, p.name.span);
-                    closure_locals.set_native_var(&p.name, self.closure_param_native(p));
-                }
-                let (declared_return_ty, declared_return_case_refs) =
-                    self.resolve_type_hint_with_case_refs(return_type.as_deref());
-                let declared_return = Some(declared_return_ty);
-                self.check_type_class_names_exist(
-                    declared_return.as_ref().unwrap_or(&Type::mixed()),
-                    "return type of anonymous function",
-                    e.span,
-                );
-                self.check_type_trait_refs(
-                    declared_return.as_ref().unwrap_or(&Type::mixed()),
-                    "return type of anonymous function",
-                    e.span,
-                    "return.trait",
-                );
-                self.check_type_class_name_case(&declared_return_case_refs, e.span);
-                // `return.noParent` - `declared_return` above never went
-                // through `resolve_pseudo` (unlike `current_declared_
-                // return_type` further down), so a fresh, one-off resolve
-                // against the closure's enclosing class
-                // (`self.current_class`, not a `class_name` parameter - a
-                // closure has no signature of its own) is needed here
-                // too.
-                if let Some(c) = self.current_class.clone() {
-                    let resolved_return =
-                        self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::mixed()), &c);
-                    self.check_no_parent_ref(
-                        &resolved_return,
-                        "return type of anonymous function",
-                        e.span,
-                        "return.noParent",
-                    );
-                }
-                // The identical `@internal` type-hint check a named
-                // function/method's param/return list already gets.
-                let current_class_for_internal_check = self.current_class.clone();
-                self.check_internal_param_and_return_types_raw(
-                    params,
-                    return_type.as_deref(),
-                    e.span,
-                    false,
-                    current_class_for_internal_check.as_deref(),
-                    &closure_label,
-                );
-                self.check_restricted_param_and_return_types_raw(
-                    params,
-                    return_type.as_deref(),
-                    e.span,
-                    current_class_for_internal_check.as_deref(),
-                );
-                // A generator-returning closure needs the same
-                // current_function_is_generator save/set/restore
-                // check_function does for a named function/method -
-                // check_block never routes through check_function at
-                // all.
-                let previous_generator_flag = self.current_function_is_generator;
-                self.current_function_is_generator = *is_generator;
-                let previous_declared_return_type = self.current_declared_return_type.take();
-                self.current_declared_return_type =
-                    declared_return.as_ref().map(|t| match &self.current_class {
-                        Some(c) => self.resolve_pseudo(t, c),
-                        None => t.clone(),
-                    });
-                // A closure is a genuinely separate callable with its
-                // own `@throws` contract, independent of whatever the
-                // *enclosing* function declares - cleared, not
-                // inherited, same reasoning as every other
-                // `current_function_*` field already cleared just below
-                // for this same arm.
-                let previous_declared_throws_type = self.current_declared_throws_type.take();
-                let previous_goto_targets = std::mem::replace(
-                    &mut self.current_function_goto_targets,
-                    GotoState::new(goto_labels.clone()),
-                );
-                let previous_assigned_variables = self.enter_assigned_variables(body);
-                // Real PHPStan exempts an anonymous function entirely
-                // from both by-ref-parameter rules (`isInAnonymousFunction()`
-                // bails in `ParameterOutAssignedTypeRule`/
-                // `ParameterOutExecutionEndTypeRule`) - a closure
-                // capturing an outer by-ref parameter via `use (&$x)`
-                // and reassigning it inside its own body is a genuinely
-                // different question from the *enclosing* function's own
-                // by-ref contract, so this must not silently check the
-                // closure body's assignments against it. Emptied for the
-                // closure body's own `check_block` pass below, restored
-                // after, the same shape as every other `current_function_*`
-                // field here.
-                let previous_by_ref_params =
-                    std::mem::take(&mut self.current_function_by_ref_params);
-                let previous_by_ref_exit_snapshots =
-                    std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
-                let previous_by_ref_params_with_tag =
-                    std::mem::take(&mut self.current_function_by_ref_params_with_tag);
-                // Every `use (&$x)` capture needs its own exit-snapshot
-                // recorded (see `current_function_byref_snapshot_names`'s
-                // own doc comment) - unlike `current_function_by_ref_
-                // params` just above, this must NOT stay empty for a
-                // closure, or the write-back loop below has nothing but
-                // `closure_locals`'s single end-of-body snapshot to work
-                // from, silently losing any mutation that happened on an
-                // early-return path (the common `if (cond) { $x[] =
-                // ...; return ...; } return ...;` guard-clause shape).
-                let previous_byref_snapshot_names =
-                    std::mem::take(&mut self.current_function_byref_snapshot_names);
-                self.current_function_byref_snapshot_names = uses
-                    .iter()
-                    .filter(|u| u.by_ref)
-                    .map(|u| u.name.name.clone())
-                    .collect();
-                // A closure's own throw points never belong to the
-                // enclosing function's count (calling the closure, not
-                // merely declaring it, is what would matter, and this
-                // project doesn't model that) - starts fresh, discarded
-                // on restore, same shape as
-                // `current_function_is_generator` above.
-                let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
-                let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
-                let previous_unannotated_call =
-                    std::mem::take(&mut self.current_function_has_unannotated_call);
-                let previous_explicit_throw_points =
-                    std::mem::take(&mut self.current_function_explicit_throw_points);
-                let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
-                // The closure's own `return` statements belong to the
-                // closure, not the enclosing function's too-wide-return
-                // accumulator - saved/restored the same way, and read back
-                // below as the closure's own inferred return type.
-                let previous_return_points =
-                    std::mem::take(&mut self.current_function_return_points);
-                let previous_saw_explicit_return =
-                    std::mem::take(&mut self.current_function_saw_explicit_return);
-                self.check_generator_return_type(declared_return.as_ref(), e.span);
-                // A closure literal may run zero-to-many times (any
-                // callback-accepting builtin, or simply being called more
-                // than once through an ordinary variable) - a single
-                // `check_block` pass here would only ever see one
-                // captured-by-ref variable's own *first* mutation, not a
-                // fixed point across repeated invocations (real corpus
-                // shape: `SearchService::positionalCondition`'s own
-                // `use (&$values)` closure passed to
-                // `preg_replace_callback`, mutated across however many
-                // regex matches the pattern finds). Routes through the
-                // same convergence primitive an ordinary loop body
-                // already gets - `LoopZeroIterations::Possible` performs
-                // exactly the "union the fixed-point result with never-
-                // having-run" merge the by-ref-`use` handling below used
-                // to do by hand, so `closure_locals` already comes back
-                // correctly converged for that too.
-                let mut body_terminates = false;
-                let (converged, _) = self.converge_loop_body(
-                    &closure_locals,
-                    declared_return.as_ref(),
-                    &closure_label,
-                    LoopZeroIterations::Possible {
-                        subject_exempt: None,
-                        subject_key: None,
-                    },
-                    |this, pass_locals, declared_return, label, _pass| {
-                        // Only the kept (last) pass's return points count,
-                        // the same way only its diagnostics survive.
-                        this.current_function_return_points.clear();
-                        this.current_function_saw_explicit_return = false;
-                        body_terminates = this.check_body_to_writes_fixpoint(
-                            pass_locals,
-                            body_has_byref_capture(body),
-                            |this, pass_locals| {
-                                this.check_block(body, pass_locals, declared_return, label)
-                                    .completion
-                                    .terminates
-                            },
-                        );
-                    },
-                );
-                closure_locals = converged;
-                let closure_return_points = std::mem::replace(
-                    &mut self.current_function_return_points,
-                    previous_return_points,
-                );
-                let closure_saw_explicit_return = std::mem::replace(
-                    &mut self.current_function_saw_explicit_return,
-                    previous_saw_explicit_return,
-                );
-                let closure_is_generator = self.current_function_is_generator;
-                let closure_falls_off_end = !body_terminates;
-                // One final snapshot from the fully-converged post-body
-                // state - covers both "falls off the end with no
-                // explicit return" and "never actually invoked"
-                // uniformly, on top of whatever mid-body `StmtKind::
-                // Return` sites already recorded via `check_block`
-                // above (`stmt.rs`'s own `record_by_ref_exit_snapshot`
-                // call sites, which fire for a closure body exactly the
-                // same as a named function's, no special-casing needed
-                // there).
-                self.record_by_ref_exit_snapshot(&closure_locals);
-                self.check_closure_missing_return(
-                    body_terminates,
-                    return_type.is_some(),
-                    declared_return.as_ref(),
-                    e.span,
-                );
-                // Captured before the restore below overwrites the live
-                // field back to the *outer* scope's own snapshots - the
-                // write-back loop further down needs this closure's own
-                // accumulated data, not whatever the enclosing function
-                // had going into this closure literal.
-                let closure_byref_exit_snapshots = std::mem::replace(
-                    &mut self.current_function_by_ref_exit_snapshots,
-                    previous_by_ref_exit_snapshots,
-                );
-                self.current_function_is_generator = previous_generator_flag;
-                self.current_declared_return_type = previous_declared_return_type;
-                self.current_declared_throws_type = previous_declared_throws_type;
-                self.current_function_throw_points = previous_throw_points;
-                self.try_throw_states = previous_try_throw_states;
-                self.current_function_has_unannotated_call = previous_unannotated_call;
-                self.current_function_explicit_throw_points = previous_explicit_throw_points;
-                self.current_function_exit_points = previous_exit_points;
-                self.current_function_goto_targets = previous_goto_targets;
-                self.current_function_assigned_variables = previous_assigned_variables;
-                self.current_function_by_ref_params = previous_by_ref_params;
-                self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
-                self.current_function_byref_snapshot_names = previous_byref_snapshot_names;
-                // A `use(...)` capture never referenced anywhere in the
-                // closure's own body. `ClosureUse` carries no span of its
-                // own (see its doc comment), so every finding here
-                // anchors to the whole closure expression's span instead
-                // of the specific `$x` token.
-                self.check_unused_closure_uses(uses, body, e.span);
-                // A `use (&$x)` capture is a real reference - any
-                // mutation the closure body makes to `$x` is visible in
-                // the declaring scope too, from the closure literal's
-                // own point onward. `mutated` is the union of every real
-                // exit point's own snapshot (`closure_byref_exit_
-                // snapshots`, captured just above) - NOT just `closure_
-                // locals`'s own single post-convergence state, which
-                // only ever reflects whichever statement the body last
-                // fell through to. For the common `if (cond) { $x[] =
-                // ...; return ...; } return ...;` guard-clause shape,
-                // that's never the branch that actually mutated `$x` -
-                // every real mutation happened right before an early
-                // `return`, invisible to a single end-of-body read. Falls
-                // back to the old single-snapshot read only if somehow
-                // nothing was recorded (shouldn't happen - the post-
-                // convergence snapshot above is unconditional - but this
-                // project's own "don't guess wrong" precedent prefers a
-                // graceful degrade here over an `unwrap()`).
-                // A capture is written back when the body writes it, and
-                // when the body makes a call, which may write any of them.
-                // A capture neither written nor exposed to a call keeps the
-                // outer type it has: the body's own view of it only ever
-                // reflects the body's narrowing, not an assignment.
-                let body_calls = body_has_call(body);
-                for u in uses {
-                    if !u.by_ref {
-                        continue;
-                    }
-                    let written_here = closure_writes.as_ref().is_some_and(|writes| {
-                        let writes = writes.borrow();
-                        !writes.types_of(&u.name.name).is_empty() || writes.any_name_written()
-                    });
-                    if !written_here && !body_calls {
-                        continue;
-                    }
-                    let mutated = if written_here {
-                        closure_byref_exit_snapshots
-                            .get(&u.name.name)
-                            .and_then(|snapshots| {
-                                snapshots.iter().cloned().union_all_with(&self.relation())
-                            })
-                            .unwrap_or_else(|| {
-                                closure_locals
-                                    .get_var(&u.name)
-                                    .cloned()
-                                    .unwrap_or(Type::mixed())
-                            })
-                    } else {
-                        let held = locals.get_var(&u.name).cloned().unwrap_or(Type::null());
-                        self.widen_to_byref_writes(&u.name.name, held)
-                    };
-                    if !locals.contains_var(&u.name) {
-                        // Real PHP auto-vivifies `$x` in the outer/
-                        // declaring scope the moment `use (&$x)` captures
-                        // an as-yet-undefined variable - the same by-ref-
-                        // argument auto-vivification this project models
-                        // in `predefine_byref_or_unknown_args`, now given
-                        // a real, navigable declaration site.
-                        locals.declare_var(&u.name, mutated, u.name.span);
-                        // `locals.declare` above is this variable's only
-                        // provenance site in this case (it didn't exist
-                        // in the outer scope before), so the probe hook
-                        // above (fired before this variable existed in
-                        // `locals` at all) would have stashed an empty
-                        // set - correct it now that the real site is
-                        // known.
-                        if self.probe_span.get() == Some(u.name.span) {
-                            *self.probe_var_provenance.borrow_mut() =
-                                Some([u.name.span].into_iter().collect());
-                        }
-                    } else {
-                        locals.insert_var(&u.name, mutated);
-                        // The closure may write anything to it.
-                        locals.clear_native_var(&u.name);
-                    }
-                }
-                let inferred_return = (!closure_is_generator).then(|| {
-                    closure_inferred_return_type(
-                        &self.relation(),
-                        closure_return_points,
-                        closure_saw_explicit_return,
-                        closure_falls_off_end,
-                    )
-                });
-                self.closure_literal_type(params, return_type.as_deref(), inferred_return, None)
-            }
+            ExprKind::Closure(closure) => self.check_closure_literal(e, closure, locals, label),
             ExprKind::ArrowFn(arrow) => {
                 let syntax::ast::ArrowFnExpr {
                     params,
@@ -5681,6 +5702,7 @@ impl<'a> Checker<'a> {
                     .collect(),
                 return_type: Box::new(target.sig.return_type().clone()),
                 templates: Vec::new(),
+                literal: None,
             }
             .with_own_templates(&|scope| scope.eq_ignore_ascii_case(&target.name));
             let closure = Type::closure_literal(sig);
@@ -5704,6 +5726,19 @@ impl<'a> Checker<'a> {
     /// callable-shape comparison treats `mixed` as "any".
     pub(crate) fn closure_literal_type(
         &self,
+        params: &[Param],
+        return_type: Option<&TypeHint>,
+        inferred_return: Option<Type>,
+        overrides: Option<&[Type]>,
+    ) -> Type {
+        self.closure_literal_type_of(None, params, return_type, inferred_return, overrides)
+    }
+
+    /// `closure_literal_type` for the literal `literal` identifies, so the
+    /// type it makes carries that identity (`CallableSig::literal`).
+    pub(crate) fn closure_literal_type_of(
+        &self,
+        literal: Option<types::ClosureLiteralId>,
         params: &[Param],
         return_type: Option<&TypeHint>,
         inferred_return: Option<Type>,
@@ -5738,6 +5773,7 @@ impl<'a> Checker<'a> {
                 (hint, None) => resolve(hint),
             }),
             templates: Vec::new(),
+            literal,
         })
     }
 

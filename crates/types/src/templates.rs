@@ -354,6 +354,7 @@ impl CallableSig {
                 .collect(),
             return_type: Box::new(f(&self.return_type)),
             templates: self.templates.clone(),
+            literal: self.literal,
         }
     }
 }

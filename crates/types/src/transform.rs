@@ -126,6 +126,7 @@ impl Type {
                                 ..t.clone()
                             })
                             .collect(),
+                        literal: sig.literal,
                     }
                     .rebind_templates(),
                 )))

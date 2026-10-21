@@ -71,6 +71,7 @@ pub(super) fn any_type() -> impl Strategy<Value = Type> {
                     } else {
                         Vec::new()
                     },
+                    literal: None,
                 })))
             }),
         ]
