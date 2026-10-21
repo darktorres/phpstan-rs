@@ -372,6 +372,7 @@ fn same_callable(a: &CallableSig, b: &CallableSig) -> bool {
                 && x.by_ref == y.by_ref
         })
         && same(&a.return_type, &b.return_type)
+        && a.literal == b.literal
         && a.templates.len() == b.templates.len()
         && a.templates
             .iter()
@@ -545,6 +546,7 @@ fn exact_hash_owned(repr: &Repr) -> u64 {
                     (param.variadic, param.optional, param.by_ref).hash(state);
                 }
                 hash_type(&sig.return_type, state);
+                sig.literal.hash(state);
                 for tp in &sig.templates {
                     hash_template(tp, state);
                 }
