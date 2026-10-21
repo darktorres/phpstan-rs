@@ -230,28 +230,25 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        // The first pass has nothing to narrow going in - the
-        // condition is only evaluated after the body has already run
-        // once. Every *re*-convergence pass (`pass > 0`) is different:
-        // reaching it at all means the previous pass's trailing `cond`
-        // evaluated true (the only way a do-while body runs again), so
-        // the "continue" half of `cond`'s narrowing is a real, provable
-        // fact at that pass's entry - the same narrowing a `while`
-        // loop's convergence closure applies unconditionally on every
-        // pass, just shifted here to skip pass 0. Needed for
+        // The loop's header is reached from the entry and from the back
+        // edge, and the back edge is the body's end where `cond` holds: the
+        // body runs again only then. So each pass narrows its own end by
+        // `cond` before that end joins the entry, and the entry's values are
+        // never narrowed by a condition they did not pass. Needed for
         // `do { $iterator = $iterator->getIterator(); } while
-        // (!$iterator instanceof \Iterator);`: without it, pass 2's
-        // entry would widen `$iterator` all the way back to the
-        // un-narrowed `Traversable`, and `$iterator->getIterator()`
-        // isn't a real `Traversable` method - applying `!$iterator
-        // instanceof \Iterator`'s true-branch narrowing subtracts
-        // `Iterator` back out first (`Type::without`'s
-        // `Traversable`-minus-`Iterator` special case), correctly
-        // re-narrowing to `IteratorAggregate` instead.
+        // (!$iterator instanceof \Iterator);`: the back edge is narrowed to
+        // `IteratorAggregate`, where narrowing the joined header would
+        // subtract `Iterator` from the entry's `Traversable` first.
+        //
+        // The condition runs once per pass, on the body's end, so an
+        // assignment in it (`while ($w = !$w)`) takes effect once. The exit
+        // is that same end, with its `continue` states, which jump to the
+        // condition too.
         let entry = locals.clone();
         let exits_from = self.current_function_exit_points.len();
         self.loop_depth += 1;
-        let (body_locals, break_states) = self.converge_loop_body(
+        let mut body_end = None;
+        let (_, break_states) = self.converge_loop_body(
             &entry,
             declared_return,
             label,
@@ -260,17 +257,24 @@ impl<'a> Checker<'a> {
             // see `converge_loop_body`'s own doc comment on this
             // parameter.
             LoopZeroIterations::Impossible,
-            |this, pass_locals, declared_return, label, pass| {
-                if pass > 0 {
-                    this.apply_narrowing(cond, pass_locals, true);
-                }
+            |this, pass_locals, declared_return, label, _pass| {
                 this.check_loop_body(body, pass_locals, declared_return, label);
+                let mut end = pass_locals.clone();
+                for state in this
+                    .loop_continue_states
+                    .last()
+                    .cloned()
+                    .unwrap_or_default()
+                {
+                    end = merge_scopes(&this.relation(), &end, &state);
+                }
+                body_end = Some(end);
+                this.apply_narrowing(cond, pass_locals, true);
             },
         );
-        // A do-while's body always runs at least once - the converged
-        // result replaces `locals` directly, no zero-iterations merge
-        // needed.
-        *locals = body_locals;
+        // The exit: the converged pass's end, before the condition runs on
+        // it, and the trailing check below evaluates the condition on it.
+        *locals = body_end.unwrap_or(entry);
         self.in_condition_position = true;
         // `loop_depth` deliberately stays incremented one statement
         // longer than While's arm needs it to: this trailing check of
