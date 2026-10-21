@@ -191,6 +191,22 @@ impl<'a> Checker<'a> {
         is_static: bool,
         is_concrete: bool,
     ) {
+        let imports = super::global_writes::imported_globals(f.body_stmts());
+        let outer = std::mem::replace(
+            &mut self.global_scope,
+            super::global_writes::Scope::Function(imports),
+        );
+        self.check_function_body(f, class_name, is_static, is_concrete);
+        self.global_scope = outer;
+    }
+
+    fn check_function_body(
+        &mut self,
+        f: &FunctionDecl,
+        class_name: Option<&str>,
+        is_static: bool,
+        is_concrete: bool,
+    ) {
         // The registry keeps one signature per top-level function name, and
         // the union of a class body's declarations of one method name; a
         // declaration whose slot isn't its own is checked against its own.

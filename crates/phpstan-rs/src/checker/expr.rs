@@ -476,6 +476,20 @@ impl<'a> Checker<'a> {
         label: &str,
         mode: ClosureMode,
     ) -> Type {
+        let outer = std::mem::replace(&mut self.global_scope, super::global_writes::Scope::Other);
+        let ty = self.check_closure_literal_body(span, closure, locals, label, mode);
+        self.global_scope = outer;
+        ty
+    }
+
+    fn check_closure_literal_body(
+        &mut self,
+        span: Span,
+        closure: &syntax::ast::ClosureExpr,
+        locals: &mut Locals,
+        label: &str,
+        mode: ClosureMode,
+    ) -> Type {
         let diagnostics_mark = self.diagnostics.len();
         let literal = self.closure_literal_id(span);
         let syntax::ast::ClosureExpr {
@@ -1486,6 +1500,7 @@ impl<'a> Checker<'a> {
                             span: e.span,
                         });
                         self.apply_param_out_types(sig, args, locals);
+                        self.apply_global_writes(&declared, locals);
                         self.check_castable_array_arguments(name, sig, args, &resolved, locals);
                         self.check_impossible_haystack_values(name, args, locals, e.span);
                         if name.eq_ignore_ascii_case("define") {

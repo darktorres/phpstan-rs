@@ -370,6 +370,10 @@ pub struct Checker<'a> {
     // scalar argument is coerced to the parameter's scalar type, as PHP's weak
     // mode does (`calls/parameters.rs`).
     pub(crate) strict_types: bool,
+    // The globals each function of the file may write (`global_writes`), and
+    // which globals the body being checked shares with the top level.
+    pub(crate) global_writes: global_writes::GlobalWrites,
+    pub(crate) global_scope: global_writes::Scope,
     // How many bodies enclosing the one being checked have
     // `saw_dynamic_var_construct` set, each of which drops every
     // diagnostic made since it began, the nested body's included.
@@ -957,6 +961,7 @@ mod function_decl;
 mod function_like_declarations;
 mod generics;
 mod global_constants;
+pub(crate) mod global_writes;
 mod imports;
 mod impossible_instanceof;
 pub mod include_lookup;
@@ -1176,6 +1181,8 @@ impl<'a> Checker<'a> {
             current_scope_deprecated: false,
             saw_dynamic_var_construct: false,
             strict_types: false,
+            global_writes: global_writes::GlobalWrites::default(),
+            global_scope: global_writes::Scope::default(),
             enclosing_dynamic_bodies: 0,
             #[cfg(debug_assertions)]
             reports_made_while_dropping: Vec::new(),
@@ -1934,6 +1941,8 @@ impl<'a> Checker<'a> {
         );
 
         self.strict_types = keywords::declares_strict_types(program);
+        self.global_writes = global_writes::global_writes(program);
+        self.global_scope = global_writes::Scope::Top;
         let file = self.current_file_id;
         self.tracked_closures = closure_flow::tracked_closures(program, &|span| {
             closure_flow::closure_literal_id_in(file, span)
