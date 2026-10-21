@@ -16,8 +16,10 @@
 //! followed the same way and read only as `$holder[...](...)`. Any other
 //! read - passing it, returning it, capturing it, referencing it, a
 //! `global` naming it - escapes it, and a scope that calls `compact`,
-//! `extract`, `eval`, `include`, or uses a variable variable is not
-//! followed at all.
+//! `extract`, `eval`, `include`, or uses a variable variable it cannot name
+//! is not followed at all. A variable variable `$$n(...)` whose `$n` is
+//! written only as one string literal is a call of that variable, as
+//! `$GLOBALS['f'](...)` is a call of the global `f`.
 
 use std::rc::Rc;
 
@@ -90,6 +92,9 @@ pub(crate) fn tracked_closures(
     for name in &globals.imported {
         top.read(name, Read::Escape);
     }
+    for name in &globals.called {
+        top.read(name, Read::Callee);
+    }
     let mut flow = ScopeFlow::new(&mut top, Rc::clone(invocations));
     for stmt in program {
         flow.visit_stmt(stmt);
@@ -145,6 +150,8 @@ enum Write {
     /// `$v = new C()`, with `C` (its `global_writes::key`) a class whose
     /// instances are reached only through the variables they are built into.
     Object(String),
+    /// `$v = 'name'`: a string literal, a name a variable variable can call.
+    Name(String),
     /// `$v = $w`, or `$v = a ? b : c` with each branch a source.
     Sources(Vec<Source>),
     /// Any other write: a parameter, a capture, `foreach`, ...
@@ -182,6 +189,9 @@ struct Scope {
     /// Each closure literal written to a property: the variable holding the
     /// object, the property, and the literal's span.
     property_closures: Vec<(String, String, Span)>,
+    /// The variables `$$n(...)` calls name through: each is resolved by
+    /// `resolve_named_callees`.
+    named_callees: Vec<String>,
     /// The scope calls something that makes variables by name, or reads
     /// them through a name it computes: nothing in it is followed.
     dynamic: bool,
@@ -196,9 +206,33 @@ impl Scope {
         self.reads.entry(name.to_string()).or_default().push(read);
     }
 
+    /// Resolves each variable variable call `$$n(...)`: when `$n` is written
+    /// only as one string literal `'f'` and no read of it escapes, the call
+    /// is a read of `$f`; any other one makes the scope dynamic.
+    fn resolve_named_callees(&mut self) {
+        for name in std::mem::take(&mut self.named_callees) {
+            let escapes = self
+                .reads
+                .get(&name)
+                .is_some_and(|reads| reads.contains(&Read::Escape));
+            let target = match self.writes.get(&name).map(Vec::as_slice) {
+                Some([Write::Name(first), rest @ ..]) => rest
+                    .iter()
+                    .all(|write| matches!(write, Write::Name(other) if other == first))
+                    .then(|| first.clone()),
+                _ => None,
+            };
+            match target {
+                Some(target) if !escapes => self.read(&target, Read::Callee),
+                _ => self.dynamic = true,
+            }
+        }
+    }
+
     /// The literals this scope follows, once its variables are all seen: a
     /// literal is followed when every variable that may hold it is.
-    fn followed_literals(&self, invocations: &Invocations) -> Vec<Span> {
+    fn followed_literals(&mut self, invocations: &Invocations) -> Vec<Span> {
+        self.resolve_named_callees();
         if self.dynamic {
             return Vec::new();
         }
@@ -242,7 +276,7 @@ impl Scope {
                             }
                         }
                     }
-                    Write::Array(_) | Write::Object(_) | Write::Other => {}
+                    Write::Array(_) | Write::Object(_) | Write::Name(_) | Write::Other => {}
                 }
             }
         }
@@ -324,6 +358,8 @@ impl Scope {
 #[derive(Default)]
 struct GlobalFacts {
     imported: FxHashSet<String>,
+    /// The keys of the `$GLOBALS['f'](...)` calls, which call the global `f`.
+    called: FxHashSet<String>,
     uses_globals_array: bool,
 }
 
@@ -353,11 +389,35 @@ impl<'ast> Visitor<'ast> for GlobalFinder<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
+        if let ExprKind::Call(callee, args) = &expr.kind
+            && let Some(key) = globals_array_key(callee)
+        {
+            self.facts.called.insert(key);
+            visit::walk_args(self, args);
+            return;
+        }
         if matches!(&expr.kind, ExprKind::Variable(name) if name.as_str() == "GLOBALS") {
             self.facts.uses_globals_array = true;
         }
         visit::walk_expr(self, expr);
     }
+}
+
+/// The literal key of a `$GLOBALS['key']` element, or `None` for any other
+/// expression.
+fn globals_array_key(expr: &Expr) -> Option<String> {
+    let ExprKind::Index(base, Some(index)) = &expr.peeled().kind else {
+        return None;
+    };
+    let ExprKind::Variable(name) = &base.kind else {
+        return None;
+    };
+    let ExprKind::Literal(Literal::String(key)) = &index.kind else {
+        return None;
+    };
+    (name.as_str() == "GLOBALS")
+        .then(|| key.as_str().map(str::to_string))
+        .flatten()
 }
 
 /// One scope's occurrences, walked without entering the scopes nested in
@@ -456,6 +516,13 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
                 match &callee.peeled().kind {
                     ExprKind::Variable(name) if plain => {
                         self.scope.read(name.as_str(), Read::Callee);
+                    }
+                    ExprKind::DynamicVariable(name)
+                        if plain && matches!(name.peeled().kind, ExprKind::Variable(_)) =>
+                    {
+                        if let ExprKind::Variable(variable) = &name.peeled().kind {
+                            self.scope.named_callees.push(variable.as_str().to_string());
+                        }
                     }
                     ExprKind::PropertyAccess(base, _, ObjectOperator::Arrow)
                         if plain && matches!(base.kind, ExprKind::Variable(_)) =>
@@ -611,6 +678,10 @@ impl ScopeFlow<'_> {
                         .collect(),
                 )
             }
+            ExprKind::Literal(Literal::String(value)) => match value.as_str() {
+                Some(name) => Write::Name(name.to_string()),
+                None => Write::Other,
+            },
             _ => {
                 self.visit_expr(rhs);
                 Write::Other

@@ -1645,7 +1645,10 @@ impl<'a> Checker<'a> {
                     // produces `None` above is excluded by the
                     // `ExprKind::Name` guard, so this branch never fires
                     // for those.
-                    let callee_ty = self.check_expr(callee, locals, label);
+                    let checked = self.check_expr(callee, locals, label);
+                    let callee_ty = self
+                        .literal_named_callee_type(callee, locals, label)
+                        .unwrap_or(checked);
                     // `callable.nonCallable` - checked (and, by
                     // reference, before the `if let` below consumes
                     // `callee_ty` by value) for every dynamic-callee
@@ -4496,6 +4499,43 @@ impl<'a> Checker<'a> {
             .get_var(name)
             .cloned()
             .unwrap_or_else(|| unassigned_variable_type(name))
+    }
+
+    /// The type of the variable a call's callee names by a literal: `$$n`
+    /// where `$n` holds one string literal, or `$GLOBALS['f']` in the main
+    /// script. `None` for any other callee, and while a write to a name not
+    /// known statically may have changed the variables.
+    pub(crate) fn literal_named_callee_type(
+        &self,
+        callee: &Expr,
+        locals: &Locals,
+        label: &str,
+    ) -> Option<Type> {
+        if locals.any_variable_may_exist() {
+            return None;
+        }
+        let name = match &callee.peeled().kind {
+            ExprKind::DynamicVariable(name_expr) => self
+                .infer_expr(name_expr, locals)
+                .string_literal_value()?
+                .as_str()?
+                .to_string(),
+            ExprKind::Index(base, Some(key)) if label == "<main>" => {
+                let ExprKind::Variable(array) = &base.kind else {
+                    return None;
+                };
+                let ExprKind::Literal(Literal::String(key)) = &key.kind else {
+                    return None;
+                };
+                if array.as_str() != "GLOBALS" {
+                    return None;
+                }
+                key.as_str()?.to_string()
+            }
+            _ => return None,
+        };
+        (locals.contains_var(&name) && !locals.is_maybe_undefined_var(&name))
+            .then(|| self.variable_type(&name, locals))
     }
 
     /// The type of the variable `name` in a quiet position (`??`, `isset`,
