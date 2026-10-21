@@ -4,7 +4,6 @@ use crate::checker::{Checker, Discriminant, Locals};
 use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
 use syntax::span::Span;
-use syntax::visit::for_each_child_expr;
 use types::{AccessoryKind, Type};
 mod assertions;
 mod phpunit;
@@ -654,35 +653,22 @@ fn condition_alias_targets(rhs: &Expr, locals: &Locals) -> Option<Vec<LocalKey>>
     })
 }
 
-/// Defines the variables `e` assigns, for a branch on which `e` is known to
-/// have been evaluated: the right operand of a `&&` that is true, or of an
-/// `||` that is false. An operand that may be skipped (the right side of a
-/// nested `||` or `??`, a ternary's arms) is left alone.
-fn define_assigned_variables(e: &Expr, locals: &mut Locals) {
-    match &e.peeled().kind {
-        ExprKind::Assign(lhs, rhs) => {
-            if let ExprKind::Variable(name) = &lhs.kind
-                && let Some(key) = locals.find_var(name)
-            {
+impl<'a> Checker<'a> {
+    /// Reads the variables a `&&` (true branch) or `||` (false branch) defined
+    /// through its right operand as defined: that branch took the operand,
+    /// which `Checker::operand_definitions` recorded when the expression was
+    /// checked.
+    fn define_operand_definitions(&self, e: &Expr, locals: &mut Locals) {
+        let Some(names) = self.operand_definitions.get(&e.span) else {
+            return;
+        };
+        for name in names {
+            if let Some(key) = locals.find_var(name) {
                 locals.clear_maybe_undefined(key);
             }
-            define_assigned_variables(rhs, locals);
         }
-        // Only the left operand of `||` and `??` is always evaluated; the
-        // right one may be skipped.
-        ExprKind::Binary(BinOp::Or | BinOp::LogicalOr | BinOp::Coalesce, l, _) => {
-            define_assigned_variables(l, locals);
-        }
-        // Only the subject of a `match` and the condition of a ternary are
-        // always evaluated; their arms may be skipped.
-        ExprKind::Match { subject: first, .. } | ExprKind::Ternary(first, _, _) => {
-            define_assigned_variables(first, locals);
-        }
-        _ => for_each_child_expr(e, |child| define_assigned_variables(child, locals)),
     }
-}
 
-impl<'a> Checker<'a> {
     /// Narrows `locals` in place based on `cond` being true (`branch_true`)
     /// or false, along one branch of an `if`/`while`. Only handles the
     /// common, safe patterns - equality against a known-type value
@@ -797,12 +783,12 @@ impl<'a> Checker<'a> {
                 // for its own unrepresentable branch below.
                 ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) if branch_true => {
                     self.apply_narrowing(l, locals, true);
-                    define_assigned_variables(r, locals);
+                    self.define_operand_definitions(cond, locals);
                     self.apply_narrowing(r, locals, true);
                 }
                 ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) if !branch_true => {
                     self.apply_narrowing(l, locals, false);
-                    define_assigned_variables(r, locals);
+                    self.define_operand_definitions(cond, locals);
                     self.apply_narrowing(r, locals, false);
                 }
                 // "At least one is true, but not sure

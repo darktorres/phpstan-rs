@@ -691,6 +691,12 @@ pub struct Checker<'a> {
     // pass, so convergence would silently stop after one pass against a
     // stale pre-loop entry.
     pub(crate) loop_continue_states: Vec<Vec<Locals>>,
+    // The variables each `&&`/`||` defines through its right operand on
+    // every path, by the expression's span. The operand may be skipped, so
+    // the expression itself leaves them maybe-defined; the branch that takes
+    // the operand (the true branch of `&&`, the false branch of `||`) reads
+    // them as defined.
+    pub(crate) operand_definitions: rustc_hash::FxHashMap<Span, Vec<String>>,
     // How many loop bodies (`While`/`DoWhile`/`For`/`Foreach`, nesting
     // included - a `Switch` doesn't count, it runs its body once)
     // currently enclose whatever's being checked. `check_pointless_
@@ -1195,6 +1201,7 @@ impl<'a> Checker<'a> {
             external_rules: &[],
             loop_break_states: Vec::new(),
             loop_continue_states: Vec::new(),
+            operand_definitions: rustc_hash::FxHashMap::default(),
             loop_depth: 0,
             in_range_index_writes: Vec::new(),
             active_discriminant: Vec::new(),

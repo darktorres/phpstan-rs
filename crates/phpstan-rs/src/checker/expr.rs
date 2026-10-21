@@ -1557,7 +1557,9 @@ impl<'a> Checker<'a> {
                     locals,
                     is_condition_position || is_bare_statement,
                 );
+                let defined = operand_definitions(locals, &narrowed);
                 merge_new_variable_definitions(locals, &narrowed);
+                self.operand_definitions.insert(e.span, defined);
                 self.infer_binary(op, l, r, locals)
             }
             ExprKind::Binary(op @ (BinOp::Or | BinOp::LogicalOr), l, r) => {
@@ -1590,7 +1592,9 @@ impl<'a> Checker<'a> {
                     locals,
                     is_condition_position || is_bare_statement,
                 );
+                let defined = operand_definitions(locals, &narrowed);
                 merge_new_variable_definitions(locals, &narrowed);
+                self.operand_definitions.insert(e.span, defined);
                 self.infer_binary(op, l, r, locals)
             }
             // `??` is built on isset()-style quiet semantics - its left
@@ -5346,6 +5350,24 @@ impl<'a> Checker<'a> {
 /// (left-associative `And(And(A,B),C)`): the inner node's own filtered
 /// merge already lands B's new plain-variable defs in the outer node's
 /// real `locals` before the outer node clones it for `C`.
+/// The variables `narrowed` defines on every path through a `&&`/`||`'s
+/// right operand, by name: defined in `narrowed` and not maybe-defined there,
+/// and either absent from `locals` or maybe-defined in it.
+fn operand_definitions(locals: &Locals, narrowed: &Locals) -> Vec<String> {
+    narrowed
+        .iter()
+        .filter(|&(key, _)| {
+            narrowed.is_real_variable(key)
+                && !narrowed.is_maybe_undefined(key)
+                && (!locals.contains_key(key) || locals.is_maybe_undefined(key))
+        })
+        .filter_map(|(key, _)| match narrowed.data(key) {
+            KeyData::Var(name) => Some(name.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
     for (key, ty) in narrowed.iter() {
         if narrowed.is_real_variable(key) && !locals.contains_key(key) {
