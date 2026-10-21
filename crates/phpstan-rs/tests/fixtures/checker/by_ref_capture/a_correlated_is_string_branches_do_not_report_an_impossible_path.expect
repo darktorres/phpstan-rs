@@ -1,0 +1,2 @@
+4:9-4:22 function.alreadyNarrowedType L4 | Call to function is_string() with string will always evaluate to true.
+7:9-7:22 function.alreadyNarrowedType L4 | Call to function is_string() with string will always evaluate to true.
