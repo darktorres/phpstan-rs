@@ -1,5 +1,6 @@
 <?php
-function walk(array<mixed> $values): void {
+/** @param array<mixed> $values */
+function walk(array $values): void {
     $walk = null;
     $walk = function (mixed $value) use (&$walk): void {
         if (is_array($value)) {
