@@ -233,6 +233,35 @@ impl Invocations {
         walk.dead
     }
 
+    /// The spans of the branches of `body` that cannot run when each named
+    /// variable holds its value on entry. Nothing when the body names variables
+    /// dynamically, since a write by name can change any of them.
+    pub(crate) fn dead_branches_under(
+        &self,
+        body: &Stmt,
+        bindings: &[(String, Known)],
+    ) -> Vec<Span> {
+        if has_dynamic_names(std::slice::from_ref(body)) {
+            return Vec::new();
+        }
+        let mut walk = Walk::new(self, 0);
+        let env: Env = bindings
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.clone(),
+                    Binding {
+                        params: Vec::new(),
+                        value: Some(value.clone()),
+                        shared: false,
+                    },
+                )
+            })
+            .collect();
+        walk.stmt(body, env);
+        walk.dead
+    }
+
     fn summary(
         &self,
         name: String,

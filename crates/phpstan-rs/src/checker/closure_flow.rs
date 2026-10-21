@@ -1151,7 +1151,7 @@ impl Checker<'_> {
     }
 
     /// Drops what was reported from `from` on inside one of the `dead` spans.
-    fn drop_in_dead_branches(&mut self, from: usize, dead: &[Span]) {
+    pub(crate) fn drop_in_dead_branches(&mut self, from: usize, dead: &[Span]) {
         if dead.is_empty() {
             return;
         }
@@ -1229,7 +1229,7 @@ const MAX_OPEN_CLOSURE_CALLS: usize = 4;
 
 /// Whether a diagnostic identifier says that a condition or narrowing is
 /// constant: the finding holds for the body whatever its values are.
-fn is_constancy(identifier: &str) -> bool {
+pub(crate) fn is_constancy(identifier: &str) -> bool {
     [
         "alwaysTrue",
         "alwaysFalse",

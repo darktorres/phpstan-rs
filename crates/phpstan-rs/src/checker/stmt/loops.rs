@@ -4,13 +4,153 @@ use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use types::UnionAll as _;
 
+use crate::checker::closure_flow::is_constancy;
+use crate::checker::invocation::Known;
+use crate::checker::must_invoke::{names_dynamically, names_written_otherwise};
 use crate::checker::{
     Checker, Locals, LoopZeroIterations, count_call_operand, merge_scopes,
     propagate_container_field_facts,
 };
 use syntax::ast::*;
-use syntax::visit::body_contains_yield;
+use syntax::visit::{self, Visitor, body_contains_yield};
 use types::Type;
+
+/// The most iterations of a counted `for` loop that are checked one by one,
+/// each with the counter at the value that iteration sees. A longer loop is
+/// checked as a loop, from the state its passes converge to.
+const MAX_UNROLLED_ITERATIONS: usize = 8;
+
+/// A `for` loop whose counter starts at an int literal, is compared with an int
+/// literal, and steps by an int literal, with a body that neither leaves the
+/// loop early nor changes the counter: the values its body sees, in order.
+struct CountedLoop {
+    name: String,
+    values: Vec<i64>,
+    /// The counter's value once the loop has ended.
+    exit: i64,
+}
+
+impl CountedLoop {
+    fn of(init: &[Expr], cond: &[Expr], step: &[Expr], body: &Stmt) -> Option<CountedLoop> {
+        let ([init], [cond], [step]) = (init, cond, step) else {
+            return None;
+        };
+        let ExprKind::Assign(target, start) = &init.kind else {
+            return None;
+        };
+        let (ExprKind::Variable(name), ExprKind::Literal(Literal::Int(start))) =
+            (&target.kind, &start.kind)
+        else {
+            return None;
+        };
+        let ExprKind::Binary(op, left, right) = &cond.kind else {
+            return None;
+        };
+        let (ExprKind::Variable(compared), ExprKind::Literal(Literal::Int(bound))) =
+            (&left.kind, &right.kind)
+        else {
+            return None;
+        };
+        if compared.as_str() != name.as_str() {
+            return None;
+        }
+        let holds = |value: i64| match op {
+            BinOp::Lt => value < *bound,
+            BinOp::LtEq => value <= *bound,
+            BinOp::Gt => value > *bound,
+            BinOp::GtEq => value >= *bound,
+            _ => false,
+        };
+        let delta = match &step.kind {
+            ExprKind::Unary(UnaryOp::PreInc | UnaryOp::PostInc, operand)
+                if is_variable(operand, name.as_str()) =>
+            {
+                1
+            }
+            ExprKind::Unary(UnaryOp::PreDec | UnaryOp::PostDec, operand)
+                if is_variable(operand, name.as_str()) =>
+            {
+                -1
+            }
+            ExprKind::CompoundAssign(op @ (BinOp::Add | BinOp::Sub), target, amount)
+                if is_variable(target, name.as_str()) =>
+            {
+                let ExprKind::Literal(Literal::Int(by)) = &amount.kind else {
+                    return None;
+                };
+                if *by <= 0 {
+                    return None;
+                }
+                if *op == BinOp::Add { *by } else { -*by }
+            }
+            _ => return None,
+        };
+        let mut values = Vec::new();
+        let mut value = *start;
+        while holds(value) {
+            if values.len() == MAX_UNROLLED_ITERATIONS {
+                return None;
+            }
+            values.push(value);
+            value = value.checked_add(delta)?;
+        }
+        let body_names_counter =
+            names_written_otherwise(std::slice::from_ref(body)).contains(name.as_str());
+        if values.is_empty()
+            || body_names_counter
+            || may_exit(body)
+            || names_dynamically(std::slice::from_ref(body))
+        {
+            return None;
+        }
+        Some(CountedLoop {
+            name: name.as_str().to_string(),
+            values,
+            exit: value,
+        })
+    }
+}
+
+/// Whether `expr` is the variable `name`.
+fn is_variable(expr: &Expr, name: &str) -> bool {
+    matches!(&expr.kind, ExprKind::Variable(variable) if variable.as_str() == name)
+}
+
+/// Whether `stmt` may leave the loop it is the body of early, or leave the
+/// function: a `break`, `continue`, `goto`, `return`, `throw` or `exit` anywhere
+/// in it, outside a nested function or closure. A `break` of a nested loop
+/// counts too, which is conservative.
+fn may_exit(stmt: &Stmt) -> bool {
+    let mut finder = MayExit { found: false };
+    finder.visit_stmt(stmt);
+    finder.found
+}
+
+struct MayExit {
+    found: bool,
+}
+
+impl<'ast> Visitor<'ast> for MayExit {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            StmtKind::Break(_)
+            | StmtKind::Continue(_)
+            | StmtKind::Goto(_)
+            | StmtKind::Return(_)
+            | StmtKind::Throw(_) => self.found = true,
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
+            _ => visit::walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        match &expr.kind {
+            ExprKind::Throw(_) | ExprKind::Exit(..) => self.found = true,
+            ExprKind::Closure(_) | ExprKind::ArrowFn(_) => {}
+            _ => visit::walk_expr(self, expr),
+        }
+    }
+}
 
 /// `Checker::in_range_index_writes`'s own trigger - whether `cond` is
 /// syntactically `$i < count($container)` (either operand order,
@@ -348,6 +488,45 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Checks a counted `for` loop once per iteration. Each iteration has the
+    /// counter bound to the value it sees, and reports what its reachable
+    /// branches show. A finding about a constant condition or narrowing is kept
+    /// only when every iteration has it, since the counter's value decides it.
+    fn check_unrolled_for(
+        &mut self,
+        counted: &CountedLoop,
+        cond: &Expr,
+        body: &Stmt,
+        locals: &mut Locals,
+        declared_return: Option<&Type>,
+        label: &str,
+    ) {
+        let mut iterations: Vec<Vec<diagnostics::Diagnostic>> = Vec::new();
+        self.loop_depth += 1;
+        for value in &counted.values {
+            locals.insert_var(&counted.name, Type::int_literal(*value));
+            let from = self.diagnostics.len();
+            self.check_expr(cond, locals, label);
+            self.apply_narrowing(cond, locals, true);
+            self.check_loop_body(body, locals, declared_return, label);
+            let bindings = [(counted.name.clone(), Known::Int(*value))];
+            let dead = self.invocations.dead_branches_under(body, &bindings);
+            self.drop_in_dead_branches(from, &dead);
+            iterations.push(self.diagnostics.split_off(from));
+        }
+        self.loop_depth -= 1;
+        locals.insert_var(&counted.name, Type::int_literal(counted.exit));
+        for iteration in &iterations {
+            for finding in iteration {
+                let kept = !is_constancy(finding.identifier.as_str())
+                    || iterations.iter().all(|other| other.contains(finding));
+                if kept && !self.diagnostics.contains(finding) {
+                    self.diagnostics.push(finding.clone());
+                }
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_for(
         &mut self,
@@ -361,6 +540,10 @@ impl<'a> Checker<'a> {
     ) {
         for e in init.iter() {
             self.check_expr(e, locals, label);
+        }
+        if let Some(counted) = CountedLoop::of(init, cond, step, body) {
+            self.check_unrolled_for(&counted, &cond[0], body, locals, declared_return, label);
+            return;
         }
         // A real `for`'s condition slot can hold several
         // comma-separated expressions, *all* of which real PHP

@@ -450,7 +450,7 @@ impl<'ast> Visitor<'ast> for Declarations {
 /// Whether the program names variables in a way no walk can follow, in any
 /// scope: a variable variable, `eval`, `include`, `$GLOBALS`, a computed
 /// `global`, `goto`, or a call of `compact`, `extract` or `func_get_args`.
-fn names_dynamically(program: &[Stmt]) -> bool {
+pub(crate) fn names_dynamically(program: &[Stmt]) -> bool {
     let mut finder = Dynamic { found: false };
     for stmt in program {
         finder.visit_stmt(stmt);
@@ -497,7 +497,7 @@ impl<'ast> Visitor<'ast> for Dynamic {
 /// The names some write other than assigning a closure literal reaches,
 /// anywhere in the program. A name outside this set holds only closure
 /// literals, or nothing, so calling it cannot run a function by a name.
-fn names_written_otherwise(program: &[Stmt]) -> FxHashSet<String> {
+pub(crate) fn names_written_otherwise(program: &[Stmt]) -> FxHashSet<String> {
     let mut writes = WriteSites::default();
     for stmt in program {
         writes.visit_stmt(stmt);
