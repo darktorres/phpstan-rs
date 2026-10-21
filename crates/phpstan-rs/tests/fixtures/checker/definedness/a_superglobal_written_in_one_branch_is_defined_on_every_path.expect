@@ -1,0 +1,1 @@
+7:10-7:19 echo.nonString L2 | Parameter #1 (array<(int|string), mixed>) of echo cannot be converted to string.

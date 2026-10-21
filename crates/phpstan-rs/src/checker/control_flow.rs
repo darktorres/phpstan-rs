@@ -362,6 +362,16 @@ fn discriminant_may_hold(locals: &Locals, key: &Discriminant) -> bool {
     }
 }
 
+/// Whether `key` is a local variable that a scope can lack, so that a scope
+/// holding it alone leaves it maybe-defined. A superglobal is defined in every
+/// scope, and what one branch wrote to it is not a fact of the other.
+fn is_local_variable(scope: &Locals, key: LocalKey) -> bool {
+    match scope.data(key) {
+        KeyData::Var(name) => scope.is_real_variable(key) && !syntax::ast::is_superglobal(&name),
+        _ => false,
+    }
+}
+
 /// `scope` with each variable it holds as `never` taken from `other` instead:
 /// the branch that scope comes from is dead for that variable, so only the
 /// other branch says what the variable is at the join. `None` when `scope`
@@ -607,13 +617,13 @@ pub(crate) fn merge_scopes(
         for item in then_locals.types_diff(else_locals) {
             match item {
                 imbl::ordmap::DiffItem::Add(name, ty) => {
-                    if merged.is_real_variable(*name) {
+                    if is_local_variable(&merged, *name) {
                         merged.insert(*name, ty.clone());
                         merged.mark_maybe_undefined(*name);
                     }
                 }
                 imbl::ordmap::DiffItem::Remove(name, _) => {
-                    if merged.is_real_variable(*name) {
+                    if is_local_variable(&merged, *name) {
                         merged.mark_maybe_undefined(*name);
                     } else {
                         merged.remove_type(*name);
@@ -654,7 +664,7 @@ pub(crate) fn merge_scopes(
             } else {
                 relation.union(then_ty.clone(), else_ty.clone())
             }
-        } else if then_locals.is_real_variable(name) {
+        } else if is_local_variable(then_locals, name) {
             then_ty.clone()
         } else {
             continue;
@@ -668,7 +678,7 @@ pub(crate) fn merge_scopes(
         }
     }
     for (name, else_ty) in else_locals.iter() {
-        if then_locals.contains_key(name) || !else_locals.is_real_variable(name) {
+        if then_locals.contains_key(name) || !is_local_variable(else_locals, name) {
             continue;
         }
         let provenance = else_locals
