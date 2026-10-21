@@ -1,7 +1,7 @@
 use crate::checker::ExitKind;
 use crate::checker::GotoState;
 use crate::checker::InferQuestion;
-use crate::checker::assignment::writes_dynamic_variable;
+use crate::checker::assignment::{assigned_part_of_variable, writes_dynamic_variable};
 use crate::checker::calls::parameters::Callee;
 use crate::checker::control_flow::{body_has_byref_capture, body_has_call};
 use crate::checker::keys::{KeyData, LocalKey};
@@ -2088,6 +2088,12 @@ impl<'a> Checker<'a> {
                 // never be array-like at all.
                 if writes_dynamic_variable(lhs) {
                     locals.havoc_variables();
+                }
+                // An element or a property written inside a variable leaves
+                // the variable's own type untouched in `locals`, so the
+                // write log holds the variable as mixed for it.
+                if let Some(name) = assigned_part_of_variable(lhs) {
+                    locals.log_mixed_write_var(name);
                 }
                 if let ExprKind::Destructure(items, _) = &lhs.kind
                     && !self.relation().is_destructurable(&rhs_ty).no()

@@ -335,6 +335,13 @@ impl Locals {
         self.write_log.get_or_insert_with(Rc::default).clone()
     }
 
+    /// Makes this scope log its writes to the log `other` logs to, so a
+    /// scope made from `other` (a merge, see `merge_scopes`) keeps logging
+    /// into the body's own log.
+    pub(crate) fn share_write_log(&mut self, other: &Locals) {
+        self.write_log = other.write_log.clone();
+    }
+
     /// Gives this scope a version of its own, so an expression type
     /// remembered for the previous content is not reused after a change
     /// that is not visible in `types`, such as a wider write log.
@@ -355,10 +362,23 @@ impl Locals {
         let Some(log) = &self.write_log else {
             return;
         };
-        if self.is_real_variable(key)
-            && let KeyData::Var(name) = self.data(key)
-        {
-            log.borrow_mut().record(name, ty);
+        // A write to an element or a property changes its variable too, to
+        // a value this log does not hold, so the variable is logged as
+        // mixed: the element's own type is not the variable's.
+        let mixed = Type::mixed();
+        let mut root = key;
+        loop {
+            match self.data(root) {
+                KeyData::Var(name) => {
+                    let written = if root == key { ty } else { &mixed };
+                    log.borrow_mut().record(name, written);
+                    return;
+                }
+                KeyData::Prop { base, .. }
+                | KeyData::Index { base, .. }
+                | KeyData::VarIndex { base, .. } => root = base,
+                _ => return,
+            }
         }
     }
 

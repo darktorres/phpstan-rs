@@ -46,6 +46,22 @@ pub(crate) fn writes_dynamic_variable(target: &Expr) -> bool {
     }
 }
 
+/// The variable an assignment target writes a part of (`$a` for `$a[0]`,
+/// `$a->b`, `$a[0]->b[]`), or `None` when the target is not such a part.
+pub(crate) fn assigned_part_of_variable(target: &Expr) -> Option<&str> {
+    let mut base = match &target.peeled().kind {
+        ExprKind::Index(base, _) | ExprKind::PropertyAccess(base, _, _) => base,
+        _ => return None,
+    };
+    loop {
+        match &base.peeled().kind {
+            ExprKind::Variable(name) => return Some(name.as_ref()),
+            ExprKind::Index(inner, _) | ExprKind::PropertyAccess(inner, _, _) => base = inner,
+            _ => return None,
+        }
+    }
+}
+
 /// Real PHPStan's `InvalidAssignVarRule::containsNonAssignableExpression`,
 /// i.e. whether an assignment's own left-hand side is a real PHP lvalue
 /// (`assign.invalidExpr` otherwise: `foo() = 1;`/`1 = 2;`, a real

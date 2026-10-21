@@ -494,6 +494,7 @@ pub(crate) fn merge_scopes(
     merged.set_any_variable_may_exist(
         then_locals.any_variable_may_exist() || else_locals.any_variable_may_exist(),
     );
+    merged.share_write_log(then_locals);
     // A `function_exists()` guard only survives a merge
     // point when both incoming branches agree it's guaranteed - the same
     // reasoning every other narrowed fact here already gets (`Type::union`
