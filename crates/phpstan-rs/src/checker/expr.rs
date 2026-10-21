@@ -3,7 +3,7 @@ use crate::checker::GotoState;
 use crate::checker::InferQuestion;
 use crate::checker::assignment::{assigned_part_of_variable, writes_dynamic_variable};
 use crate::checker::calls::parameters::Callee;
-use crate::checker::closure_flow::{self, CapturedVariable, ClosureMode};
+use crate::checker::closure_flow::{self, CallInput, CapturedVariable, ClosureMode};
 use crate::checker::control_flow::body_has_byref_capture;
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::resolve::receiver_class;
@@ -467,10 +467,8 @@ impl<'a> Checker<'a> {
 
     /// A closure literal's own check: its body, its `use` captures and what
     /// its by-reference captures make of the enclosing scope. `mode` says
-    /// which of the three checks this is (`ClosureMode`).
-    /// Checks a closure literal's body. `arguments` are the types of the
-    /// arguments a call passes, by position, when the call's arguments are
-    /// all positional.
+    /// which of the three checks this is (`ClosureMode`), and `call` what a
+    /// call passes into the body.
     pub(crate) fn check_closure_literal(
         &mut self,
         span: Span,
@@ -478,10 +476,10 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
         mode: ClosureMode,
-        arguments: Option<&[Type]>,
+        call: CallInput<'_>,
     ) -> Type {
         let outer = std::mem::replace(&mut self.global_scope, super::global_writes::Scope::Other);
-        let ty = self.check_closure_literal_body(span, closure, locals, label, mode, arguments);
+        let ty = self.check_closure_literal_body(span, closure, locals, label, mode, call);
         self.global_scope = outer;
         ty
     }
@@ -493,7 +491,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
         mode: ClosureMode,
-        arguments: Option<&[Type]>,
+        call: CallInput<'_>,
     ) -> Type {
         let diagnostics_mark = self.diagnostics.len();
         let literal = self.closure_literal_id(span);
@@ -508,6 +506,28 @@ impl<'a> Checker<'a> {
             attrs,
             ..
         } = closure;
+        // A call also holds the by-reference names its nested calls read through
+        // this literal's captures, when the caller holds them and neither the
+        // parameters nor the body name them.
+        let mut call_uses: Vec<ClosureUse> = uses.clone();
+        if mode == ClosureMode::Call {
+            let mentioned = super::invocation::body_mentions(body);
+            for name in call.captures {
+                let own = params.iter().any(|p| p.name.name.as_str() == name.as_str())
+                    || uses.iter().any(|u| u.name.name.as_str() == name.as_str());
+                if own || mentioned.contains(name) || !locals.contains_var(name) {
+                    continue;
+                }
+                call_uses.push(ClosureUse {
+                    name: Ident {
+                        name: syntax::name::Name::from(name.as_str()),
+                        span,
+                    },
+                    by_ref: true,
+                });
+            }
+        }
+        let uses = &call_uses;
         // Mirrors real PHPStan's `ClosureAttributesRule` -
         // existence plus target-validity for a closure
         // expression's own `#[Attr]` group.
@@ -725,7 +745,7 @@ impl<'a> Checker<'a> {
             } else {
                 // A call holds each parameter's argument, when the declared
                 // type accepts that argument as it is.
-                match arguments.and_then(|args| args.get(index)) {
+                match call.arguments.and_then(|args| args.get(index)) {
                     Some(argument)
                         if mode == ClosureMode::Call
                             && !p.by_ref
@@ -986,7 +1006,7 @@ impl<'a> Checker<'a> {
         // own (see its doc comment), so every finding here
         // anchors to the whole closure expression's span instead
         // of the specific `$x` token.
-        self.check_unused_closure_uses(uses, body, span);
+        self.check_unused_closure_uses(&closure.uses, body, span);
         // A `use (&$x)` capture is a real reference - any
         // mutation the closure body makes to `$x` is visible in
         // the declaring scope too, from the closure literal's
@@ -4010,7 +4030,14 @@ impl<'a> Checker<'a> {
                 } else {
                     ClosureMode::Plain
                 };
-                self.check_closure_literal(e.span, closure, locals, label, mode, None)
+                self.check_closure_literal(
+                    e.span,
+                    closure,
+                    locals,
+                    label,
+                    mode,
+                    CallInput::default(),
+                )
             }
             ExprKind::ArrowFn(arrow) => {
                 let syntax::ast::ArrowFnExpr {

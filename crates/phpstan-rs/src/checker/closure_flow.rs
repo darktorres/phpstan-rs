@@ -60,6 +60,15 @@ pub(crate) enum ClosureMode {
     Call,
 }
 
+/// What a call of a followed literal passes into its body: the types of its
+/// arguments when they are all positional, and the by-reference names its
+/// nested calls read through the literal's captures.
+#[derive(Default)]
+pub(crate) struct CallInput<'a> {
+    pub(crate) arguments: Option<&'a [Type]>,
+    pub(crate) captures: &'a [String],
+}
+
 /// What a followed literal's by-value capture held where the literal was
 /// written: whether the variable was defined and what it held.
 #[derive(Clone)]
@@ -73,6 +82,10 @@ pub(crate) struct CapturedVariable {
 pub(crate) struct TrackedClosure {
     pub(crate) span: Span,
     pub(crate) closure: ClosureExpr,
+    /// The by-reference names a call reads through the literal's captures: its
+    /// own, and those of each literal a captured holder may hold, since a call
+    /// of that literal can run inside this one.
+    pub(crate) captures: Vec<String>,
 }
 
 /// The followed literals of a program, by identity.
@@ -86,7 +99,8 @@ pub(crate) fn tracked_closures(
     id_of: &dyn Fn(Span) -> ClosureLiteralId,
 ) -> TrackedClosures {
     let globals = global_scope_facts(program);
-    let mut found = FxHashSet::default();
+    let captured = captured_bodies(program, invocations);
+    let mut found: FxHashMap<Span, Vec<String>> = FxHashMap::default();
     let mut top = Scope::default();
     top.dynamic |= globals.uses_globals_array;
     for name in &globals.imported {
@@ -99,10 +113,11 @@ pub(crate) fn tracked_closures(
     for stmt in program {
         flow.visit_stmt(stmt);
     }
-    found.extend(top.followed_literals(invocations));
+    found.extend(top.followed_literals(invocations, &captured));
     let mut discover = Discover {
         found: &mut found,
         invocations: Rc::clone(invocations),
+        captured: &captured,
     };
     for stmt in program {
         discover.visit_stmt(stmt);
@@ -136,9 +151,20 @@ enum Read {
     /// assigned to one): the value reaches that variable, whose own reads
     /// decide whether it is followed.
     Copied,
+    /// `$v` captured by reference by the closure literal with this span: its
+    /// body reads `$v` at each call of the literal, so the variable is followed
+    /// only while the literal is, and its body only calls `$v` (see
+    /// `CapturedBodies`).
+    Captured(Span),
     /// Any other use: the value is passed on or can be reached elsewhere.
     Escape,
 }
+
+/// Whether each by-reference capture of a closure literal is only called in
+/// the literal's body: keyed by the literal's span and the captured name, the
+/// capture is settled when the body writes it nowhere, reads it only as a
+/// callee, and has no dynamic name.
+type CapturedBodies = FxHashMap<(Span, String), bool>;
 
 /// How a variable is written.
 #[derive(Clone)]
@@ -231,10 +257,14 @@ impl Scope {
 
     /// The literals this scope follows, once its variables are all seen: a
     /// literal is followed when every variable that may hold it is.
-    fn followed_literals(&mut self, invocations: &Invocations) -> Vec<Span> {
+    fn followed_literals(
+        &mut self,
+        invocations: &Invocations,
+        captured: &CapturedBodies,
+    ) -> FxHashMap<Span, Vec<String>> {
         self.resolve_named_callees();
         if self.dynamic {
-            return Vec::new();
+            return FxHashMap::default();
         }
         let mut found = Vec::new();
         for (name, writes) in &self.writes {
@@ -295,37 +325,82 @@ impl Scope {
                 break;
             }
         }
-        let literals: FxHashSet<Span> = holds.values().flatten().copied().collect();
-        for span in literals {
-            let settled = holds
+        // A literal is followed when every holder of it settles. A holder
+        // read by a capture settles only while the capturing literal is
+        // followed, so the set shrinks until no literal is dropped.
+        let mut followed: FxHashSet<Span> = holds.values().flatten().copied().collect();
+        loop {
+            let unsettled: Vec<Span> = followed
                 .iter()
-                .filter(|(_, spans)| spans.contains(&span))
-                .all(|(name, _)| self.holder_settles(name));
-            if settled {
-                found.push(span);
+                .copied()
+                .filter(|span| {
+                    !holds
+                        .iter()
+                        .filter(|(_, spans)| spans.contains(span))
+                        .all(|(name, _)| self.holder_settles(name, &followed, captured))
+                })
+                .collect();
+            if unsettled.is_empty() {
+                break;
+            }
+            for span in unsettled {
+                followed.remove(&span);
             }
         }
+        found.extend(followed);
         found
+            .into_iter()
+            .map(|span| {
+                let mut names = Vec::new();
+                transitive_captures(
+                    span,
+                    captured,
+                    &holds,
+                    &mut names,
+                    &mut FxHashSet::default(),
+                );
+                names.sort();
+                (span, names)
+            })
+            .collect()
     }
 
     /// Whether `name` may hold a followed literal without any of its reads
     /// escaping: its reads are all calls or copies, and it is never written
     /// as an array.
-    fn holder_settles(&self, name: &str) -> bool {
-        self.variable_followed(name)
+    fn holder_settles(
+        &self,
+        name: &str,
+        followed: &FxHashSet<Span>,
+        captured: &CapturedBodies,
+    ) -> bool {
+        self.variable_followed(name, followed, captured)
             && !self
                 .writes
                 .get(name)
                 .is_some_and(|writes| writes.iter().any(|write| matches!(write, Write::Array(_))))
     }
 
-    /// Whether every read of the variable `name` is a call, or an element
-    /// of an array that is itself followed.
-    fn variable_followed(&self, name: &str) -> bool {
+    /// Whether every read of the variable `name` is a call, a copy, or an
+    /// element of an array that is itself followed, or a by-reference capture
+    /// whose literal is followed and only calls the variable.
+    fn variable_followed(
+        &self,
+        name: &str,
+        followed: &FxHashSet<Span>,
+        captured: &CapturedBodies,
+    ) -> bool {
         self.reads.get(name).is_none_or(|reads| {
             reads.iter().all(|read| match read {
                 Read::Callee | Read::Passed | Read::Copied => true,
                 Read::Element(holder) => self.holder_followed(holder),
+                Read::Captured(literal) => {
+                    followed.contains(literal)
+                        && captured
+                            .get(&(*literal, name.to_string()))
+                            .copied()
+                            .unwrap_or(false)
+                }
                 Read::CalleeElement | Read::PropertyCallee | Read::Escape => false,
             })
         })
@@ -440,12 +515,18 @@ impl<'s> ScopeFlow<'s> {
         }
     }
 
-    /// The closure's `use (...)` names escape the scope: the closure body
-    /// reads them at its own calls.
-    fn escape_uses(&mut self, uses: &[ClosureUse]) {
+    /// The closure literal's `use (...)` names: a by-value name escapes the
+    /// scope, since the body reads its own copy at its calls. A by-reference
+    /// name is read by the body at each call of the literal `literal`, so it
+    /// is followed only while that literal is (see `Read::Captured`).
+    fn escape_uses(&mut self, uses: &[ClosureUse], literal: Span) {
         for closure_use in uses {
-            self.scope
-                .read(closure_use.name.name.as_str(), Read::Escape);
+            let read = if closure_use.by_ref {
+                Read::Captured(literal)
+            } else {
+                Read::Escape
+            };
+            self.scope.read(closure_use.name.name.as_str(), read);
         }
     }
 }
@@ -574,7 +655,7 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
                 }
             },
             ExprKind::Closure(closure) => {
-                self.escape_uses(&closure.uses);
+                self.escape_uses(&closure.uses, expr.span);
             }
             ExprKind::ArrowFn(arrow) => {
                 self.visit_arrow(arrow);
@@ -612,7 +693,7 @@ impl ScopeFlow<'_> {
         };
         match &rhs.kind {
             ExprKind::Closure(closure) => {
-                self.escape_uses(&closure.uses);
+                self.escape_uses(&closure.uses, rhs.span);
                 self.scope.property_closures.push((
                     holder.as_str().to_string(),
                     property.name.as_str().to_string(),
@@ -632,7 +713,7 @@ impl ScopeFlow<'_> {
         }
         match &rhs.kind {
             ExprKind::Closure(closure) => {
-                self.escape_uses(&closure.uses);
+                self.escape_uses(&closure.uses, rhs.span);
                 Write::Closure(rhs.span)
             }
             ExprKind::ArrayLiteral(items) if self.inside_arrow == 0 => {
@@ -644,7 +725,7 @@ impl ScopeFlow<'_> {
                     let followed = !item.spread && !item.by_ref;
                     match &item.value.kind {
                         ExprKind::Closure(closure) if followed => {
-                            self.escape_uses(&closure.uses);
+                            self.escape_uses(&closure.uses, item.value.span);
                             elements.push(Element::Closure(item.value.span));
                         }
                         ExprKind::Variable(variable) if followed => {
@@ -693,7 +774,7 @@ impl ScopeFlow<'_> {
     fn source_of(&mut self, branch: &Expr) -> Source {
         match &branch.kind {
             ExprKind::Closure(closure) => {
-                self.escape_uses(&closure.uses);
+                self.escape_uses(&closure.uses, branch.span);
                 Source::Closure(branch.span)
             }
             ExprKind::Variable(variable) => {
@@ -734,8 +815,9 @@ pub(crate) fn is_dynamic_function(name: &str) -> bool {
 
 /// Finds every scope in the program and collects what it follows.
 struct Discover<'f> {
-    found: &'f mut FxHashSet<Span>,
+    found: &'f mut FxHashMap<Span, Vec<String>>,
     invocations: Rc<Invocations>,
+    captured: &'f CapturedBodies,
 }
 
 impl<'ast> Visitor<'ast> for Discover<'_> {
@@ -764,7 +846,7 @@ impl<'ast> Visitor<'ast> for Discover<'_> {
                 let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invocations));
                 flow.visit_expr(&arrow.body);
                 self.found
-                    .extend(scope.followed_literals(&self.invocations));
+                    .extend(scope.followed_literals(&self.invocations, self.captured));
                 visit::walk_expr(self, &arrow.body);
             }
             _ => visit::walk_expr(self, expr),
@@ -786,7 +868,77 @@ impl Discover<'_> {
             flow.visit_stmt(stmt);
         }
         self.found
-            .extend(scope.followed_literals(&self.invocations));
+            .extend(scope.followed_literals(&self.invocations, self.captured));
+    }
+}
+
+/// The by-reference captures of every closure literal in `program`, each
+/// settled when its literal's body only calls the captured variable.
+fn captured_bodies(program: &[Stmt], invocations: &Rc<Invocations>) -> CapturedBodies {
+    let mut out = CapturedBodies::default();
+    let mut scan = CaptureScan {
+        out: &mut out,
+        invocations: Rc::clone(invocations),
+    };
+    for stmt in program {
+        scan.visit_stmt(stmt);
+    }
+    out
+}
+
+/// Appends the by-reference names a call of the literal `literal` reads
+/// through its captures: its own, and those of each literal a captured holder
+/// may hold, from `holds`.
+fn transitive_captures(
+    literal: Span,
+    captured: &CapturedBodies,
+    holds: &FxHashMap<&str, FxHashSet<Span>>,
+    names: &mut Vec<String>,
+    visited: &mut FxHashSet<Span>,
+) {
+    if !visited.insert(literal) {
+        return;
+    }
+    for (span, name) in captured.keys() {
+        if *span != literal {
+            continue;
+        }
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+        for held in holds.get(name.as_str()).into_iter().flatten() {
+            transitive_captures(*held, captured, holds, names, visited);
+        }
+    }
+}
+
+/// Records each by-reference capture's settlement, scanning the body of
+/// each closure literal on its own.
+struct CaptureScan<'c> {
+    out: &'c mut CapturedBodies,
+    invocations: Rc<Invocations>,
+}
+
+impl<'ast> Visitor<'ast> for CaptureScan<'_> {
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        if let ExprKind::Closure(closure) = &expr.kind {
+            let mut scope = Scope::default();
+            let mut flow = ScopeFlow::new(&mut scope, Rc::clone(&self.invocations));
+            for stmt in &closure.body {
+                flow.visit_stmt(stmt);
+            }
+            for closure_use in closure.uses.iter().filter(|closure_use| closure_use.by_ref) {
+                let name = closure_use.name.name.as_str();
+                let settled = !scope.dynamic
+                    && !scope.writes.contains_key(name)
+                    && scope
+                        .reads
+                        .get(name)
+                        .is_none_or(|reads| reads.iter().all(|read| *read == Read::Callee));
+                self.out.insert((expr.span, name.to_string()), settled);
+            }
+        }
+        visit::walk_expr(self, expr);
     }
 }
 
@@ -798,7 +950,7 @@ fn range_contains(outer: Range, inner: Range) -> bool {
 
 /// Copies each followed literal into the table, keyed by its identity.
 struct Collect<'c> {
-    found: &'c FxHashSet<Span>,
+    found: &'c FxHashMap<Span, Vec<String>>,
     id_of: &'c dyn Fn(Span) -> ClosureLiteralId,
     out: TrackedClosures,
 }
@@ -806,7 +958,7 @@ struct Collect<'c> {
 impl<'ast> Visitor<'ast> for Collect<'_> {
     fn visit_expr(&mut self, expr: &'ast Expr) {
         if let ExprKind::Closure(closure) = &expr.kind
-            && self.found.contains(&expr.span)
+            && let Some(captures) = self.found.get(&expr.span)
         {
             let id = (self.id_of)(expr.span);
             self.out.insert(
@@ -814,6 +966,7 @@ impl<'ast> Visitor<'ast> for Collect<'_> {
                 Rc::new(TrackedClosure {
                     span: expr.span,
                     closure: (**closure).clone(),
+                    captures: captures.clone(),
                 }),
             );
         }
@@ -843,16 +996,75 @@ impl Checker<'_> {
             let Some(tracked) = self.tracked_closures.get(&id).cloned() else {
                 continue;
             };
+            // The innermost open call's own variables shadow some names. A call
+            // reading one of them through a capture would read the shadowing
+            // variable, not the captured one, so it is not checked here.
+            let shadowed_by_caller = self.closure_call_stack.last().is_some_and(|(_, shadows)| {
+                tracked.captures.iter().any(|name| shadows.contains(name))
+            });
+            if shadowed_by_caller {
+                continue;
+            }
             self.called_closures.insert(id);
+            // A literal reached again from its own body, through a by-reference
+            // capture, is checked at its call there until this many are open.
+            let open = self
+                .closure_call_stack
+                .iter()
+                .filter(|(open, _)| *open == id)
+                .count();
+            if open >= MAX_OPEN_CLOSURE_CALLS {
+                continue;
+            }
+            // The names this body shadows: a parameter, or a variable it mentions
+            // that it does not capture. The caller's variables of those names
+            // may be written by a nested call this check does not follow, so
+            // they are unknown after the call.
+            let mentioned = crate::checker::invocation::body_mentions(&tracked.closure.body);
+            let shadows: Vec<String> = tracked
+                .captures
+                .iter()
+                .filter(|name| {
+                    let captured = tracked
+                        .closure
+                        .uses
+                        .iter()
+                        .any(|closure_use| closure_use.name.name.as_str() == name.as_str());
+                    let own = tracked
+                        .closure
+                        .params
+                        .iter()
+                        .any(|param| param.name.name.as_str() == name.as_str())
+                        || mentioned.contains(*name);
+                    !captured && own && locals.contains_var(name.as_str())
+                })
+                .cloned()
+                .collect();
+            let nested: Vec<String> = tracked
+                .captures
+                .iter()
+                .filter(|name| !shadows.contains(name))
+                .cloned()
+                .collect();
             let before = self.diagnostics.len();
+            self.closure_call_stack
+                .push((id, shadows.iter().cloned().collect()));
             self.check_closure_literal(
                 tracked.span,
                 &tracked.closure,
                 locals,
                 label,
                 ClosureMode::Call,
-                arguments.as_deref(),
+                CallInput {
+                    arguments: arguments.as_deref(),
+                    captures: &nested,
+                },
             );
+            self.closure_call_stack.pop();
+            for name in &shadows {
+                locals.insert_var(name, types::Type::mixed());
+                locals.clear_native_var(name);
+            }
             let dead = self.invocations.dead_branches(&tracked.closure, &values);
             self.drop_in_dead_branches(before, &dead);
             self.drop_call_specific_constancy(id, before);
@@ -954,6 +1166,10 @@ impl Checker<'_> {
         }
     }
 }
+
+/// How many calls of one followed literal may be open at once, the calls
+/// nested through by-reference captures included.
+const MAX_OPEN_CLOSURE_CALLS: usize = 4;
 
 /// Whether a diagnostic identifier says that a condition or narrowing is
 /// constant: the finding holds for the body whatever its values are.

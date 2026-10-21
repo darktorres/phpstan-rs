@@ -1037,6 +1037,10 @@ fn compute(op: BinOp, left: &Known, right: &Known) -> Option<Known> {
         BinOp::NotEq => Known::Bool(!loosely_equal(left, right)?),
         BinOp::Add => Known::Int(int(left)?.checked_add(int(right)?)?),
         BinOp::Sub => Known::Int(int(left)?.checked_sub(int(right)?)?),
+        BinOp::Lt => Known::Bool(int(left)? < int(right)?),
+        BinOp::LtEq => Known::Bool(int(left)? <= int(right)?),
+        BinOp::Gt => Known::Bool(int(left)? > int(right)?),
+        BinOp::GtEq => Known::Bool(int(left)? >= int(right)?),
         BinOp::LogicalXor => Known::Bool(truth(left) != truth(right)),
         _ => return None,
     })
@@ -1158,6 +1162,16 @@ fn mentions_expr(expr: &Expr) -> FxHashSet<String> {
 fn mentions_stmt(stmt: &Stmt) -> FxHashSet<String> {
     let mut mentions = Mentions::default();
     mentions.visit_stmt(stmt);
+    mentions.names
+}
+
+/// The variable names a body mentions, not counting those of a closure nested
+/// in it.
+pub(crate) fn body_mentions(body: &[Stmt]) -> FxHashSet<String> {
+    let mut mentions = Mentions::default();
+    for stmt in body {
+        mentions.visit_stmt(stmt);
+    }
     mentions.names
 }
 

@@ -879,6 +879,9 @@ pub struct Checker<'a> {
     pending_closure_diagnostics: FxHashMap<types::ClosureLiteralId, Vec<Diagnostic>>,
     // The followed literals a call has been checked at.
     called_closures: FxHashSet<types::ClosureLiteralId>,
+    // The followed literals whose calls are open, innermost last, each with the
+    // names its body shadows (`closure_flow`).
+    closure_call_stack: Vec<(types::ClosureLiteralId, FxHashSet<String>)>,
     // What each followed literal captured by value when it was written.
     closure_capture_snapshots:
         FxHashMap<types::ClosureLiteralId, Vec<(Name, closure_flow::CapturedVariable)>>,
@@ -1261,6 +1264,7 @@ impl<'a> Checker<'a> {
             invocations: Rc::new(invocation::Invocations::default()),
             pending_closure_diagnostics: FxHashMap::default(),
             called_closures: FxHashSet::default(),
+            closure_call_stack: Vec::new(),
             closure_capture_snapshots: FxHashMap::default(),
             semantic_tokens: Vec::new(),
             pending_or_disjunctions: Vec::new(),
