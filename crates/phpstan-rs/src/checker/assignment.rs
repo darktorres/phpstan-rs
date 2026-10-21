@@ -34,6 +34,18 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
     })
 }
 
+/// Whether an assignment target writes a variable whose name is only known at
+/// run time (`$$name`, also inside a destructuring list).
+pub(crate) fn writes_dynamic_variable(target: &Expr) -> bool {
+    match &target.peeled().kind {
+        ExprKind::DynamicVariable(_) => true,
+        ExprKind::Destructure(items, _) => items
+            .iter()
+            .any(|item| item.target.as_ref().is_some_and(writes_dynamic_variable)),
+        _ => false,
+    }
+}
+
 /// Real PHPStan's `InvalidAssignVarRule::containsNonAssignableExpression`,
 /// i.e. whether an assignment's own left-hand side is a real PHP lvalue
 /// (`assign.invalidExpr` otherwise: `foo() = 1;`/`1 = 2;`, a real
@@ -46,6 +58,7 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
 pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
     stack::guard(|| match &expr.peeled().kind {
         ExprKind::Variable(_)
+        | ExprKind::DynamicVariable(_)
         | ExprKind::PropertyAccess(..)
         | ExprKind::DynamicPropertyAccess(..)
         | ExprKind::Index(..)

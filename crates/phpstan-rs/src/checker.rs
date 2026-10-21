@@ -914,7 +914,7 @@ mod infer_cache;
 mod keys;
 mod locals;
 pub(crate) use locals::Locals;
-mod assignment;
+pub(crate) mod assignment;
 mod by_ref_params;
 mod callable_values;
 mod calls;

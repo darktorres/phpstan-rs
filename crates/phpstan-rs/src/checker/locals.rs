@@ -801,4 +801,19 @@ impl Locals {
         self.touch();
         self.any_variable_may_exist = value;
     }
+
+    /// Records a write to a variable whose name is not known statically
+    /// (`$$name = ...`, an `extract`, an `include`, an `eval`): any variable
+    /// may now hold any value, and any name may now exist.
+    pub(crate) fn havoc_variables(&mut self) {
+        let keys: Vec<LocalKey> = self
+            .iter()
+            .filter(|&(key, _)| self.is_real_variable(key))
+            .map(|(key, _)| key)
+            .collect();
+        for key in keys {
+            self.insert(key, Type::mixed());
+        }
+        self.set_any_variable_may_exist(true);
+    }
 }

@@ -1,6 +1,7 @@
 use crate::checker::ExitKind;
 use crate::checker::GotoState;
 use crate::checker::InferQuestion;
+use crate::checker::assignment::writes_dynamic_variable;
 use crate::checker::calls::parameters::Callee;
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::resolve::receiver_class;
@@ -558,7 +559,7 @@ impl<'a> Checker<'a> {
                         .trim_start_matches('\\')
                         .eq_ignore_ascii_case("extract")
                 {
-                    locals.set_any_variable_may_exist(true);
+                    locals.havoc_variables();
                 }
                 // Resolved once up front (namespace/`use`-import rules
                 // applied, with the same global-namespace fallback real
@@ -1669,14 +1670,19 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Variable(name) => {
+                // After a write to a name not known statically, any name may
+                // exist (`Locals::havoc_variables`).
+                let may_exist = locals.any_variable_may_exist();
                 if !locals.contains_var(name) && !is_superglobal(name) {
-                    self.report(
-                        format!("undefined variable ${name}"),
-                        e.span,
-                        0,
-                        "variable.undefined",
-                    );
-                } else if locals.is_maybe_undefined_var(name) {
+                    if !may_exist {
+                        self.report(
+                            format!("undefined variable ${name}"),
+                            e.span,
+                            0,
+                            "variable.undefined",
+                        );
+                    }
+                } else if locals.is_maybe_undefined_var(name) && !may_exist {
                     self.report(
                         format!("Variable ${name} might not be defined."),
                         e.span,
@@ -1692,10 +1698,13 @@ impl<'a> Checker<'a> {
                         .get_provenance_var(name)
                         .map(|p| p.iter().copied().collect());
                 }
-                let ty = locals
-                    .get_var(name)
-                    .cloned()
-                    .unwrap_or_else(|| unassigned_variable_type(name));
+                let ty = locals.get_var(name).cloned().unwrap_or_else(|| {
+                    if may_exist {
+                        Type::mixed()
+                    } else {
+                        unassigned_variable_type(name)
+                    }
+                });
                 // A read's inferred type, for hover - see
                 // `Checker::probe_hit_at`'s doc comment.
                 self.probe_hit_at(e.span, &ty);
@@ -1893,7 +1902,7 @@ impl<'a> Checker<'a> {
             ExprKind::Eval(code) => {
                 self.check_expr(code, locals, label);
                 self.saw_dynamic_var_construct = true;
-                locals.set_any_variable_may_exist(true);
+                locals.havoc_variables();
                 Type::mixed()
             }
             // The included file can define any variable.
@@ -1905,7 +1914,7 @@ impl<'a> Checker<'a> {
                     locals,
                     e.span,
                 );
-                locals.set_any_variable_may_exist(true);
+                locals.havoc_variables();
                 Type::mixed()
             }
             ExprKind::ShellExec(cmd) => {
@@ -2068,6 +2077,9 @@ impl<'a> Checker<'a> {
                 // `offsetAccess.nonArray` - `[$a, $b] = $x;`/
                 // `list($a, $b) = $x;` destructuring a value confirmed to
                 // never be array-like at all.
+                if writes_dynamic_variable(lhs) {
+                    locals.havoc_variables();
+                }
                 if let ExprKind::Destructure(items, _) = &lhs.kind
                     && !self.relation().is_destructurable(&rhs_ty).no()
                 {
