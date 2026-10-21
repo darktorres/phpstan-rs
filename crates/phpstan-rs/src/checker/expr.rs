@@ -5357,8 +5357,11 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
             locals.insert_with_provenance(key, ty.clone(), provenance);
             // The right operand of `&&`/`||` may be skipped, so a variable
             // it defined is defined on one path only; a branch that takes
-            // the operand narrows the mark away again.
-            locals.mark_maybe_undefined(key);
+            // the operand narrows the mark away again. A superglobal is
+            // always defined, however it got into `narrowed`.
+            if !matches!(narrowed.data(key), KeyData::Var(name) if is_superglobal(&name)) {
+                locals.mark_maybe_undefined(key);
+            }
         }
     }
 }

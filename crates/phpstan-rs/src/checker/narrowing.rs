@@ -4,6 +4,7 @@ use crate::checker::{Checker, Discriminant, Locals};
 use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
 use syntax::span::Span;
+use syntax::visit::for_each_child_expr;
 use types::{AccessoryKind, Type};
 mod assertions;
 mod phpunit;
@@ -667,13 +668,17 @@ fn define_assigned_variables(e: &Expr, locals: &mut Locals) {
             }
             define_assigned_variables(rhs, locals);
         }
-        ExprKind::Binary(BinOp::Or | BinOp::LogicalOr | BinOp::Coalesce, _, _) => {}
-        ExprKind::Binary(_, l, r) => {
+        // Only the left operand of `||` and `??` is always evaluated; the
+        // right one may be skipped.
+        ExprKind::Binary(BinOp::Or | BinOp::LogicalOr | BinOp::Coalesce, l, _) => {
             define_assigned_variables(l, locals);
-            define_assigned_variables(r, locals);
         }
-        ExprKind::Unary(_, inner) => define_assigned_variables(inner, locals),
-        _ => {}
+        // Only the subject of a `match` and the condition of a ternary are
+        // always evaluated; their arms may be skipped.
+        ExprKind::Match { subject: first, .. } | ExprKind::Ternary(first, _, _) => {
+            define_assigned_variables(first, locals);
+        }
+        _ => for_each_child_expr(e, |child| define_assigned_variables(child, locals)),
     }
 }
 
