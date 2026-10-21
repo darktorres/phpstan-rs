@@ -123,6 +123,10 @@ enum Read {
     /// `$v` as a positional argument of a same-file function whose parameter
     /// its live code never invokes: no call reaches the value through it.
     Passed,
+    /// `$v` copied into another variable (`$w = $v`, or a branch of a ternary
+    /// assigned to one): the value reaches that variable, whose own reads
+    /// decide whether it is followed.
+    Copied,
     /// Any other use: the value is passed on or can be reached elsewhere.
     Escape,
 }
@@ -134,7 +138,20 @@ enum Write {
     Closure(Span),
     /// `$v = [ ... ]`, with the elements that can be followed.
     Array(Vec<Element>),
-    /// Any other write: a parameter, a capture, `$v = $w`, `foreach`, ...
+    /// `$v = $w`, or `$v = a ? b : c` with each branch a source.
+    Sources(Vec<Source>),
+    /// Any other write: a parameter, a capture, `foreach`, ...
+    Other,
+}
+
+/// Where one branch of a value assigned to a variable comes from.
+#[derive(Clone)]
+enum Source {
+    /// A closure literal, by its span.
+    Closure(Span),
+    /// Another variable, copied.
+    Variable(String),
+    /// Anything else.
     Other,
 }
 
@@ -169,29 +186,85 @@ impl Scope {
         self.reads.entry(name.to_string()).or_default().push(read);
     }
 
-    /// The literals this scope follows, once its variables are all seen.
+    /// The literals this scope follows, once its variables are all seen: a
+    /// literal is followed when every variable that may hold it is.
     fn followed_literals(&self) -> Vec<Span> {
         if self.dynamic {
             return Vec::new();
         }
         let mut found = Vec::new();
         for (name, writes) in &self.writes {
-            let [write] = writes.as_slice() else {
-                continue;
-            };
-            match write {
-                Write::Closure(span) if self.variable_followed(name) => found.push(*span),
-                Write::Array(elements) if self.holder_followed(name) => {
-                    for element in elements {
-                        if let Element::Closure(span) = element {
-                            found.push(*span);
-                        }
+            if let [Write::Array(elements)] = writes.as_slice()
+                && self.holder_followed(name)
+            {
+                for element in elements {
+                    if let Element::Closure(span) = element {
+                        found.push(*span);
                     }
                 }
-                _ => {}
+            }
+        }
+        // The literals each variable may hold, and the copies between variables.
+        let mut holds: FxHashMap<&str, FxHashSet<Span>> = FxHashMap::default();
+        let mut copies: Vec<(&str, &str)> = Vec::new();
+        for (name, writes) in &self.writes {
+            for write in writes {
+                match write {
+                    Write::Closure(span) => {
+                        holds.entry(name).or_default().insert(*span);
+                    }
+                    Write::Sources(sources) => {
+                        for source in sources {
+                            match source {
+                                Source::Closure(span) => {
+                                    holds.entry(name).or_default().insert(*span);
+                                }
+                                Source::Variable(from) => copies.push((name, from)),
+                                Source::Other => {}
+                            }
+                        }
+                    }
+                    Write::Array(_) | Write::Other => {}
+                }
+            }
+        }
+        loop {
+            let mut changed = false;
+            for (target, from) in &copies {
+                let reaching: Vec<Span> = holds
+                    .get(from)
+                    .map(|spans| spans.iter().copied().collect())
+                    .unwrap_or_default();
+                for span in reaching {
+                    changed |= holds.entry(target).or_default().insert(span);
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let literals: FxHashSet<Span> = holds.values().flatten().copied().collect();
+        for span in literals {
+            let settled = holds
+                .iter()
+                .filter(|(_, spans)| spans.contains(&span))
+                .all(|(name, _)| self.holder_settles(name));
+            if settled {
+                found.push(span);
             }
         }
         found
+    }
+
+    /// Whether `name` may hold a followed literal without any of its reads
+    /// escaping: its reads are all calls or copies, and it is never written
+    /// as an array.
+    fn holder_settles(&self, name: &str) -> bool {
+        self.variable_followed(name)
+            && !self
+                .writes
+                .get(name)
+                .is_some_and(|writes| writes.iter().any(|write| matches!(write, Write::Array(_))))
     }
 
     /// Whether every read of the variable `name` is a call, or an element
@@ -199,7 +272,7 @@ impl Scope {
     fn variable_followed(&self, name: &str) -> bool {
         self.reads.get(name).is_none_or(|reads| {
             reads.iter().all(|read| match read {
-                Read::Callee | Read::Passed => true,
+                Read::Callee | Read::Passed | Read::Copied => true,
                 Read::Element(holder) => self.holder_followed(holder),
                 Read::CalleeElement | Read::Escape => false,
             })
@@ -445,9 +518,45 @@ impl ScopeFlow<'_> {
                 }
                 Write::Array(elements)
             }
+            ExprKind::Variable(_) | ExprKind::Ternary(..) if self.inside_arrow == 0 => {
+                let branches: Vec<&Expr> = match &rhs.kind {
+                    ExprKind::Ternary(cond, then, otherwise) => {
+                        self.visit_expr(cond);
+                        then.as_deref()
+                            .into_iter()
+                            .chain(std::iter::once(&**otherwise))
+                            .collect()
+                    }
+                    _ => vec![rhs],
+                };
+                Write::Sources(
+                    branches
+                        .into_iter()
+                        .map(|branch| self.source_of(branch))
+                        .collect(),
+                )
+            }
             _ => {
                 self.visit_expr(rhs);
                 Write::Other
+            }
+        }
+    }
+
+    /// Where a branch of a value assigned to a variable comes from.
+    fn source_of(&mut self, branch: &Expr) -> Source {
+        match &branch.kind {
+            ExprKind::Closure(closure) => {
+                self.escape_uses(&closure.uses);
+                Source::Closure(branch.span)
+            }
+            ExprKind::Variable(variable) => {
+                self.scope.read(variable.as_str(), Read::Copied);
+                Source::Variable(variable.as_str().to_string())
+            }
+            _ => {
+                self.visit_expr(branch);
+                Source::Other
             }
         }
     }
