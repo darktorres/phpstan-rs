@@ -104,7 +104,9 @@ pub(crate) fn tracked_closures(
     let mut top = Scope::default();
     top.dynamic |= globals.uses_globals_array;
     for name in &globals.imported {
-        top.read(name, Read::Escape);
+        if !invocations.must_invoke.covers_global(name) {
+            top.read(name, Read::Escape);
+        }
     }
     for name in &globals.called {
         top.read(name, Read::Callee);
@@ -147,6 +149,11 @@ enum Read {
     /// `$v` as a positional argument of a same-file function whose parameter
     /// its live code never invokes: no call reaches the value through it.
     Passed,
+    /// `$v` as a positional argument of a same-file function whose parameter
+    /// every path of its body invokes, or a global such a function invokes on
+    /// every call: the value runs during that call, which checks it there
+    /// (see `check_must_invoked_calls`).
+    Invoked,
     /// `$v` copied into another variable (`$w = $v`, or a branch of a ternary
     /// assigned to one): the value reaches that variable, whose own reads
     /// decide whether it is followed.
@@ -392,7 +399,7 @@ impl Scope {
     ) -> bool {
         self.reads.get(name).is_none_or(|reads| {
             reads.iter().all(|read| match read {
-                Read::Callee | Read::Passed | Read::Copied => true,
+                Read::Callee | Read::Passed | Read::Invoked | Read::Copied => true,
                 Read::Element(holder) => self.holder_followed(holder),
                 Read::Captured(literal) => {
                     followed.contains(literal)
@@ -623,6 +630,12 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
                     _ => self.visit_expr(callee),
                 }
                 let uninvoked = self.uninvoked_parameters(callee, args).filter(|_| plain);
+                let invoked = self.invoked_parameters(callee, args).filter(|_| plain);
+                if plain && let ExprKind::Name(name) = &callee.kind {
+                    for global in self.invocations.must_invoke.globals(name.written.as_str()) {
+                        self.scope.read(global, Read::Invoked);
+                    }
+                }
                 for (index, arg) in args.iter().enumerate() {
                     match &arg.value.kind {
                         ExprKind::Variable(name)
@@ -633,6 +646,15 @@ impl<'ast> Visitor<'ast> for ScopeFlow<'_> {
                                     .is_some_and(|u| u.get(index) == Some(&true)) =>
                         {
                             self.scope.read(name.as_str(), Read::Passed);
+                        }
+                        ExprKind::Variable(name)
+                            if !arg.spread
+                                && arg.name.is_none()
+                                && invoked
+                                    .as_ref()
+                                    .is_some_and(|i| i.get(index) == Some(&true)) =>
+                        {
+                            self.scope.read(name.as_str(), Read::Invoked);
                         }
                         _ => self.visit_arg(arg),
                     }
@@ -1072,6 +1094,40 @@ impl Checker<'_> {
         }
     }
 
+    /// Checks the closure literals a same-file function `name` invokes on every
+    /// path, at this call: each positional argument at a parameter the function
+    /// invokes, and each global the function invokes when it is called. The
+    /// call runs them in the state it sees, so each is checked with that state
+    /// and no argument values of its own.
+    pub(crate) fn check_must_invoked_calls(
+        &mut self,
+        name: &str,
+        args: &[Arg],
+        locals: &mut Locals,
+        label: &str,
+    ) {
+        if let Some(invoked) = self
+            .invocations
+            .must_invoke
+            .parameters(name)
+            .map(<[bool]>::to_vec)
+            && args.iter().all(|arg| !arg.spread && arg.name.is_none())
+        {
+            for (index, arg) in args.iter().enumerate() {
+                if invoked.get(index) == Some(&true) {
+                    let callee = self.infer_expr(&arg.value, locals);
+                    self.check_tracked_closure_calls(&callee, &[], locals, label);
+                }
+            }
+        }
+        for global in self.invocations.must_invoke.globals(name).to_vec() {
+            if locals.contains_var(&global) && !locals.any_variable_may_exist() {
+                let callee = self.variable_type(&global, locals);
+                self.check_tracked_closure_calls(&callee, &[], locals, label);
+            }
+        }
+    }
+
     /// Drops what was reported from `from` on that a condition or narrowing
     /// is constant, unless the literal's creation check reports it too. Such a
     /// finding describes the body, which runs at every call, so the argument
@@ -1209,5 +1265,21 @@ impl ScopeFlow<'_> {
             .invocations
             .invoked_by_call(name.written.as_str(), &values)?;
         Some(invoked.iter().map(|invoked| !invoked).collect())
+    }
+
+    /// For a call of a same-file function `callee` names, with arguments
+    /// `args`: which of its positional parameters every path of its body
+    /// invokes.
+    fn invoked_parameters(&self, callee: &Expr, args: &[Arg]) -> Option<Vec<bool>> {
+        let ExprKind::Name(name) = &callee.kind else {
+            return None;
+        };
+        if args.iter().any(|arg| arg.spread || arg.name.is_some()) {
+            return None;
+        }
+        self.invocations
+            .must_invoke
+            .parameters(name.written.as_str())
+            .map(<[bool]>::to_vec)
     }
 }

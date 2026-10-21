@@ -25,6 +25,7 @@ use syntax::visit::{self, Visitor};
 
 use super::closure_flow::is_dynamic_function;
 use super::global_writes::key;
+use super::must_invoke::MustInvoke;
 
 /// How many same-file calls deep a summary follows. A call past it is
 /// assumed to invoke every parameter it is passed.
@@ -72,6 +73,8 @@ pub(crate) struct Invocations {
     /// Each class the file declares as a plain class, by its key; `None` for a
     /// name declared twice.
     classes: FxHashMap<String, Option<ClassInfo>>,
+    /// The parameters and globals each function invokes on every path.
+    pub(crate) must_invoke: MustInvoke,
     summaries: RefCell<FxHashMap<Call, Rc<Vec<bool>>>>,
     /// The calls whose summaries are being computed, for cycle detection.
     active: RefCell<Vec<Call>>,
@@ -92,10 +95,12 @@ impl Invocations {
             let short = name.rsplit('\\').next().unwrap_or(name.as_str());
             *short_names.entry(short.to_string()).or_insert(0) += 1;
         }
+        let must_invoke = MustInvoke::new(program, &collect.functions);
         Invocations {
             functions: collect.functions,
             short_names,
             classes: collect.classes,
+            must_invoke,
             ..Invocations::default()
         }
     }

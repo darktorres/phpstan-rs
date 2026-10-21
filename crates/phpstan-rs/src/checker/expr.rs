@@ -1497,6 +1497,7 @@ impl<'a> Checker<'a> {
                     e.span,
                 );
                 if let Some(name) = &resolved_name {
+                    self.check_must_invoked_calls(name, args, locals, label);
                     if let Some(sig) = sig {
                         // This function's own throw contribution - tried
                         // before `sig.throws` itself.

@@ -977,6 +977,7 @@ mod includes;
 mod ini_directives;
 mod instantiation;
 pub(crate) mod invocation;
+pub(crate) mod must_invoke;
 pub mod rule_level_helper;
 pub mod settings;
 mod strict_idioms;

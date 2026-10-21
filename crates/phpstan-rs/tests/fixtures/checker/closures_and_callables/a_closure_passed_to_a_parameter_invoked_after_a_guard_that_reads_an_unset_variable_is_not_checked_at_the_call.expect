@@ -1,0 +1,3 @@
+3:9-3:20 if.alwaysFalse L4 | If condition is always false.
+3:9-3:11 nullCoalesce.variable L1 | Variable $u on left side of ?? is never defined.
+9:12-9:14 argument.type L5 | Parameter #1 $string of function strlen expects string, 'a'|null given.
