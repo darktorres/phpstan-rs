@@ -241,9 +241,9 @@ impl<'a> Checker<'a> {
         // subtract `Iterator` from the entry's `Traversable` first.
         //
         // The condition runs once per pass, on the body's end, so an
-        // assignment in it (`while ($w = !$w)`) takes effect once. The exit
-        // is that same end, with its `continue` states, which jump to the
-        // condition too.
+        // assignment in it (`while ($w = !$w)`) takes effect once. A
+        // `continue` jumps to the condition too, so its states narrow by
+        // `cond` as the back edge does. The exit is the unnarrowed end.
         let entry = locals.clone();
         let exits_from = self.current_function_exit_points.len();
         self.loop_depth += 1;
@@ -269,6 +269,12 @@ impl<'a> Checker<'a> {
                     end = merge_scopes(&this.relation(), &end, &state);
                 }
                 body_end = Some(end);
+                if let Some(mut continues) = this.loop_continue_states.pop() {
+                    for state in &mut continues {
+                        this.apply_narrowing(cond, state, true);
+                    }
+                    this.loop_continue_states.push(continues);
+                }
                 this.apply_narrowing(cond, pass_locals, true);
             },
         );
