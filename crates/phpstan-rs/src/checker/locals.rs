@@ -2,7 +2,75 @@
 
 use super::keys::KeyTableRef;
 use super::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Every value a function body writes to each of its variables, shared by
+/// the scopes of that body (a clone of a `Locals` shares it), so a by-ref
+/// capture (`use (&$x)`) can see each value `$x` may hold when the closure
+/// runs, not only the value at its creation. Each write takes the next
+/// `clock` stamp, so the writes made since a point are found by comparing
+/// stamps, even when the written type was already recorded.
+#[derive(Default)]
+pub(crate) struct WriteLog {
+    clock: u64,
+    names: rustc_hash::FxHashMap<syntax::name::Name, NameWrites>,
+    // The stamp of the latest write whose name is not known: any variable
+    // may have been written, so every variable has a write since then.
+    any_name_stamp: u64,
+}
+
+#[derive(Default)]
+struct NameWrites {
+    // The distinct types written to the name, in first-write order.
+    types: Vec<Type>,
+    stamp: u64,
+}
+
+impl WriteLog {
+    fn record(&mut self, name: syntax::name::Name, ty: &Type) {
+        self.clock += 1;
+        let writes = self.names.entry(name).or_default();
+        writes.stamp = self.clock;
+        if !writes.types.contains(ty) {
+            writes.types.push(ty.clone());
+        }
+    }
+
+    fn record_any_name(&mut self) {
+        self.clock += 1;
+        self.any_name_stamp = self.clock;
+    }
+
+    /// The stamp of the latest write; a later `written_since` call sees
+    /// only the writes after it.
+    pub(crate) fn clock(&self) -> u64 {
+        self.clock
+    }
+
+    /// The distinct types written to `name`.
+    pub(crate) fn types_of(&self, name: &str) -> &[Type] {
+        self.names
+            .get(&syntax::name::Name::from(name))
+            .map_or(&[], |writes| writes.types.as_slice())
+    }
+
+    /// Whether some write since the stamp `clock` may have written any
+    /// variable (an unknown-name write).
+    pub(crate) fn any_name_written_since(&self, clock: u64) -> bool {
+        self.any_name_stamp > clock
+    }
+
+    /// The names written since the stamp `clock`.
+    pub(crate) fn names_written_since(&self, clock: u64) -> Vec<syntax::name::Name> {
+        self.names
+            .iter()
+            .filter(|(_, writes)| writes.stamp > clock)
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+}
 
 /// A checked scope's variable-name-to-inferred-type bindings, plus an
 /// opt-in, parallel declaration-span side-channel the LSP's local-variable-
@@ -85,6 +153,10 @@ pub(crate) struct Locals {
     // (real PHPStan's `afterExtractCall`). Flow-sensitive: a branch
     // merge keeps it if either side has it.
     any_variable_may_exist: bool,
+    // The writes to this function body's variables, when a by-ref capture
+    // of one needs them (`enable_write_log`). Shared by every clone, so a
+    // write in any branch, merge or loop pass of the body lands in it.
+    write_log: Option<Rc<RefCell<WriteLog>>>,
     // Whether `declare`/`insert_with_provenance` do anything - `false` by
     // default for every ordinary check-project run, `true` only for the
     // LSP's own per-request variable-navigation probe. Carried on `Locals`
@@ -137,6 +209,7 @@ impl Locals {
             discriminant_array_facts: DiscriminantArrayFactsMap::default(),
             may_have_member_narrowing: false,
             any_variable_may_exist: false,
+            write_log: None,
             track: false,
             version: 0,
         }
@@ -272,12 +345,39 @@ impl Locals {
         }
     }
 
+    /// Starts logging the writes to this scope's variables, into a log
+    /// every scope cloned from it shares. Does nothing when one exists.
+    pub(crate) fn enable_write_log(&mut self) {
+        if self.write_log.is_none() {
+            self.write_log = Some(Rc::default());
+        }
+    }
+
+    /// The log of the writes to this scope's variables, once enabled.
+    pub(crate) fn write_log(&self) -> Option<&Rc<RefCell<WriteLog>>> {
+        self.write_log.as_ref()
+    }
+
+    /// Logs the write of `ty` to `key` when it is a variable and the log
+    /// is enabled.
+    fn log_write(&self, key: LocalKey, ty: &Type) {
+        let Some(log) = &self.write_log else {
+            return;
+        };
+        if let KeyData::Var(name) = self.data(key) {
+            if self.is_real_variable(key) {
+                log.borrow_mut().record(name, ty);
+            }
+        }
+    }
+
     /// Provenance-preserving update, for narrowing an existing binding
     /// (`instanceof`/null/array-shape checks) or a by-ref call's type
     /// widening (`sort($arr)`, `preg_match(..., $matches)`) - the value's
     /// declaration site doesn't move just because its known type changed.
     pub(crate) fn insert(&mut self, key: LocalKey, ty: Type) -> Option<Type> {
         self.touch();
+        self.log_write(key, &ty);
         self.maybe_undefined.remove(&key);
         self.note_synthetic(key);
         self.types.insert(key, ty)
@@ -338,6 +438,7 @@ impl Locals {
     /// makes anything tracked before it a dead candidate.
     pub(crate) fn declare(&mut self, key: LocalKey, ty: Type, span: Span) -> Option<Type> {
         self.touch();
+        self.log_write(key, &ty);
         self.maybe_undefined.remove(&key);
         self.native.remove(&key);
         if self.track {
@@ -479,6 +580,7 @@ impl Locals {
         provenance: ProvenanceSet,
     ) -> Option<Type> {
         self.touch();
+        self.log_write(key, &ty);
         if self.track && !provenance.is_empty() {
             self.provenance.insert(key, provenance);
         }
@@ -548,6 +650,7 @@ impl Locals {
 
     pub(crate) fn remove(&mut self, key: LocalKey) -> Option<Type> {
         self.touch();
+        self.log_write(key, &Type::null());
         self.maybe_undefined.remove(&key);
         self.provenance.remove(&key);
         self.native.remove(&key);
@@ -562,6 +665,7 @@ impl Locals {
     pub(crate) fn remove_type(&mut self, key: LocalKey) -> Option<Type> {
         debug_assert!(!self.track);
         self.touch();
+        self.log_write(key, &Type::null());
         self.maybe_undefined.remove(&key);
         if self.may_have_member_narrowing {
             self.synthetic.remove(&key);
@@ -643,6 +747,7 @@ impl Locals {
             discriminant_array_facts: DiscriminantArrayFactsMap::default(),
             may_have_member_narrowing: false,
             any_variable_may_exist: false,
+            write_log: None,
             track: self.track,
             version: NEXT_VERSION.fetch_add(1, Ordering::Relaxed),
         }
@@ -806,6 +911,9 @@ impl Locals {
     /// (`$$name = ...`, an `extract`, an `include`, an `eval`): any variable
     /// may now hold any value, and any name may now exist.
     pub(crate) fn havoc_variables(&mut self) {
+        if let Some(log) = &self.write_log {
+            log.borrow_mut().record_any_name();
+        }
         let keys: Vec<LocalKey> = self
             .iter()
             .filter(|&(key, _)| self.is_real_variable(key))
