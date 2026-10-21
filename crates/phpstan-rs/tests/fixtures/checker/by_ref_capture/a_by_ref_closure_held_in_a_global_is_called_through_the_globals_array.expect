@@ -1,0 +1,1 @@
+4:12-4:14 argument.type L5 | Parameter #1 $string of function strlen expects string, null given.
