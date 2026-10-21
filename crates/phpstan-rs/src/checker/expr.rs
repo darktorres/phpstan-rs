@@ -3,6 +3,7 @@ use crate::checker::GotoState;
 use crate::checker::InferQuestion;
 use crate::checker::assignment::writes_dynamic_variable;
 use crate::checker::calls::parameters::Callee;
+use crate::checker::control_flow::{body_has_byref_capture, body_has_call};
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::resolve::receiver_class;
 use crate::checker::suggest;
@@ -2065,6 +2066,14 @@ impl<'a> Checker<'a> {
                     {
                         locals.declare_var(name, Type::mixed(), rhs.span);
                     }
+                    // Both names now refer to one value, so a write through
+                    // either reaches the other, and neither name's logged
+                    // writes say what it may hold.
+                    for side in [lhs, rhs] {
+                        if let ExprKind::Variable(name) = &side.kind {
+                            locals.log_mixed_write_var(name);
+                        }
+                    }
                 }
                 // `$r = &$a[];` legally creates the new element it refers to.
                 let rhs_ty = match &rhs.kind {
@@ -3439,9 +3448,20 @@ impl<'a> Checker<'a> {
                     // A by-reference capture can still gain keys from
                     // anything else holding the reference before the
                     // closure runs.
-                    let ty = if u.by_ref { ty.unsealed_shapes() } else { ty };
+                    let ty = if u.by_ref {
+                        self.widen_to_byref_writes(&u.name.name, ty)
+                    } else {
+                        ty
+                    };
                     closure_locals.insert_with_provenance_var(&u.name, ty, provenance);
                 }
+                // The writes this body makes, logged from here on so the
+                // seeding above is not one of them. The write-back below
+                // reads which by-reference captures the body wrote.
+                let closure_writes = uses
+                    .iter()
+                    .any(|u| u.by_ref)
+                    .then(|| closure_locals.enable_write_log());
                 if !*is_static && let Some(this_ty) = locals.get_var("this") {
                     closure_locals.insert_var("this", this_ty.clone());
                 }
@@ -3670,10 +3690,15 @@ impl<'a> Checker<'a> {
                         // the same way only its diagnostics survive.
                         this.current_function_return_points.clear();
                         this.current_function_saw_explicit_return = false;
-                        body_terminates = this
-                            .check_block(body, pass_locals, declared_return, label)
-                            .completion
-                            .terminates;
+                        body_terminates = this.check_body_to_writes_fixpoint(
+                            pass_locals,
+                            body_has_byref_capture(body),
+                            |this, pass_locals| {
+                                this.check_block(body, pass_locals, declared_return, label)
+                                    .completion
+                                    .terminates
+                            },
+                        );
                     },
                 );
                 closure_locals = converged;
@@ -3749,21 +3774,39 @@ impl<'a> Checker<'a> {
                 // convergence snapshot above is unconditional - but this
                 // project's own "don't guess wrong" precedent prefers a
                 // graceful degrade here over an `unwrap()`).
+                // A capture is written back when the body writes it, and
+                // when the body makes a call, which may write any of them.
+                // A capture neither written nor exposed to a call keeps the
+                // outer type it has: the body's own view of it only ever
+                // reflects the body's narrowing, not an assignment.
+                let body_calls = body_has_call(body);
                 for u in uses {
                     if !u.by_ref {
                         continue;
                     }
-                    let mutated = closure_byref_exit_snapshots
-                        .get(&u.name.name)
-                        .and_then(|snapshots| {
-                            snapshots.iter().cloned().union_all_with(&self.relation())
-                        })
-                        .unwrap_or_else(|| {
-                            closure_locals
-                                .get_var(&u.name)
-                                .cloned()
-                                .unwrap_or(Type::mixed())
-                        });
+                    let written_here = closure_writes.as_ref().is_some_and(|writes| {
+                        let writes = writes.borrow();
+                        !writes.types_of(&u.name.name).is_empty() || writes.any_name_written()
+                    });
+                    if !written_here && !body_calls {
+                        continue;
+                    }
+                    let mutated = if written_here {
+                        closure_byref_exit_snapshots
+                            .get(&u.name.name)
+                            .and_then(|snapshots| {
+                                snapshots.iter().cloned().union_all_with(&self.relation())
+                            })
+                            .unwrap_or_else(|| {
+                                closure_locals
+                                    .get_var(&u.name)
+                                    .cloned()
+                                    .unwrap_or(Type::mixed())
+                            })
+                    } else {
+                        let held = locals.get_var(&u.name).cloned().unwrap_or(Type::null());
+                        self.widen_to_byref_writes(&u.name.name, held)
+                    };
                     if !locals.contains_var(&u.name) {
                         // Real PHP auto-vivifies `$x` in the outer/
                         // declaring scope the moment `use (&$x)` captures

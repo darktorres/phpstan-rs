@@ -1,6 +1,6 @@
 use crate::checker::keys::{KeyData, LocalKey};
 use crate::checker::{Checker, Discriminant, Locals};
-use types::{self, Relation, Type};
+use types::{self, Relation, Type, UnionAll as _};
 
 mod boolean_conditions;
 mod generators;
@@ -108,6 +108,71 @@ impl<'a> Checker<'a> {
                 next_entry.mark_maybe_undefined(name);
             }
         }
+    }
+
+    /// `ty` widened to every value the enclosing body writes to the variable
+    /// `name` (`byref_writes`): what a by-reference capture of it may hold
+    /// when its closure runs, wherever the closure is created.
+    pub(crate) fn widen_to_byref_writes(&self, name: &str, ty: types::Type) -> types::Type {
+        let mut types = vec![ty];
+        if let Some(log) = &self.byref_writes {
+            let log = log.borrow();
+            types.extend(log.types_of(name).iter().cloned());
+            if log.any_name_written() {
+                types.push(types::Type::mixed());
+            }
+        }
+        types
+            .into_iter()
+            .union_all_with(&self.relation())
+            .unwrap_or_else(types::Type::mixed)
+            .unsealed_shapes()
+    }
+
+    /// Runs `check` over a body's locals, repeating it while the body's
+    /// write log still grows, when the body holds a by-reference capture
+    /// (`use (&$x)`): a capture's closure starts from every value the body
+    /// writes to the variable (`byref_writes`), and the writes its own check
+    /// logs are what the next pass starts from. Every pass starts from
+    /// `locals` as it was, and the log only grows across them, so the first
+    /// pass that adds no write is the fixed point: its `locals` and
+    /// diagnostics are kept, and any earlier pass is rewound the way a loop
+    /// pass is. Bounded by `MAX_PASSES`; the last pass is kept when the
+    /// writes still grow.
+    pub(crate) fn check_body_to_writes_fixpoint<R>(
+        &mut self,
+        locals: &mut Locals,
+        holds_byref_capture: bool,
+        mut check: impl FnMut(&mut Self, &mut Locals) -> R,
+    ) -> R {
+        if !holds_byref_capture {
+            return check(self, locals);
+        }
+        const MAX_PASSES: usize = 4;
+        let log = locals.enable_write_log();
+        let entry = locals.clone();
+        let outer_writes = self.byref_writes.replace(std::rc::Rc::clone(&log));
+        for pass in 0..MAX_PASSES {
+            let mut pass_locals = entry.clone();
+            pass_locals.renew_version();
+            let before = log.borrow().clone();
+            let snapshots = self.current_function_by_ref_exit_snapshots.clone();
+            let unannotated = self.current_function_has_unannotated_call;
+            let saw_return = self.current_function_saw_explicit_return;
+            let mark = self.pass_mark();
+            let value = check(self, &mut pass_locals);
+            let settled = log.borrow().same_writes(&before);
+            if settled || pass + 1 == MAX_PASSES {
+                *locals = pass_locals;
+                self.byref_writes = outer_writes;
+                return value;
+            }
+            self.rewind_to(mark);
+            self.current_function_by_ref_exit_snapshots = snapshots;
+            self.current_function_has_unannotated_call = unannotated;
+            self.current_function_saw_explicit_return = saw_return;
+        }
+        unreachable!("the last pass returns")
     }
 
     pub(crate) fn converge_loop_body(
@@ -689,4 +754,29 @@ pub(crate) fn merge_scopes(
         merged.mark_maybe_undefined(name);
     }
     merged
+}
+
+/// Whether a body holds a by-reference capture: a closure in it, outside
+/// any nested function or closure body, has a `use (&$x)`.
+pub(crate) fn body_has_byref_capture(stmts: &[syntax::ast::Stmt]) -> bool {
+    syntax::visit::any_expr_in_body(stmts, |e| match &e.kind {
+        syntax::ast::ExprKind::Closure(closure) => closure.uses.iter().any(|u| u.by_ref),
+        _ => false,
+    })
+}
+
+/// Whether a body makes a call of its own, outside any nested function or
+/// closure body - a call may write any variable a by-reference capture
+/// shares.
+pub(crate) fn body_has_call(stmts: &[syntax::ast::Stmt]) -> bool {
+    syntax::visit::any_expr_in_body(stmts, |e| {
+        matches!(
+            e.kind,
+            syntax::ast::ExprKind::Call(..)
+                | syntax::ast::ExprKind::New(..)
+                | syntax::ast::ExprKind::MethodCall(..)
+                | syntax::ast::ExprKind::StaticCall(..)
+                | syntax::ast::ExprKind::NewAnonymousClass(..)
+        )
+    })
 }

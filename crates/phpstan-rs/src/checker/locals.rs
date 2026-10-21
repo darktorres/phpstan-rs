@@ -9,66 +9,49 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Every value a function body writes to each of its variables, shared by
 /// the scopes of that body (a clone of a `Locals` shares it), so a by-ref
 /// capture (`use (&$x)`) can see each value `$x` may hold when the closure
-/// runs, not only the value at its creation. Each write takes the next
-/// `clock` stamp, so the writes made since a point are found by comparing
-/// stamps, even when the written type was already recorded.
-#[derive(Default)]
+/// runs, not only the value at its creation.
+#[derive(Default, Clone)]
 pub(crate) struct WriteLog {
-    clock: u64,
-    names: rustc_hash::FxHashMap<syntax::name::Name, NameWrites>,
-    // The stamp of the latest write whose name is not known: any variable
-    // may have been written, so every variable has a write since then.
-    any_name_stamp: u64,
-}
-
-#[derive(Default)]
-struct NameWrites {
-    // The distinct types written to the name, in first-write order.
-    types: Vec<Type>,
-    stamp: u64,
+    names: rustc_hash::FxHashMap<syntax::name::Name, Vec<Type>>,
+    // Whether a write whose name is not known happened (`havoc_variables`):
+    // then any variable may have been written.
+    any_name: bool,
 }
 
 impl WriteLog {
     fn record(&mut self, name: syntax::name::Name, ty: &Type) {
-        self.clock += 1;
-        let writes = self.names.entry(name).or_default();
-        writes.stamp = self.clock;
-        if !writes.types.contains(ty) {
-            writes.types.push(ty.clone());
+        let types = self.names.entry(name).or_default();
+        if !types.contains(ty) {
+            types.push(ty.clone());
         }
     }
 
     fn record_any_name(&mut self) {
-        self.clock += 1;
-        self.any_name_stamp = self.clock;
-    }
-
-    /// The stamp of the latest write; a later `written_since` call sees
-    /// only the writes after it.
-    pub(crate) fn clock(&self) -> u64 {
-        self.clock
+        self.any_name = true;
     }
 
     /// The distinct types written to `name`.
     pub(crate) fn types_of(&self, name: &str) -> &[Type] {
         self.names
             .get(&syntax::name::Name::from(name))
-            .map_or(&[], |writes| writes.types.as_slice())
+            .map_or(&[], |types| types.as_slice())
     }
 
-    /// Whether some write since the stamp `clock` may have written any
-    /// variable (an unknown-name write).
-    pub(crate) fn any_name_written_since(&self, clock: u64) -> bool {
-        self.any_name_stamp > clock
+    /// Whether a write whose name is not known happened.
+    pub(crate) fn any_name_written(&self) -> bool {
+        self.any_name
     }
 
-    /// The names written since the stamp `clock`.
-    pub(crate) fn names_written_since(&self, clock: u64) -> Vec<syntax::name::Name> {
-        self.names
-            .iter()
-            .filter(|(_, writes)| writes.stamp > clock)
-            .map(|(name, _)| name.clone())
-            .collect()
+    /// Whether `self` and `other` hold the same writes: the same names with
+    /// the same types, and both or neither with an unknown-name write.
+    pub(crate) fn same_writes(&self, other: &WriteLog) -> bool {
+        self.any_name == other.any_name
+            && self.names.len() == other.names.len()
+            && self.names.iter().all(|(name, types)| {
+                other.names.get(name).is_some_and(|theirs| {
+                    types.len() == theirs.len() && types.iter().all(|ty| theirs.contains(ty))
+                })
+            })
     }
 }
 
@@ -346,16 +329,24 @@ impl Locals {
     }
 
     /// Starts logging the writes to this scope's variables, into a log
-    /// every scope cloned from it shares. Does nothing when one exists.
-    pub(crate) fn enable_write_log(&mut self) {
-        if self.write_log.is_none() {
-            self.write_log = Some(Rc::default());
-        }
+    /// every scope cloned from it shares, and returns that log. An existing
+    /// log is kept, not replaced.
+    pub(crate) fn enable_write_log(&mut self) -> Rc<RefCell<WriteLog>> {
+        self.write_log.get_or_insert_with(Rc::default).clone()
     }
 
-    /// The log of the writes to this scope's variables, once enabled.
-    pub(crate) fn write_log(&self) -> Option<&Rc<RefCell<WriteLog>>> {
-        self.write_log.as_ref()
+    /// Gives this scope a version of its own, so an expression type
+    /// remembered for the previous content is not reused after a change
+    /// that is not visible in `types`, such as a wider write log.
+    pub(crate) fn renew_version(&mut self) {
+        self.touch();
+    }
+
+    /// Logs that the variable `name` may hold any value, for a write whose
+    /// value is not tracked (a reference binding, see `ExprKind::AssignRef`).
+    pub(crate) fn log_mixed_write_var(&self, name: &str) {
+        let key = self.var_key(name);
+        self.log_write(key, &Type::mixed());
     }
 
     /// Logs the write of `ty` to `key` when it is a variable and the log
@@ -364,10 +355,10 @@ impl Locals {
         let Some(log) = &self.write_log else {
             return;
         };
-        if let KeyData::Var(name) = self.data(key) {
-            if self.is_real_variable(key) {
-                log.borrow_mut().record(name, ty);
-            }
+        if self.is_real_variable(key)
+            && let KeyData::Var(name) = self.data(key)
+        {
+            log.borrow_mut().record(name, ty);
         }
     }
 

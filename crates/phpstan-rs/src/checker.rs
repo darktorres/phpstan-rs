@@ -6,6 +6,7 @@ use types::Name;
 use crate::file_id::FileId;
 use crate::pest_config;
 use crate::registry::Registry;
+use control_flow::body_has_byref_capture;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use keys::{KeyData, LocalKey};
 use std::sync::Arc;
@@ -697,6 +698,12 @@ pub struct Checker<'a> {
     // the operand (the true branch of `&&`, the false branch of `||`) reads
     // them as defined.
     pub(crate) operand_definitions: rustc_hash::FxHashMap<Span, Vec<String>>,
+    // The write log of the enclosing function body (or top-level script)
+    // while its by-reference captures are checked: a `use (&$x)` closure
+    // body starts from every value the body writes to `$x`, not only the
+    // value where the closure is created. `None` outside such a body, so a
+    // closure there starts from its creation state alone.
+    pub(crate) byref_writes: Option<std::rc::Rc<std::cell::RefCell<locals::WriteLog>>>,
     // How many loop bodies (`While`/`DoWhile`/`For`/`Foreach`, nesting
     // included - a `Switch` doesn't count, it runs its body once)
     // currently enclose whatever's being checked. `check_pointless_
@@ -1202,6 +1209,7 @@ impl<'a> Checker<'a> {
             loop_break_states: Vec::new(),
             loop_continue_states: Vec::new(),
             operand_definitions: rustc_hash::FxHashMap::default(),
+            byref_writes: None,
             loop_depth: 0,
             in_range_index_writes: Vec::new(),
             active_discriminant: Vec::new(),
@@ -1623,76 +1631,28 @@ impl<'a> Checker<'a> {
     }
 
     #[hotpath::measure]
-    pub fn check_program(&mut self, program: &[Stmt]) {
-        self.current_function_assigned_variables =
-            if self.settings.strict_rules.check_implicit_array_creation {
-                strict_rules::assigned_variables(program)
-            } else {
-                Vec::new()
-            };
-        self.constant_facts = global_constants::constant_facts(program);
-        if self.current_file.is_some() {
-            self.include_constant_initializers =
-                include_values::file_constant_initializers(program);
-            self.include_guarded_paths = if self.mentions & mentions::GUARD != 0 {
-                self.collect_include_guards(program)
-            } else {
-                FxHashSet::default()
-            };
-        }
-        self.check_declare_directives(program);
-        self.check_file_whitespace(program);
-        self.check_statement_keywords(program);
-        self.check_use_function_imports(program);
-        self.check_use_const_imports(program);
-        self.check_use_class_imports(program);
-        self.check_used_names(program);
-        let (rebind_targets, rebind_escape_all) = if self.mentions & mentions::REBIND != 0 {
-            unused::scan_program_for_rebind_targets(program)
-        } else {
-            (NameSet::default(), false)
-        };
-        self.rebind_target_classes = rebind_targets;
-        self.rebind_escape_all = rebind_escape_all;
-        // A file-local `uses(...)` call (no `->in(...)`) wins over
-        // whatever `Project::check_file` already set via
-        // `set_pest_this_type` from directory-scoped Pest.php config -
-        // matches real Pest's resolution order (file-local checked
-        // first).
-        if let Some(local_ty) = pest_config::file_local_this_type(program) {
-            self.pest_this_type = local_ty;
-        }
-        // Unlike `pest_this_type` above, hook properties are unioned, not
-        // overridden - a property-name set has no "file-local wins"
-        // precedence to apply. `file_local_hook_properties` returns owned
-        // `String`s, interned here on the way in to match
-        // `pest_hook_properties`'s own interned representation.
-        self.pest_hook_properties.extend(
-            pest_config::file_local_hook_properties(program)
-                .into_iter()
-                .map(|p| Name::from(&p)),
-        );
-
-        let mut top_locals: Locals = self.new_locals();
-        top_locals.set_track(self.probe_span.get().is_some());
-        let diagnostics_before = self.diagnostics.len();
-        // `self.name_ctx` is tracked *positionally* here: real PHP only
-        // allows a `namespace`/`use` statement at the top level of a file,
-        // so a single left-to-right pass, mutating `self.name_ctx` in
-        // place when one is seen, means that by the time this loop
-        // reaches a `ClassDecl`/`FunctionDecl`/`ClassDecl`, `self.name_ctx`
-        // reflects whichever `namespace` was active at that declaration's
-        // own position - not merely the last one anywhere in the file,
-        // which would wrongly resolve a declaration under an earlier
-        // namespace against a later one.
-        self.name_ctx = NameContext::default();
+    /// Checks the statements of a top-level script in order, with the
+    /// declarations they contain when `declarations` is set. A dry pass
+    /// (`declarations` unset) skips them: see `check_top_level_with_byref_
+    /// writes`, which runs them once, in the final pass.
+    fn check_top_level_statements(
+        &mut self,
+        program: &[Stmt],
+        top_locals: &mut Locals,
+        declarations: bool,
+    ) {
         for stmt in program {
-            self.check_function_like_declarations_in_stmt(stmt);
+            if declarations {
+                self.check_function_like_declarations_in_stmt(stmt);
+            }
             match &stmt.kind {
                 StmtKind::Namespace(name) => self.name_ctx.set_namespace(name),
                 StmtKind::Use(imports) => self.name_ctx.add_uses(imports),
-                StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
-                StmtKind::ClassDecl(c) => {
+                StmtKind::FunctionDecl(f) if declarations => {
+                    self.check_function(f, None, false, true)
+                }
+                StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) if !declarations => {}
+                StmtKind::ClassDecl(c) if declarations => {
                     // `current_class` must be the fully-qualified name -
                     // it's looked up directly against
                     // `self.registry.classes` (via `resolve_pseudo` for
@@ -1872,9 +1832,103 @@ impl<'a> Checker<'a> {
                 // whole file, so the extract()/eval() guard spans the
                 // entire loop rather than resetting per statement.
                 _ => {
-                    self.check_stmt(stmt, &mut top_locals, None, "<main>");
+                    self.check_stmt(stmt, top_locals, None, "<main>");
                 }
             }
+        }
+    }
+
+    /// `check_top_level_statements` for a script that holds a by-reference
+    /// capture: the statements are first checked without their declarations
+    /// until the writes to the script's variables settle
+    /// (`check_body_to_writes_fixpoint`), and then once more with them, from
+    /// the state the script starts with and with the settled writes in hand.
+    /// Its own diagnostics and records are rewound before the final pass.
+    fn check_top_level_with_byref_writes(&mut self, program: &[Stmt], top_locals: &mut Locals) {
+        let writes = top_locals.enable_write_log();
+        let entry = top_locals.clone();
+        let name_ctx = self.name_ctx.clone();
+        let mark = self.pass_mark();
+        self.check_body_to_writes_fixpoint(top_locals, true, |this, locals| {
+            this.name_ctx = name_ctx.clone();
+            this.check_top_level_statements(program, locals, false);
+        });
+        self.rewind_to(mark);
+        self.name_ctx = name_ctx;
+        *top_locals = entry;
+        top_locals.renew_version();
+        let outer_writes = self.byref_writes.replace(writes);
+        self.check_top_level_statements(program, top_locals, true);
+        self.byref_writes = outer_writes;
+    }
+
+    pub fn check_program(&mut self, program: &[Stmt]) {
+        self.current_function_assigned_variables =
+            if self.settings.strict_rules.check_implicit_array_creation {
+                strict_rules::assigned_variables(program)
+            } else {
+                Vec::new()
+            };
+        self.constant_facts = global_constants::constant_facts(program);
+        if self.current_file.is_some() {
+            self.include_constant_initializers =
+                include_values::file_constant_initializers(program);
+            self.include_guarded_paths = if self.mentions & mentions::GUARD != 0 {
+                self.collect_include_guards(program)
+            } else {
+                FxHashSet::default()
+            };
+        }
+        self.check_declare_directives(program);
+        self.check_file_whitespace(program);
+        self.check_statement_keywords(program);
+        self.check_use_function_imports(program);
+        self.check_use_const_imports(program);
+        self.check_use_class_imports(program);
+        self.check_used_names(program);
+        let (rebind_targets, rebind_escape_all) = if self.mentions & mentions::REBIND != 0 {
+            unused::scan_program_for_rebind_targets(program)
+        } else {
+            (NameSet::default(), false)
+        };
+        self.rebind_target_classes = rebind_targets;
+        self.rebind_escape_all = rebind_escape_all;
+        // A file-local `uses(...)` call (no `->in(...)`) wins over
+        // whatever `Project::check_file` already set via
+        // `set_pest_this_type` from directory-scoped Pest.php config -
+        // matches real Pest's resolution order (file-local checked
+        // first).
+        if let Some(local_ty) = pest_config::file_local_this_type(program) {
+            self.pest_this_type = local_ty;
+        }
+        // Unlike `pest_this_type` above, hook properties are unioned, not
+        // overridden - a property-name set has no "file-local wins"
+        // precedence to apply. `file_local_hook_properties` returns owned
+        // `String`s, interned here on the way in to match
+        // `pest_hook_properties`'s own interned representation.
+        self.pest_hook_properties.extend(
+            pest_config::file_local_hook_properties(program)
+                .into_iter()
+                .map(|p| Name::from(&p)),
+        );
+
+        let mut top_locals: Locals = self.new_locals();
+        top_locals.set_track(self.probe_span.get().is_some());
+        let diagnostics_before = self.diagnostics.len();
+        // `self.name_ctx` is tracked *positionally* here: real PHP only
+        // allows a `namespace`/`use` statement at the top level of a file,
+        // so a single left-to-right pass, mutating `self.name_ctx` in
+        // place when one is seen, means that by the time this loop
+        // reaches a `ClassDecl`/`FunctionDecl`/`ClassDecl`, `self.name_ctx`
+        // reflects whichever `namespace` was active at that declaration's
+        // own position - not merely the last one anywhere in the file,
+        // which would wrongly resolve a declaration under an earlier
+        // namespace against a later one.
+        self.name_ctx = NameContext::default();
+        if body_has_byref_capture(program) {
+            self.check_top_level_with_byref_writes(program, &mut top_locals);
+        } else {
+            self.check_top_level_statements(program, &mut top_locals, true);
         }
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);

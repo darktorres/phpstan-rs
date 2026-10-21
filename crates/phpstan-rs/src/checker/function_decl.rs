@@ -1,4 +1,5 @@
 use crate::checker::GotoState;
+use crate::checker::control_flow::body_has_byref_capture;
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
     ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, generator_missing_return_type,
@@ -935,15 +936,15 @@ impl<'a> Checker<'a> {
         // as any nested `{ ... }` block is - it just needs to be routed
         // through the one place that check lives.
         let previous_implicit_calls = std::mem::take(&mut self.implicit_calls);
-        let body_terminates = self
-            .check_block(
-                f.body_stmts(),
-                &mut locals,
-                declared_return.as_ref(),
-                &label,
-            )
-            .completion
-            .terminates;
+        let body_terminates = self.check_body_to_writes_fixpoint(
+            &mut locals,
+            body_has_byref_capture(f.body_stmts()),
+            |this, locals| {
+                this.check_block(f.body_stmts(), locals, declared_return.as_ref(), &label)
+                    .completion
+                    .terminates
+            },
+        );
         let implicit_calls = std::mem::replace(&mut self.implicit_calls, previous_implicit_calls);
         // Judged after the body, which finds the offsets that are calls.
         self.check_purity_impure_points(f, sig, class_name.is_some(), &label, &implicit_calls);
