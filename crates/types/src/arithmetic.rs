@@ -204,51 +204,68 @@ pub(crate) fn pow_int_range(
     }
 }
 
-/// `l << amount` or `l >> amount` for a single constant `amount`, as PHP
-/// computes it: a negative amount throws `ArithmeticError` (`never`); a
-/// left shift wraps within 64 bits and one of 64 or more is 0; a right
-/// shift of 64 or more leaves only the sign (`0` or `-1`). A range whose
-/// bounds shift without losing bits keeps its order; one that wraps is
-/// plain `int`.
-pub(crate) fn shift_int_range(
-    l_min: Option<i64>,
-    l_max: Option<i64>,
-    amount: i64,
-    left: bool,
+/// `>>` of an `int` in `left` by an amount in `amount`: each value moves
+/// towards `0` or `-1` as the amount grows, so the least and greatest are
+/// at the ends. A negative amount throws, so gives no value; an amount of
+/// 64 or more shifts as 63 does.
+fn shift_right_int_range(
+    (l_min, l_max): (Option<i64>, Option<i64>),
+    (a_min, a_max): (Option<i64>, Option<i64>),
 ) -> Type {
+    let a_min = a_min.unwrap_or(0).max(0);
+    let a_max = a_max.unwrap_or(63);
+    if a_max < 0 {
+        return Type::never();
+    }
+    let (a_min, a_max) = (a_min.min(63) as u32, a_max.min(63) as u32);
+    let (l_min, l_max) = (l_min.unwrap_or(i64::MIN), l_max.unwrap_or(i64::MAX));
+    let corners = [
+        l_min >> a_min,
+        l_min >> a_max,
+        l_max >> a_min,
+        l_max >> a_max,
+    ];
+    let least = corners.iter().copied().min().unwrap_or(l_min);
+    let most = corners.iter().copied().max().unwrap_or(l_max);
+    Type::int_range(
+        (least != i64::MIN).then_some(least),
+        (most != i64::MAX).then_some(most),
+    )
+}
+
+/// `l << amount` for a single constant `amount`, as PHP computes it: a
+/// negative amount throws `ArithmeticError` (`never`); the shift wraps
+/// within 64 bits, and one of 64 or more is 0. A range whose bounds shift
+/// without losing bits keeps its order; one that wraps is plain `int`.
+fn shift_left_int_range(l_min: Option<i64>, l_max: Option<i64>, amount: i64) -> Type {
     let Ok(amount) = u32::try_from(amount) else {
         return Type::never();
     };
-    if left {
-        if amount >= 64 {
-            return Type::int_literal(0);
-        }
-        // One value wraps to one value.
-        if let (Some(min), Some(max)) = (l_min, l_max)
-            && min == max
-        {
-            return Type::int_literal(min.wrapping_shl(amount));
-        }
-        let shift = |v: Option<i64>| -> Result<Option<i64>, ()> {
-            match v {
-                None => Ok(None),
-                Some(v) => {
-                    let shifted = v.wrapping_shl(amount);
-                    if shifted >> amount == v {
-                        Ok(Some(shifted))
-                    } else {
-                        Err(())
-                    }
+    if amount >= 64 {
+        return Type::int_literal(0);
+    }
+    // One value wraps to one value.
+    if let (Some(min), Some(max)) = (l_min, l_max)
+        && min == max
+    {
+        return Type::int_literal(min.wrapping_shl(amount));
+    }
+    let shift = |v: Option<i64>| -> Result<Option<i64>, ()> {
+        match v {
+            None => Ok(None),
+            Some(v) => {
+                let shifted = v.wrapping_shl(amount);
+                if shifted >> amount == v {
+                    Ok(Some(shifted))
+                } else {
+                    Err(())
                 }
             }
-        };
-        match (shift(l_min), shift(l_max)) {
-            (Ok(min), Ok(max)) => Type::int_range(min, max),
-            _ => Type::int(),
         }
-    } else {
-        let amount = amount.min(63);
-        Type::int_range(l_min.map(|v| v >> amount), l_max.map(|v| v >> amount))
+    };
+    match (shift(l_min), shift(l_max)) {
+        (Ok(min), Ok(max)) => Type::int_range(min, max),
+        _ => Type::int(),
     }
 }
 
@@ -659,10 +676,14 @@ impl Type {
                     TrinaryLogic::Maybe => Type::union(Type::int(), string_bitwise(op, lt, rt)),
                 }
             }
-            ArithmeticOp::Shl | ArithmeticOp::Shr => match (lt.int_bounds(), rt.int_bounds()) {
+            ArithmeticOp::Shl => match (lt.int_bounds(), rt.int_bounds()) {
                 (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) if amount == r_max => {
-                    shift_int_range(l_min, l_max, amount, matches!(op, ArithmeticOp::Shl))
+                    shift_left_int_range(l_min, l_max, amount)
                 }
+                _ => Type::int(),
+            },
+            ArithmeticOp::Shr => match (lt.int_hull(), rt.int_hull()) {
+                (Some(left), Some(amount)) => shift_right_int_range(left, amount),
                 _ => Type::int(),
             },
             ArithmeticOp::Mod => match (lt.int_bounds(), rt.int_bounds()) {
