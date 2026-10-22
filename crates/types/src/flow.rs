@@ -311,6 +311,63 @@ fn collect_family_flows(ty: &Type, flows: &mut FamilyFlows) {
     })
 }
 
+/// `keeping_flows`, for an operation that rebuilds arrays (widening,
+/// generalizing): the sets inside the operands' arrays, keys and values,
+/// go to the result's array values.
+pub(crate) fn keeping_deep_flows(
+    operands: Vec<Type>,
+    make: impl FnOnce(Vec<Type>) -> Type,
+) -> Type {
+    let nested = operands
+        .iter()
+        .fold(Flow::default(), |acc, t| acc.union(&nested_flow(t)));
+    let result = keeping_flows(operands, make);
+    if nested.is_empty() {
+        result
+    } else {
+        with_nested_flow(&result, &nested)
+    }
+}
+
+/// Every set carried inside `ty`'s arrays.
+fn nested_flow(ty: &Type) -> Flow {
+    if !ty.has_flow() {
+        return Flow::default();
+    }
+    stack::guard(|| match ty.repr() {
+        Repr::Union(members) | Repr::BenevolentUnion(members) | Repr::Intersection(members) => {
+            members
+                .iter()
+                .fold(Flow::default(), |acc, m| acc.union(&nested_flow(m)))
+        }
+        Repr::Array(..) | Repr::ArrayShape(_) => {
+            let mut flow = Flow::default();
+            crate::traverse::for_each_repr_child(ty.repr(), &mut |child| {
+                flow = flow.union(&child.deep_flow());
+            });
+            flow
+        }
+        _ => Flow::default(),
+    })
+}
+
+/// `ty` with `flow` added to the values of its arrays.
+fn with_nested_flow(ty: &Type, flow: &Flow) -> Type {
+    stack::guard(|| match ty.repr() {
+        Repr::Union(members) => Type::new(Repr::Union(
+            members.iter().map(|m| with_nested_flow(m, flow)).collect(),
+        )),
+        Repr::BenevolentUnion(members) => Type::new(Repr::BenevolentUnion(
+            members.iter().map(|m| with_nested_flow(m, flow)).collect(),
+        )),
+        Repr::Intersection(members) => Type::new(Repr::Intersection(
+            members.iter().map(|m| with_nested_flow(m, flow)).collect(),
+        )),
+        Repr::Array(..) | Repr::ArrayShape(_) => ty.with_flow(flow),
+        _ => ty.clone(),
+    })
+}
+
 /// `make` applied to `operands` without the sets their scalar parts carry,
 /// the result's scalar parts given those sets by kind of value: how an
 /// operation that keeps a value's identity (union, intersection, widening)

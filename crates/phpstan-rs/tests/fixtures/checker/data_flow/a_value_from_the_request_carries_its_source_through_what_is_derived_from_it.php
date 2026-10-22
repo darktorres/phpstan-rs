@@ -30,6 +30,14 @@ function g(): void {
     assertFlow('env:$_GET', $s);
 }
 
+function collected(): void {
+    $ids = [];
+    foreach ([1, 2, 3] as $i) {
+        $ids[] = (int) ($_GET['id' . $i] ?? 0);
+    }
+    assertFlow('env:$_GET', $ids);
+}
+
 function h(): void {
     $t = rand();
     if (rand(0, 1)) {
@@ -41,3 +49,4 @@ function h(): void {
 f();
 g();
 h();
+collected();

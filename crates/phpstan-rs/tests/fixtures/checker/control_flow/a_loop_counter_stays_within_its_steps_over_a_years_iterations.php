@@ -24,7 +24,7 @@ function f(array $l, int $start, callable $g): void {
     foreach ($l as $a) {
         $d *= 2;
     }
-    assertType('int|float', $d);
+    assertType('int<1, max>|float', $d);
     $r = 0;
     foreach ($l as $a) {
         $r++;

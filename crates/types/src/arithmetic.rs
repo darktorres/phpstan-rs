@@ -553,9 +553,20 @@ impl Type {
         let (l_rest, l_overflowed) = lt.split_overflow_float();
         let (r_rest, r_overflowed) = rt.split_overflow_float();
         if l_overflowed || r_overflowed {
-            // An overflowed value is a number past the `int` range: the
-            // operators that keep a float keep it an overflow float, and
-            // the rest read it as an `int`, as PHP converts it.
+            // An overflowed value is a number past the `int` range: `+`,
+            // `-`, `*` and `**` keep a float a float, past the range still,
+            // so the other values meet only each other; the rest read it
+            // as an `int`, as PHP converts it.
+            if let ArithmeticOp::Add | ArithmeticOp::Sub | ArithmeticOp::Mul | ArithmeticOp::Pow =
+                op
+            {
+                let rest = if l_rest.is_never() || r_rest.is_never() {
+                    Type::never()
+                } else {
+                    Type::binary_operation(op, &l_rest, &r_rest)
+                };
+                return Type::union(rest, Type::overflow_float());
+            }
             let as_int = |rest: Type, overflowed: bool| {
                 if overflowed {
                     Type::union(rest, Type::int())
@@ -563,17 +574,11 @@ impl Type {
                     rest
                 }
             };
-            let result = Type::binary_operation(
+            return Type::binary_operation(
                 op,
                 &as_int(l_rest, l_overflowed),
                 &as_int(r_rest, r_overflowed),
             );
-            return match op {
-                ArithmeticOp::Add | ArithmeticOp::Sub | ArithmeticOp::Mul | ArithmeticOp::Pow => {
-                    Type::union(result, Type::overflow_float())
-                }
-                _ => result,
-            };
         }
         if let (ArithmeticOp::Add | ArithmeticOp::Sub | ArithmeticOp::Mul, Some(l), Some(r)) =
             (op, lt.int_hull(), rt.int_hull())

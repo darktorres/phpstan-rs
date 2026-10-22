@@ -517,7 +517,7 @@ impl Type {
     /// its siblings their types; anything else, an array gaining int keys
     /// by appends among it, is `next` generalized.
     pub fn widen_towards(&self, next: &Type) -> Type {
-        crate::flow::keeping_flows(vec![self.clone(), next.clone()], |both| {
+        crate::flow::keeping_deep_flows(vec![self.clone(), next.clone()], |both| {
             both[0].widen_towards_unflowed(&both[1])
         })
     }
@@ -533,6 +533,32 @@ impl Type {
                 before_rest.widen_towards(&next_rest)
             };
             return Type::union(rest, Type::overflow_float());
+        }
+        // Arrays beside other values (`null|array{...}`) widen as arrays,
+        // and the other values as themselves.
+        let split = |ty: &Type| -> (Type, Type) {
+            let (arrays, rest): (Vec<Type>, Vec<Type>) = ty
+                .union_members()
+                .iter()
+                .cloned()
+                .partition(|m| m.is_array().yes());
+            (
+                Type::union_of(arrays),
+                rest.into_iter().union_all().unwrap_or_else(Type::never),
+            )
+        };
+        let ((before_arrays, before_others), (next_arrays, next_others)) =
+            (split(self), split(next));
+        if !before_arrays.is_never()
+            && !next_arrays.is_never()
+            && !(before_others.is_never() && next_others.is_never())
+        {
+            let others = if before_others.is_never() || next_others.is_never() {
+                next_others
+            } else {
+                before_others.widen_towards(&next_others)
+            };
+            return Type::union(before_arrays.widen_towards(&next_arrays), others);
         }
         if let (Some((before, before_non_empty)), Some((after, after_non_empty))) =
             (self.combined_shape(), next.combined_shape())
@@ -689,7 +715,7 @@ impl Type {
     /// of its generalized keys and values (still a list, still non-empty,
     /// when it was), and a union's members each.
     pub fn generalize(&self) -> Type {
-        crate::flow::keeping_flows(vec![self.clone()], |one| one[0].generalize_unflowed())
+        crate::flow::keeping_deep_flows(vec![self.clone()], |one| one[0].generalize_unflowed())
     }
 
     fn generalize_unflowed(&self) -> Type {
