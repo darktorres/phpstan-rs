@@ -961,6 +961,7 @@ pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;
 mod flow_derivation;
 mod flow_nodes;
+pub(crate) mod flow_sources;
 mod infer_cache;
 mod keys;
 mod locals;

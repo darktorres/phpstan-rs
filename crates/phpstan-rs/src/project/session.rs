@@ -1380,6 +1380,13 @@ impl Session {
             doctrine: section::<ext::doctrine::DoctrineSettings>(config, policy, &mut warnings)?,
             dynamic_constant_names: engine.dynamic_constant_entries(),
             platform: engine.deployment.clone().unwrap_or_default().limits(),
+            sources: engine
+                .sources
+                .as_ref()
+                .map(|s| {
+                    crate::checker::flow_sources::ConfiguredSources::new(&s.functions, &s.methods)
+                })
+                .unwrap_or_default(),
             overlays,
             sql_reflection,
             sql_schema,

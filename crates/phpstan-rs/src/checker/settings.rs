@@ -40,6 +40,25 @@ pub struct EngineSettings {
     /// max_run_seconds = 86400
     /// ```
     pub deployment: Option<Deployment>,
+    /// More places the environment hands the code values, beside the
+    /// builtins and the request objects of PSR-7, Symfony and Laravel: a
+    /// function by name, a method as `Class::method` (a subclass's too).
+    /// A value one gives is anything its type allows.
+    ///
+    /// ```toml
+    /// [sources]
+    /// functions = ["App\\param"]
+    /// methods = ["App\\Http\\Input::get"]
+    /// ```
+    pub sources: Option<SourceSettings>,
+}
+
+/// `EngineSettings::sources`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct SourceSettings {
+    pub functions: Vec<String>,
+    pub methods: Vec<String>,
 }
 
 /// `EngineSettings::deployment`: the architectures and operating systems
@@ -324,4 +343,6 @@ pub struct CheckSettings {
     pub pest: bool,
     /// What the deployment bounds (`EngineSettings::deployment`).
     pub platform: PlatformLimits,
+    /// The sources the configuration adds (`EngineSettings::sources`).
+    pub sources: crate::checker::flow_sources::ConfiguredSources,
 }

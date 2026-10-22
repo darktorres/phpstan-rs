@@ -884,6 +884,7 @@ pub(crate) fn unassigned_variable_type(name: &str) -> Type {
     use crate::checker::flow_nodes::{FlowNode, flow_of};
     match name {
         "argc" => Type::int().with_flow(&flow_of(FlowNode::env("$argc"))),
+        "argv" => Type::list_of(Type::string()).with_flow(&flow_of(FlowNode::env("$argv"))),
         "GLOBALS" | "_SESSION" => {
             let flow = flow_of(FlowNode::Global(name.into()));
             Type::array(

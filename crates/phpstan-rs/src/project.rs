@@ -539,6 +539,8 @@ pub struct ProjectSettings {
     pub dynamic_constant_names: Vec<(String, Option<String>)>,
     /// `EngineSettings::deployment`'s bounds.
     pub platform: crate::checker::settings::PlatformLimits,
+    /// `EngineSettings::sources`.
+    pub sources: crate::checker::flow_sources::ConfiguredSources,
     pub overlays: crate::assertion_tables::OverlaySettings,
     pub sql_reflection: Option<sql::config::SqlReflectionConfig>,
     pub sql_schema: Option<sql::schema::SchemaCatalog>,
@@ -678,6 +680,7 @@ impl Project {
             doctrine,
             dynamic_constant_names,
             platform,
+            sources,
             overlays,
             sql_reflection,
             sql_schema,
@@ -725,6 +728,7 @@ impl Project {
             language_extensions: active.language_extensions,
             pest: active.pest,
             platform,
+            sources,
         };
 
         self.sql.set_config(sql_reflection);

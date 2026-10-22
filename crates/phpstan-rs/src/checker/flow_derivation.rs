@@ -173,6 +173,11 @@ impl Checker<'_> {
             ExprKind::Call(callee, args) => match &callee.kind {
                 ExprKind::Name(name) => match self.registry.resolve_function(name) {
                     Some(_) if self.passes_values_through(name) => of_args(args),
+                    Some((resolved, sig)) if self.is_source_function(resolved, sig.is_stub()) => {
+                        flow_of(FlowNode::Env(
+                            format!("{}()", resolved.trim_start_matches('\\')).into(),
+                        ))
+                    }
                     Some((_, sig)) if sig.is_stub() => Flow::default(),
                     Some((resolved, _)) => {
                         self.call_flow(e.span, format!("{}()", resolved.trim_start_matches('\\')))
@@ -182,9 +187,16 @@ impl Checker<'_> {
                 _ => self.call_flow(e.span, "{dynamic}()".to_string()),
             },
             ExprKind::MethodCall(base, method, ..) => {
-                let classes = self.infer_expr(base, locals);
-                let builtin = !classes.object_class_names().is_empty()
-                    && classes.object_class_names().iter().all(|class| {
+                let receiver = self.infer_expr(base, locals);
+                let classes = receiver.object_class_names();
+                if let Some(source) = classes
+                    .iter()
+                    .find_map(|class| self.source_method_class(class, &method.name))
+                {
+                    return flow_of(FlowNode::Env(format!("{source}::{}()", method.name).into()));
+                }
+                let builtin = !classes.is_empty()
+                    && classes.iter().all(|class| {
                         self.registry
                             .lookup_method_with_owner(class, &method.name)
                             .is_some_and(|(owner, _)| self.registry.is_builtin_class(&owner))
