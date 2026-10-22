@@ -232,7 +232,7 @@ fn exact_exit_writes(body: &[Stmt], imports: &FxHashSet<String>) -> FxHashMap<St
         };
         let name = name.as_str();
         if !imports.contains(name)
-            || body[..index].iter().any(|before| may_leave_early(before))
+            || body[..index].iter().any(may_leave_early)
             || body[index + 1..]
                 .iter()
                 .any(|after| may_change(after, name))
