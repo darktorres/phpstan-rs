@@ -536,7 +536,13 @@ impl Type {
                         result
                     };
                 }
-                Type::int()
+                // An array comes out only when both operands are arrays, so
+                // the array member needs both of them to be possibly arrays.
+                if lt.is_array().no() || rt.is_array().no() {
+                    numeric_result(lt, rt)
+                } else {
+                    Type::union(numeric_result(lt, rt), array_union_type(lt, rt))
+                }
             }
             ArithmeticOp::Sub => {
                 if either_float {
@@ -559,7 +565,7 @@ impl Type {
                     (Some((l_min, l_max)), Some((r_min, r_max))) => {
                         sub_int_range_full(l_min, l_max, r_min, r_max)
                     }
-                    _ => Type::int(),
+                    _ => numeric_result(lt, rt),
                 }
             }
             ArithmeticOp::Mul => {
@@ -570,7 +576,7 @@ impl Type {
                     (Some((l_min, l_max)), Some((r_min, r_max))) => {
                         mul_int_range(l_min, l_max, r_min, r_max)
                     }
-                    _ => Type::int(),
+                    _ => numeric_result(lt, rt),
                 }
             }
             ArithmeticOp::Pow => {
@@ -581,7 +587,7 @@ impl Type {
                     (Some((l_min, l_max)), Some((r_min, r_max))) => {
                         pow_int_range(l_min, l_max, r_min, r_max)
                     }
-                    _ => Type::int(),
+                    _ => numeric_result(lt, rt),
                 }
             }
             ArithmeticOp::BitAnd | ArithmeticOp::BitOr | ArithmeticOp::BitXor => {
@@ -730,6 +736,16 @@ fn fold_float_constants(op: ArithmeticOp, lt: &Type, rt: &Type) -> Option<Type> 
             .union_all()
             .unwrap_or_else(Type::never),
     )
+}
+
+/// The result of arithmetic on operands that are not both bounded int ranges.
+/// Two ints give an int; any other operand may give a float as well.
+fn numeric_result(lt: &Type, rt: &Type) -> Type {
+    if lt.is_int().yes() && rt.is_int().yes() {
+        Type::int()
+    } else {
+        Type::union(Type::int(), Type::float())
+    }
 }
 
 /// `$a + $b` over arrays: the keys and values of both, a list when both
