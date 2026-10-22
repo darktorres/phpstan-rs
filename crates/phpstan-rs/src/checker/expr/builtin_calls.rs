@@ -40,10 +40,24 @@ const STRING_MEASURES: &[&str] = &[
     "substr_count",
 ];
 
+/// Builtins whose `int` result is a C `int`, 32 bits wide on every
+/// platform PHP runs on: the string comparisons return their C helper's
+/// result as it is (`zend_binary_strcmp`, `strnatcmp_ex`, `strcoll`).
+const C_INT_RESULTS: &[&str] = &[
+    "strcasecmp",
+    "strcmp",
+    "strcoll",
+    "strnatcasecmp",
+    "strnatcmp",
+    "strncasecmp",
+    "strncmp",
+    "substr_compare",
+];
+
 impl<'a> Checker<'a> {
-    /// What a builtin returns, within what the deployment's platforms
-    /// bound: a string's measures by the longest string, `time()` by the
-    /// clock.
+    /// What a builtin returns, within what PHP's C code and the
+    /// deployment's platforms bound: a C `int` result by 32 bits, a
+    /// string's measures by the longest string, `time()` by the clock.
     pub(crate) fn infer_builtin_call_return_type(
         &self,
         name: &str,
@@ -54,6 +68,9 @@ impl<'a> Checker<'a> {
         let ty = self.builtin_call_return_type(name, sig, args, locals);
         let platform = self.settings.platform;
         let bound = match (name, platform.string_length, platform.clock) {
+            _ if C_INT_RESULTS.contains(&name) => {
+                Type::int_range(Some(i64::from(i32::MIN)), Some(i64::from(i32::MAX)))
+            }
             (_, Some(most), _) if STRING_MEASURES.contains(&name) => {
                 Type::int_range(Some(0), Some(most))
             }
