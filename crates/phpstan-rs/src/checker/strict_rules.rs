@@ -556,15 +556,35 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Replaces the current function's assignment sites with `body`'s,
-    /// returning the previous ones to restore.
-    pub(crate) fn enter_assigned_variables(&mut self, body: &[Stmt]) -> Vec<AssignedVariable> {
+    /// Replaces the current function's assignment sites and counters with
+    /// `body`'s, returning the previous ones for `leave_function_body`.
+    pub(crate) fn enter_function_body(&mut self, body: &[Stmt]) -> EnteredBody {
         let entered = if self.settings.strict_rules.check_implicit_array_creation {
             assigned_variables(body)
         } else {
             Vec::new()
         };
-        std::mem::replace(&mut self.current_function_assigned_variables, entered)
+        EnteredBody {
+            assigned_variables: std::mem::replace(
+                &mut self.current_function_assigned_variables,
+                entered,
+            ),
+            counters: std::mem::replace(
+                &mut self.current_function_counters,
+                std::rc::Rc::new(
+                    crate::checker::loop_counters::LoopCounters::of_function_body(
+                        body,
+                        self.registry,
+                    ),
+                ),
+            ),
+        }
+    }
+
+    /// Restores what `enter_function_body` replaced.
+    pub(crate) fn leave_function_body(&mut self, previous: EnteredBody) {
+        self.current_function_assigned_variables = previous.assigned_variables;
+        self.current_function_counters = previous.counters;
     }
 
     /// Whether an assignment to `name` could have run before the one at
@@ -872,6 +892,12 @@ impl AssignedVariable {
 
 /// Every site in `body` that binds a variable, outside nested functions,
 /// closures and classes.
+/// The function body state `enter_function_body` replaced.
+pub(crate) struct EnteredBody {
+    assigned_variables: Vec<AssignedVariable>,
+    counters: std::rc::Rc<crate::checker::loop_counters::LoopCounters>,
+}
+
 pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {
     let mut assigned = Assigned {
         loops: Vec::new(),

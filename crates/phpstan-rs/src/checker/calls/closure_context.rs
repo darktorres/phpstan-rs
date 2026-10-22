@@ -310,7 +310,7 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     GotoState::new(goto_labels.clone()),
                 );
-                let previous_assigned_variables = self.enter_assigned_variables(body);
+                let previous_assigned_variables = self.enter_function_body(body);
                 // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
@@ -354,7 +354,7 @@ impl<'a> Checker<'a> {
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_exit_points = previous_exit_points;
                 self.current_function_goto_targets = previous_goto_targets;
-                self.current_function_assigned_variables = previous_assigned_variables;
+                self.leave_function_body(previous_assigned_variables);
                 self.check_unused_closure_uses(uses, body, closure_expr.span);
                 for u in uses {
                     if !u.by_ref {

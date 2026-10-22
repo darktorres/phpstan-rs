@@ -4,6 +4,7 @@
 //! counter by no more than the sum of its steps, so a counter that starts
 //! in a bounded range stays within that many steps of it.
 
+use crate::registry::{FunctionReflection, Registry};
 use rustc_hash::{FxHashMap, FxHashSet};
 use syntax::ast::*;
 use syntax::visit::{self, Visitor};
@@ -47,10 +48,45 @@ impl LoopCounters {
         for s in stmts {
             scan.visit_stmt(s);
         }
-        if scan.anything {
+        scan.counters()
+    }
+
+    /// The counters of a function body: its statics written only by
+    /// steps. A call outside a loop isn't logged, so a variable passed to
+    /// a call is written unless the call is to a function `registry`
+    /// declares with that parameter by value.
+    pub(crate) fn of_function_body(stmts: &[Stmt], registry: &Registry) -> LoopCounters {
+        let mut scan = Scan {
+            args_by_ref: Some(registry),
+            function_body: true,
+            ..Scan::default()
+        };
+        visit::walk_stmts(&mut scan, stmts);
+        scan.counters()
+    }
+}
+
+/// The band a counter starting in `start` stays in over `iterations`
+/// iterations of `steps` each, when that band and one step past it fit in
+/// the `int` range.
+pub(crate) fn counter_band(
+    (lo, hi): (i64, i64),
+    steps: Steps,
+    iterations: i64,
+) -> Option<(i64, i64)> {
+    let band_lo = lo.checked_sub(iterations.checked_mul(steps.down)?)?;
+    let band_hi = hi.checked_add(iterations.checked_mul(steps.up)?)?;
+    band_lo.checked_sub(steps.down)?;
+    band_hi.checked_add(steps.up)?;
+    Some((band_lo, band_hi))
+}
+
+impl Scan<'_> {
+    fn counters(self) -> LoopCounters {
+        if self.anything {
             return LoopCounters::default();
         }
-        let Scan { steps, other, .. } = scan;
+        let Scan { steps, other, .. } = self;
         LoopCounters(
             steps
                 .into_iter()
@@ -61,16 +97,23 @@ impl LoopCounters {
 }
 
 #[derive(Default)]
-struct Scan {
+struct Scan<'r> {
     steps: FxHashMap<String, Steps>,
     /// Variables written some other way.
     other: FxHashSet<String>,
     /// Whether any variable may be written in a way the scan can't name
     /// (`$$name`, `$GLOBALS`, `extract()`, `include`, `eval`).
     anything: bool,
+    /// Set when a variable passed to a call may be written by reference
+    /// unless the registry's function takes it by value.
+    args_by_ref: Option<&'r Registry>,
+    /// Whether the scan is of a function body, where a `static`
+    /// statement declares its variables (its initializer runs once)
+    /// rather than rebinding them.
+    function_body: bool,
 }
 
-impl Scan {
+impl Scan<'_> {
     fn step(&mut self, name: &str, by: i64) {
         let steps = self.steps.entry(name.to_string()).or_default();
         if by >= 0 {
@@ -87,6 +130,27 @@ impl Scan {
         self.other.extend(assigned_variable_names(target));
         if super::assignment::writes_dynamic_variable(target) {
             self.anything = true;
+        }
+    }
+
+    /// A bare variable passed to `sig` where it takes its argument by
+    /// reference (or by a name or spread it may) is written.
+    fn passed_to(&mut self, sig: &FunctionReflection, args: &[Arg]) {
+        let params = sig.params();
+        for (i, arg) in args.iter().enumerate() {
+            let ExprKind::Variable(name) = &arg.value.peeled().kind else {
+                continue;
+            };
+            let param = match &arg.name {
+                _ if arg.spread => None,
+                Some(label) => params.iter().find(|p| p.name().as_ref() == label.as_ref()),
+                None => params
+                    .get(i)
+                    .or_else(|| params.last().filter(|p| p.variadic())),
+            };
+            if param.is_none_or(|p| p.by_ref()) {
+                self.other.insert(name.to_string());
+            }
         }
     }
 
@@ -130,7 +194,7 @@ fn step_of(name: &str, value: &Expr) -> Option<i64> {
     }
 }
 
-impl<'ast> Visitor<'ast> for Scan {
+impl<'ast> Visitor<'ast> for Scan<'_> {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match &stmt.kind {
             StmtKind::Global(vars) => {
@@ -143,7 +207,7 @@ impl<'ast> Visitor<'ast> for Scan {
                     }
                 }
             }
-            StmtKind::StaticVar(vars) => {
+            StmtKind::StaticVar(vars) if !self.function_body => {
                 self.other
                     .extend(vars.iter().map(|(name, _)| name.to_string()));
             }
@@ -172,6 +236,22 @@ impl<'ast> Visitor<'ast> for Scan {
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
+        if let Some(registry) = self.args_by_ref {
+            match &expr.kind {
+                ExprKind::Call(callee, args) => match &callee.peeled().kind {
+                    ExprKind::Name(name) => match registry.resolve_function(name) {
+                        Some((_, sig)) => self.passed_to(sig, args),
+                        None => self.passed_to_unknown_callee(args),
+                    },
+                    _ => self.passed_to_unknown_callee(args),
+                },
+                ExprKind::New(_, args)
+                | ExprKind::MethodCall(_, _, args, _)
+                | ExprKind::StaticCall(_, _, args) => self.passed_to_unknown_callee(args),
+                ExprKind::NewAnonymousClass(class) => self.passed_to_unknown_callee(&class.args),
+                _ => {}
+            }
+        }
         match &expr.kind {
             ExprKind::Unary(op, target) => {
                 let by = match op {

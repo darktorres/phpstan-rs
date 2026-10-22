@@ -218,8 +218,8 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         let previous_assigned_variables = match body {
-            PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
-            _ => self.enter_assigned_variables(&[]),
+            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts),
+            _ => self.enter_function_body(&[]),
         };
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(_) => {
@@ -327,7 +327,7 @@ impl<'a> Checker<'a> {
         if let Some(previous) = previous_goto_targets {
             self.current_function_goto_targets = previous;
         }
-        self.current_function_assigned_variables = previous_assigned_variables;
+        self.leave_function_body(previous_assigned_variables);
         self.current_class = previous_class;
     }
 
@@ -515,8 +515,8 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         let previous_assigned_variables = match body {
-            PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
-            _ => self.enter_assigned_variables(&[]),
+            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts),
+            _ => self.enter_function_body(&[]),
         };
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(_) => {
@@ -583,7 +583,7 @@ impl<'a> Checker<'a> {
         if let Some(previous) = previous_goto_targets {
             self.current_function_goto_targets = previous;
         }
-        self.current_function_assigned_variables = previous_assigned_variables;
+        self.leave_function_body(previous_assigned_variables);
         self.current_class = previous_class;
     }
 }

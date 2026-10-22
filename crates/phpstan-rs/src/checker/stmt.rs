@@ -1103,10 +1103,13 @@ impl<'a> Checker<'a> {
                     // The initializer only holds on a first call; later
                     // calls see whatever an earlier call left behind, so
                     // only its general type is known.
-                    let ty = default
-                        .as_ref()
-                        .map(|e| static_variable_type(&self.check_expr(e, locals, label)))
-                        .unwrap_or(Type::mixed());
+                    let initial = default.as_ref().map(|e| self.check_expr(e, locals, label));
+                    let ty = match initial {
+                        Some(initial) => self
+                            .static_counter_band(name, &initial)
+                            .unwrap_or_else(|| static_variable_type(&initial)),
+                        None => Type::mixed(),
+                    };
                     purge_stale_narrowing_for_var(locals, name);
                     self.probe_hit_at(stmt.span, &ty);
                     // A `static $x;` rebinds `$x` to its own storage, as
@@ -1697,6 +1700,24 @@ fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
         collect(lhs, &mut out);
     }
     out
+}
+
+impl Checker<'_> {
+    /// A static counter's type across calls: the band its steps can take
+    /// it to from its initializer over the process's iterations (each
+    /// call, and each loop iteration, runs one at least).
+    fn static_counter_band(&self, name: &str, initial: &Type) -> Option<Type> {
+        let steps = self.current_function_counters.get(name)?;
+        let (Some(lo), Some(hi)) = initial.int_hull()? else {
+            return None;
+        };
+        let (lo, hi) = super::loop_counters::counter_band(
+            (lo, hi),
+            steps,
+            self.settings.platform.loop_iterations?,
+        )?;
+        Some(Type::int_range(Some(lo), Some(hi)))
+    }
 }
 
 /// A static variable's type across calls: its initializer's general

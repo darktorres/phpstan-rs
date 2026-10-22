@@ -257,12 +257,7 @@ impl<'a> Checker<'a> {
                 let (Some(lo), Some(hi)) = ty.int_hull()? else {
                     return None;
                 };
-                let n = iterations?;
-                let band_lo = lo.checked_sub(n.checked_mul(steps.down)?)?;
-                let band_hi = hi.checked_add(n.checked_mul(steps.up)?)?;
-                band_lo.checked_sub(steps.down)?;
-                band_hi.checked_add(steps.up)?;
-                Some((band_lo, band_hi))
+                crate::checker::loop_counters::counter_band((lo, hi), steps, iterations?)
             });
             if let Some(band) = band {
                 self.loop_counter_bands.push((name.to_string(), band));

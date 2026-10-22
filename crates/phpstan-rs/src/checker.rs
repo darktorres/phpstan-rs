@@ -558,6 +558,9 @@ pub struct Checker<'a> {
     // Every variable assignment site in the current function body, for
     // `variable.implicitArray`; empty unless that check is enabled.
     pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,
+    // The current function body's statics written only by steps
+    // (`LoopCounters::of_function_body`).
+    pub(crate) current_function_counters: std::rc::Rc<loop_counters::LoopCounters>,
     // Set to `true` immediately before `check_expr` is called for a
     // `StmtKind::Expression`'s top-level expression (a bare `foo();`, its
     // return value going nowhere by construction), cleared the instant
@@ -1225,6 +1228,7 @@ impl<'a> Checker<'a> {
             loop_body_completion: Completion::FALLS_THROUGH,
             statement_method_call: None,
             current_function_assigned_variables: Vec::new(),
+            current_function_counters: Default::default(),
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,
@@ -1918,6 +1922,9 @@ impl<'a> Checker<'a> {
             } else {
                 Vec::new()
             };
+        self.current_function_counters = std::rc::Rc::new(
+            loop_counters::LoopCounters::of_function_body(program, self.registry),
+        );
         self.constant_facts = global_constants::constant_facts(program);
         if self.current_file.is_some() {
             self.include_constant_initializers =
