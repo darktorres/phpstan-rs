@@ -4602,10 +4602,23 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The type of `l`, the left operand of `??`, read quietly.
+    /// The type of `l`, the left operand of `??`, read quietly. An element
+    /// the array surely lacks reads as `null`, which `??` replaces, not as
+    /// the error type a reported read gives.
     fn quiet_left_type(&self, l: &Expr, locals: &Locals) -> Type {
         match &l.kind {
             ExprKind::Variable(name) => self.quiet_variable_type(name, locals),
+            ExprKind::Index(base, Some(key)) => {
+                let base_ty = self.infer_expr(base, locals);
+                let key_ty = self.infer_expr(key, locals);
+                if base_ty.is_array().yes()
+                    && let Some((_, types::OffsetPresence::Absent)) =
+                        base_ty.array_offset_read(&key_ty)
+                {
+                    return Type::null();
+                }
+                self.infer_expr(l, locals)
+            }
             _ => self.infer_expr(l, locals),
         }
     }
