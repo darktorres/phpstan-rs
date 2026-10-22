@@ -134,14 +134,20 @@ impl Node {
     }
 
     /// This node's form with `flow` as its set: a node of its own, not
-    /// interned.
+    /// interned. Its exact hash takes in the set, so the interned types
+    /// that hold it are told apart from those holding the form with
+    /// another set by their hash, not by a search of one bucket.
     pub(crate) fn with_flow(&self, flow: flow::Flow) -> Node {
+        use std::hash::{Hash, Hasher};
         let state = self.state.load(std::sync::atomic::Ordering::Relaxed);
         let kept = (state & !ANSWER_BITS & !FLOW_BIT) | FLOW_BIT;
+        let mut exact = rustc_hash::FxHasher::default();
+        exact.write_u64(self.exact);
+        flow.hash(&mut exact);
         Node {
             repr: self.repr.clone(),
             hash: self.hash,
-            exact: self.exact,
+            exact: exact.finish(),
             state: std::sync::atomic::AtomicU64::new(kept),
             flow,
         }
