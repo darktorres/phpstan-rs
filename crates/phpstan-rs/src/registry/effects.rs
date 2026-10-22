@@ -6583,6 +6583,8 @@ syntax::canonical_enum!(Storage {
 mod hierarchy_queries;
 #[cfg(test)]
 mod reference;
+#[cfg(test)]
+mod derived_bound_dump;
 
 #[cfg(test)]
 mod join_transferred_tests {

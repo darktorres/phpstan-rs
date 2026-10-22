@@ -1,0 +1,99 @@
+{
+ "keys": 1183,
+ "calls": 4028427,
+ "derived_covered_keys": 187,
+ "union_covered_keys": 555,
+ "fallback_covered_keys": 66,
+ "by_status": {
+  "calls-kind": {
+   "keys": 208,
+   "calls": 1029785,
+   "derived": 0,
+   "union": 208
+  },
+  "missing": {
+   "keys": 217,
+   "calls": 125158,
+   "derived": 73,
+   "union": 132
+  },
+  "not-a-row/callable-unplaced": {
+   "keys": 245,
+   "calls": 1425,
+   "derived": 0,
+   "union": 30
+  },
+  "not-a-row/generator-resume": {
+   "keys": 80,
+   "calls": 2352427,
+   "derived": 0,
+   "union": 0
+  },
+  "not-a-row/lazy-initializer": {
+   "keys": 1,
+   "calls": 38,
+   "derived": 0,
+   "union": 0
+  },
+  "not-a-row/reached-otherwise": {
+   "keys": 271,
+   "calls": 397187,
+   "derived": 15,
+   "union": 59
+  },
+  "not-a-row/receives-argument": {
+   "keys": 33,
+   "calls": 170,
+   "derived": 0,
+   "union": 6
+  },
+  "not-a-row/registered-callback": {
+   "keys": 8,
+   "calls": 235,
+   "derived": 0,
+   "union": 0
+  },
+  "table": {
+   "keys": 120,
+   "calls": 122002,
+   "derived": 99,
+   "union": 120
+  }
+ },
+ "by_hole": {
+  "H1": {
+   "keys": 1,
+   "calls": 2,
+   "derived": 0,
+   "union": 0
+  },
+  "H2": {
+   "keys": 1,
+   "calls": 2,
+   "derived": 0,
+   "union": 0
+  },
+  "H3": {
+   "keys": 1,
+   "calls": 38,
+   "derived": 0,
+   "union": 0
+  },
+  "none": {
+   "keys": 1180,
+   "calls": 4028385,
+   "derived": 187,
+   "union": 555
+  }
+ },
+ "union_misses_outside_holes": 625,
+ "union_misses_outside_holes_calls": 2740951,
+ "union_misses_by_status": {
+  "not-a-row/callable-unplaced": 215,
+  "not-a-row/reached-otherwise": 212,
+  "missing": 83,
+  "not-a-row/registered-callback": 8,
+  "not-a-row/receives-argument": 27,
+  "not-a-row/generator-resume": 80
+ }
+}
