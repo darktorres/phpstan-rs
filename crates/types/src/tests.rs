@@ -8,6 +8,7 @@ mod concat;
 mod constants;
 mod constructors;
 mod display_and_misc;
+mod flows;
 mod intersections;
 mod keyword_hints;
 mod kinds;

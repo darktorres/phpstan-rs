@@ -20,6 +20,7 @@ mod constructors;
 mod decide;
 mod display;
 mod extension;
+mod flow;
 mod hierarchy;
 mod intern;
 mod intersection;
@@ -48,6 +49,7 @@ pub use arithmetic::{ArithmeticOp, OrderingOp};
 pub use comparison::Outcomes;
 pub use display::quote_php_string;
 pub use extension::ExtensionTypeData;
+pub use flow::{FamilyFlows, Flow};
 pub use hierarchy::{ClassFacts, ClassHierarchy, NoClasses};
 pub(crate) use hierarchy::{effective_slot_variance, slot_variance};
 pub(crate) use intersection::intersect_types;
@@ -108,20 +110,46 @@ pub(crate) struct Node {
     pub(crate) exact: u64,
     // Both words below in one, so a node is the size it was: the
     // reference flags and the kind (`kind_of`) in the top 16 bits (`flags`),
-    // which are set when the node is made, and below them, two bits for each question the node
-    // has answered (`answers`).
+    // which are set when the node is made, below them whether a data-flow
+    // set is carried anywhere in the type (`FLOW_BIT`), and below that, two
+    // bits for each question the node has answered (`answers`).
     state: std::sync::atomic::AtomicU64,
+    // Where the value came from (`flow`): empty on every interned node.
+    pub(crate) flow: flow::Flow,
 }
 
 impl Node {
     /// A node of `repr`, with its two hashes and its reference flags.
     pub(crate) fn new(repr: Repr, hash: u64, exact: u64, flags: u16) -> Node {
+        let mut below = false;
+        traverse::for_each_repr_child(&repr, &mut |child| below |= child.0.has_flow());
+        let flow_bit = if below { FLOW_BIT } else { 0 };
         Node {
             repr,
             hash,
             exact,
-            state: std::sync::atomic::AtomicU64::new(u64::from(flags) << FLAGS_SHIFT),
+            state: std::sync::atomic::AtomicU64::new((u64::from(flags) << FLAGS_SHIFT) | flow_bit),
+            flow: flow::Flow::default(),
         }
+    }
+
+    /// This node's form with `flow` as its set: a node of its own, not
+    /// interned.
+    pub(crate) fn with_flow(&self, flow: flow::Flow) -> Node {
+        let state = self.state.load(std::sync::atomic::Ordering::Relaxed);
+        let kept = (state & !ANSWER_BITS & !FLOW_BIT) | FLOW_BIT;
+        Node {
+            repr: self.repr.clone(),
+            hash: self.hash,
+            exact: self.exact,
+            state: std::sync::atomic::AtomicU64::new(kept),
+            flow,
+        }
+    }
+
+    /// Whether a data-flow set is carried anywhere in the type.
+    pub(crate) fn has_flow(&self) -> bool {
+        self.state.load(std::sync::atomic::Ordering::Relaxed) & FLOW_BIT != 0
     }
 
     /// Which of `self`, `static` (or `$this`) and `parent`, and whether a
@@ -153,7 +181,9 @@ impl Node {
 pub const MAX_ARRAY_SIZE: i64 = 1 << 30;
 
 const FLAGS_SHIFT: u32 = 48;
-const ANSWER_BITS: u64 = (1 << FLAGS_SHIFT) - 1;
+/// Set on a node that carries a data-flow set, or has a child that does.
+const FLOW_BIT: u64 = 1 << 47;
+const ANSWER_BITS: u64 = (1 << 47) - 1;
 
 pub(crate) const HAS_SELF: u16 = 1;
 pub(crate) const HAS_STATIC: u16 = 2;

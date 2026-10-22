@@ -517,6 +517,12 @@ impl Type {
     /// its siblings their types; anything else, an array gaining int keys
     /// by appends among it, is `next` generalized.
     pub fn widen_towards(&self, next: &Type) -> Type {
+        crate::flow::keeping_flows(vec![self.clone(), next.clone()], |both| {
+            both[0].widen_towards_unflowed(&both[1])
+        })
+    }
+
+    fn widen_towards_unflowed(&self, next: &Type) -> Type {
         // The float of an `int` overflow rides along: the ints widen.
         let (before_rest, before_overflowed) = self.split_overflow_float();
         let (next_rest, next_overflowed) = next.split_overflow_float();
@@ -683,6 +689,10 @@ impl Type {
     /// of its generalized keys and values (still a list, still non-empty,
     /// when it was), and a union's members each.
     pub fn generalize(&self) -> Type {
+        crate::flow::keeping_flows(vec![self.clone()], |one| one[0].generalize_unflowed())
+    }
+
+    fn generalize_unflowed(&self) -> Type {
         stack::guard(|| match self.repr() {
             Repr::IntLiteral(_) | Repr::IntRange(..) => Type::int(),
             Repr::StringLiteral(_) => Type::string(),

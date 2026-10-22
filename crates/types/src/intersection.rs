@@ -21,6 +21,10 @@ impl Relation<'_> {
     /// an offset or accessory a shape can hold is applied to it, and
     /// members sharing no value make `never`.
     pub fn intersect(&self, members: Vec<Type>) -> Type {
+        crate::flow::keeping_flows(members, |members| self.intersect_unflowed(members))
+    }
+
+    fn intersect_unflowed(&self, members: Vec<Type>) -> Type {
         stack::guard(|| {
             let mut flat: Vec<Type> = Vec::new();
             for member in members {

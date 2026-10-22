@@ -750,9 +750,9 @@ fn a_remembered_refinement_answer_is_the_relations() {
 #[test]
 fn the_remembered_answers_do_not_make_a_node_bigger() {
     // A node is its representation, two hashes, the reference flags and
-    // the answers, in the space the first three and a word of padding take.
+    // the answers in one word, and its data-flow set.
     assert_eq!(
         std::mem::size_of::<crate::Node>(),
-        std::mem::size_of::<crate::Repr>() + 24
+        std::mem::size_of::<crate::Repr>() + 32
     );
 }
