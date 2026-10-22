@@ -6,7 +6,7 @@
                 if ($view instanceof HasValue) {
                     assertType('int', $view->value());
                     $x = $view->value() + 1;
-                    assertType('int', $x);
+                    assertType('int<-9223372036854775807, max>|float', $x);
                 }
             }
         

@@ -95,6 +95,11 @@ impl Type {
         Type::constant(Constant::Float)
     }
 
+    /// The float PHP gives when `int` arithmetic leaves the `int` range.
+    pub fn overflow_float() -> Type {
+        Type::constant(Constant::OverflowFloat)
+    }
+
     pub fn float_literal(value: f64) -> Type {
         Type::new(Repr::FloatLiteral(value))
     }

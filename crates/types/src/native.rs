@@ -53,7 +53,7 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
     stack::guard(|| {
         match ty.repr() {
             Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..) => out.add("int"),
-            Repr::Float | Repr::FloatLiteral(_) => out.add("float"),
+            Repr::Float(_) | Repr::FloatLiteral(_) => out.add("float"),
             Repr::String
             | Repr::StringLiteral(_)
             | Repr::ClassString(_)

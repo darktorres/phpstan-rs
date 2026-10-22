@@ -19,5 +19,5 @@ function g(int $n): void {
     if ($i < $n) {
         goto again;
     }
-    assertType('int<1, max>', $i);
+    assertType('int<1, max>|float', $i);
 }

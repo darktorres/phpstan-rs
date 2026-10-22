@@ -15,7 +15,7 @@ function countStates(array $states): void {
         $counts[$state]++;
     }
     $counts['missing']++;
-    assertType('array{active: int<0, max>, inactive: int<0, max>, missing: int<1, max>, merged: int<0, max>, ...<(int|string), int<1, max>>}', $counts);
+    assertType('array{active: int<0, max>|float, inactive: int<0, max>|float, missing: int<1, max>|float, merged: int<0, max>|float, ...<(int|string), int<1, max>|float>}', $counts);
 }
 
 countStates([]);

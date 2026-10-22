@@ -196,7 +196,7 @@ impl Relation<'_> {
             Repr::IntRange(min, max) => Value::Int(*min, *max),
             Repr::Int => Value::Int(None, None),
             Repr::FloatLiteral(f) => Value::Float(Some(*f)),
-            Repr::Float => Value::Float(None),
+            Repr::Float(_) => Value::Float(None),
             Repr::StringLiteral(s) => Value::Str(Str::Literal(s.as_bytes())),
             Repr::EnumCase(class, case) => Value::Object {
                 class: Some(class.as_ref()),

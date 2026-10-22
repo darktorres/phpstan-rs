@@ -232,7 +232,12 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
             // late-bound class is always an instance of the declaring one.
             Repr::StaticRef(_) | Repr::This | Repr::SelfRef(_) => !matches!(
                 native_ty.repr(),
-                Repr::Int | Repr::Float | Repr::String | Repr::Bool | Repr::Array(..) | Repr::Null
+                Repr::Int
+                    | Repr::Float(_)
+                    | Repr::String
+                    | Repr::Bool
+                    | Repr::Array(..)
+                    | Repr::Null
             ),
             // A callable doc member (`callable(int): string`) may be a
             // `Closure` under a native `Closure` hint, though not every

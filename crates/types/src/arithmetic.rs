@@ -3,7 +3,7 @@
 //! arithmetic, and the outcome of comparing ranges and literals.
 
 use crate::UnionAll as _;
-use crate::{AccessoryKind, PhpString, Repr, TrinaryLogic, Type};
+use crate::{AccessoryKind, FloatOrigin, PhpString, Repr, TrinaryLogic, Type};
 
 /// Applies `op` to two bounds, distinguishing a genuine `i64` overflow
 /// (both operands were real values, but the exact result doesn't fit)
@@ -448,13 +448,30 @@ pub(crate) fn div_int_range(
 }
 
 impl Type {
+    /// This type without its overflow float, and whether it had one.
+    pub fn split_overflow_float(&self) -> (Type, bool) {
+        let is_overflow = |m: &Type| matches!(m.repr(), Repr::Float(FloatOrigin::IntOverflow));
+        let members = self.union_members();
+        if !members.iter().any(is_overflow) {
+            return (self.clone(), false);
+        }
+        let rest = members
+            .iter()
+            .filter(|m| !is_overflow(m))
+            .cloned()
+            .union_all()
+            .unwrap_or_else(Type::never);
+        (rest, true)
+    }
+
     /// Unary `-` negates a literal/range operand's actual value - `+` is a
     /// true no-op on the value (only ever coercing a numeric string), but `-`
     /// must flip it: `-32768` infers as `IntLiteral(-32768)`, not
     /// `IntLiteral(32768)`. `IntRange`'s min/max swap on negation (`-int<a,
     /// b>` is `int<-b, -a>`) mirrors real PHPStan's `IntegerRangeType`
-    /// negation handling. Anything else (a bare `Repr::Int`, `Repr::Float`,
-    /// ...) has no specific value to flip, so it's returned unchanged.
+    /// negation handling. An `int` that can be `PHP_INT_MIN` overflows on it
+    /// to a float. Anything else (a `Repr::Float`, ...) has no specific
+    /// value to flip, so it's returned unchanged.
     pub fn negate(self) -> Type {
         match self.repr() {
             Repr::IntLiteral(n) => match n.checked_neg() {
@@ -463,17 +480,22 @@ impl Type {
                 None => Type::float_literal(-(*n as f64)),
             },
             Repr::FloatLiteral(f) => Type::float_literal(-f),
+            // A range that can hold `PHP_INT_MIN` overflows on it.
             Repr::IntRange(min, max) => {
                 let negated = Type::int_range(
                     max.map(|m| m.checked_neg().unwrap_or(i64::MAX)),
                     min.map(|m| m.checked_neg().unwrap_or(i64::MAX)),
                 );
-                if *min == Some(i64::MIN) {
-                    Type::union(negated, Type::float_literal(-(i64::MIN as f64)))
+                if min.is_none_or(|m| m == i64::MIN) {
+                    Type::union(negated, Type::overflow_float())
                 } else {
                     negated
                 }
             }
+            Repr::Int => Type::union(
+                Type::int_range(Some(i64::MIN + 1), None),
+                Type::overflow_float(),
+            ),
             _ => self,
         }
     }
@@ -511,6 +533,45 @@ impl Type {
     /// or `<=>` over operands of these types, operator overloading aside
     /// (PHPStan's `InitializerExprTypeResolver`).
     pub fn binary_operation(op: ArithmeticOp, lt: &Type, rt: &Type) -> Type {
+        let (l_rest, l_overflowed) = lt.split_overflow_float();
+        let (r_rest, r_overflowed) = rt.split_overflow_float();
+        if l_overflowed || r_overflowed {
+            // An overflowed value is a number past the `int` range: the
+            // operators that keep a float keep it an overflow float, and
+            // the rest read it as an `int`, as PHP converts it.
+            let as_int = |rest: Type, overflowed: bool| {
+                if overflowed {
+                    Type::union(rest, Type::int())
+                } else {
+                    rest
+                }
+            };
+            let result = Type::binary_operation(
+                op,
+                &as_int(l_rest, l_overflowed),
+                &as_int(r_rest, r_overflowed),
+            );
+            return match op {
+                ArithmeticOp::Add | ArithmeticOp::Sub | ArithmeticOp::Mul | ArithmeticOp::Pow => {
+                    Type::union(result, Type::overflow_float())
+                }
+                _ => result,
+            };
+        }
+        if let (ArithmeticOp::Add | ArithmeticOp::Sub | ArithmeticOp::Mul, Some(l), Some(r)) =
+            (op, int_hull_bounds(lt), int_hull_bounds(rt))
+            && !(lt.union_members().len() * rt.union_members().len() <= LITERAL_FOLD_LIMIT
+                && all_int_literals(lt)
+                && all_int_literals(rt))
+        {
+            return exact_int_arithmetic(op, l, r);
+        }
+        Type::range_arithmetic(op, lt, rt)
+    }
+
+    /// `binary_operation` once neither operand carries an overflow float and
+    /// two `int` operands of `+`, `-`, `*` are handled.
+    fn range_arithmetic(op: ArithmeticOp, lt: &Type, rt: &Type) -> Type {
         if let Some(folded) = fold_float_constants(op, lt, rt) {
             return folded;
         }
@@ -660,7 +721,7 @@ impl Number {
 /// float literals and a float takes part, or the operator is `/`. A pair
 /// that throws (a division or modulo by zero) contributes nothing.
 fn fold_float_constants(op: ArithmeticOp, lt: &Type, rt: &Type) -> Option<Type> {
-    const LIMIT: usize = 64;
+    const LIMIT: usize = LITERAL_FOLD_LIMIT;
     fn numbers(ty: &Type) -> Option<Vec<Number>> {
         ty.union_members()
             .iter()
@@ -686,8 +747,15 @@ fn fold_float_constants(op: ArithmeticOp, lt: &Type, rt: &Type) -> Option<Type> 
     let (ls, rs) = (numbers(lt)?, numbers(rt)?);
     let has_float = |ns: &[Number]| ns.iter().any(|n| matches!(n, Number::Float(_)));
     // Int-only operands are the range arithmetic's, but a division of
-    // literals is exact here where a range can only say `int|float`.
-    let takes_part = has_float(&ls) || has_float(&rs) || matches!(op, ArithmeticOp::Div);
+    // literals is exact here where a range can only say `int|float`, and
+    // `+`, `-`, `*` of literals keep each value, an overflowing pair its
+    // float.
+    let takes_part = has_float(&ls)
+        || has_float(&rs)
+        || matches!(
+            op,
+            ArithmeticOp::Div | ArithmeticOp::Add | ArithmeticOp::Sub | ArithmeticOp::Mul
+        );
     if !takes_part || ls.len() * rs.len() > LIMIT {
         return None;
     }
@@ -736,6 +804,70 @@ fn fold_float_constants(op: ArithmeticOp, lt: &Type, rt: &Type) -> Option<Type> 
             .union_all()
             .unwrap_or_else(Type::never),
     )
+}
+
+/// How many value pairs of two literal sets are computed one by one.
+const LITERAL_FOLD_LIMIT: usize = 64;
+
+/// The least and greatest value of a type whose every member is an `int`
+/// (`None` for an end PHP's own `int` range bounds).
+fn int_hull_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
+    let mut hull: Option<(Option<i64>, Option<i64>)> = None;
+    for member in ty.union_members() {
+        let (min, max) = member.int_bounds()?;
+        hull = Some(match hull {
+            None => (min, max),
+            Some((lo, hi)) => (
+                lo.zip(min).map(|(a, b)| a.min(b)),
+                hi.zip(max).map(|(a, b)| a.max(b)),
+            ),
+        });
+    }
+    hull
+}
+
+fn all_int_literals(ty: &Type) -> bool {
+    ty.union_members()
+        .iter()
+        .all(|m| matches!(m.repr(), Repr::IntLiteral(_)))
+}
+
+/// `+`, `-` or `*` of two `int`s, computed exactly: the `int` values the
+/// result can take, and the float PHP gives where the exact result leaves
+/// the `int` range. An unbounded end is the end of that range.
+fn exact_int_arithmetic(
+    op: ArithmeticOp,
+    (l_min, l_max): (Option<i64>, Option<i64>),
+    (r_min, r_max): (Option<i64>, Option<i64>),
+) -> Type {
+    let low = |v: Option<i64>| i128::from(v.unwrap_or(i64::MIN));
+    let high = |v: Option<i64>| i128::from(v.unwrap_or(i64::MAX));
+    let (a, b, c, d) = (low(l_min), high(l_max), low(r_min), high(r_max));
+    let (lo, hi) = match op {
+        ArithmeticOp::Add => (a + c, b + d),
+        ArithmeticOp::Sub => (a - d, b - c),
+        _ => {
+            let corners = [a * c, a * d, b * c, b * d];
+            (
+                *corners.iter().min().expect("four corners"),
+                *corners.iter().max().expect("four corners"),
+            )
+        }
+    };
+    let (int_min, int_max) = (i128::from(i64::MIN), i128::from(i64::MAX));
+    if hi < int_min || lo > int_max {
+        return Type::float();
+    }
+    let end = |v: i128, unbounded_past: bool| (!unbounded_past).then_some(v as i64);
+    let int_part = Type::int_range(
+        end(lo.max(int_min), lo <= int_min),
+        end(hi.min(int_max), hi >= int_max),
+    );
+    if lo < int_min || hi > int_max {
+        Type::union(int_part, Type::overflow_float())
+    } else {
+        int_part
+    }
 }
 
 /// The result of arithmetic on operands that are not both bounded int ranges.

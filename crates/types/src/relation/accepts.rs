@@ -826,7 +826,8 @@ impl Relation<'_> {
 }
 
 /// A value `accepts` takes although it isn't provably a `sup`: an `int`
-/// where a `float` is declared (PHP widens it), a plain string where a
+/// where a `float` is declared (PHP widens it), the float of an `int`
+/// overflow where an `int` is (rules report overflow on their own), a plain string where a
 /// class-string is (it may name one), a bare callable where a shaped one
 /// is, a `self`/`static` not yet bound where a class is, and anything
 /// where a template not yet bound is.
@@ -835,7 +836,10 @@ fn accepted_though_no_subtype(sub: &Type, sup: &Type) -> bool {
         (sub.repr(), sup.repr()),
         (
             Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..),
-            Repr::Float
+            Repr::Float(_)
+        ) | (
+            Repr::Float(crate::FloatOrigin::IntOverflow),
+            Repr::Int | Repr::IntRange(..)
         ) | (
             Repr::String | Repr::StringLiteral(_),
             Repr::ClassString(_) | Repr::ClassKindString(_)

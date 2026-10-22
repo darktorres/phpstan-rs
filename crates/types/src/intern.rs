@@ -15,7 +15,7 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
 use rustc_hash::{FxHashMap, FxHasher};
 
-use crate::{CallableSig, MixedKind, Node, Repr, Shape, TemplateParam, Type};
+use crate::{CallableSig, FloatOrigin, MixedKind, Node, Repr, Shape, TemplateParam, Type};
 
 const SHARDS: usize = 64;
 
@@ -156,6 +156,7 @@ pub(crate) enum Constant {
     False,
     Int,
     Float,
+    OverflowFloat,
     String,
     ObjectWithoutClass,
     ParentRef,
@@ -164,7 +165,7 @@ pub(crate) enum Constant {
 
 impl Constant {
     #[cfg(test)]
-    pub(crate) const ALL: [Constant; 15] = [
+    pub(crate) const ALL: [Constant; 16] = [
         Constant::Mixed,
         Constant::ExplicitMixed,
         Constant::Error,
@@ -176,6 +177,7 @@ impl Constant {
         Constant::False,
         Constant::Int,
         Constant::Float,
+        Constant::OverflowFloat,
         Constant::String,
         Constant::ObjectWithoutClass,
         Constant::ParentRef,
@@ -195,7 +197,8 @@ impl Constant {
             Repr::True => Constant::True,
             Repr::False => Constant::False,
             Repr::Int => Constant::Int,
-            Repr::Float => Constant::Float,
+            Repr::Float(FloatOrigin::Value) => Constant::Float,
+            Repr::Float(FloatOrigin::IntOverflow) => Constant::OverflowFloat,
             Repr::String => Constant::String,
             Repr::ObjectWithoutClass => Constant::ObjectWithoutClass,
             Repr::ParentRef => Constant::ParentRef,
@@ -216,7 +219,8 @@ impl Constant {
             Constant::True => Repr::True,
             Constant::False => Repr::False,
             Constant::Int => Repr::Int,
-            Constant::Float => Repr::Float,
+            Constant::Float => Repr::Float(FloatOrigin::Value),
+            Constant::OverflowFloat => Repr::Float(FloatOrigin::IntOverflow),
             Constant::String => Repr::String,
             Constant::ObjectWithoutClass => Repr::ObjectWithoutClass,
             Constant::ParentRef => Repr::ParentRef,
@@ -226,7 +230,7 @@ impl Constant {
 
     /// The node every type of this constant shares.
     pub(crate) fn node(self, semantic_hash: fn(&Repr) -> u64) -> Arc<Node> {
-        static NODES: OnceLock<[Arc<Node>; 15]> = OnceLock::new();
+        static NODES: OnceLock<[Arc<Node>; 16]> = OnceLock::new();
         let nodes = NODES.get_or_init(|| {
             [
                 Constant::Mixed,
@@ -240,6 +244,7 @@ impl Constant {
                 Constant::False,
                 Constant::Int,
                 Constant::Float,
+                Constant::OverflowFloat,
                 Constant::String,
                 Constant::ObjectWithoutClass,
                 Constant::ParentRef,
@@ -392,11 +397,11 @@ fn exact_eq_owned(a: &Repr, b: &Repr) -> bool {
         | (Repr::True, Repr::True)
         | (Repr::False, Repr::False)
         | (Repr::Int, Repr::Int)
-        | (Repr::Float, Repr::Float)
         | (Repr::String, Repr::String)
         | (Repr::ObjectWithoutClass, Repr::ObjectWithoutClass)
         | (Repr::ParentRef, Repr::ParentRef)
         | (Repr::This, Repr::This) => true,
+        (Repr::Float(a), Repr::Float(b)) => a == b,
         (Repr::IntLiteral(a), Repr::IntLiteral(b)) => a == b,
         (Repr::Array(ak, av), Repr::Array(bk, bv))
         | (Repr::OffsetAccess(ak, av), Repr::OffsetAccess(bk, bv)) => same(ak, bk) && same(av, bv),
@@ -515,11 +520,11 @@ fn exact_hash_owned(repr: &Repr) -> u64 {
         | Repr::True
         | Repr::False
         | Repr::Int
-        | Repr::Float
         | Repr::String
         | Repr::ObjectWithoutClass
         | Repr::ParentRef
         | Repr::This => {}
+        Repr::Float(origin) => origin.hash(state),
         Repr::IntLiteral(n) => n.hash(state),
         Repr::Array(a, b) | Repr::OffsetAccess(a, b) => {
             hash_type(a, state);

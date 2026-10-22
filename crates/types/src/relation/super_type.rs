@@ -257,7 +257,7 @@ impl Relation<'_> {
                     }
                 }
                 (
-                    Repr::Float | Repr::FloatLiteral(_),
+                    Repr::Float(_) | Repr::FloatLiteral(_),
                     Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..),
                 ) => TrinaryLogic::No,
                 // A plain string may or may not name a class.
@@ -706,7 +706,7 @@ pub(crate) fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
 fn family_of(repr: &Repr) -> Option<ScalarFamily> {
     match repr {
         Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(_, _) => Some(ScalarFamily::Int),
-        Repr::Float | Repr::FloatLiteral(_) => Some(ScalarFamily::Float),
+        Repr::Float(_) | Repr::FloatLiteral(_) => Some(ScalarFamily::Float),
         Repr::String | Repr::StringLiteral(_) | Repr::ClassString(_) | Repr::ClassKindString(_) => {
             Some(ScalarFamily::String)
         }

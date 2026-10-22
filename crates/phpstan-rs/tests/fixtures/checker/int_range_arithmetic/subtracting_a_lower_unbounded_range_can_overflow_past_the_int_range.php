@@ -5,6 +5,6 @@
              * @param int<min, 8> $y
              */
             function f(int $x, int $y): void {
-                assertType('int<-5, max>', $x - $y);
+                assertType('int<-5, max>|float', $x - $y);
             }
         

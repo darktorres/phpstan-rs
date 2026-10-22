@@ -241,7 +241,7 @@ fn union_types_many(operands: Vec<Type>, hierarchy: Option<&dyn ClassHierarchy>)
             .filter(|m| {
                 matches!(
                     m.repr(),
-                    Repr::Int | Repr::String | Repr::Bool | Repr::Array(_, _) | Repr::Float
+                    Repr::Int | Repr::String | Repr::Bool | Repr::Array(_, _) | Repr::Float(_)
                 )
             })
             .cloned()
@@ -497,7 +497,7 @@ fn fold_value_families(members: Vec<Type>) -> Vec<Type> {
             Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..)
         )
     };
-    let is_float = |m: &Type| matches!(m.repr(), Repr::Float | Repr::FloatLiteral(_));
+    let is_float = |m: &Type| matches!(m.repr(), Repr::Float(_) | Repr::FloatLiteral(_));
     let is_string = |m: &Type| {
         m.is_string().yes() && !matches!(m.repr(), Repr::ClassString(_) | Repr::ClassKindString(_))
     };

@@ -72,7 +72,7 @@ impl fmt::Display for Type {
                 Repr::False => write!(f, "false"),
                 Repr::Int => write!(f, "int"),
                 Repr::IntLiteral(n) => write!(f, "{n}"),
-                Repr::Float => write!(f, "float"),
+                Repr::Float(_) => write!(f, "float"),
                 Repr::String => write!(f, "string"),
                 Repr::StringLiteral(s) => f.write_str(&quote_php_string(s)),
                 Repr::Array(key, value) => {

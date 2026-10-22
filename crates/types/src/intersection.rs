@@ -196,7 +196,7 @@ impl Relation<'_> {
             );
             let fits = !matches!(m.repr(), Repr::Void)
                 && native_members.iter().any(|n| {
-                    !(int_like && matches!(n.repr(), Repr::Float)) && self.accepts(n, &m).yes()
+                    !(int_like && matches!(n.repr(), Repr::Float(_))) && self.accepts(n, &m).yes()
                 });
             if fits {
                 kept.push(m);
@@ -207,7 +207,7 @@ impl Relation<'_> {
             if int_like
                 && native_members
                     .iter()
-                    .any(|n| matches!(n.repr(), Repr::Float))
+                    .any(|n| matches!(n.repr(), Repr::Float(_)))
             {
                 kept.push(match m.repr() {
                     Repr::IntLiteral(n) => Type::float_literal(*n as f64),

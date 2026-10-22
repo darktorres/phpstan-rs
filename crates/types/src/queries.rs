@@ -271,7 +271,7 @@ impl Type {
     /// `mentions` for this type's own form, not what is nested in it.
     fn mentions_directly(&self, name: &str) -> bool {
         match (name, self.repr()) {
-            ("float", Repr::Float | Repr::FloatLiteral(_)) => true,
+            ("float", Repr::Float(_) | Repr::FloatLiteral(_)) => true,
             ("int", Repr::Int | Repr::IntLiteral(_) | Repr::IntRange(..)) => true,
             (
                 "string",
@@ -508,7 +508,8 @@ impl Type {
 
     /// The loop widening of this type as it grows into `next`: an int
     /// keeps a bound that stayed put and opens the one that moved
-    /// (`0` then `0|1` is `int<0, max>`); array shapes, a union of them
+    /// (`0` then `0|1` is `int<0, max>`), the float of an overflow kept
+    /// beside it; array shapes, a union of them
     /// read as one shape whose keys some members lack are optional, widen
     /// field by field as long as they keep their keys or gain string ones
     /// (a body writes finitely many), other keys either allows staying
@@ -516,6 +517,17 @@ impl Type {
     /// its siblings their types; anything else, an array gaining int keys
     /// by appends among it, is `next` generalized.
     pub fn widen_towards(&self, next: &Type) -> Type {
+        // The float of an `int` overflow rides along: the ints widen.
+        let (before_rest, before_overflowed) = self.split_overflow_float();
+        let (next_rest, next_overflowed) = next.split_overflow_float();
+        if (before_overflowed || next_overflowed) && !next_rest.is_never() {
+            let rest = if before_rest.is_never() {
+                next_rest.clone()
+            } else {
+                before_rest.widen_towards(&next_rest)
+            };
+            return Type::union(rest, Type::overflow_float());
+        }
         if let (Some((before, before_non_empty)), Some((after, after_non_empty))) =
             (self.combined_shape(), next.combined_shape())
             && before

@@ -452,7 +452,7 @@ impl Type {
                 | Repr::Int
                 | Repr::IntLiteral(_)
                 | Repr::IntRange(..)
-                | Repr::Float
+                | Repr::Float(_)
                 | Repr::FloatLiteral(_) => Type::never(),
                 Repr::ArrayShape(_) => {
                     let Some(key) = key else {

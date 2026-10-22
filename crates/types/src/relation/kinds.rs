@@ -85,7 +85,7 @@ impl Relation<'_> {
             | Repr::Int
             | Repr::IntLiteral(_)
             | Repr::IntRange(..)
-            | Repr::Float
+            | Repr::Float(_)
             | Repr::FloatLiteral(_)
             | Repr::Resource { .. } => TrinaryLogic::No,
             Repr::Object(name, _) | Repr::EnumCase(name, _) => {

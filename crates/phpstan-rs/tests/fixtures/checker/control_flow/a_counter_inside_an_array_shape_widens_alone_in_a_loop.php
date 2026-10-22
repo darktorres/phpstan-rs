@@ -15,5 +15,5 @@ function f(array $plugins, string $installedOn): void
         }
         $info['plugins'][] = $plugin;
     }
-    assertType('array{nb_photos: 1, installed_on: string, nb_private: int<0, max>}', $info['stats']);
+    assertType('array{nb_photos: 1, installed_on: string, nb_private: int<0, max>|float}', $info['stats']);
 }

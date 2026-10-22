@@ -172,17 +172,10 @@ impl Type {
                 None => Type::float_literal(*n as f64 + by as f64),
             },
             Repr::FloatLiteral(f) => Type::float_literal(f + by as f64),
-            Repr::IntRange(min, max) => {
-                let edge = if by > 0 { i64::MAX } else { i64::MIN };
-                let stepped = Type::int_range(
-                    min.map(|v| v.checked_add(by).unwrap_or(edge)),
-                    max.map(|v| v.checked_add(by).unwrap_or(edge)),
-                );
-                if [*min, *max].contains(&Some(edge)) {
-                    Type::union(stepped, Type::float_literal(edge as f64 + by as f64))
-                } else {
-                    stepped
-                }
+            // An int steps as `+ by` does, past either end of the `int`
+            // range to a float.
+            Repr::IntRange(..) | Repr::Int => {
+                Type::binary_operation(crate::ArithmeticOp::Add, self, &Type::int_literal(by))
             }
             Repr::StringLiteral(s) => match crate::numeric_value(s.as_bytes()) {
                 Some(crate::PhpNumber::Int(n)) => Type::int_literal(n).step(by),

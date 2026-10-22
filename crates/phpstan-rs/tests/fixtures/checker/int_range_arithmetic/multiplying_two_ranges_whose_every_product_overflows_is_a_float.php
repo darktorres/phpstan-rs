@@ -5,6 +5,6 @@
              * @param int<2, 3> $y
              */
             function f(int $x, int $y): void {
-                assertType('int|float', $x * $y);
+                assertType('float', $x * $y);
             }
         

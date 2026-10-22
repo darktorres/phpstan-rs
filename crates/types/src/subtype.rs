@@ -140,7 +140,9 @@ impl Relation<'_> {
                     Repr::ObjectWithoutClass,
                 ) => true,
                 (Repr::True, Repr::Bool) | (Repr::False, Repr::Bool) => true,
-                (Repr::FloatLiteral(_), Repr::Float) => true,
+                (Repr::FloatLiteral(_), Repr::Float(_)) => true,
+                // A float from `int` overflow is a float.
+                (Repr::Float(_), Repr::Float(crate::FloatOrigin::Value)) => true,
 
                 // `int<min, max>` ranges. `IntRange` fully replaces
                 // `Int`'s own range (the same relationship `IntLiteral` has to

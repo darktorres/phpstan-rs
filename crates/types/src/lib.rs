@@ -380,6 +380,15 @@ impl std::fmt::Debug for Type {
 /// rule reports as invalid: a `mixed` that accepts and is accepted by
 /// everything, so the reported error doesn't cascade into more, and that
 /// no rule reports on again.
+/// Where a float came from. `IntOverflow` is the float PHP gives when `int`
+/// arithmetic leaves the `int` range: a float to narrowing, which rules
+/// report by what can make the operands that large, not as a float value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) enum FloatOrigin {
+    Value,
+    IntOverflow,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum MixedKind {
     Implicit,
@@ -398,7 +407,7 @@ pub(crate) enum Repr {
     False,
     Int,
     IntLiteral(i64),
-    Float,
+    Float(FloatOrigin),
     String,
     StringLiteral(PhpString),
     // Key type alongside value type. Construction sites with no more
@@ -623,7 +632,7 @@ fn repr_eq(a: &Repr, b: &Repr) -> bool {
         (Repr::False, Repr::False) => true,
         (Repr::Int, Repr::Int) => true,
         (Repr::IntLiteral(a), Repr::IntLiteral(b)) => a == b,
-        (Repr::Float, Repr::Float) => true,
+        (Repr::Float(a), Repr::Float(b)) => a == b,
         (Repr::String, Repr::String) => true,
         (Repr::StringLiteral(a), Repr::StringLiteral(b)) => a == b,
         (Repr::Array(ak, av), Repr::Array(bk, bv)) => ak == bk && av == bv,
@@ -699,7 +708,7 @@ fn repr_eq(a: &Repr, b: &Repr) -> bool {
             | Repr::False
             | Repr::Int
             | Repr::IntLiteral(_)
-            | Repr::Float
+            | Repr::Float(_)
             | Repr::String
             | Repr::StringLiteral(_)
             | Repr::Array(..)
@@ -766,11 +775,11 @@ fn semantic_hash(repr: &Repr) -> u64 {
         | Repr::True
         | Repr::False
         | Repr::Int
-        | Repr::Float
         | Repr::String
         | Repr::ObjectWithoutClass
         | Repr::ParentRef
         | Repr::This => {}
+        Repr::Float(origin) => origin.hash(state),
         Repr::IntLiteral(n) => n.hash(state),
         Repr::StringLiteral(s) => s.hash(state),
         Repr::Array(k, v) | Repr::OffsetAccess(k, v) => {

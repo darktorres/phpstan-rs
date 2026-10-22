@@ -7,4 +7,4 @@
 11:10-11:13 unaryMinus.nonNumeric L0 | Only numeric types are allowed in unary -, bool given.
 13:5-13:9 postDec.nonNumeric L0 | Only numeric types are allowed in post-decrement, int|float|string given.
 14:5-14:13 postInc.nonNumeric L0 | Only numeric types are allowed in post-increment, int|null given.
-16:5-16:14 pow.rightNonNumeric L0 | Only numeric types are allowed in **, int|float|string given on the right side.
+16:5-16:14 pow.rightNonNumeric L0 | Only numeric types are allowed in **, float|int|string given on the right side.

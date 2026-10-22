@@ -21,7 +21,7 @@ function f(string $s, string $num, string $ne, ?int $ni): void {
     $num++; assertType('int|float', $num);
     $s++; assertType('int|float|non-empty-string', $s);
     $ne--; assertType('int|float|non-empty-string', $ne);
-    $ni++; assertType('int', $ni);
+    $ni++; assertType('int<-9223372036854775807, max>|float', $ni);
     $p = 'a'; assertType("'a'", $p++); assertType("'b'", $p);
     $q = 'a'; assertType("'b'", ++$q);
 }

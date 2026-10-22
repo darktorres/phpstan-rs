@@ -5,6 +5,6 @@
              * @param int<0, max> $y
              */
             function f(int $x, int $y): void {
-                assertType('int<0, max>', $x + $y);
+                assertType('int<0, max>|float', $x + $y);
             }
         

@@ -51,7 +51,7 @@ impl Type {
     /// numeric-castable class list (no `CurlHandle`/`CurlMultiHandle`).
     pub fn to_float(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
         stack::guard(|| match self.repr() {
-            Repr::Float | Repr::FloatLiteral(_) => Some(self.clone()),
+            Repr::Float(_) | Repr::FloatLiteral(_) => Some(self.clone()),
             Repr::IntLiteral(n) => Some(Type::float_literal(*n as f64)),
             Repr::True => Some(Type::float_literal(1.0)),
             Repr::False | Repr::Null => Some(Type::float_literal(0.0)),
@@ -89,7 +89,7 @@ impl Type {
                 Repr::Int
                 | Repr::IntLiteral(_)
                 | Repr::IntRange(..)
-                | Repr::Float
+                | Repr::Float(_)
                 | Repr::FloatLiteral(_) => Some(self.clone()),
                 Repr::True | Repr::False | Repr::Null | Repr::Bool => self.to_integer(hierarchy),
                 Repr::StringLiteral(s)
@@ -138,7 +138,7 @@ impl Type {
                 Repr::Int | Repr::IntRange(..) => Some(decimal_int_string()),
                 Repr::FloatLiteral(f) => Some(Type::string_literal(format_php_float(*f).into())),
                 // `INF`, `-INF` and `NAN` aren't numeric.
-                Repr::Float => Some(Type::new(Repr::Intersection(vec![
+                Repr::Float(_) => Some(Type::new(Repr::Intersection(vec![
                     Type::string(),
                     Type::accessory(AccessoryKind::UppercaseString),
                     Type::accessory(AccessoryKind::NonEmptyString),
@@ -202,7 +202,7 @@ impl Type {
     pub fn to_array_key(&self) -> Type {
         stack::guard(|| match self.repr() {
             Repr::FloatLiteral(f) => Type::int_literal(php_float_to_int(*f)),
-            Repr::Float => Type::int(),
+            Repr::Float(_) => Type::int(),
             Repr::True => Type::int_literal(1),
             Repr::False => Type::int_literal(0),
             Repr::Bool => Type::new(Repr::Union(vec![
@@ -248,10 +248,12 @@ impl Type {
     /// lower bound's is). Anything it can't narrow is `int|float`.
     pub fn to_absolute_number(&self) -> Type {
         match self.repr() {
-            Repr::IntRange(min, max) if *min == Some(i64::MIN) => Type::union(
+            // A range that can hold `PHP_INT_MIN` overflows on it.
+            Repr::IntRange(min, max) if min.is_none_or(|m| m == i64::MIN) => Type::union(
                 Type::int_range(Some(i64::MIN + 1), *max).to_absolute_number(),
-                Type::float_literal(-(i64::MIN as f64)),
+                Type::overflow_float(),
             ),
+            Repr::Int => Type::union(Type::int_range(Some(0), None), Type::overflow_float()),
             Repr::IntRange(min, max) => {
                 if min.is_some_and(|m| m >= 0) {
                     return self.clone();
@@ -279,7 +281,7 @@ impl Type {
                 .map(Type::to_absolute_number)
                 .union_all()
                 .unwrap_or_else(|| self.clone()),
-            Repr::Int | Repr::Float => self.clone(),
+            Repr::Float(_) => self.clone(),
             _ => Type::new(Repr::Union(vec![Type::int(), Type::float()])),
         }
     }
@@ -291,7 +293,7 @@ impl Type {
         stack::guard(|| match self.repr() {
             Repr::IntRange(min, max) => Type::int_range(max.map(|m| !m), min.map(|m| !m)),
             Repr::IntLiteral(n) => Type::int_literal(!n),
-            Repr::Int | Repr::Float => Type::int(),
+            Repr::Int | Repr::Float(_) => Type::int(),
             Repr::FloatLiteral(f) => Type::int_literal(!php_float_to_int(*f)),
             Repr::StringLiteral(s) => Type::string_literal(PhpString::from(
                 s.as_bytes().iter().map(|b| !b).collect::<Vec<u8>>(),
