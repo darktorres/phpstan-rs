@@ -12,11 +12,14 @@ use syntax::visit::{self, Visitor};
 use super::assignment::assigned_part_of_variable;
 use super::stmt::assigned_variable_names;
 
-/// How far one iteration can move a counter: up and down.
+/// How far one iteration can move a counter: up and down, and whether
+/// each step runs at most once an iteration (none in a nested loop, and
+/// no `goto` in the loop).
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub(crate) struct Steps {
     pub(crate) up: i64,
     pub(crate) down: i64,
+    pub(crate) once: bool,
 }
 
 /// A loop's counters, by name.
@@ -86,11 +89,21 @@ impl Scan<'_> {
         if self.anything {
             return LoopCounters::default();
         }
-        let Scan { steps, other, .. } = self;
+        let Scan {
+            steps,
+            other,
+            repeated,
+            jumps,
+            ..
+        } = self;
         LoopCounters(
             steps
                 .into_iter()
                 .filter(|(name, _)| !other.contains(name))
+                .map(|(name, steps)| {
+                    let once = !jumps && !repeated.contains(&name);
+                    (name, Steps { once, ..steps })
+                })
                 .collect(),
         )
     }
@@ -101,6 +114,13 @@ struct Scan<'r> {
     steps: FxHashMap<String, Steps>,
     /// Variables written some other way.
     other: FxHashSet<String>,
+    /// Variables stepped inside a nested loop.
+    repeated: FxHashSet<String>,
+    /// How many loops the scan is inside, past the scanned one.
+    nested: u32,
+    /// Whether the scan met a `goto` or a label, which can run a step
+    /// again in the same iteration.
+    jumps: bool,
     /// Whether any variable may be written in a way the scan can't name
     /// (`$$name`, `$GLOBALS`, `extract()`, `include`, `eval`).
     anything: bool,
@@ -115,6 +135,9 @@ struct Scan<'r> {
 
 impl Scan<'_> {
     fn step(&mut self, name: &str, by: i64) {
+        if self.nested > 0 {
+            self.repeated.insert(name.to_string());
+        }
         let steps = self.steps.entry(name.to_string()).or_default();
         if by >= 0 {
             steps.up = steps.up.saturating_add(by);
@@ -223,9 +246,19 @@ impl<'ast> Visitor<'ast> for Scan<'_> {
                 self.write(value);
             }
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => return,
+            StmtKind::Goto(_) | StmtKind::Label(_) => self.jumps = true,
             _ => {}
         }
+        let nested = matches!(
+            stmt.kind,
+            StmtKind::While { .. }
+                | StmtKind::DoWhile { .. }
+                | StmtKind::For { .. }
+                | StmtKind::Foreach { .. }
+        );
+        self.nested += u32::from(nested);
         visit::walk_stmt(self, stmt);
+        self.nested -= u32::from(nested);
     }
 
     fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {

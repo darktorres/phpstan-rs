@@ -227,22 +227,40 @@ impl<'a> Checker<'a> {
     /// `converge_loop_passes` with the loop's `counters` widened to their
     /// bands: from the range a counter enters the loop with (or the band
     /// of an enclosing loop it is a counter of too), as far as the steps of
-    /// the process's iterations take it, when that stays in the `int`
-    /// range with a step to spare.
+    /// the process's iterations take it, or of the loop's own
+    /// `most_iterations` when it has a bound and the counter's steps run
+    /// once an iteration, when that stays in the `int` range with a step
+    /// to spare.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn converge_loop_body(
         &mut self,
         entry: &Locals,
         declared_return: Option<&Type>,
         label: &str,
         counters: &LoopCounters,
+        most_iterations: Option<i64>,
         zero_iterations: LoopZeroIterations<'_>,
         run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str, usize),
     ) -> (Locals, Vec<Locals>) {
         let enclosing = self.loop_counter_bands.len();
-        let iterations = self.settings.platform.loop_iterations;
+        let run = self.settings.platform.loop_iterations;
         for name in counters.names() {
             let Some(steps) = counters.get(name) else {
                 continue;
+            };
+            // The band bounds a counter where an iteration begins, which
+            // a loop that can run zero times also leaves by, so after as
+            // many iterations as it runs; one that can't is left after
+            // its last iteration's body, past a beginning one fewer.
+            let completed = most_iterations.filter(|_| steps.once).map(|most| {
+                match zero_iterations {
+                    LoopZeroIterations::Possible { .. } => most,
+                    LoopZeroIterations::Impossible => most.saturating_sub(1).max(0),
+                }
+            });
+            let iterations = match (run, completed) {
+                (Some(run), Some(most)) => Some(run.min(most)),
+                (run, most) => most.or(run),
             };
             let enclosing_band = self.loop_counter_bands[..enclosing]
                 .iter()

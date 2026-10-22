@@ -4,7 +4,7 @@ use function PHPStan\Testing\assertType;
 function f(array $l): void {
     $acc = 0;
     foreach ($l as $n) { $acc += 1; }
-    assertType('int<0, 541784354586624000>', $acc);
+    assertType('int<0, 1073741824>', $acc);
     $s = '';
     foreach ($l as $n) { $s .= 'a'; }
     assertType('string', $s);

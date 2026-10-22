@@ -939,6 +939,7 @@ impl<'a> Checker<'a> {
             declared_return.as_ref(),
             &closure_label,
             &crate::checker::loop_counters::LoopCounters::default(),
+            None,
             zero_iterations,
             |this, pass_locals, declared_return, label, _pass| {
                 // Only the kept (last) pass's return points count,

@@ -1,8 +1,8 @@
 <?php
 use function PHPStan\Testing\assertType;
 
-/** @param list<int> $l */
-function f(array $l): void {
+/** @param iterable<int> $l */
+function f(iterable $l): void {
     $i = 0;
     foreach ($l as $a) {
         $i++;

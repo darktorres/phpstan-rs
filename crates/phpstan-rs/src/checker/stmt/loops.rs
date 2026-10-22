@@ -251,6 +251,7 @@ impl<'a> Checker<'a> {
             declared_return,
             label,
             &LoopCounters::of(&[], &[cond], &[body]),
+            None,
             LoopZeroIterations::Possible {
                 subject_exempt: None,
                 subject_key: None,
@@ -399,6 +400,7 @@ impl<'a> Checker<'a> {
             // construction (the condition is only checked *after*) -
             // see `converge_loop_body`'s own doc comment on this
             // parameter.
+            None,
             LoopZeroIterations::Impossible,
             |this, pass_locals, declared_return, label, _pass| {
                 this.check_loop_body(body, pass_locals, declared_return, label);
@@ -587,6 +589,7 @@ impl<'a> Checker<'a> {
                     declared_return,
                     label,
                     &LoopCounters::of(&[], &cond.iter().chain(step).collect::<Vec<_>>(), &[body]),
+                    None,
                     LoopZeroIterations::Possible {
                         subject_exempt: None,
                         subject_key: None,
@@ -650,6 +653,7 @@ impl<'a> Checker<'a> {
                     // once (no condition to ever prevent the first
                     // iteration) - same exemption as `do`-`while`, see
                     // `converge_loop_body`'s own doc comment.
+                    None,
                     LoopZeroIterations::Impossible,
                     |this, pass_locals, declared_return, label, _pass| {
                         this.check_loop_body(body, pass_locals, declared_return, label);
@@ -949,6 +953,17 @@ impl<'a> Checker<'a> {
         // Iterating anything but an array runs user code (a generator, an
         // `Iterator`'s methods) before each iteration and after the last.
         let iteration_throws = subject_ty.array_value_type().is_none();
+        // By value, an array is iterated as it was when the loop began,
+        // and no array holds more than `MAX_ARRAY_SIZE` elements; by
+        // reference the body can append to it, and a `Traversable` has
+        // no end.
+        let most_iterations = (!by_ref && subject_ty.is_array().yes()).then(|| {
+            subject_ty
+                .count_range()
+                .map_or(types::MAX_ARRAY_SIZE, |(_, most)| {
+                    most.min(types::MAX_ARRAY_SIZE)
+                })
+        });
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
             declared_return,
@@ -958,6 +973,7 @@ impl<'a> Checker<'a> {
                 &[],
                 &[body],
             ),
+            most_iterations,
             zero_iterations,
             |this, pass_locals, declared_return, label, _pass| {
                 if iteration_throws {

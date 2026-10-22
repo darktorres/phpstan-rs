@@ -19,7 +19,7 @@ function f(array $l, int $start, callable $g): void {
         $k += 3;
         $k -= 2;
     }
-    assertType('int<10, 1625353063759872010>', $k);
+    assertType('int<10, 3221225482>', $k);
     $d = 1;
     foreach ($l as $a) {
         $d *= 2;
