@@ -1379,6 +1379,11 @@ impl Session {
             restricted_symbols,
             doctrine: section::<ext::doctrine::DoctrineSettings>(config, policy, &mut warnings)?,
             dynamic_constant_names: engine.dynamic_constant_entries(),
+            platform: engine
+                .deployment
+                .as_ref()
+                .map(crate::checker::settings::Deployment::limits)
+                .unwrap_or_default(),
             overlays,
             sql_reflection,
             sql_schema,

@@ -10,7 +10,71 @@ use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 
 use super::{is_false_literal, is_true_literal};
 
+/// Builtins whose `int` result is a count of bytes, characters or words of
+/// a string, or an offset into one: no more than the string's length.
+const STRING_MEASURES: &[&str] = &[
+    "grapheme_stripos",
+    "grapheme_strlen",
+    "grapheme_strpos",
+    "grapheme_strripos",
+    "grapheme_strrpos",
+    "iconv_strlen",
+    "iconv_strpos",
+    "iconv_strrpos",
+    "mb_stripos",
+    "mb_strlen",
+    "mb_strpos",
+    "mb_strripos",
+    "mb_strrpos",
+    "mb_substr_count",
+    "ob_get_length",
+    "similar_text",
+    "str_word_count",
+    "strcspn",
+    "stripos",
+    "strlen",
+    "strpos",
+    "strripos",
+    "strrpos",
+    "strspn",
+    "substr_count",
+];
+
 impl<'a> Checker<'a> {
+    /// What a builtin returns, within what the deployment's platforms
+    /// bound: a string's measures by the longest string, `time()` by the
+    /// clock.
+    pub(crate) fn infer_builtin_call_return_type(
+        &self,
+        name: &str,
+        sig: &FunctionReflection,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Type {
+        let ty = self.builtin_call_return_type(name, sig, args, locals);
+        let platform = self.settings.platform;
+        let bound = match (name, platform.string_length, platform.clock) {
+            (_, Some(most), _) if STRING_MEASURES.contains(&name) => {
+                Type::int_range(Some(0), Some(most))
+            }
+            ("time", _, Some((least, most))) => Type::int_range(Some(least), Some(most)),
+            _ => return ty,
+        };
+        let members: Vec<Type> = ty
+            .union_members()
+            .iter()
+            .map(|member| {
+                if member.is_int().yes() {
+                    self.relation()
+                        .intersect(vec![member.clone(), bound.clone()])
+                } else {
+                    member.clone()
+                }
+            })
+            .collect();
+        self.relation().union_of(members)
+    }
+
     /// Bespoke per-function return-type extensions, mirroring real
     /// PHPStan's own `src/Type/Php/` (190 files of exactly this kind of
     /// special-casing, not generic machinery). Falls through to the
@@ -23,7 +87,7 @@ impl<'a> Checker<'a> {
     /// standard-library functions nobody realistically calls with named
     /// arguments, and a resolved slice isn't sized the same way a raw
     /// argument count is (see `check_args`'s note on that distinction).
-    pub(crate) fn infer_builtin_call_return_type(
+    fn builtin_call_return_type(
         &self,
         name: &str,
         sig: &FunctionReflection,

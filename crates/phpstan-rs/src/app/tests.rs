@@ -279,3 +279,36 @@ fn dynamic_constant_names_accept_a_list_a_typed_table_or_mixed_entries() {
         ]
     );
 }
+
+#[test]
+fn a_deployment_bounds_what_every_listed_platform_bounds() {
+    let limits = |toml: &str| {
+        load(toml)
+            .section::<EngineSettings>()
+            .unwrap()
+            .deployment
+            .map(|d| d.limits())
+    };
+    let bounded =
+        limits("[deployment]\narch = [\"x86_64\", \"aarch64\"]\nos = [\"linux\", \"windows\"]")
+            .unwrap();
+    assert_eq!(bounded.string_length, Some((1 << 56) - 1));
+    assert_eq!(bounded.clock, Some((-11_644_473_600, 910_692_730_085)));
+    let unbounded =
+        limits("[deployment]\narch = [\"s390x\", \"x86_64\"]\nos = [\"freebsd\"]").unwrap();
+    assert_eq!(unbounded.string_length, None);
+    assert_eq!(unbounded.clock, None);
+    assert_eq!(
+        limits("[deployment]\nos = [\"linux\"]")
+            .unwrap()
+            .string_length,
+        None
+    );
+    assert_eq!(limits(""), None);
+    let schema = config_schema();
+    let err = ConfigFile::parse("[deployment]\narch = [\"mips64\"]", &schema)
+        .unwrap()
+        .validate(&schema)
+        .unwrap_err();
+    assert!(err.contains("unknown variant `mips64`"), "got: {err}");
+}
