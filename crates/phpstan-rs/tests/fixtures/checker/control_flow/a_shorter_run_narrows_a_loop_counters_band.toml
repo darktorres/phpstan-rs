@@ -1,0 +1,2 @@
+[deployment]
+max_run_seconds = 86400

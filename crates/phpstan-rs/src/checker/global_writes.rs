@@ -209,6 +209,7 @@ impl Checker<'_> {
                 Some(literal) if !any => self.infer_expr(literal, locals),
                 _ => Type::mixed(),
             };
+            self.log_byref_write(&name);
             locals.insert_var(&name, ty);
         }
     }

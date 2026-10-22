@@ -1,4 +1,5 @@
 use crate::checker::keys::{KeyData, LocalKey};
+use crate::checker::loop_counters::LoopCounters;
 use crate::checker::{Checker, Discriminant, Locals};
 use types::{self, Relation, Type, UnionAll as _};
 
@@ -76,8 +77,14 @@ impl<'a> Checker<'a> {
     /// so the next pass can converge: an int only on the side it is moving,
     /// anything else to its general type. Only a growing value widens; one
     /// that shrank back inside an earlier widening narrows to what the pass
-    /// gave.
-    pub(crate) fn widen_towards_entry(&self, pass_entry: &Locals, next_entry: &mut Locals) {
+    /// gave. A counter of the loop (`bands`) widens to its band instead:
+    /// as far as the process's iterations can move it.
+    pub(crate) fn widen_towards_entry(
+        &self,
+        pass_entry: &Locals,
+        next_entry: &mut Locals,
+        bands: &[(LocalKey, (i64, i64))],
+    ) {
         let relation = self.relation();
         // A binding the pass did not change stays; only an added or changed
         // one can widen.
@@ -93,9 +100,13 @@ impl<'a> Checker<'a> {
                 None => true,
             })
             .map(|(name, before, ty)| {
-                let widened = match before {
-                    Some(before) => before.widen_towards(ty),
-                    None => ty.generalize(),
+                let band = bands.iter().find(|(key, _)| *key == name).map(|(_, b)| *b);
+                let widened = match (before, band) {
+                    (Some(before), Some(band)) if before.is_int().yes() && ty.is_int().yes() => {
+                        widen_counter(before, ty, band)
+                    }
+                    (Some(before), _) => before.widen_towards(ty),
+                    (None, _) => ty.generalize(),
                 };
                 (name, widened)
             })
@@ -213,11 +224,91 @@ impl<'a> Checker<'a> {
         unreachable!("the last pass returns")
     }
 
+    /// `converge_loop_passes` with the loop's `counters` widened to their
+    /// bands: from the range a counter enters the loop with (or the band
+    /// of an enclosing loop it is a counter of too), as far as the steps of
+    /// the process's iterations take it, when that stays in the `int`
+    /// range with a step to spare.
     pub(crate) fn converge_loop_body(
         &mut self,
         entry: &Locals,
         declared_return: Option<&Type>,
         label: &str,
+        counters: &LoopCounters,
+        zero_iterations: LoopZeroIterations<'_>,
+        run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str, usize),
+    ) -> (Locals, Vec<Locals>) {
+        let enclosing = self.loop_counter_bands.len();
+        let iterations = self.settings.platform.loop_iterations;
+        for name in counters.names() {
+            let Some(steps) = counters.get(name) else {
+                continue;
+            };
+            let enclosing_band = self.loop_counter_bands[..enclosing]
+                .iter()
+                .rev()
+                .find(|(n, _)| n == name)
+                .map(|(_, band)| *band);
+            let band = enclosing_band.or_else(|| {
+                let ty = entry.get_var(name)?;
+                if !ty.is_int().yes() {
+                    return None;
+                }
+                let (Some(lo), Some(hi)) = ty.int_hull()? else {
+                    return None;
+                };
+                let n = iterations?;
+                let band_lo = lo.checked_sub(n.checked_mul(steps.down)?)?;
+                let band_hi = hi.checked_add(n.checked_mul(steps.up)?)?;
+                band_lo.checked_sub(steps.down)?;
+                band_hi.checked_add(steps.up)?;
+                Some((band_lo, band_hi))
+            });
+            if let Some(band) = band {
+                self.loop_counter_bands.push((name.to_string(), band));
+            }
+        }
+        let log_start = self.byref_written_names.borrow().len();
+        let out = self.converge_loop_passes(
+            entry,
+            declared_return,
+            label,
+            CounterScope {
+                enclosing,
+                log_start,
+            },
+            zero_iterations,
+            run_pass,
+        );
+        self.loop_counter_bands.truncate(enclosing);
+        if self.loop_counter_bands.is_empty() {
+            self.byref_written_names.borrow_mut().clear();
+        }
+        out
+    }
+
+    /// This loop's counter bands, keyed in `scope`, less the counters a
+    /// call has written by reference since the loop began.
+    fn counter_bands_in(
+        &self,
+        scope: &Locals,
+        counters: CounterScope,
+    ) -> Vec<(LocalKey, (i64, i64))> {
+        let log = self.byref_written_names.borrow();
+        let written = &log[counters.log_start.min(log.len())..];
+        self.loop_counter_bands[counters.enclosing..]
+            .iter()
+            .filter(|(name, _)| !written.contains(name))
+            .filter_map(|(name, band)| Some((scope.find_var(name)?, *band)))
+            .collect()
+    }
+
+    fn converge_loop_passes(
+        &mut self,
+        entry: &Locals,
+        declared_return: Option<&Type>,
+        label: &str,
+        counters: CounterScope,
         // `while`/`for`/`foreach` can all genuinely run zero times (the
         // condition/subject is checked *before* the first iteration) -
         // `Possible` merges the exit state with `entry` accordingly (see
@@ -256,7 +347,8 @@ impl<'a> Checker<'a> {
                 next_entry = merge_scopes(&self.relation(), &next_entry, state);
             }
             if pass >= WIDEN_FROM_PASS && next_entry != pass_entry {
-                self.widen_towards_entry(&pass_entry, &mut next_entry);
+                let bands = self.counter_bands_in(&pass_entry, counters);
+                self.widen_towards_entry(&pass_entry, &mut next_entry, &bands);
             }
             if next_entry == pass_entry || is_last_allowed_pass {
                 // The kept pass's own `body_locals`, returned to the
@@ -372,6 +464,36 @@ impl<'a> Checker<'a> {
 /// Adds the fact that `name` is `ty` to `facts`. Two facts for one
 /// variable under one discriminant come from different paths, so it is
 /// either.
+/// Where a loop's counters are: its bands from `enclosing` on in
+/// `Checker::loop_counter_bands`, and the by-reference writes logged from
+/// `log_start` on.
+#[derive(Clone, Copy)]
+struct CounterScope {
+    enclosing: usize,
+    log_start: usize,
+}
+
+/// A loop counter's widening: an end that moved goes to its band's end,
+/// one that stayed put stays, and no value leaves the band.
+fn widen_counter(before: &Type, next: &Type, band: (i64, i64)) -> Type {
+    let (Some((Some(lo_before), Some(hi_before))), Some((Some(lo_next), Some(hi_next)))) =
+        (before.int_hull(), next.int_hull())
+    else {
+        return before.widen_towards(next);
+    };
+    let lo = if lo_next < lo_before {
+        band.0
+    } else {
+        lo_before
+    };
+    let hi = if hi_next > hi_before {
+        band.1
+    } else {
+        hi_before
+    };
+    Type::int_range(Some(lo.max(band.0)), Some(hi.min(band.1)))
+}
+
 pub(crate) fn add_implied_fact(
     relation: &Relation,
     facts: &mut Vec<(LocalKey, Type)>,

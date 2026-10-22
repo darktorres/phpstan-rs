@@ -1,4 +1,5 @@
 use crate::checker::keys::KeyData;
+use crate::checker::loop_counters::LoopCounters;
 use crate::checker::{ExitKind, ExitPoint};
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
@@ -249,6 +250,7 @@ impl<'a> Checker<'a> {
             &entry,
             declared_return,
             label,
+            &LoopCounters::of(&[], &[cond], &[body]),
             LoopZeroIterations::Possible {
                 subject_exempt: None,
                 subject_key: None,
@@ -392,6 +394,7 @@ impl<'a> Checker<'a> {
             &entry,
             declared_return,
             label,
+            &LoopCounters::of(&[], &[cond], &[body]),
             // A do-while's body always runs at least once by
             // construction (the condition is only checked *after*) -
             // see `converge_loop_body`'s own doc comment on this
@@ -583,6 +586,7 @@ impl<'a> Checker<'a> {
                     &entry,
                     declared_return,
                     label,
+                    &LoopCounters::of(&[], &cond.iter().chain(step).collect::<Vec<_>>(), &[body]),
                     LoopZeroIterations::Possible {
                         subject_exempt: None,
                         subject_key: None,
@@ -641,6 +645,7 @@ impl<'a> Checker<'a> {
                     &entry,
                     declared_return,
                     label,
+                    &LoopCounters::of(&[], &cond.iter().chain(step).collect::<Vec<_>>(), &[body]),
                     // `for (;;)` genuinely always executes at least
                     // once (no condition to ever prevent the first
                     // iteration) - same exemption as `do`-`while`, see
@@ -948,6 +953,11 @@ impl<'a> Checker<'a> {
             &entry,
             declared_return,
             label,
+            &LoopCounters::of(
+                &key.into_iter().chain([value]).collect::<Vec<_>>(),
+                &[],
+                &[body],
+            ),
             zero_iterations,
             |this, pass_locals, declared_return, label, _pass| {
                 if iteration_throws {

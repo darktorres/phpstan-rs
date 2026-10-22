@@ -559,7 +559,7 @@ impl Type {
             };
         }
         if let (ArithmeticOp::Add | ArithmeticOp::Sub | ArithmeticOp::Mul, Some(l), Some(r)) =
-            (op, int_hull_bounds(lt), int_hull_bounds(rt))
+            (op, lt.int_hull(), rt.int_hull())
             && !(lt.union_members().len() * rt.union_members().len() <= LITERAL_FOLD_LIMIT
                 && all_int_literals(lt)
                 && all_int_literals(rt))
@@ -808,23 +808,6 @@ fn fold_float_constants(op: ArithmeticOp, lt: &Type, rt: &Type) -> Option<Type> 
 
 /// How many value pairs of two literal sets are computed one by one.
 const LITERAL_FOLD_LIMIT: usize = 64;
-
-/// The least and greatest value of a type whose every member is an `int`
-/// (`None` for an end PHP's own `int` range bounds).
-fn int_hull_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
-    let mut hull: Option<(Option<i64>, Option<i64>)> = None;
-    for member in ty.union_members() {
-        let (min, max) = member.int_bounds()?;
-        hull = Some(match hull {
-            None => (min, max),
-            Some((lo, hi)) => (
-                lo.zip(min).map(|(a, b)| a.min(b)),
-                hi.zip(max).map(|(a, b)| a.max(b)),
-            ),
-        });
-    }
-    hull
-}
 
 fn all_int_literals(ty: &Type) -> bool {
     ty.union_members()

@@ -66,6 +66,14 @@ impl<'a> Checker<'a> {
     /// instead of the raw argument list - a named or reordered-named
     /// by-ref argument must be matched against its real declared
     /// parameter, not whichever parameter sits at the same index.
+    /// Notes that a call may write `name` by reference, while a loop
+    /// with counters is checked.
+    pub(crate) fn log_byref_write(&self, name: &str) {
+        if !self.loop_counter_bands.is_empty() {
+            self.byref_written_names.borrow_mut().push(name.to_string());
+        }
+    }
+
     pub(crate) fn predefine_byref_or_unknown_args(
         &self,
         call_name: Option<&str>,
@@ -112,6 +120,7 @@ impl<'a> Checker<'a> {
                     locals.declare_var(name, Type::mixed(), arg.value.span);
                 }
                 locals.clear_native_var(name);
+                self.log_byref_write(name);
             }
             return;
         };
@@ -136,6 +145,7 @@ impl<'a> Checker<'a> {
             if !param.by_ref() {
                 continue;
             }
+            self.log_byref_write(name);
             if !locals.contains_var(name) {
                 locals.declare_var(name, Type::mixed(), arg_expr.span);
                 continue;

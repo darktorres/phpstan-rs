@@ -22,26 +22,48 @@ pub struct EngineSettings {
     /// dynamic_constant_names = [{ name = "DEBUG" }, { name = "MODE", type = "'dev'|'prod'" }]
     /// ```
     pub dynamic_constant_names: Option<DynamicConstantNames>,
-    /// The platforms the code runs on. Without it, any platform PHP runs
-    /// on, so a string's length and the clock have no bound below the
-    /// `int` range; listing them bounds what every listed one bounds.
+    /// The platforms the code runs on, and how long a process runs.
+    /// Without platforms, any platform PHP runs on, so a string's length
+    /// and the clock have no bound below the `int` range; listing them
+    /// bounds what every listed one bounds. A process runs under
+    /// `max_run_seconds` (a year unless set), which bounds how far a loop
+    /// counter gets.
     ///
     /// ```toml
     /// [deployment]
     /// arch = ["x86_64", "aarch64"]
     /// os = ["linux"]
+    /// max_run_seconds = 86400
     /// ```
     pub deployment: Option<Deployment>,
 }
 
 /// `EngineSettings::deployment`: the architectures and operating systems
-/// the code runs on; an empty list is any.
-#[derive(Debug, Default, Clone, Deserialize, PartialEq)]
+/// the code runs on (an empty list is any), and the longest a process
+/// runs.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Deployment {
     pub arch: Vec<Arch>,
     pub os: Vec<Os>,
+    pub max_run_seconds: i64,
 }
+
+impl Default for Deployment {
+    fn default() -> Self {
+        Deployment {
+            arch: Vec::new(),
+            os: Vec::new(),
+            max_run_seconds: 365 * 24 * 60 * 60,
+        }
+    }
+}
+
+/// The most updates a chain of dependent `int` operations makes in a
+/// second: one a cycle at 2^34 Hz, about twice the fastest clock a CPU
+/// has run at. PHP runs each loop iteration, so each takes a cycle at
+/// least.
+const UPDATES_PER_SECOND: i64 = 1 << 34;
 
 /// A 64-bit architecture PHP runs on.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
@@ -92,13 +114,21 @@ impl Os {
     }
 }
 
-/// What the deployment's platforms bound.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+/// What the deployment bounds.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlatformLimits {
     /// The most bytes a string holds.
     pub string_length: Option<i64>,
     /// The least and most seconds `time()` gives.
     pub clock: Option<(i64, i64)>,
+    /// The most iterations loops run in one process.
+    pub loop_iterations: Option<i64>,
+}
+
+impl Default for PlatformLimits {
+    fn default() -> Self {
+        Deployment::default().limits()
+    }
 }
 
 impl Deployment {
@@ -125,6 +155,10 @@ impl Deployment {
         PlatformLimits {
             string_length,
             clock,
+            loop_iterations: self
+                .max_run_seconds
+                .checked_mul(UPDATES_PER_SECOND)
+                .filter(|n| *n > 0),
         }
     }
 }
@@ -220,6 +254,6 @@ pub struct CheckSettings {
     /// Whether the Pest extension is active: Pest's test closures bind
     /// `$this` only then.
     pub pest: bool,
-    /// What the deployment's platforms bound (`EngineSettings::deployment`).
+    /// What the deployment bounds (`EngineSettings::deployment`).
     pub platform: PlatformLimits,
 }

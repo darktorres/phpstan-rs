@@ -305,6 +305,18 @@ fn a_deployment_bounds_what_every_listed_platform_bounds() {
         None
     );
     assert_eq!(limits(""), None);
+    assert_eq!(
+        crate::checker::settings::Deployment::default()
+            .limits()
+            .loop_iterations,
+        Some((365 * 24 * 60 * 60) << 34)
+    );
+    assert_eq!(
+        limits("[deployment]\nmax_run_seconds = 3153600000")
+            .unwrap()
+            .loop_iterations,
+        None
+    );
     let schema = config_schema();
     let err = ConfigFile::parse("[deployment]\narch = [\"mips64\"]", &schema)
         .unwrap()

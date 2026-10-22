@@ -327,6 +327,7 @@ impl<'a> Checker<'a> {
                     &closure_locals,
                     declared_return.as_ref(),
                     &closure_label,
+                    &crate::checker::loop_counters::LoopCounters::default(),
                     LoopZeroIterations::Possible {
                         subject_exempt: None,
                         subject_key: None,

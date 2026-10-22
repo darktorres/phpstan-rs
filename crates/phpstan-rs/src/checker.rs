@@ -646,6 +646,13 @@ pub struct Checker<'a> {
     // arguments are checked - the one read-looking position where PHP
     // accepts an empty dim, since it creates the element.
     pub(crate) by_ref_empty_dim_args: std::cell::RefCell<rustc_hash::FxHashSet<syntax::span::Span>>,
+    // The counters of the loops being checked, outermost first, with the
+    // band each stays in (`converge_loop_body`).
+    pub(crate) loop_counter_bands: Vec<(String, (i64, i64))>,
+    // The variables a call wrote by reference, or a function's `global`
+    // statement, while a loop with counters is checked: those stop being
+    // counters.
+    pub(crate) byref_written_names: std::cell::RefCell<Vec<String>>,
     // The type of every legal write to a private property, keyed by the
     // declaring class and the property. A trait's methods are checked once
     // per host, so a write in one lands under the host's name.
@@ -946,6 +953,7 @@ mod array_access;
 mod infer_cache;
 mod keys;
 mod locals;
+mod loop_counters;
 pub(crate) use locals::Locals;
 pub(crate) mod assignment;
 mod by_ref_params;
@@ -1234,6 +1242,8 @@ impl<'a> Checker<'a> {
             enum_chain_tails: FxHashSet::default(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
+            loop_counter_bands: Vec::new(),
+            byref_written_names: Default::default(),
             property_assign_facts: NameMap::default(),
             named_argument_call_facts: FxHashMap::default(),
             property_type_sites: Vec::new(),

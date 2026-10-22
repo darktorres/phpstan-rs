@@ -957,6 +957,24 @@ impl Type {
         }
     }
 
+    /// The least and greatest value of a type whose every member is an
+    /// `int` (`None` for an end PHP's own `int` range bounds); `None` when
+    /// a member isn't one.
+    pub fn int_hull(&self) -> Option<(Option<i64>, Option<i64>)> {
+        let mut hull: Option<(Option<i64>, Option<i64>)> = None;
+        for member in self.union_members() {
+            let (min, max) = member.int_bounds()?;
+            hull = Some(match hull {
+                None => (min, max),
+                Some((lo, hi)) => (
+                    lo.zip(min).map(|(a, b)| a.min(b)),
+                    hi.zip(max).map(|(a, b)| a.max(b)),
+                ),
+            });
+        }
+        hull
+    }
+
     /// PHPStan's `isArray()`.
     pub fn is_array(&self) -> TrinaryLogic {
         self.structural(Structural::Array)
