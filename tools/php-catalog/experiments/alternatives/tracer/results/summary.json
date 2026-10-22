@@ -6,9 +6,14 @@
   "calls/table": 15,
   "method/missing": 182,
   "method/table": 45,
-  "other-method/not-a-row": 271,
-  "receives-argument/not-a-row": 70,
-  "user-function/not-a-row": 505,
+  "other-method/not-a-row/reached-otherwise": 271,
+  "receives-argument/calls-kind": 28,
+  "receives-argument/not-a-row/lazy-initializer": 1,
+  "receives-argument/not-a-row/receives-argument": 33,
+  "receives-argument/not-a-row/registered-callback": 8,
+  "user-function/calls-kind": 180,
+  "user-function/not-a-row/callable-unplaced": 245,
+  "user-function/not-a-row/generator-resume": 80,
   "wrapper/missing": 23,
   "wrapper/table": 60
  }

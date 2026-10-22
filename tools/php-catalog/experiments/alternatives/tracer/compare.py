@@ -3,6 +3,8 @@
 vocabulary. Usage: compare.py TRACE.tsv TABLE.tsv OUT_DIR"""
 import collections, json, os, sys
 
+import classify
+
 trace_path, table_path, out = sys.argv[1:4]
 os.makedirs(out, exist_ok=True)
 
@@ -20,18 +22,7 @@ BOUND_WRAPPER = {"stream_open", "stream_read", "stream_write", "stream_close", "
                  "stream_truncate", "stream_set_option", "stream_cast", "stream_metadata",
                  "url_stat", "dir_opendir", "dir_readdir", "dir_closedir", "dir_rewinddir"}
 
-table = collections.defaultdict(set)   # fn -> {(place, kind, detail)}
-probed = set()
-for line in open(table_path):
-    parts = line.rstrip("\n").split("\t")
-    if len(parts) < 3:
-        continue
-    fn, place, kind = parts[0], parts[1], parts[2]
-    detail = parts[3] if len(parts) > 3 else ""
-    if kind == "probed":
-        probed.add(fn)
-    else:
-        table[fn].add((place, kind, detail))
+table, probed = classify.load_table(table_path)
 
 obs = collections.defaultdict(lambda: {"count": 0, "scripts": set()})
 bad = 0
@@ -59,21 +50,10 @@ for line in open(trace_path, errors="replace"):
     o["count"] += int(count)
     o["scripts"].add(script.replace("/home/torres/.cache/php-alt-exp/exp3/php-src-tests/", ""))
 
-def in_table(fn, place, kind, detail):
-    rows = table.get(fn, set())
-    if kind == "wrapper":
-        return any(k == "wrapper" and d == detail for (_, k, d) in rows)
-    if kind == "calls":
-        return (place, "calls", "") in rows
-    if kind == "method":
-        return (place, "method", detail) in rows
-    return None  # not expressible as a table row
-
 summary = collections.Counter()
 new_rows, bound_holes = [], []
 for (fn, place, kind, detail), o in sorted(obs.items()):
-    t = in_table(fn, place, kind, detail)
-    status = "table" if t else ("missing" if t is False else "not-a-row")
+    status = classify.status((fn, place, kind, detail), table)
     summary[(kind, status)] += 1
     rec = {"fn": fn, "place": place, "kind": kind, "detail": detail, "count": o["count"],
            "scripts": len(o["scripts"]), "example": sorted(o["scripts"])[0], "in_table": status,
@@ -94,8 +74,7 @@ for name, rows in (("missing-from-table", new_rows), ("outside-bound-vocabulary"
 with open(os.path.join(out, "all-observed.tsv"), "w") as f:
     f.write("fn\tplace\tkind\tdetail\tcount\tscripts\tin_table\texample\n")
     for (fn, place, kind, detail), o in sorted(obs.items()):
-        t = in_table(fn, place, kind, detail)
-        st = "table" if t else ("missing" if t is False else "not-a-row")
+        st = classify.status((fn, place, kind, detail), table)
         f.write(f"{fn}\t{place}\t{kind}\t{detail}\t{o['count']}\t{len(o['scripts'])}\t{st}\t{sorted(o['scripts'])[0]}\n")
 print(json.dumps({"bad_lines": bad, "observed_keys": len(obs),
                   "summary": {f"{k}/{s}": n for (k, s), n in sorted(summary.items())},
