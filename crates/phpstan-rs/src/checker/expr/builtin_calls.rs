@@ -192,9 +192,11 @@ impl<'a> Checker<'a> {
                 return Type::string();
             }
             // The count an array's type allows (`Type::count_range`), or a
-            // `Countable` object's `count()` (PHP throws on a negative
-            // one); `COUNT_RECURSIVE` counts at least as many, and a mode
-            // that isn't a literal anything from 0.
+            // `Countable` object's `count()`. PHP passes a negative count
+            // through, but `Countable::count()` is declared non-negative, so
+            // an implementation returning one is reported at its `return`.
+            // `COUNT_RECURSIVE` counts at least as many, and a mode that
+            // isn't a literal anything from 0.
             "count" | "sizeof" if !args.is_empty() => {
                 let counted = self.infer_expr(&args[0].value, locals);
                 let recursive = match args.get(1) {
