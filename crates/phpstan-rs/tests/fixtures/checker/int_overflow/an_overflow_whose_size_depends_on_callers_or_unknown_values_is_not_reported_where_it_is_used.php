@@ -52,6 +52,12 @@ function guardedByRange(): int
     return takesInt($page * 20);
 }
 
+function divideByLiteral(): int
+{
+    $page = (int) ($_GET['page'] ?? 1);
+    return intdiv($page, 3) + intdiv(PHP_INT_MIN, max(1, (int) ($_GET['by'] ?? 1))) * 0;
+}
+
 function intoFloat(): float
 {
     $page = (int) ($_GET['page'] ?? 1);

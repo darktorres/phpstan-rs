@@ -532,6 +532,37 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|a| self.infer_expr(&a.value, locals))
                     .collect();
+                // Integers compare as numbers: the result is between the
+                // greatest (`max`) or least (`min`) of their least values
+                // and of their greatest.
+                let hulls: Option<Vec<(Option<i64>, Option<i64>)>> =
+                    arg_types.iter().map(Type::int_hull).collect();
+                if let Some(hulls) = hulls {
+                    let is_max = name == "max";
+                    let pick = |a: Option<i64>, b: Option<i64>, unbounded_wins: bool| match (a, b) {
+                        (Some(a), Some(b)) => Some(if is_max { a.max(b) } else { a.min(b) }),
+                        (None, other) | (other, None) => {
+                            if unbounded_wins {
+                                None
+                            } else {
+                                other
+                            }
+                        }
+                    };
+                    // `max`'s least value is bounded by any bounded one,
+                    // its greatest only when every one is; `min` the other
+                    // way round.
+                    let (lo, hi) = hulls
+                        .into_iter()
+                        .reduce(|(lo, hi), (min, max)| {
+                            (pick(lo, min, !is_max), pick(hi, max, is_max))
+                        })
+                        .unwrap_or((None, None));
+                    return match (lo, hi) {
+                        (Some(lo), Some(hi)) if lo == hi => Type::int_literal(lo),
+                        _ => Type::int_range(lo, hi),
+                    };
+                }
                 if !arg_types.iter().any(|t| t.is_array().yes()) {
                     return arg_types
                         .into_iter()

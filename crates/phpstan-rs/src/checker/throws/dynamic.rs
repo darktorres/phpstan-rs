@@ -23,6 +23,7 @@
 
 use crate::checker::date_interval::is_valid_date_interval_spec;
 use crate::checker::expr::contains_flag_name;
+use crate::checker::overflow_sinks::intdiv_can_overflow;
 use crate::checker::xml_name::is_valid_xml_name;
 use crate::checker::xml_wellformedness::is_well_formed_xml;
 use crate::checker::{Checker, Locals};
@@ -61,11 +62,22 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         match bare_name {
             // Contributes `DivisionByZeroError` unless the divisor is a
-            // literal, provably-nonzero integer. Omits `ArithmeticError`
-            // for the `PHP_INT_MIN / -1` overflow case, which needs both
-            // arguments' provable ranges, not just the divisor's.
+            // literal, provably-nonzero integer, and `ArithmeticError`
+            // when the dividend can be `PHP_INT_MIN` and the divisor `-1`.
             "intdiv" => {
                 let divisor = args.get(1)?;
+                let dividend = args.first()?;
+                if !divisor.spread
+                    && !dividend.spread
+                    && divisor.name.is_none()
+                    && dividend.name.is_none()
+                    && intdiv_can_overflow(
+                        &self.infer_expr(&dividend.value, locals),
+                        &self.infer_expr(&divisor.value, locals),
+                    )
+                {
+                    return Some(throwable("ArithmeticError"));
+                }
                 match literal_int_value(divisor) {
                     Some(0) => Some(throwable("DivisionByZeroError")),
                     // `void` is `record_call_throw_point`'s

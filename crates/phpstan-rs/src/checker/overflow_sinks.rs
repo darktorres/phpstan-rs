@@ -10,6 +10,7 @@ use syntax::ast::{BinOp, Expr, ExprKind};
 use syntax::span::Span;
 use types::Type;
 
+use crate::checker::flow_derivation::magnitude_known;
 use crate::checker::flow_nodes::{FlowNode, nodes_of, sources_and_overflows};
 use crate::checker::{Checker, Locals};
 
@@ -96,10 +97,11 @@ impl Checker<'_> {
     }
 
     /// Reports the overflow of an argument a builtin converts to an `int`
-    /// without a declared `int` parameter: `intval()`'s value, and the
-    /// variable `settype()` gives the type `int`. `resolved` is the call's
-    /// arguments by parameter.
-    pub(crate) fn check_overflow_converting_builtin(
+    /// without a declared `int` parameter (`intval()`'s value, and the
+    /// variable `settype()` gives the type `int`), and `intdiv()` of
+    /// `PHP_INT_MIN` by `-1`. `resolved` is the call's arguments by
+    /// parameter.
+    pub(crate) fn check_overflow_in_builtin(
         &mut self,
         function: &str,
         resolved: &[Option<&Expr>],
@@ -123,6 +125,41 @@ impl Checker<'_> {
         if let Some(arg) = converted {
             let ty = self.infer_expr(arg, locals);
             self.report_overflow_converted(&ty, arg.span, &format!("{function}()"));
+        }
+        if function.eq_ignore_ascii_case("intdiv")
+            && let (Some(Some(dividend)), Some(Some(divisor))) = (resolved.first(), resolved.get(1))
+        {
+            let dividend_ty = self.infer_expr(dividend, locals);
+            let divisor_ty = self.infer_expr(divisor, locals);
+            let (dividend_int, _) = dividend_ty.split_overflow_float();
+            if intdiv_can_overflow(&dividend_int, &divisor_ty)
+                && magnitude_known(&dividend_int)
+                && magnitude_known(&divisor_ty)
+            {
+                let mut environment: Vec<Arc<str>> = [&dividend_int, &divisor_ty]
+                    .iter()
+                    .flat_map(|ty| nodes_of(&sources_and_overflows(&ty.deep_flow()).0))
+                    .filter_map(|node| match node {
+                        FlowNode::Env(name) => Some(name),
+                        _ => None,
+                    })
+                    .collect();
+                environment.sort();
+                environment.dedup();
+                let from = if environment.is_empty() {
+                    String::new()
+                } else {
+                    format!(" with a value from {}", environment.join(", "))
+                };
+                self.report(
+                    format!(
+                        "intdiv() can divide PHP_INT_MIN by -1{from}, whose result is past the int range: an ArithmeticError."
+                    ),
+                    dividend.span.to(divisor.span),
+                    5,
+                    "arithmetic.intOverflow",
+                );
+            }
         }
     }
 
@@ -179,4 +216,18 @@ pub(crate) fn converting_operator(op: BinOp) -> Option<&'static str> {
         BinOp::Shr => Some("`>>`"),
         _ => None,
     }
+}
+
+/// Whether `intdiv()` of a `dividend` by a `divisor` can be
+/// `PHP_INT_MIN` divided by `-1`, whose result is past the `int` range: an
+/// `ArithmeticError`. A value that isn't an `int` is converted, and can
+/// be either.
+pub(crate) fn intdiv_can_overflow(dividend: &Type, divisor: &Type) -> bool {
+    let can_be = |ty: &Type, n: i64| {
+        ty.union_members().iter().any(|m| match m.int_bounds() {
+            Some((min, max)) => min.is_none_or(|min| min <= n) && max.is_none_or(|max| n <= max),
+            None => !m.is_int().no() || m.is_mixed() || !m.is_string().no() || !m.is_float().no(),
+        })
+    };
+    can_be(dividend, i64::MIN) && can_be(divisor, -1)
 }

@@ -309,7 +309,7 @@ fn with_flows(ty: Type, flow: &Flow, overflow: &Flow) -> Type {
 /// from nowhere else and each of its values is one known value or a
 /// bounded range. A value a caller, a property or a call brings, or an
 /// unbounded one whose source isn't known, is as large as they make it.
-fn magnitude_known(operand: &Type) -> bool {
+pub(crate) fn magnitude_known(operand: &Type) -> bool {
     let (sources, _) = sources_and_overflows(&operand.deep_flow());
     if !sources.is_empty() {
         return nodes_of(&sources).iter().all(FlowNode::is_env);

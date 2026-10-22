@@ -14,6 +14,7 @@
 39:21-39:28 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and intval() converts the float to PHP_INT_MIN with a warning.
 40:13-40:20 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and settype() converts the float to PHP_INT_MIN with a warning.
 41:30-41:40 arithmetic.intOverflow L5 | The result of * on line 41 can leave the int range with a value from $_GET, and placeholder #1 ("%d") of sprintf converts the float to PHP_INT_MIN with a warning.
-44:23-44:28 arithmetic.intOverflow L5 | The result of ++ on line 43 can leave the int range with a value from $_GET, and passing the float to parameter #1 $n of function takesInt throws a TypeError.
-45:12-45:21 arithmetic.intOverflow L5 | The result of + on line 45 can leave the int range with a value from $_GET, and returning the float throws a TypeError.
-51:21-51:29 argument.type L5 | Parameter #1 $n of function takesInt expects int, 2147483648|9.223372036854776E+18 given.
+42:24-42:55 arithmetic.intOverflow L5 | intdiv() can divide PHP_INT_MIN by -1 with a value from $_GET, whose result is past the int range: an ArithmeticError.
+45:23-45:28 arithmetic.intOverflow L5 | The result of ++ on line 44 can leave the int range with a value from $_GET, and passing the float to parameter #1 $n of function takesInt throws a TypeError.
+46:12-46:21 arithmetic.intOverflow L5 | The result of + on line 46 can leave the int range with a value from $_GET, and returning the float throws a TypeError.
+52:21-52:29 argument.type L5 | Parameter #1 $n of function takesInt expects int, 2147483648|9.223372036854776E+18 given.

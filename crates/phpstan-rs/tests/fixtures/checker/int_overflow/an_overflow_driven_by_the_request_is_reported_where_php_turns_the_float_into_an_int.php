@@ -39,6 +39,7 @@ function sinks(): int
     $value = intval($offset);
     settype($offset, 'int');
     $printed = sprintf('%d', $page * 20);
+    $quotient = intdiv($page, (int) ($_GET['by'] ?? 1));
     $next = $page;
     $next++;
     $taken = takesInt($next);

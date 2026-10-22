@@ -1300,7 +1300,7 @@ impl<'a> Checker<'a> {
                 if let (Some(name), Some(sig)) = (resolved_name, sig)
                     && sig.is_stub()
                 {
-                    self.check_overflow_converting_builtin(name, &resolved, locals);
+                    self.check_overflow_in_builtin(name, &resolved, locals);
                 }
                 self.maybe_record_param_name_hints(sig, args);
                 // `array_pop`/`array_shift`'s by-ref first argument gets
