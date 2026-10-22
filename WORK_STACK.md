@@ -22,14 +22,15 @@ together later. Their sections below keep the content they had that day. The one
 exception is level 7's designs, which are rows of the 20 G plan and are worked in
 level 8's order; DOC-2.1 stays deferred.
 
-Level 9 is the active level: the batch that follows the cross-platform fixes. It is
-designed and partly built (section 9 below): Part A is built and validated, and batch 0 is partly built. Part B onward waits for the user's go.
+Level 10, the open-world cost (section 10 below), is the active level. It is paused
+level 9's work, which resumes when level 10 is done. Level 9 is the batch that follows
+the cross-platform fixes. It is designed and partly built (section 9 below): Part A is built and validated, and batch 0 is partly built. Part B onward waits for the user's go.
 Level 8, the 20 G plan and the off drill, resumes when level 9 starts, in the order
 that level 9 sets.
 
-Level 10 is planned, not started: the report viewer (`REPORT_VIEWER_PLAN.md`). The
-cross-platform fixes it was to follow are pushed, so its start condition holds. Its
-place against levels 8 and 9 is open.
+The report viewer (`REPORT_VIEWER_PLAN.md`) is planned, not started, and has no stack
+level until it is pushed. The cross-platform fixes it was to follow are pushed, so its
+start condition holds. Its place against levels 8 and 9 is open.
 
 ## The stack
 
@@ -285,12 +286,28 @@ Leftovers from plan mode, to delete when it ends: the helper scripts, backups an
 probes in the scratchpad (`/tmp/claude-1000/-home-torres-projects-phpstan-rs/0fdc40b5-accc-4267-853a-f5ef8f30c07c/scratchpad`),
 the empty `~/.cache/prs-ledger-gen`, and `/tmp/claude-1000/regfields.txt`.
 
-### 10. The report viewer — `REPORT_VIEWER_PLAN.md`
+### 10. The open-world cost — `~/.cache/phpstan-rs-scratch/design/open-world-ledger.md`
 
-Planned on 2026-10-18, not started. The browser feature is ROADMAP Phase 181:
-a local page that browses one analysis's findings. The plan's rows (V1 to V13)
-are built in this checkout, on this branch, after the cross-platform fixes are pushed. The first
-row measures whether one scan can stand in for a run at each level.
+Started on 2026-10-21. It measures what it costs to treat variables as possibly written by code outside the checked set: mixing them to `mixed` before each statement that can run code. The design, the measurements and the classifications are in `~/.cache/phpstan-rs-scratch/design/by-ref-warning-and-fiber.md` (section "Open-world cost, measured") and the ledger above; binaries and corpus outputs are in `~/.cache/phpstan-rs-scratch/adv/`. The experiment code is reverted, and the last variant measured is X7. The done rows are in the ledger. Open rows:
+
+- **Measurement**
+  - M1 (rerun on HEAD, 2026-10-21): Piwigo HEAD 592 (old base 586; +6), X7 on HEAD 589, lost 3, gained 0. Mago HEAD 5159 (old 5150), X7 on HEAD 4994, lost 209, gained 44. The mago losses and gains are unclassified (G rows).
+  - N1: resolved. The fix's six Piwigo findings: three came from `??` on an absent element (`9715b34c6`); the other three from `file()` taking phpstorm's `array|false` (`2c189db92`, which ingests PHPStan's function-level stub PHPDoc).
+  - Overlay measured (`2c189db92`): Piwigo 592 (HEAD) to 583, lost 9 false positives, gained 0. Mago 5159 to 5158: lost 8 (3 false positives removed, 5 message-only changes), gained 7 (2 new: `is_a` on a string, which mago expects as `impossible-condition`, and `preg_replace`'s `return.unusedType`; 5 message-only changes). Mago is still not a clean corpus (M2).
+  - M2: the mago snippets are not a valid precision corpus; eight files share class names, and `check-project` loads them as one project. Run each snippet alone, or drop the colliding files.
+  - M3: only Piwigo is a real project, and no script-heavy corpus was run. Find a second real project.
+  - M4: the runtime cost of mixing is unmeasured. Time base against X7 on Piwigo with `hyperfine -N`, warm, under `nice -n 19`.
+  - M5: the fixture suite was not run under open world. Apply X7 in a scratch worktree and list the expectations that change.
+  - M6: two Piwigo `foreach` overwrite losses at `tests/Browser/ConsoleCleanTest.php:48` have no traced mechanism.
+- **Mago losses**, not yet classified: G1 `method.notFound` (88), G2 `argument.type` (67), G3 `arguments.count` (10), G4 the three `alwaysTrue` findings (15), and G5 the small ones (`property.notFound`, `assign.propertyReadOnly`, `assign.propertyType`, `isset.variable`, `method.resultUnused`, `notIdentical.alwaysTrue`, `property.private`, `property.writeOnly`, `return.type`).
+- **Mago gain**: G7, `variable.possiblyUndefined` (2), not examined.
+- **Decisions for the user**
+  - P1: error handlers, fibers and `trigger_error` are not modelled. The by-ref and fiber designs are deferred until this is decided.
+  - P2: open world as the default, or closed world as opt-in (D5). Decide after M1 to M4.
+  - P3: unbounded `int + int` and `int * int` stay `int` and ignore overflow to float, which PHP does not.
+- **Open, no decision needed**
+  - P4: unary minus on `mixed` gives no finding. Conservative; type it like the binary fallback or leave it.
+  - P5: closed-world false positives through `call_user_func('setIt')` and `array_map` with a closure that declares `global`. Count them on the corpora.
 
 ## Documents with no place in the stack
 
