@@ -821,7 +821,7 @@ fn member_offset_read(member: &Type, offset: &Type) -> Option<(Option<Type>, Off
     };
     // A key an accessory proves, or an index below a list's proven
     // length, is there; any other is a general array's key.
-    let (least, _) = member.count_range().unwrap_or((0, None));
+    let (least, _) = member.count_range().unwrap_or((0, crate::MAX_ARRAY_SIZE));
     let is_list = member.is_list().yes();
     let mut presence: Option<OffsetPresence> = None;
     for key in &keys {

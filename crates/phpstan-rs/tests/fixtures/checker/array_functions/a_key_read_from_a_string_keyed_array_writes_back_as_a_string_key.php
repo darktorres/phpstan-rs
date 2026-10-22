@@ -27,7 +27,7 @@ function passes(array $in): void {
 
 /** @param list<string> $l */
 function flips(array $l): void {
-    assertType('array<(int|string), int<0, max>>', array_flip($l));
+    assertType('array<(int|string), int<0, 1073741823>>', array_flip($l));
 }
 
 /** @param array<mixed> $a */

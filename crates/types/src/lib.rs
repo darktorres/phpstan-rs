@@ -148,6 +148,10 @@ impl Node {
     }
 }
 
+/// The most elements a PHP array holds on a 64-bit build (`HT_MAX_SIZE`):
+/// growing past it is a fatal error.
+pub const MAX_ARRAY_SIZE: i64 = 1 << 30;
+
 const FLAGS_SHIFT: u32 = 48;
 const ANSWER_BITS: u64 = (1 << FLAGS_SHIFT) - 1;
 

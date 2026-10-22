@@ -157,7 +157,7 @@ impl<'a> Checker<'a> {
                 let values_ty = self.infer_expr(&values.value, locals);
                 if let (Some((kl, kh)), Some((vl, vh))) =
                     (keys_ty.count_range(), values_ty.count_range())
-                    && (kh.is_some_and(|h| h < vl) || vh.is_some_and(|h| h < kl))
+                    && (kh < vl || vh < kl)
                 {
                     self.report(
                         format!(

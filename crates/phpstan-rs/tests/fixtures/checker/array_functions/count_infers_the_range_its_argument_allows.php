@@ -17,7 +17,7 @@ final class Five implements Countable
  */
 function f(array $shapes, array $map, Five $five, array $nested): void {
     assertType('int<1, 2>', count($shapes));
-    assertType('int<1, max>', count($map));
+    assertType('int<1, 1073741824>', count($map));
     assertType('int<1, 5>', count($five));
     assertType('int<0, max>', count($nested, COUNT_RECURSIVE));
 }

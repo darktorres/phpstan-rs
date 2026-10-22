@@ -649,7 +649,7 @@ impl Relation<'_> {
                 let Some((least, most)) = member.count_range() else {
                     return Some(member.clone());
                 };
-                if hi.is_some_and(|h| h < least) || most.is_some_and(|m| m < lo) {
+                if hi.is_some_and(|h| h < least) || most < lo {
                     return None;
                 }
                 if hi == Some(0) {

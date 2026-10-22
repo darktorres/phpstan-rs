@@ -156,7 +156,7 @@ impl Relation<'_> {
     fn arrays_equal(&self, e: &Type, a: &Type, exact: bool) -> TrinaryLogic {
         stack::guard(|| {
             if let (Some((el, eh)), Some((al, ah))) = (e.count_range(), a.count_range())
-                && (eh.is_some_and(|h| h < al) || ah.is_some_and(|h| h < el))
+                && (eh < al || ah < el)
             {
                 return TrinaryLogic::No;
             }

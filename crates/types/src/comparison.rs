@@ -117,7 +117,7 @@ enum Value<'t> {
     Str(Str<'t>),
     Array {
         least: i64,
-        most: Option<i64>,
+        most: i64,
         shape: Option<&'t Shape>,
     },
     Object {
@@ -227,7 +227,7 @@ impl Relation<'_> {
                 })
             }
             _ if ty.is_array().yes() => {
-                let (least, most) = ty.count_range().unwrap_or((0, None));
+                let (least, most) = ty.count_range().unwrap_or((0, crate::MAX_ARRAY_SIZE));
                 Value::Array {
                     least,
                     most,
@@ -374,10 +374,10 @@ impl Relation<'_> {
             else {
                 return Outcomes::ALL;
             };
-            if ma.is_some_and(|m| m < *lb) {
+            if *ma < *lb {
                 return Outcomes::LESS;
             }
-            if mb.is_some_and(|m| m < *la) {
+            if *mb < *la {
                 return Outcomes::GREATER;
             }
             let (Some(sa), Some(sb)) = (sa, sb) else {
@@ -486,7 +486,7 @@ fn truthiness(v: &Value<'_>) -> Option<bool> {
         Value::Array { least, most, .. } => {
             if *least > 0 {
                 Some(true)
-            } else if *most == Some(0) {
+            } else if *most == 0 {
                 Some(false)
             } else {
                 None

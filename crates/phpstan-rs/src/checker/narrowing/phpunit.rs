@@ -389,7 +389,7 @@ impl<'a> Checker<'a> {
     /// The count type of `e`: its count range, when it's an array.
     fn count_type(&self, e: &Expr, locals: &Locals) -> Option<Type> {
         let (lo, hi) = self.infer_expr(e, locals).count_range()?;
-        Some(Type::int_range(Some(lo), hi))
+        Some(Type::int_range(Some(lo), Some(hi)))
     }
 
     /// Narrows `value` by `check` having held (`holds`) or failed.

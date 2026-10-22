@@ -20,7 +20,7 @@ columns([['id' => 3, 'v' => 'x']]);
 
 /** @param list<int|string|float> $values */
 function flips(array $values): void {
-    assertType('array<(int|string), int<0, max>>', array_flip($values));
+    assertType('array<(int|string), int<0, 1073741823>>', array_flip($values));
     assertType('array<(int|string), int<1, max>>', array_count_values($values));
 }
 flips([1, 'a', 1.5]);

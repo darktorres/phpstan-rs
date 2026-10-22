@@ -9,7 +9,7 @@ class Node {
 /** @param list<int> $x */
 function counts(array $x): void {
     if (($n = count($x)) > 0) {
-        assertType('int<1, max>', $n);
+        assertType('int<1, 1073741824>', $n);
         assertType('non-empty-list<int>', $x);
     }
 }

@@ -213,7 +213,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|member| match member.count_range() {
                         Some((least, most)) => {
-                            Type::int_range(Some(least), if recursive { None } else { most })
+                            Type::int_range(Some(least), (!recursive).then_some(most))
                         }
                         None => match self.find_method_receiver(member, "count") {
                             Some((_, _, _, sig)) if member.is_object().yes() => self

@@ -983,18 +983,18 @@ impl Type {
         self.structural(Structural::List)
     }
 
-    /// How many elements this array may hold, as the least and the most
-    /// (`None`: no most), over every member of a union; `None` when a
-    /// member isn't an array. A shape's required keys are its least, and
+    /// How many elements this array may hold, as the least and the most,
+    /// over every member of a union; `None` when a member isn't an array.
+    /// No array holds more than `MAX_ARRAY_SIZE`. A shape's required keys are its least, and
     /// its optional ones add to its most when it's sealed; offsets an
     /// array is known to hold (`hasOffset`) count toward its least.
-    pub fn count_range(&self) -> Option<(i64, Option<i64>)> {
-        let mut hull: Option<(i64, Option<i64>)> = None;
+    pub fn count_range(&self) -> Option<(i64, i64)> {
+        let mut hull: Option<(i64, i64)> = None;
         for member in self.union_members() {
             let (least, most) = member_count_range(member)?;
             hull = Some(match hull {
                 None => (least, most),
-                Some((l, m)) => (l.min(least), m.zip(most).map(|(a, b)| a.max(b))),
+                Some((l, m)) => (l.min(least), m.max(most)),
             });
         }
         hull
@@ -1034,15 +1034,15 @@ impl Type {
         stack::guard(|| {
             match self.repr() {
                 Repr::Array(key, _) => Some(read_key((*key).clone())),
+                Repr::ArrayShape(shape) if self.is_list().yes() => {
+                    Some(crate::intersect_types(vec![shape.key_type(), list_key()]))
+                }
                 Repr::ArrayShape(shape) => Some(read_key(shape.key_type())),
-                // A list keys on `int<0, max>` whatever its array member says.
+                // A list keys on its positions whatever its array member says.
                 Repr::Intersection(members) => {
                     let key = members.iter().find_map(Type::array_key_type)?;
                     if members.contains(&Type::accessory(AccessoryKind::ArrayList)) {
-                        Some(crate::intersect_types(vec![
-                            key,
-                            Type::int_range(Some(0), None),
-                        ]))
+                        Some(crate::intersect_types(vec![key, list_key()]))
                     } else {
                         Some(key)
                     }
@@ -1259,7 +1259,15 @@ impl Type {
 }
 
 /// `count_range` of one member that isn't a union.
-fn member_count_range(member: &Type) -> Option<(i64, Option<i64>)> {
+fn member_count_range(member: &Type) -> Option<(i64, i64)> {
+    let (least, most) = member_count_range_by_type(member)?;
+    Some((
+        least,
+        most.map_or(crate::MAX_ARRAY_SIZE, |m| m.min(crate::MAX_ARRAY_SIZE)),
+    ))
+}
+
+fn member_count_range_by_type(member: &Type) -> Option<(i64, Option<i64>)> {
     if let Some((shape, non_empty)) = crate::union::shape_parts(member) {
         let required = shape.fields().iter().filter(|f| !f.optional).count() as i64;
         let most = shape.is_sealed().then_some(shape.fields().len() as i64);
@@ -1286,6 +1294,11 @@ fn member_count_range(member: &Type) -> Option<(i64, Option<i64>)> {
         }
         _ => None,
     }
+}
+
+/// The key of a list: a position, below the most elements an array holds.
+fn list_key() -> Type {
+    Type::int_range(Some(0), Some(crate::MAX_ARRAY_SIZE - 1))
 }
 
 /// An array key as read out of the array: a string key is one PHP didn't

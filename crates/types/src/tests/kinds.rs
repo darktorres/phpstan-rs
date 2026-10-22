@@ -74,7 +74,7 @@ fn an_array_answers_its_value_and_key_types() {
     );
     assert_eq!(
         Type::list_of(Type::int()).array_key_type(),
-        Some(Type::int_range(Some(0), None))
+        Some(Type::int_range(Some(0), Some(crate::MAX_ARRAY_SIZE - 1)))
     );
 }
 

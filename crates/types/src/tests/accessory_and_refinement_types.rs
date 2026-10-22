@@ -660,20 +660,23 @@ fn an_offset_read_of_a_union_joins_what_each_member_reads() {
 }
 
 #[test]
-fn count_range_is_the_hull_of_what_each_member_may_hold() {
+fn count_range_is_the_hull_of_what_each_member_may_hold_up_to_the_most_an_array_holds() {
     let sealed = shape_of(&[("a", Type::int(), false), ("b", Type::int(), true)]);
-    assert_eq!(sealed.count_range(), Some((1, Some(2))));
-    assert_eq!(shape_of(&[]).count_range(), Some((0, Some(0))));
+    assert_eq!(sealed.count_range(), Some((1, 2)));
+    assert_eq!(shape_of(&[]).count_range(), Some((0, 0)));
     assert_eq!(
         Type::union(shape_of(&[]), sealed.clone()).count_range(),
-        Some((0, Some(2)))
+        Some((0, 2))
     );
-    assert_eq!(Type::array_of(Type::int()).count_range(), Some((0, None)));
+    assert_eq!(
+        Type::array_of(Type::int()).count_range(),
+        Some((0, crate::MAX_ARRAY_SIZE))
+    );
     assert_eq!(
         Type::array_of(Type::int())
             .to_non_empty_array()
             .count_range(),
-        Some((1, None))
+        Some((1, crate::MAX_ARRAY_SIZE))
     );
     assert_eq!(Type::union(sealed, Type::null()).count_range(), None);
 }

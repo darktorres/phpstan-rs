@@ -1956,7 +1956,7 @@ impl Checker<'_> {
                     let kept: Vec<Type> = current
                         .union_members()
                         .iter()
-                        .filter(|m| m.count_range() != Some((bl, Some(bl))))
+                        .filter(|m| m.count_range() != Some((bl, bl)))
                         .cloned()
                         .collect();
                     let kept = self.relation().union_of(kept);
