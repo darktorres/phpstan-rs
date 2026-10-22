@@ -25,6 +25,16 @@ pub(crate) enum FlowNode {
     Global(Arc<str>),
     /// A static variable, as the earlier calls leave it.
     Static { owner: Owner, name: Arc<str> },
+    /// An operation whose `int` result can leave the `int` range, carried
+    /// by the float it gives there. `real` when what can make it leave is
+    /// known here: its operands come from the environment or are bounded;
+    /// otherwise it depends on what callers, properties or calls bring.
+    Overflow {
+        site: Site,
+        op: Arc<str>,
+        line: u32,
+        real: bool,
+    },
 }
 
 /// The function a parameter or a static variable belongs to: a function
@@ -48,6 +58,12 @@ impl FlowNode {
         FlowNode::Env(name.into())
     }
 
+    /// Whether the environment chooses the value: it can be anything its
+    /// type allows.
+    pub(crate) fn is_env(&self) -> bool {
+        matches!(self, FlowNode::Env(_))
+    }
+
     /// How `assertFlow` writes the node.
     fn describe(&self) -> String {
         match self {
@@ -57,6 +73,9 @@ impl FlowNode {
             FlowNode::Property { class, name } => format!("property:{class}::${name}"),
             FlowNode::Global(name) => format!("global:${name}"),
             FlowNode::Static { owner, name } => format!("static:{owner}::${name}"),
+            FlowNode::Overflow { op, line, real, .. } => {
+                format!("overflow{}:{op}@{line}", if *real { "" } else { "?" })
+            }
         }
     }
 }
@@ -99,6 +118,31 @@ pub(crate) fn id(node: FlowNode) -> u32 {
 /// The node numbered `id`.
 pub(crate) fn node(id: u32) -> Option<FlowNode> {
     table().nodes.get(id as usize).cloned()
+}
+
+/// `flow` split into where its value comes from and the operations that
+/// can have left the `int` range on the way.
+pub(crate) fn sources_and_overflows(flow: &Flow) -> (Flow, Flow) {
+    if flow.is_empty() {
+        return (Flow::default(), Flow::default());
+    }
+    let table = table();
+    let (overflows, sources): (Vec<u32>, Vec<u32>) = flow.nodes().iter().partition(|&&id| {
+        matches!(
+            table.nodes.get(id as usize),
+            Some(FlowNode::Overflow { .. })
+        )
+    });
+    (Flow::of(sources), Flow::of(overflows))
+}
+
+/// The nodes of `flow`.
+pub(crate) fn nodes_of(flow: &Flow) -> Vec<FlowNode> {
+    let table = table();
+    flow.nodes()
+        .iter()
+        .filter_map(|&id| table.nodes.get(id as usize).cloned())
+        .collect()
 }
 
 /// The set of `node` alone.

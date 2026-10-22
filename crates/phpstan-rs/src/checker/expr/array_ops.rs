@@ -679,6 +679,15 @@ impl<'a> Checker<'a> {
     /// default).
     pub(crate) fn check_dim_fetch_key_type(&mut self, base: &Expr, idx: &Expr, locals: &Locals) {
         let base_ty = self.infer_expr(base, locals);
+        if base_ty.is_array().yes() || base_ty.is_string().yes() {
+            let idx_ty = self.infer_expr(idx, locals);
+            let what = if base_ty.is_array().yes() {
+                "using it as an array key"
+            } else {
+                "using it as a string offset"
+            };
+            self.report_overflow_converted(&idx_ty, idx.span, what);
+        }
         if !base_ty.is_array().yes() {
             return;
         }

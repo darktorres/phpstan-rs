@@ -556,13 +556,14 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Replaces the current function's assignment sites, counters and
-    /// owner with `body`'s and `owner`, returning the previous ones for
-    /// `leave_function_body`.
+    /// Replaces the current function's assignment sites, counters, owner
+    /// and native return type with `body`'s, `owner` and `native_return`,
+    /// returning the previous ones for `leave_function_body`.
     pub(crate) fn enter_function_body(
         &mut self,
         body: &[Stmt],
         owner: crate::checker::flow_nodes::Owner,
+        native_return: Option<types::Type>,
     ) -> EnteredBody {
         let entered = if self.settings.strict_rules.check_implicit_array_creation {
             assigned_variables(body)
@@ -584,6 +585,10 @@ impl<'a> Checker<'a> {
                 ),
             ),
             owner: std::mem::replace(&mut self.current_function_owner, owner),
+            native_return: std::mem::replace(
+                &mut self.current_function_native_return,
+                native_return,
+            ),
         }
     }
 
@@ -592,6 +597,7 @@ impl<'a> Checker<'a> {
         self.current_function_assigned_variables = previous.assigned_variables;
         self.current_function_counters = previous.counters;
         self.current_function_owner = previous.owner;
+        self.current_function_native_return = previous.native_return;
     }
 
     /// Whether an assignment to `name` could have run before the one at
@@ -904,6 +910,7 @@ pub(crate) struct EnteredBody {
     assigned_variables: Vec<AssignedVariable>,
     counters: std::rc::Rc<crate::checker::loop_counters::LoopCounters>,
     owner: crate::checker::flow_nodes::Owner,
+    native_return: Option<types::Type>,
 }
 
 pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {

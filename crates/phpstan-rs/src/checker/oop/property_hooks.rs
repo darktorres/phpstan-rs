@@ -218,9 +218,10 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         let owner = crate::checker::flow_nodes::Owner::Named(format!("{fqn}::${name}::get").into());
+        let native_return = prop_sig.native_ty().cloned();
         let previous_assigned_variables = match body {
-            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts, owner),
-            _ => self.enter_function_body(&[], owner),
+            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts, owner, native_return),
+            _ => self.enter_function_body(&[], owner, native_return),
         };
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(_) => {
@@ -254,6 +255,14 @@ impl<'a> Checker<'a> {
                         3,
                         "return.type",
                     );
+                }
+                if prop_sig
+                    .native_ty()
+                    .is_some_and(|native| self.rejects_overflow_float(native))
+                {
+                    self.report_overflow_into(&body_ty, e.span, || {
+                        "returning the float throws a TypeError".to_string()
+                    });
                 }
             }
             PropertyHookBody::Block(stmts) => {
@@ -521,8 +530,8 @@ impl<'a> Checker<'a> {
         let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
         let owner = crate::checker::flow_nodes::Owner::Named(format!("{fqn}::${name}::set").into());
         let previous_assigned_variables = match body {
-            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts, owner),
-            _ => self.enter_function_body(&[], owner),
+            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts, owner, None),
+            _ => self.enter_function_body(&[], owner, None),
         };
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(_) => {

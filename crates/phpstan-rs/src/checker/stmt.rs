@@ -771,6 +771,14 @@ impl<'a> Checker<'a> {
                     } else {
                         expected
                     };
+                    if !self.current_function_is_generator
+                        && let Some(native) = self.current_function_native_return.clone()
+                        && self.rejects_overflow_float(&native)
+                    {
+                        self.report_overflow_into(&actual, e.span, || {
+                            "returning the float throws a TypeError".to_string()
+                        });
+                    }
                     // A `never`-typed function/method reaching any
                     // `return` at all - value or bare - is its own
                     // dedicated real-PHPStan identifier/message

@@ -195,7 +195,12 @@ impl<'a> Checker<'a> {
             if member.is_int().yes() {
                 to_float || to_string || to_bool
             } else if member.is_float().yes() {
-                to_int || to_string || to_bool
+                // A float past the `int` range, or not a number, is a
+                // `TypeError` where an `int` is expected.
+                let in_int_range = member.float_literal_value().is_none_or(|f| {
+                    (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&f)
+                });
+                (to_int && in_int_range) || to_string || to_bool
             } else if member.is_bool().yes() {
                 to_int || to_float || to_string
             } else if member.is_string().yes() {
@@ -358,6 +363,29 @@ impl<'a> Checker<'a> {
                     5,
                     "argument.type",
                 );
+            }
+            // PHP enforces a function's native type; a builtin's declared
+            // one is what the engine checks.
+            let enforced = if is_builtin {
+                param_ty.clone()
+            } else {
+                match defining_class {
+                    Some(c) => self.resolve_pseudo(param.ty_native(), c),
+                    None => param.ty_native().clone(),
+                }
+            };
+            if self.rejects_overflow_float(&enforced) {
+                let position = match &argument.name {
+                    Some(name) => Position::Name(name),
+                    None => Position::Index(i + 1),
+                };
+                self.report_overflow_into(&arg_ty, argument.span, || {
+                    format!(
+                        "passing the float to {} of {} throws a TypeError",
+                        describe_parameter(param, position).replacen("Parameter", "parameter", 1),
+                        callee.of()
+                    )
+                });
             }
             if !param.by_ref() {
                 continue;

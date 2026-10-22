@@ -840,9 +840,17 @@ impl<'a> Checker<'a> {
             &mut self.current_function_goto_targets,
             GotoState::new(goto_labels.clone()),
         );
+        let native_return = return_type.as_deref().map(|hint| {
+            let ty = self.resolve_type_hint(Some(hint));
+            match &self.current_class {
+                Some(c) => self.resolve_pseudo(&ty, c),
+                None => ty,
+            }
+        });
         let previous_assigned_variables = self.enter_function_body(
             body,
             crate::checker::flow_nodes::Owner::Closure(self.flow_site(span)),
+            native_return,
         );
         // Real PHPStan exempts an anonymous function entirely
         // from both by-ref-parameter rules (`isInAnonymousFunction()`
@@ -1287,6 +1295,13 @@ impl<'a> Checker<'a> {
                 let resolved = sig
                     .map(|s| resolve_call_args(args, s.params()))
                     .unwrap_or_default();
+                // Before a by-reference argument takes the type the call
+                // leaves in it.
+                if let (Some(name), Some(sig)) = (resolved_name, sig)
+                    && sig.is_stub()
+                {
+                    self.check_overflow_converting_builtin(name, &resolved, locals);
+                }
                 self.maybe_record_param_name_hints(sig, args);
                 // `array_pop`/`array_shift`'s by-ref first argument gets
                 // widened right below (`predefine_byref_or_unknown_args`'s
@@ -2324,6 +2339,10 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(op, l, r) => {
                 let l_ty = self.check_expr(l, locals, label);
                 let r_ty = self.check_expr(r, locals, label);
+                if let Some(what) = crate::checker::overflow_sinks::converting_operator(*op) {
+                    self.report_overflow_converted(&l_ty, l.span, what);
+                    self.report_overflow_converted(&r_ty, r.span, what);
+                }
                 let invalid = self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span);
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span);
                 self.check_duplicate_operands(op, l, r);
@@ -2424,12 +2443,17 @@ impl<'a> Checker<'a> {
                 // tracked literal default, so `$obj->prop++` has no
                 // equivalent gap to fix here).
                 let is_increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
-                let updated = if is_increment {
-                    inner_ty.increment_type()
-                } else {
-                    inner_ty.decrement_type()
-                }
-                .with_flow(&inner_ty.deep_flow());
+                let updated = self.with_step_flow(
+                    e.span,
+                    if is_increment { "++" } else { "--" },
+                    &inner_ty,
+                    if is_increment {
+                        inner_ty.increment_type()
+                    } else {
+                        inner_ty.decrement_type()
+                    },
+                );
+                self.check_overflow_into_target(inner, &updated, e.span, locals);
                 // `$x++`/`$x--` is real, visible rebinding syntax, the
                 // same category as `$x += 1`.
                 self.implicit_array_access_write(inner, e.span, locals);
@@ -2499,6 +2523,7 @@ impl<'a> Checker<'a> {
             ExprKind::Unary(op @ UnaryOp::BitNot, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_unary_operand_validity(op, &inner_ty, inner.span);
+                self.report_overflow_converted(&inner_ty, inner.span, "`~`");
                 self.bitwise_not_type(&inner_ty)
             }
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
@@ -2507,6 +2532,9 @@ impl<'a> Checker<'a> {
             ExprKind::Cast(cast, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_cast_validity(cast.kind(), &inner_ty, inner.span);
+                if cast.kind() == CastKind::Int {
+                    self.report_overflow_converted(&inner_ty, inner.span, "`(int)`");
+                }
                 if cast.kind() == CastKind::Unset {
                     self.check_unset_cast_supported(e.span);
                 }
@@ -2833,6 +2861,7 @@ impl<'a> Checker<'a> {
                 }
                 self.check_self_assignment(lhs, rhs);
                 self.check_property_assignment(lhs, rhs, locals);
+                self.check_overflow_into_target(lhs, &rhs_ty, rhs.span, locals);
                 // A bare by-ref-parameter variable directly assigned a
                 // value its declared type can't hold. Also covers a
                 // destructured by-ref target (`[$byRef] = $arr;`) - see
@@ -2946,6 +2975,10 @@ impl<'a> Checker<'a> {
                         self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span);
                     self.check_division_by_zero(op, &rhs_ty, rhs.span);
                 }
+                if let Some(what) = crate::checker::overflow_sinks::converting_operator(*op) {
+                    self.report_overflow_converted(&lhs_ty, lhs.span, what);
+                    self.report_overflow_converted(&rhs_ty, rhs.span, what);
+                }
                 // `$x += 1`/`$x ??= ...` is a real rebind of `$x` -
                 // routes through the same `bind_assignment_target` every
                 // other assignment shape uses, so a property/index target
@@ -2953,6 +2986,7 @@ impl<'a> Checker<'a> {
                 // only check would leave e.g. `$this->watermark ??= ...`
                 // never actually updating the property's tracked type).
                 let ty = self.with_derived_flow(e, self.infer_binary(op, lhs, rhs, locals), locals);
+                self.check_overflow_into_target(lhs, &ty, e.span, locals);
                 // Same by-ref-parameter check as plain `=`, against the
                 // compound operation's own real result.
                 self.check_param_out_assignment(lhs, &ty);
@@ -3047,8 +3081,9 @@ impl<'a> Checker<'a> {
             ExprKind::ArrayLiteral(items) => {
                 for item in items {
                     if let Some(k) = &item.key {
-                        self.check_expr(k, locals, label);
+                        let key_ty = self.check_expr(k, locals, label);
                         self.check_array_item_key_type(k, locals);
+                        self.report_overflow_converted(&key_ty, k.span, "using it as an array key");
                     }
                     // `[&$x]` makes `$x` a reference, creating it as `null`
                     // when it doesn't exist.
@@ -4214,6 +4249,11 @@ impl<'a> Checker<'a> {
                             3,
                             "return.type",
                         );
+                    }
+                    if self.rejects_overflow_float(&expected) {
+                        self.report_overflow_into(&body_ty, body.span, || {
+                            "returning the float throws a TypeError".to_string()
+                        });
                     }
                 }
                 // See the `Closure` arm's identical comment above.

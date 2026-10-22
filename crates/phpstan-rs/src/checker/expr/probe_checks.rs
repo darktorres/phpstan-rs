@@ -60,7 +60,16 @@ impl<'a> Checker<'a> {
                 ExprKind::Index(base, idx) => {
                     self.check_expr_quiet_root(base, locals, label);
                     if let Some(i) = idx {
-                        self.check_expr(i, locals, label);
+                        let key_ty = self.check_expr(i, locals, label);
+                        // An array's key is converted even where a missing
+                        // one is allowed.
+                        if self.infer_expr(base, locals).is_array().yes() {
+                            self.report_overflow_converted(
+                                &key_ty,
+                                i.span,
+                                "using it as an array key",
+                            );
+                        }
                     }
                     Type::mixed()
                 }

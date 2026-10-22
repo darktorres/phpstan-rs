@@ -5,7 +5,7 @@ function f(): void {
     $page = (int) ($_GET['page'] ?? 1);
     assertFlow('env:$_GET', $_GET['page']);
     assertFlow('env:$_GET', $page);
-    assertFlow('env:$_GET, env:$_POST', $page * (int) $_POST['size']);
+    assertFlow('env:$_GET, env:$_POST, overflow:*@8', $page * (int) $_POST['size']);
     assertFlow('env:$_GET', "page {$page}");
     assertFlow('env:$_GET', trim($_GET['q'] ?? ''));
     assertFlow('', strlen($_GET['q'] ?? ''));
@@ -13,7 +13,7 @@ function f(): void {
     assertFlow('', 5 * 3);
     $n = $page;
     $n++;
-    assertFlow('env:$_GET', $n);
+    assertFlow('env:$_GET, overflow:++@15', $n);
     $m = rand(0, 1) ? $page : 7;
     assertFlow('env:$_GET', $m);
     assertFlow('global:$_SESSION', $_SESSION['id'] ?? 0);

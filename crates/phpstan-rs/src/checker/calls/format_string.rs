@@ -547,6 +547,16 @@ impl<'a> Checker<'a> {
             }
             let value_index = i64::try_from(i - function.format - 1).unwrap_or(i64::MAX);
             for placeholder in by_index.get(&value_index).into_iter().flatten() {
+                if matches!(placeholder.accepting, Accepting::Int | Accepting::StrictInt) {
+                    self.report_overflow_converted(
+                        &arg_ty,
+                        arg.value.span,
+                        &format!(
+                            "placeholder #{} ({}) of {name}",
+                            placeholder.number, placeholder.label
+                        ),
+                    );
+                }
                 if arg_ty.is_mixed() {
                     continue;
                 }

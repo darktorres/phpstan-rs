@@ -251,6 +251,40 @@ impl Type {
         })
     }
 
+    /// The sets this type's overflow floats carry: the float `int`
+    /// arithmetic gives past the `int` range.
+    pub fn overflow_float_flow(&self) -> Flow {
+        self.union_members()
+            .iter()
+            .filter(|m| matches!(m.repr(), Repr::Float(crate::FloatOrigin::IntOverflow)))
+            .fold(Flow::default(), |acc, m| acc.union(m.flow()))
+    }
+
+    /// This type with `flow` added to its overflow floats only.
+    pub fn with_overflow_float_flow(&self, flow: &Flow) -> Type {
+        if flow.is_empty() {
+            return self.clone();
+        }
+        match self.repr() {
+            Repr::Union(members) => Type::new(Repr::Union(
+                members
+                    .iter()
+                    .map(|m| m.with_overflow_float_flow(flow))
+                    .collect(),
+            )),
+            Repr::BenevolentUnion(members) => Type::new(Repr::BenevolentUnion(
+                members
+                    .iter()
+                    .map(|m| m.with_overflow_float_flow(flow))
+                    .collect(),
+            )),
+            Repr::Float(crate::FloatOrigin::IntOverflow) => {
+                self.with_own_flow(self.flow().union(flow))
+            }
+            _ => self.clone(),
+        }
+    }
+
     fn with_own_flow(&self, flow: Flow) -> Type {
         if flow == self.0.flow {
             return self.clone();

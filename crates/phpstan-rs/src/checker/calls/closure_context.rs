@@ -164,6 +164,11 @@ impl<'a> Checker<'a> {
                             "return.type",
                         );
                     }
+                    if self.rejects_overflow_float(&expected) {
+                        self.report_overflow_into(&body_ty, body.span, || {
+                            "returning the float throws a TypeError".to_string()
+                        });
+                    }
                 }
                 true
             }
@@ -318,9 +323,17 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     GotoState::new(goto_labels.clone()),
                 );
+                let native_return = return_type.as_deref().map(|hint| {
+                    let ty = self.resolve_type_hint(Some(hint));
+                    match &self.current_class {
+                        Some(c) => self.resolve_pseudo(&ty, c),
+                        None => ty,
+                    }
+                });
                 let previous_assigned_variables = self.enter_function_body(
                     body,
                     crate::checker::flow_nodes::Owner::Closure(self.flow_site(closure_expr.span)),
+                    native_return,
                 );
                 // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);

@@ -1128,6 +1128,14 @@ impl Type {
         }
     }
 
+    /// The value of a float literal; `None` for any other type.
+    pub fn float_literal_value(&self) -> Option<f64> {
+        match self.repr() {
+            Repr::FloatLiteral(f) => Some(*f),
+            _ => None,
+        }
+    }
+
     /// The value of a string literal; `None` for any other type.
     pub fn string_literal_value(&self) -> Option<&crate::PhpString> {
         match self.repr() {

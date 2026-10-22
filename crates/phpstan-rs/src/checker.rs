@@ -564,6 +564,9 @@ pub struct Checker<'a> {
     // The function whose body is being checked, as a data-flow node names
     // it: its parameters' and static variables' owner.
     pub(crate) current_function_owner: flow_nodes::Owner,
+    // The return type the function whose body is being checked declares
+    // natively, which PHP enforces.
+    pub(crate) current_function_native_return: Option<Type>,
     // Set to `true` immediately before `check_expr` is called for a
     // `StmtKind::Expression`'s top-level expression (a bare `foo();`, its
     // return value going nowhere by construction), cleared the instant
@@ -962,6 +965,7 @@ mod infer_cache;
 mod keys;
 mod locals;
 mod loop_counters;
+mod overflow_sinks;
 pub(crate) use locals::Locals;
 pub(crate) mod assignment;
 mod by_ref_params;
@@ -1235,6 +1239,7 @@ impl<'a> Checker<'a> {
             current_function_assigned_variables: Vec::new(),
             current_function_counters: Default::default(),
             current_function_owner: flow_nodes::Owner::Named("{main}".into()),
+            current_function_native_return: None,
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,

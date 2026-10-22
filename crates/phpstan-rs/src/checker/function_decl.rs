@@ -910,7 +910,8 @@ impl<'a> Checker<'a> {
                 .map(|b| GotoState::new(b.goto_labels.clone()))
                 .unwrap_or_default(),
         );
-        let previous_assigned_variables = self.enter_function_body(f.body_stmts(), flow_owner);
+        let previous_assigned_variables =
+            self.enter_function_body(f.body_stmts(), flow_owner, native_return.clone());
         // See `Checker::current_function_throw_points`'s doc comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
         let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
