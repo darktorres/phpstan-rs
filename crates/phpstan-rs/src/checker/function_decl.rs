@@ -278,7 +278,13 @@ impl<'a> Checker<'a> {
         is_concrete: bool,
         own_sig: Option<&FunctionReflection>,
     ) {
+        let imports = super::global_writes::imported_globals(f.body_stmts());
+        let outer = std::mem::replace(
+            &mut self.global_scope,
+            super::global_writes::Scope::Function(imports),
+        );
         self.check_function_impl(f, class_name, is_static, is_concrete, own_sig);
+        self.global_scope = outer;
     }
 
     /// The real body shared by `check_function` and
