@@ -201,6 +201,11 @@ impl Type {
                 Type::array_shape(shape.map_types(&mut |t| t.with_flow(flow)))
             }
             _ if family(self).is_some() => self.with_own_flow(self.flow().union(flow)),
+            // An array refined by accessories (`list<string>`) carries the
+            // set in its values.
+            Repr::Intersection(members) => Type::new(Repr::Intersection(
+                members.iter().map(|m| m.with_flow(flow)).collect(),
+            )),
             _ => self.clone(),
         })
     }

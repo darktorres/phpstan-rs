@@ -368,6 +368,7 @@ impl<'a> Checker<'a> {
             let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
                 self.check_expr_impl(e, locals, label)
             });
+            let ty = self.with_derived_flow(e, ty, locals);
             self.forget_members_a_call_may_change(e, locals);
             if !self.try_throw_states.is_empty()
                 && let Some(thrown) = self.thrown_by(e, locals)
@@ -1176,6 +1177,29 @@ impl<'a> Checker<'a> {
                         self.report(format!(
                                 "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
                             ), actual_arg.value.span, 0, "phpstanRs.assertType");
+                    }
+                    self.check_expr(&actual_arg.value, locals, label);
+                    return Type::mixed();
+                }
+                // `PhpstanRs\Testing\assertFlow('env:$_GET, ...', $expr)`:
+                // where a value came from, its data-flow nodes as
+                // `flow_nodes::describe` writes them.
+                if let ExprKind::Name(name) = &callee.kind
+                    && (name == "assertFlow" || name.ends_with("\\assertFlow"))
+                    && let [expected_arg, actual_arg] = args.as_slice()
+                    && let ExprKind::Literal(Literal::String(expected)) = &expected_arg.value.kind
+                {
+                    let flow = self.infer_expr(&actual_arg.value, locals).deep_flow();
+                    let actual = crate::checker::flow_nodes::describe(&flow);
+                    if *actual != *expected.to_str_lossy() {
+                        self.report(
+                            format!(
+                                "assertFlow() mismatch: expected \"{expected}\", actual \"{actual}\""
+                            ),
+                            actual_arg.value.span,
+                            0,
+                            "phpstanRs.assertFlow",
+                        );
                     }
                     self.check_expr(&actual_arg.value, locals, label);
                     return Type::mixed();
@@ -2394,7 +2418,8 @@ impl<'a> Checker<'a> {
                     inner_ty.increment_type()
                 } else {
                     inner_ty.decrement_type()
-                };
+                }
+                .with_flow(&inner_ty.deep_flow());
                 // `$x++`/`$x--` is real, visible rebinding syntax, the
                 // same category as `$x += 1`.
                 self.implicit_array_access_write(inner, e.span, locals);
@@ -2917,7 +2942,7 @@ impl<'a> Checker<'a> {
                 // rebinds too, not just a bare local (a bare-`Variable`-
                 // only check would leave e.g. `$this->watermark ??= ...`
                 // never actually updating the property's tracked type).
-                let ty = self.infer_binary(op, lhs, rhs, locals);
+                let ty = self.with_derived_flow(e, self.infer_binary(op, lhs, rhs, locals), locals);
                 // Same by-ref-parameter check as plain `=`, against the
                 // compound operation's own real result.
                 self.check_param_out_assignment(lhs, &ty);
@@ -4632,7 +4657,8 @@ impl<'a> Checker<'a> {
             // and not each level of a nested expression infers them again.
             let outermost = self.open_infer_scope();
             let ty = self.cached(e, locals, InferQuestion::Type, || {
-                self.infer_expr_unguarded(e, locals)
+                let ty = self.infer_expr_unguarded(e, locals);
+                self.with_derived_flow(e, ty, locals)
             });
             if outermost {
                 self.close_infer_scope();

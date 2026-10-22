@@ -3573,13 +3573,17 @@ struct UnindexedFile {
 }
 
 /// Whether a file declaring `functions` and `classes` and referencing
-/// `references` names anything in `PHPStan\`.
+/// `references` names anything in `PHPStan\`, or this project's own testing
+/// functions beside them in `PhpstanRs\`.
 fn mentions_phpstan(
     functions: &[Name],
     classes: &[Name],
     references: &FxHashSet<deps::RefKey>,
 ) -> bool {
-    let is_phpstan = |name: &Name| name.lower().starts_with("phpstan\\");
+    let is_phpstan = |name: &Name| {
+        let lower = name.lower();
+        lower.starts_with("phpstan\\") || lower.starts_with("phpstanrs\\")
+    };
     references.iter().any(|r| is_phpstan(r.name()))
         || functions.iter().chain(classes).any(is_phpstan)
 }

@@ -73,11 +73,15 @@ fn write_source_array(
     out.push_str("];\n");
 }
 
-/// Each file's path below `root`, parallel to its source array.
-fn write_path_array(out: &mut String, name: &str, files: &[PathBuf], root: &Path) {
+/// Each file's path below the first of `roots` it is below, parallel to its
+/// source array.
+fn write_path_array(out: &mut String, name: &str, files: &[PathBuf], roots: &[&Path]) {
     out.push_str(&format!("pub static {name}: &[&str] = &[\n"));
     for path in files {
-        let relative = path.strip_prefix(root).unwrap_or(path);
+        let relative = roots
+            .iter()
+            .find_map(|root| path.strip_prefix(root).ok())
+            .unwrap_or(path);
         out.push_str(&format!("    {:?},\n", embed::slash_spelling(relative)));
     }
     out.push_str("];\n");
@@ -129,6 +133,11 @@ fn main() {
     // top-level `stubs/*.stub` files; `stubs/runtime/` is PHPStan's own
     // polyfills) - the stub pipeline reads their class-level `@template`
     // declarations.
+    // This project's own testing functions, beside PHPStan's
+    // (`assertFlow` beside `assertType`).
+    let own = Path::new(&manifest_dir).join("own");
+    collect_php_files(&own, &mut phpstan_src_files);
+
     let mut phpstan_stub_files: Vec<PathBuf> = fs::read_dir(vendor.join("phpstan-src/stubs"))
         .map(|entries| {
             entries
@@ -170,7 +179,7 @@ fn main() {
         &mut generated,
         "PHPSTORM_STUBS_PATHS",
         &phpstorm_files,
-        &stubs_root,
+        &[&stubs_root],
     );
     write_source_array(
         &mut generated,
@@ -183,7 +192,7 @@ fn main() {
         &mut generated,
         "PHPSTAN_SRC_PATHS",
         &phpstan_src_files,
-        &vendor.join("phpstan-src/src"),
+        &[&vendor.join("phpstan-src/src"), &own],
     );
     write_source_array(
         &mut generated,
@@ -198,6 +207,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../../vendor/phpstorm-stubs");
     println!("cargo:rerun-if-changed=../../vendor/phpstan-src/src");
     println!("cargo:rerun-if-changed=../../vendor/phpstan-src/stubs");
+    println!("cargo:rerun-if-changed=own");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/embed.rs");
     println!("cargo:rerun-if-changed=index.tsv");

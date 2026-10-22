@@ -345,7 +345,7 @@ impl<'a> Checker<'a> {
                 let bands = self.counter_bands_in(&pass_entry, counters);
                 self.widen_towards_entry(&pass_entry, &mut next_entry, &bands);
             }
-            if next_entry == pass_entry || is_last_allowed_pass {
+            if next_entry.settled(&pass_entry) || is_last_allowed_pass {
                 // The kept pass's own `body_locals`, returned to the
                 // caller as "the loop's exit state," is the bare
                 // fallthrough-only state on its own - `continue_states`
@@ -864,6 +864,23 @@ pub(crate) fn merge_scopes(
                 }
             }
         }
+        // Nor is one whose types are equal and whose data-flow sets are
+        // not: what the else-scope's value came from joins the copy's.
+        for (key, else_ty) in else_locals.iter() {
+            if !else_ty.has_flow() {
+                continue;
+            }
+            if let Some(then_ty) = then_locals.get(key)
+                && *then_ty == *else_ty
+                && !then_ty.deep_flow().contains_all(&else_ty.deep_flow())
+            {
+                let maybe = merged.is_maybe_undefined(key);
+                merged.insert(key, relation.union(then_ty.clone(), else_ty.clone()));
+                if maybe {
+                    merged.mark_maybe_undefined(key);
+                }
+            }
+        }
         // A variable both scopes hold with the same type is not in the diff,
         // so one the else-scope holds as maybe-defined is marked here.
         for key in else_locals.maybe_undefined_keys() {
@@ -883,7 +900,7 @@ pub(crate) fn merge_scopes(
             // `Type::union` takes its operands by value, so equal types
             // (a variable neither branch reassigned, the common case) are
             // kept without cloning both.
-            if then_ty == else_ty {
+            if then_ty == else_ty && then_ty.deep_flow() == else_ty.deep_flow() {
                 then_ty.clone()
             } else {
                 relation.union(then_ty.clone(), else_ty.clone())

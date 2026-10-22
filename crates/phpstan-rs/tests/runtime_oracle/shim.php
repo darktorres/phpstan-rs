@@ -15,6 +15,14 @@ namespace PHPStan\Testing {
     }
 }
 
+namespace PhpstanRs\Testing {
+    /** Where a value came from is the checker's to say; PHP only passes it on. */
+    function assertFlow(string $expected, $value)
+    {
+        return $value;
+    }
+}
+
 namespace {
     if (!function_exists('assertType')) {
         function assertType(string $expected, $value)

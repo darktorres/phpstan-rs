@@ -876,12 +876,21 @@ impl<'a> Checker<'a> {
 /// superglobal's value (an array with a benevolent key and an explicit
 /// `mixed` value, as PHPStan types it), `$argc`'s count, and for any
 /// other name the error type - the read is reported undefined, so what's
-/// built on it doesn't report again.
+/// built on it doesn't report again. What the request, the command line
+/// and the process's environment put in a superglobal, keys and values,
+/// comes from the environment; `$_SESSION` holds what the code stored and
+/// `$GLOBALS` what it wrote.
 pub(crate) fn unassigned_variable_type(name: &str) -> Type {
+    use crate::checker::flow_nodes::{FlowNode, flow_of};
     match name {
-        "argc" => Type::int(),
+        "argc" => Type::int().with_flow(&flow_of(FlowNode::env("$argc"))),
+        "GLOBALS" | "_SESSION" => Type::array(Type::benevolent_array_key(), Type::explicit_mixed()),
         _ if is_superglobal(name) => {
-            Type::array(Type::benevolent_array_key(), Type::explicit_mixed())
+            let flow = flow_of(FlowNode::env(&format!("${name}")));
+            Type::array(
+                Type::benevolent_array_key().with_flow(&flow),
+                Type::explicit_mixed().with_flow(&flow),
+            )
         }
         _ => Type::error(),
     }

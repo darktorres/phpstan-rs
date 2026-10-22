@@ -953,6 +953,8 @@ mod labels;
 pub(crate) use completion::{ExitKind, ExitPoint, GotoState};
 pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;
+mod flow_derivation;
+mod flow_nodes;
 mod infer_cache;
 mod keys;
 mod locals;

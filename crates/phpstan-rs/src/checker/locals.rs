@@ -927,6 +927,20 @@ impl PartialEq for Locals {
 }
 
 impl Locals {
+    /// Whether a fixed point is reached: the same types, each carrying the
+    /// same data-flow sets, which type equality leaves out. A loop whose
+    /// types settle while a source still spreads through it runs again.
+    pub(crate) fn settled(&self, other: &Locals) -> bool {
+        self == other
+            && (self.types.ptr_eq(&other.types)
+                || self.types.iter().all(|(key, ty)| {
+                    other
+                        .types
+                        .get(key)
+                        .is_none_or(|o| o.deep_flow() == ty.deep_flow())
+                }))
+    }
+
     /// Marks this scope's content as changed.
     fn touch(&mut self) {
         self.version = NEXT_VERSION.fetch_add(1, Ordering::Relaxed);

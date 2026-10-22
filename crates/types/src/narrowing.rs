@@ -113,6 +113,12 @@ impl Relation<'_> {
     /// parameter accepts an `int`. A check nothing in `original` can pass
     /// leaves `never`: the branch doesn't run.
     pub fn narrow(&self, original: &Type, target: &Type) -> Type {
+        crate::flow::keeping_flows(vec![original.clone()], |one| {
+            self.narrow_unflowed(&one[0], target)
+        })
+    }
+
+    fn narrow_unflowed(&self, original: &Type, target: &Type) -> Type {
         match original.repr() {
             Repr::Union(members) | Repr::BenevolentUnion(members) => {
                 let target_members: &[Type] = match target.repr() {
@@ -158,7 +164,7 @@ impl Type {
     /// `array<mixed>`, which must drop an `array<string>` too.
     pub fn without(&self, excluded: &Type) -> Type {
         crate::intern::memoized_pair(crate::intern::Operation::Without, self, excluded, || {
-            self.without_uncached(excluded)
+            crate::flow::keeping_flows(vec![self.clone()], |one| one[0].without_uncached(excluded))
         })
     }
 
@@ -592,11 +598,15 @@ impl Type {
     /// range around `0` loses it (`int<min, -1>|int<1, max>`), a string is
     /// `non-falsy-string` and an array non-empty.
     pub fn without_falsy(&self) -> Type {
+        crate::flow::keeping_flows(vec![self.clone()], |one| one[0].without_falsy_unflowed())
+    }
+
+    fn without_falsy_unflowed(&self) -> Type {
         match self.repr() {
             Repr::Union(members) | Repr::BenevolentUnion(members) => {
                 let kept: Vec<Type> = members
                     .iter()
-                    .map(Type::without_falsy)
+                    .map(Type::without_falsy_unflowed)
                     .filter(|t| *t != Type::never())
                     .collect();
                 self.with_members(kept)

@@ -264,7 +264,7 @@ impl<'a> Checker<'a> {
             if pass >= 1 && next_entry != pass_entry {
                 self.widen_towards_entry(&pass_entry, &mut next_entry, &[]);
             }
-            if next_entry == pass_entry || pass + 1 == MAX_PASSES {
+            if next_entry.settled(&pass_entry) || pass + 1 == MAX_PASSES {
                 *locals = pass_locals;
                 *state = pass_state;
                 return;
