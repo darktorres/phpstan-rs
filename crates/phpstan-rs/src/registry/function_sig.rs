@@ -353,6 +353,37 @@ impl FunctionReflection {
         }
     }
 
+    /// Takes the PHPDoc-derived parts of `stub`'s declaration of the same
+    /// function: each parameter's own `@param` type, its `@return` type, and
+    /// the assertion and `@throws` tags it declares. The native types,
+    /// defaults and flags stay this signature's own.
+    pub(in crate::registry) fn adopt_stub_docs(&mut self, stub: &FunctionReflection) {
+        for (param, stub_param) in self.params.iter_mut().zip(&stub.params) {
+            if stub_param.has_own_doc && stub_param.name == param.name {
+                param.ty = stub_param.ty.clone();
+                param.doc_ty = stub_param.doc_ty.clone();
+                param.has_own_doc = true;
+            }
+        }
+        if stub.return_has_own_doc {
+            self.return_type = stub.return_type.clone();
+            self.return_doc_ty = stub.return_doc_ty.clone();
+            self.return_has_own_doc = true;
+        }
+        if !stub.assert_if_true.is_empty() {
+            self.assert_if_true = stub.assert_if_true.clone();
+        }
+        if !stub.assert_if_false.is_empty() {
+            self.assert_if_false = stub.assert_if_false.clone();
+        }
+        if !stub.assert.is_empty() {
+            self.assert = stub.assert.clone();
+        }
+        if stub.throws.is_some() {
+            self.throws = stub.throws.clone();
+        }
+    }
+
     /// This signature returning `ty` instead.
     pub fn with_return_type(&self, ty: Type) -> FunctionReflection {
         FunctionReflection {

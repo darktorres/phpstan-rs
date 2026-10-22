@@ -1,5 +1,8 @@
 <?php
-            /** @return array{0: resource, 1: array<int, resource>} */
+            /**
+             * @param list<string> $cmd
+             * @return array{0: resource, 1: array<int, resource>}
+             */
             function spawn(array $cmd, array $descriptors): array {
                 $proc = proc_open($cmd, $descriptors, $pipes);
                 if ($proc === false) {

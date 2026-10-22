@@ -57,6 +57,30 @@ use stub_sources::{
     PHPSTORM_STUBS_PATHS, PHPSTORM_STUBS_SOURCES,
 };
 
+/// PHPStan's own function stubs (`vendor/phpstan-src/stubs/*.stub`) give
+/// builtins PHPDoc types phpstorm-stubs lacks: `file()` is `list<string>|false`
+/// there, where phpstorm-stubs gives `array|false`. Real PHPStan reads those
+/// declarations in place of the builtin's own docblock, so each builtin of
+/// the same name takes the PHPDoc parts of the stub's declaration.
+fn patch_phpstan_function_stubs(functions: &mut [(Name, FunctionReflection)]) {
+    for source in PHPSTAN_STUB_SOURCES {
+        let Ok(parsed) = syntax::parse(source.as_bytes()) else {
+            continue;
+        };
+        let mut program = parsed.stmts;
+        crate::stub_attributes::apply_stub_attributes(&mut program);
+        let registry = Registry::index_and_flatten(&program, &Origin::Unknown);
+        for (name, stub) in registry.functions {
+            if let Some((_, sig)) = functions
+                .iter_mut()
+                .find(|(n, _)| n.eq_ignore_ascii_case(&name))
+            {
+                sig.adopt_stub_docs(&stub);
+            }
+        }
+    }
+}
+
 /// phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
 /// genuinely accurate) declaration of `array_multisort`'s variadic tail
 /// is `&...$rest` - every "rest" argument marked by-reference uniformly.
@@ -1667,6 +1691,7 @@ fn build_generated_stub_data(pool: Option<&rayon::ThreadPool>) -> (StubIndex, Ge
             register_global_constant(&mut merged_constants, name, ty);
         }
     }
+    patch_phpstan_function_stubs(&mut functions);
     patch_array_multisort_by_ref(&mut functions);
     patch_debug_backtrace(&mut functions);
     patch_usleep(&mut functions);
