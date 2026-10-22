@@ -19,7 +19,7 @@ function parse(array $tokens): void
         }
         $i++;
     }
-    assertType('array{flat?: true, field?: non-falsy-string, start?: int<0, max>}', $page);
+    assertType('array{flat?: true, field?: non-falsy-string, start?: int<0, 72057594037927935>}', $page);
 }
 
 /** @param list<string> $tokens */

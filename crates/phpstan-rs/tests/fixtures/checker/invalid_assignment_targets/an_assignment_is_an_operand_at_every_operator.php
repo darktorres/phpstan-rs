@@ -15,5 +15,5 @@ function f(?int $a, int $g, int $i): void {
     if (false === $x = strpos("ab", "b")) {
         return;
     }
-    assertType("int<0, max>", $x);
+    assertType("int<0, 72057594037927935>", $x);
 }

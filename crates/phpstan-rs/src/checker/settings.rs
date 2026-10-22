@@ -22,30 +22,35 @@ pub struct EngineSettings {
     /// dynamic_constant_names = [{ name = "DEBUG" }, { name = "MODE", type = "'dev'|'prod'" }]
     /// ```
     pub dynamic_constant_names: Option<DynamicConstantNames>,
-    /// The platforms the code runs on, and how long a process runs.
-    /// Without platforms, any platform PHP runs on, so a string's length
-    /// and the clock have no bound below the `int` range; listing them
-    /// bounds what every listed one bounds. A process runs under
-    /// `max_run_seconds` (a year unless set), which bounds how far a loop
-    /// counter gets.
+    /// The platforms the code runs on, how much memory a process may
+    /// hold, and how long it runs. Without operating systems, any PHP runs
+    /// on, so the clock has no bound below the `int` range; listing them
+    /// bounds it as every listed one does. A string is shorter than
+    /// `memory_limit` (PHP's setting, as its ini file spells it; `-1` or
+    /// unset is none), than the address space of every listed
+    /// architecture, and than 2^56 bytes, which no process holds. A process
+    /// runs under `max_run_seconds` (a year unless set), which bounds how
+    /// far a loop counter gets.
     ///
     /// ```toml
     /// [deployment]
     /// arch = ["x86_64", "aarch64"]
     /// os = ["linux"]
+    /// memory_limit = "512M"
     /// max_run_seconds = 86400
     /// ```
     pub deployment: Option<Deployment>,
 }
 
 /// `EngineSettings::deployment`: the architectures and operating systems
-/// the code runs on (an empty list is any), and the longest a process
-/// runs.
+/// the code runs on (an empty list is any), the memory a process may hold,
+/// and the longest it runs.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Deployment {
     pub arch: Vec<Arch>,
     pub os: Vec<Os>,
+    pub memory_limit: Option<MemoryLimit>,
     pub max_run_seconds: i64,
 }
 
@@ -54,7 +59,60 @@ impl Default for Deployment {
         Deployment {
             arch: Vec::new(),
             os: Vec::new(),
+            memory_limit: None,
             max_run_seconds: 365 * 24 * 60 * 60,
+        }
+    }
+}
+
+/// The most bytes a process holds: 2^56, the address space of the largest
+/// machines PHP runs on, and more memory than any is built with.
+const MOST_BYTES_HELD: i64 = 1 << 56;
+
+/// PHP's `memory_limit`: a number of bytes, or none.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(try_from = "MemoryLimitSpelling")]
+pub struct MemoryLimit(Option<i64>);
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum MemoryLimitSpelling {
+    Bytes(i64),
+    Text(String),
+}
+
+impl TryFrom<MemoryLimitSpelling> for MemoryLimit {
+    type Error = String;
+
+    /// As PHP reads its ini setting: a number of bytes, with `K`, `M` or
+    /// `G` for 2^10, 2^20 or 2^30 of them; `-1` is none.
+    fn try_from(spelling: MemoryLimitSpelling) -> Result<Self, String> {
+        let bytes = match spelling {
+            MemoryLimitSpelling::Bytes(n) => n,
+            MemoryLimitSpelling::Text(text) => {
+                let text = text.trim();
+                let (digits, shift) = match text.chars().last().map(|c| c.to_ascii_lowercase()) {
+                    Some('k') => (&text[..text.len() - 1], 10),
+                    Some('m') => (&text[..text.len() - 1], 20),
+                    Some('g') => (&text[..text.len() - 1], 30),
+                    _ => (text, 0),
+                };
+                let n: i64 = digits
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("invalid memory_limit `{text}`"))?;
+                if n == -1 {
+                    n
+                } else {
+                    n.checked_mul(1 << shift)
+                        .ok_or_else(|| format!("memory_limit `{text}` is too large"))?
+                }
+            }
+        };
+        match bytes {
+            -1 => Ok(MemoryLimit(None)),
+            n if n > 0 => Ok(MemoryLimit(Some(n))),
+            _ => Err(format!("memory_limit must be positive or -1, not {bytes}")),
         }
     }
 }
@@ -118,7 +176,7 @@ impl Os {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlatformLimits {
     /// The most bytes a string holds.
-    pub string_length: Option<i64>,
+    pub string_length: i64,
     /// The least and most seconds `time()` gives.
     pub clock: Option<(i64, i64)>,
     /// The most iterations loops run in one process.
@@ -134,14 +192,24 @@ impl Default for PlatformLimits {
 impl Deployment {
     /// The bounds every listed platform keeps.
     pub fn limits(&self) -> PlatformLimits {
-        let string_length = if self.arch.is_empty() {
+        let address_space = if self.arch.is_empty() {
             None
         } else {
             self.arch
                 .iter()
                 .map(|a| a.address_space())
-                .try_fold(0, |most, space| space.map(|s| most.max(s - 1)))
+                .try_fold(0, |most, space| space.map(|s| most.max(s)))
         };
+        let bytes = [
+            Some(MOST_BYTES_HELD),
+            address_space,
+            self.memory_limit.and_then(|limit| limit.0),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(MOST_BYTES_HELD);
+        let string_length = bytes - 1;
         let clock = if self.os.is_empty() {
             None
         } else {

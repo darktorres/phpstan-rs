@@ -71,9 +71,7 @@ impl<'a> Checker<'a> {
             _ if C_INT_RESULTS.contains(&name) => {
                 Type::int_range(Some(i64::from(i32::MIN)), Some(i64::from(i32::MAX)))
             }
-            (_, Some(most), _) if STRING_MEASURES.contains(&name) => {
-                Type::int_range(Some(0), Some(most))
-            }
+            (_, most, _) if STRING_MEASURES.contains(&name) => Type::int_range(Some(0), Some(most)),
             ("time", _, Some((least, most))) => Type::int_range(Some(least), Some(most)),
             _ => return ty,
         };
