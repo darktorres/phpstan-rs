@@ -107,8 +107,12 @@ impl<'a> Checker<'a> {
                 }
                 let mut arrow_locals = locals.clone();
                 for (p, override_ty) in params.iter().zip(param_overrides) {
+                    // The value is the one the caller passes, whatever the
+                    // hint says of it.
                     let (ty, case_refs) = if p.type_hint.is_some() {
-                        self.resolve_type_hint_with_case_refs(p.type_hint.as_ref())
+                        let (ty, case_refs) =
+                            self.resolve_type_hint_with_case_refs(p.type_hint.as_ref());
+                        (ty.with_flow(&override_ty.deep_flow()), case_refs)
                     } else {
                         (override_ty.clone(), Vec::new())
                     };
@@ -253,8 +257,12 @@ impl<'a> Checker<'a> {
                 }
                 let closure_label = format!("{label} (closure)");
                 for (p, override_ty) in params.iter().zip(param_overrides) {
+                    // The value is the one the caller passes, whatever the
+                    // hint says of it.
                     let (ty, case_refs) = if p.type_hint.is_some() {
-                        self.resolve_type_hint_with_case_refs(p.type_hint.as_ref())
+                        let (ty, case_refs) =
+                            self.resolve_type_hint_with_case_refs(p.type_hint.as_ref());
+                        (ty.with_flow(&override_ty.deep_flow()), case_refs)
                     } else {
                         (override_ty.clone(), Vec::new())
                     };
@@ -310,7 +318,10 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     GotoState::new(goto_labels.clone()),
                 );
-                let previous_assigned_variables = self.enter_function_body(body);
+                let previous_assigned_variables = self.enter_function_body(
+                    body,
+                    crate::checker::flow_nodes::Owner::Closure(self.flow_site(closure_expr.span)),
+                );
                 // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);

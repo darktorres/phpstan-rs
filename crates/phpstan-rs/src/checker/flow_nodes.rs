@@ -14,6 +14,33 @@ pub(crate) enum FlowNode {
     /// variables, what the deployment's files and databases hold. The name
     /// says which (`$_GET`, `getenv`).
     Env(Arc<str>),
+    /// A parameter, as the callers pass it.
+    Param { owner: Owner, name: Arc<str> },
+    /// What one call returns, at the site that makes it; `callee` names
+    /// what it calls.
+    Call { site: Site, callee: Arc<str> },
+    /// A property of a class, as the writes to it leave it.
+    Property { class: Arc<str>, name: Arc<str> },
+    /// A global variable, as the code that writes it leaves it.
+    Global(Arc<str>),
+    /// A static variable, as the earlier calls leave it.
+    Static { owner: Owner, name: Arc<str> },
+}
+
+/// The function a parameter or a static variable belongs to: a function
+/// by its qualified name, a method as `Class::method`, a closure by where
+/// it is written.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Owner {
+    Named(Arc<str>),
+    Closure(Site),
+}
+
+/// A place in the code: a file and an offset in it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Site {
+    pub(crate) file: Arc<str>,
+    pub(crate) offset: u32,
 }
 
 impl FlowNode {
@@ -25,6 +52,20 @@ impl FlowNode {
     fn describe(&self) -> String {
         match self {
             FlowNode::Env(name) => format!("env:{name}"),
+            FlowNode::Param { owner, name } => format!("param:{owner}::${name}"),
+            FlowNode::Call { callee, .. } => format!("call:{callee}"),
+            FlowNode::Property { class, name } => format!("property:{class}::${name}"),
+            FlowNode::Global(name) => format!("global:${name}"),
+            FlowNode::Static { owner, name } => format!("static:{owner}::${name}"),
+        }
+    }
+}
+
+impl std::fmt::Display for Owner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Owner::Named(name) => f.write_str(name),
+            Owner::Closure(_) => f.write_str("{closure}"),
         }
     }
 }

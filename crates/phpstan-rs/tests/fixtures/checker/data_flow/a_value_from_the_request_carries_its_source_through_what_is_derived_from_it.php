@@ -16,7 +16,7 @@ function f(): void {
     assertFlow('env:$_GET', $n);
     $m = rand(0, 1) ? $page : 7;
     assertFlow('env:$_GET', $m);
-    assertFlow('', $_SESSION['id'] ?? 0);
+    assertFlow('global:$_SESSION', $_SESSION['id'] ?? 0);
     assertFlow('env:$_SERVER', explode(',', $_SERVER['HTTP_ACCEPT'] ?? ''));
 }
 

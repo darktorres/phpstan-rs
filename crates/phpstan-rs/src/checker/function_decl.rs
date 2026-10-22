@@ -449,6 +449,14 @@ impl<'a> Checker<'a> {
             self,
             doc_nodes.as_ref().and_then(|n| n.return_type.as_ref()),
         );
+        // A parameter's value is whatever its callers pass.
+        let flow_owner = crate::checker::flow_nodes::Owner::Named(
+            match class_name {
+                Some(c) => format!("{c}::{}", f.name),
+                None => f.fq_name().to_string(),
+            }
+            .into(),
+        );
         match sig {
             // The registry's FunctionReflection already has PHPDoc types merged
             // in - using it here, instead of re-deriving from the raw
@@ -533,6 +541,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
+                    let ty = ty.with_flow(&self.param_flow(flow_owner.clone(), param.name()));
                     self.probe_hit_at(ast_param.name.span, &ty);
                     locals.declare_var(param.name(), ty, ast_param.name.span);
                     let native = match class_name {
@@ -603,6 +612,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
+                    let ty = ty.with_flow(&self.param_flow(flow_owner.clone(), &p.name));
                     self.probe_hit_at(p.name.span, &ty);
                     locals.declare_var(&p.name, ty, p.name.span);
                 }
@@ -900,7 +910,7 @@ impl<'a> Checker<'a> {
                 .map(|b| GotoState::new(b.goto_labels.clone()))
                 .unwrap_or_default(),
         );
-        let previous_assigned_variables = self.enter_function_body(f.body_stmts());
+        let previous_assigned_variables = self.enter_function_body(f.body_stmts(), flow_owner);
         // See `Checker::current_function_throw_points`'s doc comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
         let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);

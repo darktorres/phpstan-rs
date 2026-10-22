@@ -556,9 +556,14 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Replaces the current function's assignment sites and counters with
-    /// `body`'s, returning the previous ones for `leave_function_body`.
-    pub(crate) fn enter_function_body(&mut self, body: &[Stmt]) -> EnteredBody {
+    /// Replaces the current function's assignment sites, counters and
+    /// owner with `body`'s and `owner`, returning the previous ones for
+    /// `leave_function_body`.
+    pub(crate) fn enter_function_body(
+        &mut self,
+        body: &[Stmt],
+        owner: crate::checker::flow_nodes::Owner,
+    ) -> EnteredBody {
         let entered = if self.settings.strict_rules.check_implicit_array_creation {
             assigned_variables(body)
         } else {
@@ -578,6 +583,7 @@ impl<'a> Checker<'a> {
                     ),
                 ),
             ),
+            owner: std::mem::replace(&mut self.current_function_owner, owner),
         }
     }
 
@@ -585,6 +591,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn leave_function_body(&mut self, previous: EnteredBody) {
         self.current_function_assigned_variables = previous.assigned_variables;
         self.current_function_counters = previous.counters;
+        self.current_function_owner = previous.owner;
     }
 
     /// Whether an assignment to `name` could have run before the one at
@@ -896,6 +903,7 @@ impl AssignedVariable {
 pub(crate) struct EnteredBody {
     assigned_variables: Vec<AssignedVariable>,
     counters: std::rc::Rc<crate::checker::loop_counters::LoopCounters>,
+    owner: crate::checker::flow_nodes::Owner,
 }
 
 pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {

@@ -1081,7 +1081,12 @@ impl<'a> Checker<'a> {
                             .global_variables
                             .get(&**name)
                             .cloned()
-                            .unwrap_or(Type::mixed());
+                            .unwrap_or(Type::mixed())
+                            .with_flow(&crate::checker::flow_nodes::flow_of(
+                                crate::checker::flow_nodes::FlowNode::Global(
+                                    name.name.as_str().into(),
+                                ),
+                            ));
                         self.probe_hit_at(stmt.span, &ty);
                         locals.declare_var(name, ty, name.span);
                     }
@@ -1107,8 +1112,8 @@ impl<'a> Checker<'a> {
                     let ty = match initial {
                         Some(initial) => self
                             .static_counter_band(name, &initial)
-                            .unwrap_or_else(|| static_variable_type(&initial)),
-                        None => Type::mixed(),
+                            .unwrap_or_else(|| self.static_variable_with_flow(name, &initial)),
+                        None => self.static_variable_with_flow(name, &Type::mixed()),
                     };
                     purge_stale_narrowing_for_var(locals, name);
                     self.probe_hit_at(stmt.span, &ty);
@@ -1722,6 +1727,18 @@ impl Checker<'_> {
 
 /// A static variable's type across calls: its initializer's general
 /// type, with `null` (the "not computed yet" sentinel) unknown.
+impl Checker<'_> {
+    /// A static variable's type where it is declared, as an earlier call
+    /// of the current function left it.
+    fn static_variable_with_flow(&self, name: &Ident, initializer: &Type) -> Type {
+        use crate::checker::flow_nodes::{FlowNode, flow_of};
+        static_variable_type(initializer).with_flow(&flow_of(FlowNode::Static {
+            owner: self.current_function_owner.clone(),
+            name: name.name.as_str().into(),
+        }))
+    }
+}
+
 fn static_variable_type(initializer: &Type) -> Type {
     if initializer.is_null().yes() {
         Type::mixed()

@@ -561,6 +561,9 @@ pub struct Checker<'a> {
     // The current function body's statics written only by steps
     // (`LoopCounters::of_function_body`).
     pub(crate) current_function_counters: std::rc::Rc<loop_counters::LoopCounters>,
+    // The function whose body is being checked, as a data-flow node names
+    // it: its parameters' and static variables' owner.
+    pub(crate) current_function_owner: flow_nodes::Owner,
     // Set to `true` immediately before `check_expr` is called for a
     // `StmtKind::Expression`'s top-level expression (a bare `foo();`, its
     // return value going nowhere by construction), cleared the instant
@@ -1231,6 +1234,7 @@ impl<'a> Checker<'a> {
             statement_method_call: None,
             current_function_assigned_variables: Vec::new(),
             current_function_counters: Default::default(),
+            current_function_owner: flow_nodes::Owner::Named("{main}".into()),
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,

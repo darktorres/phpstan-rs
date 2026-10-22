@@ -217,9 +217,10 @@ impl<'a> Checker<'a> {
         let previous_explicit_throw_points =
             std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
+        let owner = crate::checker::flow_nodes::Owner::Named(format!("{fqn}::${name}::get").into());
         let previous_assigned_variables = match body {
-            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts),
-            _ => self.enter_function_body(&[]),
+            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts, owner),
+            _ => self.enter_function_body(&[], owner),
         };
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(_) => {
@@ -498,7 +499,11 @@ impl<'a> Checker<'a> {
         let value_ty = prop_sig
             .set_ty()
             .clone()
-            .unwrap_or_else(|| prop_sig.ty().clone());
+            .unwrap_or_else(|| prop_sig.ty().clone())
+            .with_flow(&self.param_flow(
+                crate::checker::flow_nodes::Owner::Named(format!("{fqn}::${name}::set").into()),
+                &param_name,
+            ));
         locals.declare_var(&param_name, value_ty, param_span);
         let declared_return = Some(Type::void());
         let previous_generator_flag = self.current_function_is_generator;
@@ -514,9 +519,10 @@ impl<'a> Checker<'a> {
         let previous_explicit_throw_points =
             std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_exit_points = std::mem::take(&mut self.current_function_exit_points);
+        let owner = crate::checker::flow_nodes::Owner::Named(format!("{fqn}::${name}::set").into());
         let previous_assigned_variables = match body {
-            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts),
-            _ => self.enter_function_body(&[]),
+            PropertyHookBody::Block(stmts) => self.enter_function_body(stmts, owner),
+            _ => self.enter_function_body(&[], owner),
         };
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(_) => {

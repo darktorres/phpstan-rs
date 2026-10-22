@@ -884,7 +884,13 @@ pub(crate) fn unassigned_variable_type(name: &str) -> Type {
     use crate::checker::flow_nodes::{FlowNode, flow_of};
     match name {
         "argc" => Type::int().with_flow(&flow_of(FlowNode::env("$argc"))),
-        "GLOBALS" | "_SESSION" => Type::array(Type::benevolent_array_key(), Type::explicit_mixed()),
+        "GLOBALS" | "_SESSION" => {
+            let flow = flow_of(FlowNode::Global(name.into()));
+            Type::array(
+                Type::benevolent_array_key().with_flow(&flow),
+                Type::explicit_mixed().with_flow(&flow),
+            )
+        }
         _ if is_superglobal(name) => {
             let flow = flow_of(FlowNode::env(&format!("${name}")));
             Type::array(

@@ -745,7 +745,8 @@ impl<'a> Checker<'a> {
                 Type::array(Type::unknown_array_key(), ty)
             } else {
                 // A call holds each parameter's argument, when the declared
-                // type accepts that argument as it is.
+                // type accepts that argument as it is; it comes from where
+                // the argument does.
                 match call.arguments.and_then(|args| args.get(index)) {
                     Some(argument)
                         if mode == ClosureMode::Call
@@ -754,7 +755,13 @@ impl<'a> Checker<'a> {
                     {
                         argument.clone()
                     }
-                    _ => ty,
+                    Some(argument) if mode == ClosureMode::Call => {
+                        ty.with_flow(&argument.deep_flow())
+                    }
+                    _ => ty.with_flow(&self.param_flow(
+                        crate::checker::flow_nodes::Owner::Closure(self.flow_site(span)),
+                        &p.name,
+                    )),
                 }
             };
             closure_locals.declare_var(&p.name, ty, p.name.span);
@@ -833,7 +840,10 @@ impl<'a> Checker<'a> {
             &mut self.current_function_goto_targets,
             GotoState::new(goto_labels.clone()),
         );
-        let previous_assigned_variables = self.enter_function_body(body);
+        let previous_assigned_variables = self.enter_function_body(
+            body,
+            crate::checker::flow_nodes::Owner::Closure(self.flow_site(span)),
+        );
         // Real PHPStan exempts an anonymous function entirely
         // from both by-ref-parameter rules (`isInAnonymousFunction()`
         // bails in `ParameterOutAssignedTypeRule`/
@@ -4107,6 +4117,10 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
+                    let ty = ty.with_flow(&self.param_flow(
+                        crate::checker::flow_nodes::Owner::Closure(self.flow_site(e.span)),
+                        &p.name,
+                    ));
                     arrow_locals.declare_var(&p.name, ty, p.name.span);
                     arrow_locals.set_native_var(&p.name, self.closure_param_native(p));
                 }
