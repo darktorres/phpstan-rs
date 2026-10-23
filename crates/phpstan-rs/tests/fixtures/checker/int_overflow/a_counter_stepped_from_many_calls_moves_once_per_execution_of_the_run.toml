@@ -1,0 +1,2 @@
+[ext.extras]
+check_int_overflow_growth = true

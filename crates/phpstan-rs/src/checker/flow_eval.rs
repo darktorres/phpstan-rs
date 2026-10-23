@@ -1388,6 +1388,8 @@ impl<'r, 'f> Graph<'r, 'f> {
         let mut entry = Value::Unknown;
         let mut step_lo: i128 = 0;
         let mut step_hi: i128 = 0;
+        let mut least_step: i128 = 0;
+        let mut most_step: i128 = 0;
         let mut linear = true;
         let mut persistent = false;
         let mut executions: Option<i64> = Some(1);
@@ -1430,6 +1432,8 @@ impl<'r, 'f> Graph<'r, 'f> {
                         let (lo, hi) = if negate { (-hi, -lo) } else { (lo, hi) };
                         step_lo += lo.min(0);
                         step_hi += hi.max(0);
+                        least_step = least_step.min(lo);
+                        most_step = most_step.max(hi);
                     }
                     None => linear = false,
                 }
@@ -1449,23 +1453,34 @@ impl<'r, 'f> Graph<'r, 'f> {
             }
         }
         // A cycle no loop bounds runs at most as often as the run lets it.
-        let executions = match executions {
-            _ if persistent => self.run_total,
+        let looped = executions.filter(|_| !persistent);
+        let executions = match looped {
             Some(times) => Some(self.run_total.map_or(times, |run| times.min(run))),
             None => self.run_total,
         };
         let value = match entry {
             Value::Chosen => Value::Chosen,
             Value::Within(lo, hi) if linear => {
-                let times = executions.map(i128::from);
-                let lo = match times {
+                // Each run of a loop can take every step once; the whole run
+                // takes one step at each of its executions.
+                let moved = |sum: i128, most: i128| {
+                    let by_loop = looped.map(|times| i128::from(times).saturating_mul(sum));
+                    let by_run = self
+                        .run_total
+                        .map(|run| i128::from(run).saturating_mul(most));
+                    match (by_loop, by_run) {
+                        (Some(a), Some(b)) => Some(if a.abs() < b.abs() { a } else { b }),
+                        (a, b) => a.or(b),
+                    }
+                };
+                let lo = match moved(step_lo, least_step) {
                     _ if step_lo == 0 => lo,
-                    Some(times) => lo.saturating_add(times.saturating_mul(step_lo)),
+                    Some(moved) => lo.saturating_add(moved),
                     None => INT_MIN - 1,
                 };
-                let hi = match times {
+                let hi = match moved(step_hi, most_step) {
                     _ if step_hi == 0 => hi,
-                    Some(times) => hi.saturating_add(times.saturating_mul(step_hi)),
+                    Some(moved) => hi.saturating_add(moved),
                     None => INT_MAX + 1,
                 };
                 Value::Within(lo, hi).clamped()
