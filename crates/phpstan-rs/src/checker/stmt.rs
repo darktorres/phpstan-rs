@@ -751,6 +751,12 @@ impl<'a> Checker<'a> {
                 if !self.current_function_is_generator {
                     self.current_function_saw_explicit_return = true;
                     self.current_function_return_points.push(actual.clone());
+                    self.record_write(
+                        crate::checker::flow_nodes::FlowNode::Return(
+                            self.current_function_owner.clone(),
+                        ),
+                        &actual,
+                    );
                 }
                 self.record_by_ref_exit_snapshot(locals);
                 if let Some(expected) = declared_return {
@@ -1117,6 +1123,13 @@ impl<'a> Checker<'a> {
                     // calls see whatever an earlier call left behind, so
                     // only its general type is known.
                     let initial = default.as_ref().map(|e| self.check_expr(e, locals, label));
+                    self.record_write(
+                        crate::checker::flow_nodes::FlowNode::Static {
+                            owner: self.current_function_owner.clone(),
+                            name: name.name.as_str().into(),
+                        },
+                        initial.as_ref().unwrap_or(&Type::null()),
+                    );
                     let ty = match initial {
                         Some(initial) => self
                             .static_counter_band(name, &initial)

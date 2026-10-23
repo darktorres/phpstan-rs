@@ -1,0 +1,2 @@
+16:21-16:37 arithmetic.intOverflow L5 | The result of + on line 16 can leave the int range with a value from $_GET through parameter $at of shifted(), and passing the float to parameter #1 $n of function takesInt throws a TypeError.
+21:21-21:39 arithmetic.intOverflow L5 | The result of + on line 21 can leave the int range with a value from $_GET through parameter $at of interned(), and passing the float to parameter #1 $n of function takesInt throws a TypeError.

@@ -252,12 +252,13 @@ impl<'a> Checker<'a> {
             // a loop that can run zero times also leaves by, so after as
             // many iterations as it runs; one that can't is left after
             // its last iteration's body, past a beginning one fewer.
-            let completed = most_iterations.filter(|_| steps.once).map(|most| {
-                match zero_iterations {
-                    LoopZeroIterations::Possible { .. } => most,
-                    LoopZeroIterations::Impossible => most.saturating_sub(1).max(0),
-                }
-            });
+            let completed =
+                most_iterations
+                    .filter(|_| steps.once)
+                    .map(|most| match zero_iterations {
+                        LoopZeroIterations::Possible { .. } => most,
+                        LoopZeroIterations::Impossible => most.saturating_sub(1).max(0),
+                    });
             let iterations = match (run, completed) {
                 (Some(run), Some(most)) => Some(run.min(most)),
                 (run, most) => most.or(run),
@@ -282,6 +283,11 @@ impl<'a> Checker<'a> {
             }
         }
         let log_start = self.byref_written_names.borrow().len();
+        self.loop_iteration_bounds
+            .push(match (run, most_iterations) {
+                (Some(run), Some(most)) => Some(run.min(most)),
+                (run, most) => most.or(run),
+            });
         let out = self.converge_loop_passes(
             entry,
             declared_return,
@@ -293,6 +299,7 @@ impl<'a> Checker<'a> {
             zero_iterations,
             run_pass,
         );
+        self.loop_iteration_bounds.pop();
         self.loop_counter_bands.truncate(enclosing);
         if self.loop_counter_bands.is_empty() {
             self.byref_written_names.borrow_mut().clear();

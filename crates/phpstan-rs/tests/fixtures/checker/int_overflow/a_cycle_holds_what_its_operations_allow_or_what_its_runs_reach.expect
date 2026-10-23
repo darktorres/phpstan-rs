@@ -1,0 +1,1 @@
+55:21-55:26 arithmetic.intOverflow L5 | The result of * on line 53, + on line 53 can leave the int range with a value from $_GET through parameter $seed of hashed(), and passing the float to parameter #1 $n of function takesInt throws a TypeError.

@@ -134,6 +134,7 @@ impl<'a> Checker<'a> {
             defining_class: named.defining_class.as_deref(),
             is_builtin: false,
             span,
+            receiver: None,
         });
     }
 }

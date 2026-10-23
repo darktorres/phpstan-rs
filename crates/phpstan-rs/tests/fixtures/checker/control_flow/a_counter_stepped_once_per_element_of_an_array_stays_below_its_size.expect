@@ -1,1 +1,1 @@
-30:16-30:27 arithmetic.intOverflow L5 | The result of * on line 30 can leave the int range, and passing the float to parameter #1 $x of function offset throws a TypeError.
+30:16-30:27 arithmetic.intOverflowGrowth L5 | The result of * on line 30 can leave the int range, and passing the float to parameter #1 $x of function offset throws a TypeError.

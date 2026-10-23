@@ -290,13 +290,26 @@ impl<'a> Checker<'a> {
     /// object; `null` for `null`, a bool, an int or a float; `mixed` for
     /// `mixed` and for an object that may be `ArrayAccess` only through a
     /// subclass. A read the checks report as impossible is the error type.
+    ///
+    /// PHP sets `$_SERVER['REQUEST_TIME']` and `['REQUEST_TIME_FLOAT']`
+    /// from the clock after every variable the server passes, so neither
+    /// is a value the environment chooses.
     pub(crate) fn offset_read_type(&self, base: &Type, key: &Type) -> Type {
+        use crate::checker::flow_nodes::{self, FlowNode};
         let members = base.union_members();
         let values: Vec<Type> = members
             .iter()
             .map(|member| self.member_offset_read_type(member, key, members.len() > 1))
             .collect();
-        self.relation().union_of(values)
+        let value = self.relation().union_of(values);
+        let clock = key
+            .string_literal_value()
+            .and_then(|key| key.as_str())
+            .is_some_and(|key| matches!(key, "REQUEST_TIME" | "REQUEST_TIME_FLOAT"));
+        if clock && value.has_flow() {
+            return value.without_flow_node(flow_nodes::id(FlowNode::env("$_SERVER")));
+        }
+        value
     }
 
     /// Whether a negative string offset counts from the end on every PHP

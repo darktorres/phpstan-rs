@@ -6,6 +6,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::checker::calls::{contains_nullsafe_access, is_valid_byref_argument_expr};
+use crate::checker::flow_facts::{CallTarget, ValueFact};
 use crate::checker::{Checker, Locals};
 use crate::registry::{FunctionReflection, ParameterReflection};
 use diagnostics::DiagnosticBuilder;
@@ -112,6 +113,31 @@ impl Callee<'_> {
     }
 }
 
+/// What a call to `callee` calls, for its data flow: a function, or a
+/// method of the receiver's class `defining_class` (an instance call can
+/// run an override). A callable's target isn't known here.
+fn call_target(callee: Callee, defining_class: Option<&str>) -> Option<CallTarget> {
+    match callee {
+        Callee::Function(name) => Some(CallTarget::Function(name.into())),
+        Callee::Method { class, name } => Some(CallTarget::Method {
+            class: defining_class.unwrap_or(class).into(),
+            method: name.into(),
+            dispatch: true,
+        }),
+        Callee::StaticMethod { class, name, .. } => Some(CallTarget::Method {
+            class: defining_class.unwrap_or(class).into(),
+            method: name.into(),
+            dispatch: false,
+        }),
+        Callee::Constructor(class) => Some(CallTarget::Method {
+            class: class.into(),
+            method: "__construct".into(),
+            dispatch: false,
+        }),
+        Callee::AttributeConstructor(_) | Callee::Callable(_) => None,
+    }
+}
+
 fn upper_first(text: &str) -> String {
     let mut chars = text.chars();
     match chars.next() {
@@ -164,6 +190,8 @@ pub(crate) struct ParametersCheck<'a> {
     /// unknown named argument.
     pub is_builtin: bool,
     pub span: Span,
+    /// The object a method runs on.
+    pub receiver: Option<Type>,
 }
 
 impl<'a> Checker<'a> {
@@ -221,6 +249,7 @@ impl<'a> Checker<'a> {
             defining_class,
             is_builtin,
             span,
+            receiver,
         } = check;
         let params = sig.params();
         let variadic = params.last().is_some_and(|p| p.variadic());
@@ -332,6 +361,13 @@ impl<'a> Checker<'a> {
         }
 
         let bound = self.bind_arguments(callee, sig, &arguments, has_named, is_builtin, span);
+        let flow_target = if is_builtin {
+            None
+        } else {
+            call_target(callee, defining_class)
+        };
+        let mut flow_args: Vec<(usize, ValueFact)> = Vec::new();
+        let mut unpacked_from: Option<(usize, ValueFact)> = None;
 
         for (i, (argument, param)) in arguments.iter().zip(bound).enumerate() {
             let Some(param) = param else { continue };
@@ -341,6 +377,16 @@ impl<'a> Checker<'a> {
                     .infer_closure_literal_in_context(argument.value, param.ty(), locals)
                     .unwrap_or_else(|| self.infer_expr(argument.value, locals)),
             };
+            if flow_target.is_some()
+                && let Some(at) = params.iter().position(|p| std::ptr::eq(p, param))
+            {
+                let fact = self.value_fact(&arg_ty);
+                if argument.unpack {
+                    unpacked_from = Some((at, fact));
+                } else {
+                    flow_args.push((at, fact));
+                }
+            }
             let param_ty = match defining_class {
                 Some(c) => self.resolve_pseudo(param.ty(), c),
                 None => param.ty().clone(),
@@ -404,6 +450,9 @@ impl<'a> Checker<'a> {
                     "argument.byRef",
                 );
             }
+        }
+        if let Some(target) = flow_target {
+            self.record_call(span, target, receiver.as_ref(), flow_args, unpacked_from);
         }
     }
 

@@ -1,1 +1,1 @@
-no diagnostics
+26:12-26:14 arithmetic.intOverflowGrowth L5 | The result of * on line 25 can leave the int range, and returning the float throws a TypeError.

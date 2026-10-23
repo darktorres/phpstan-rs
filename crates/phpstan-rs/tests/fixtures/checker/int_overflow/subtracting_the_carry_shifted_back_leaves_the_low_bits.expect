@@ -1,0 +1,1 @@
+25:21-25:32 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET through parameter $h of kept(), and passing the float to parameter #1 $n of function takesInt throws a TypeError.

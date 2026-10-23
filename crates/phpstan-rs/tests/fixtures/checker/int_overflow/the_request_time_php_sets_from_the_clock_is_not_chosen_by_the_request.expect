@@ -1,0 +1,1 @@
+21:20-21:57 arithmetic.intOverflow L5 | The result of - on line 21 can leave the int range with a value from $_SERVER, and passing the float to parameter #1 $at of function expires throws a TypeError.

@@ -1,0 +1,4 @@
+17:18-17:31 arithmetic.intOverflow L5 | The result of + on line 17 can leave the int range with a value from getenv(), and passing the float to parameter #1 $width of function width throws a TypeError.
+23:18-23:33 arithmetic.intOverflow L5 | The result of - on line 23 can leave the int range with a value from getenv(), and passing the float to parameter #1 $width of function width throws a TypeError.
+42:35-42:52 arithmetic.intOverflow L5 | The result of - on line 42 can leave the int range with a value from getenv(), and `%` wraps the float into the int range with a warning.
+61:18-61:38 arithmetic.intOverflow L5 | The result of * on line 61, - on line 61 can leave the int range with a value from getenv(), and passing the float to parameter #1 $width of function width throws a TypeError.

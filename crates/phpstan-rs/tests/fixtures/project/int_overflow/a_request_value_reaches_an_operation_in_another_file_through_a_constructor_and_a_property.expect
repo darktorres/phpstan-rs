@@ -1,0 +1,1 @@
+Controller.php:17:36-17:72 arithmetic.intOverflow L5 | The result of * on line 17 can leave the int range with a value from $_GET through parameter $raw of App\\SearchInput::fromArray(), parameter $pageNumber of App\\SearchInput::__construct(), App\\SearchInput::$pageNumber, and passing the float to parameter #2 $offset of function array_slice throws a TypeError.

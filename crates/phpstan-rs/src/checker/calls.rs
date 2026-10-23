@@ -26,6 +26,8 @@ pub(crate) struct CheckArgsCall<'a> {
     /// A PHP builtin (whose variadic takes no unknown named argument).
     pub(crate) is_builtin: bool,
     pub(crate) span: Span,
+    /// The object a method runs on.
+    pub(crate) receiver: Option<Type>,
 }
 
 impl<'a> Checker<'a> {
@@ -387,6 +389,7 @@ impl<'a> Checker<'a> {
             defining_class,
             is_builtin,
             span,
+            receiver,
         } = call;
         if self.settings.extras.check_boolean_trap {
             self.check_boolean_trap_arguments(callee_label, sig, args, defining_class);
@@ -402,6 +405,7 @@ impl<'a> Checker<'a> {
             defining_class,
             is_builtin,
             span,
+            receiver,
         });
     }
 
@@ -769,6 +773,7 @@ impl<'a> Checker<'a> {
                 defining_class: None,
                 is_builtin: false,
                 span,
+                receiver: None,
             });
         } else if name.eq_ignore_ascii_case("call_user_func_array") {
             if args.len() != 2 {
@@ -802,6 +807,7 @@ impl<'a> Checker<'a> {
                 defining_class: None,
                 is_builtin: false,
                 span,
+                receiver: None,
             });
         }
     }

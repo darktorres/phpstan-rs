@@ -457,6 +457,25 @@ impl<'a> Checker<'a> {
             }
             .into(),
         );
+        let defaults: Vec<Option<Type>> = f
+            .params
+            .iter()
+            .map(|p| {
+                p.default
+                    .as_ref()
+                    .map(|default| self.infer_expr(default, &self.new_locals()))
+            })
+            .collect();
+        self.record_params(
+            &flow_owner,
+            class_name,
+            f.name.as_ref(),
+            &f.params
+                .iter()
+                .zip(defaults)
+                .map(|(p, default)| (p.name.as_ref(), default, p.variadic))
+                .collect::<Vec<_>>(),
+        );
         match sig {
             // The registry's FunctionReflection already has PHPDoc types merged
             // in - using it here, instead of re-deriving from the raw
@@ -542,6 +561,7 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     let ty = ty.with_flow(&self.param_flow(flow_owner.clone(), param.name()));
+                    self.record_promotion(class_name, ast_param, &ty);
                     self.probe_hit_at(ast_param.name.span, &ty);
                     locals.declare_var(param.name(), ty, ast_param.name.span);
                     let native = match class_name {
@@ -613,6 +633,7 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     let ty = ty.with_flow(&self.param_flow(flow_owner.clone(), &p.name));
+                    self.record_promotion(class_name, p, &ty);
                     self.probe_hit_at(p.name.span, &ty);
                     locals.declare_var(&p.name, ty, p.name.span);
                 }
@@ -633,7 +654,12 @@ impl<'a> Checker<'a> {
                 .get(c)
                 .map(|info| info.own_template_args(c))
                 .unwrap_or_default();
-            locals.insert_var("this", Type::object(c.into(), own));
+            locals.insert_var(
+                "this",
+                Type::object(c.into(), own).with_flow(&crate::checker::flow_nodes::flow_of(
+                    crate::checker::flow_nodes::FlowNode::This(flow_owner.clone()),
+                )),
+            );
         }
 
         // A signature's return type already defaults to Mixed when nothing

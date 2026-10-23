@@ -39,6 +39,10 @@ pub struct ExtrasSettings<T = Option<bool>> {
     pub check_identity_vs_equals: T,
     /// A PHPDoc-only parameter or return type the PHP version can declare natively (`missingNativeType.*`).
     pub check_native_type_hints: T,
+    /// An operation that can leave the `int` range with values nothing
+    /// in the environment chooses, as a value grows around a loop, a
+    /// recursion or an object's property (`arithmetic.intOverflowGrowth`).
+    pub check_int_overflow_growth: T,
 }
 
 impl config::Section for ExtrasSettings {
@@ -77,6 +81,7 @@ impl ExtrasSettings {
             check_loose_haystack_comparison: self.check_loose_haystack_comparison.unwrap_or(active),
             check_identity_vs_equals: self.check_identity_vs_equals.unwrap_or(active),
             check_native_type_hints: self.check_native_type_hints.unwrap_or(active),
+            check_int_overflow_growth: self.check_int_overflow_growth.unwrap_or(active),
         }
     }
 }

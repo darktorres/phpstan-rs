@@ -1209,7 +1209,7 @@ impl<'a> Checker<'a> {
                     && let ExprKind::Literal(Literal::String(expected)) = &expected_arg.value.kind
                 {
                     let flow = self.infer_expr(&actual_arg.value, locals).deep_flow();
-                    let actual = crate::checker::flow_nodes::describe(&flow);
+                    let actual = crate::checker::flow_nodes::describe(&self.computed_from(&flow));
                     if *actual != *expected.to_str_lossy() {
                         self.report(
                             format!(
@@ -1616,6 +1616,7 @@ impl<'a> Checker<'a> {
                             defining_class: None,
                             is_builtin: self.registry.is_builtin_function(name),
                             span: e.span,
+                            receiver: None,
                         });
                         self.apply_param_out_types(sig, args, locals);
                         self.apply_global_writes(&declared, locals);
@@ -2180,6 +2181,7 @@ impl<'a> Checker<'a> {
                             defining_class: Some(class),
                             is_builtin: self.registry.is_builtin_class(owner),
                             span: e.span,
+                            receiver: Some(recv_ty.clone()),
                         });
                         self.apply_param_out_types(sig, args, locals);
                     }
@@ -2455,6 +2457,7 @@ impl<'a> Checker<'a> {
                     },
                 );
                 self.check_overflow_into_target(inner, &updated, e.span, locals);
+                self.record_target_write(inner, &updated, locals);
                 // `$x++`/`$x--` is real, visible rebinding syntax, the
                 // same category as `$x += 1`.
                 self.implicit_array_access_write(inner, e.span, locals);
@@ -2612,6 +2615,7 @@ impl<'a> Checker<'a> {
                             defining_class: None,
                             is_builtin: true,
                             span: e.span,
+                            receiver: None,
                         });
                     }
                 }
@@ -2863,6 +2867,7 @@ impl<'a> Checker<'a> {
                 self.check_self_assignment(lhs, rhs);
                 self.check_property_assignment(lhs, rhs, locals);
                 self.check_overflow_into_target(lhs, &rhs_ty, rhs.span, locals);
+                self.record_target_write(lhs, &rhs_ty, locals);
                 // A bare by-ref-parameter variable directly assigned a
                 // value its declared type can't hold. Also covers a
                 // destructured by-ref target (`[$byRef] = $arr;`) - see
@@ -2986,8 +2991,19 @@ impl<'a> Checker<'a> {
                 // rebinds too, not just a bare local (a bare-`Variable`-
                 // only check would leave e.g. `$this->watermark ??= ...`
                 // never actually updating the property's tracked type).
-                let ty = self.with_derived_flow(e, self.infer_binary(op, lhs, rhs, locals), locals);
+                let result = self.infer_binary(op, lhs, rhs, locals);
+                let ty = match crate::checker::flow_derivation::binary_derived_op(*op) {
+                    Some(derived) => self.with_derived_node(
+                        e.span,
+                        derived,
+                        crate::checker::flow_derivation::binary_symbol(*op),
+                        &[lhs_ty.clone(), rhs_ty.clone()],
+                        result,
+                    ),
+                    None => result,
+                };
                 self.check_overflow_into_target(lhs, &ty, e.span, locals);
+                self.record_target_write(lhs, &ty, locals);
                 // Same by-ref-parameter check as plain `=`, against the
                 // compound operation's own real result.
                 self.check_param_out_assignment(lhs, &ty);
@@ -3322,6 +3338,10 @@ impl<'a> Checker<'a> {
                                 defining_class: Some(class),
                                 is_builtin: self.registry.is_builtin_class(class),
                                 span: e.span,
+                                receiver: Some(
+                                    Type::object(class.into(), Vec::new())
+                                        .with_flow(&self.alloc_flow(e.span)),
+                                ),
                             });
                             self.apply_param_out_types(sig, args, locals);
                         }
@@ -6559,6 +6579,11 @@ impl<'a> Checker<'a> {
                     defining_class: Some(class),
                     is_builtin: self.registry.is_builtin_class(&owner),
                     span,
+                    receiver: if is_static {
+                        None
+                    } else {
+                        locals.get_var("this").cloned()
+                    },
                 });
                 self.apply_param_out_types(sig, args, locals);
             } else if self.registry.classes.contains_key(class.as_str())

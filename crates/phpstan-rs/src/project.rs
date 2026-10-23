@@ -283,6 +283,10 @@ pub struct Project {
     packages: composer::PackageIndex,
     // What the checks are configured with (`apply_settings`).
     settings: CheckSettings,
+    // What each file's last check recorded of where values go
+    // (`checker::flow_facts`), for judging the uses of overflow floats with
+    // every file's facts (`judge_overflow_sinks`).
+    flow_facts: std::sync::Mutex<FxHashMap<FileId, Arc<checker::flow_facts::FlowFacts>>>,
     // What the configuration and the manifests say of where includes are
     // found (`apply_settings`).
     include_settings: IncludeSettings,
@@ -419,6 +423,9 @@ pub(crate) struct FileCheck {
     /// The file's private property types, until judged against the
     /// writes of every file (`Project::judge_property_types`).
     property_type_sites: Vec<checker::PropertyTypeSite>,
+    /// Where the file's values go, until its uses of overflow floats are
+    /// judged with every file's (`Project::judge_overflow_sinks`).
+    flow_facts: checker::flow_facts::FlowFacts,
 }
 
 impl FileCheck {
@@ -432,6 +439,7 @@ impl FileCheck {
             type_dump: Vec::new(),
             property_assign_facts: NameMap::default(),
             property_type_sites: Vec::new(),
+            flow_facts: checker::flow_facts::FlowFacts::default(),
         }
     }
 }
@@ -631,6 +639,7 @@ impl Project {
             absolute_root: None,
             packages: composer::PackageIndex::default(),
             settings: CheckSettings::default(),
+            flow_facts: std::sync::Mutex::default(),
             include_settings: IncludeSettings::default(),
             include_env: OnceLock::new(),
             retain_source: false,
@@ -1663,6 +1672,10 @@ impl Project {
         self.complete_skipped_references();
         let id = self.files.id_of(path)?;
         self.forget_parse_of(path);
+        self.flow_facts
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
         let old = self.files.remove(path)?;
         let classes: Vec<Name> = old
             .classes
@@ -2429,6 +2442,7 @@ impl Project {
             },
         );
         self.judge_property_types(&mut checks, pool);
+        self.judge_overflow_sinks(&mut checks);
         // Each file's diagnostics are finished from the project as it is,
         // which nothing here changes, so the files are finished side by
         // side; they stay where they are in `checks`.
@@ -2536,6 +2550,64 @@ impl Project {
                         &relation,
                         &file.line_index,
                     ));
+            }
+        }
+    }
+
+    /// Judges the uses of overflow floats `checks` recorded with the facts
+    /// of every file checked so far: these, and the last check of each
+    /// other file. A file that panicked contributes nothing.
+    fn judge_overflow_sinks(&self, checks: &mut [(FileId, CheckOutcome)]) {
+        let mut cache = self
+            .flow_facts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut judged: Vec<FileId> = Vec::new();
+        for (id, outcome) in checks.iter_mut() {
+            match outcome {
+                Ok(check) => {
+                    let facts = std::mem::take(&mut check.flow_facts);
+                    if !facts.sinks.is_empty() {
+                        judged.push(*id);
+                    }
+                    cache.insert(*id, Arc::new(facts));
+                }
+                Err(_) => {
+                    cache.remove(id);
+                }
+            }
+        }
+        if judged.is_empty() {
+            return;
+        }
+        let mut sources: Vec<(u32, &checker::flow_facts::FlowFacts)> = cache
+            .iter()
+            .map(|(id, facts)| (self.files.rank_of(*id), &**facts))
+            .collect();
+        sources.sort_by_key(|&(rank, _)| rank);
+        let graph = checker::flow_eval::Graph::new(
+            &self.registry,
+            self.settings.platform.loop_iterations,
+            sources.into_iter().map(|(_, facts)| facts),
+        );
+        for (id, outcome) in checks.iter_mut() {
+            let (Ok(check), Some(facts), Some(file)) =
+                (outcome, cache.get(id), self.files.get_by_id(*id))
+            else {
+                continue;
+            };
+            for sink in &facts.sinks {
+                let Some(overflow) = graph.judge(sink) else {
+                    continue;
+                };
+                if let Some(identifier) =
+                    overflow.identifier(self.settings.extras.check_int_overflow_growth)
+                {
+                    check.diagnostics.push(
+                        DiagnosticBuilder::new(overflow.message, sink.span, 5, identifier)
+                            .build(&file.line_index),
+                    );
+                }
             }
         }
     }
@@ -2668,6 +2740,7 @@ impl Project {
             return FileCheck::empty();
         };
         checker.set_defer_property_type_checks(true);
+        checker.defer_overflow_sinks = true;
         checker.set_collect_member_refs(collect_member_refs);
         checker.set_dump_types(dump_types);
         checker.check_program(&ast);
@@ -2682,6 +2755,7 @@ impl Project {
             type_dump: checker.take_type_dump(),
             property_assign_facts: checker.take_property_assign_facts(),
             property_type_sites: checker.take_property_type_sites(),
+            flow_facts: checker.take_flow_facts(),
             diagnostics: checker.into_diagnostics(),
         }
     }

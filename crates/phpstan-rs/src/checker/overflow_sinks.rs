@@ -1,17 +1,20 @@
 //! Where the float an `int` overflow gives is used as an `int`: a typed
 //! parameter, return or property throws a `TypeError` for it, and the
-//! operations that convert it to an `int` give `PHP_INT_MIN` with a
-//! warning. Each operation that can have left the `int` range on the way,
-//! and whose operands alone can make it, is reported there.
-
-use std::sync::Arc;
+//! operations that convert it to an `int` wrap it into the `int` range
+//! with a warning. Without `strict_types` both take a float that is a
+//! whole number in the `int` range: PHP computes the overflow in doubles,
+//! and one just below `PHP_INT_MIN` rounds to `-2^63`. Each
+//! operation that can have left the `int` range on the way is reported
+//! there, when what its operands are computed from can make it
+//! (`flow_eval`).
 
 use syntax::ast::{BinOp, Expr, ExprKind};
 use syntax::span::Span;
 use types::Type;
 
-use crate::checker::flow_derivation::magnitude_known;
-use crate::checker::flow_nodes::{FlowNode, nodes_of, sources_and_overflows};
+use crate::checker::flow_eval::Graph;
+use crate::checker::flow_facts::SinkKind;
+use crate::checker::flow_nodes::sources_and_overflows;
 use crate::checker::{Checker, Locals};
 
 impl Checker<'_> {
@@ -29,78 +32,60 @@ impl Checker<'_> {
                     .any(|m| m.is_string().yes() || m.is_bool().yes()))
     }
 
-    /// Reports `value`'s overflow at `span`, where `sink` says what PHP
-    /// does with it.
+    /// Records `value`'s overflow at `span`, a typed target, where `sink`
+    /// says what PHP does with it; it is reported when one of the
+    /// operations its float comes from can leave the `int` range
+    /// (`judge_overflow_sinks`).
     pub(crate) fn report_overflow_into(
         &mut self,
         value: &Type,
         span: Span,
         sink: impl FnOnce() -> String,
     ) {
+        let every_float = self.strict_types;
+        self.record_overflow_float(value, span, every_float, sink);
+    }
+
+    /// Records `value`'s overflow where `what` converts it to an `int`.
+    pub(crate) fn report_overflow_converted(&mut self, value: &Type, span: Span, what: &str) {
+        self.record_overflow_float(value, span, false, || {
+            format!("{what} wraps the float into the int range with a warning")
+        });
+    }
+
+    /// Records `value`'s overflow at `span`; `every_float` when PHP
+    /// rejects any float there.
+    fn record_overflow_float(
+        &mut self,
+        value: &Type,
+        span: Span,
+        every_float: bool,
+        sink: impl FnOnce() -> String,
+    ) {
         let flow = value.overflow_float_flow();
         if flow.is_empty() {
             return;
         }
-        let (sources, overflows) = sources_and_overflows(&flow);
-        let mut sites: Vec<(u32, Arc<str>)> = nodes_of(&overflows)
-            .into_iter()
-            .filter_map(|node| match node {
-                FlowNode::Overflow {
-                    op,
-                    line,
-                    real: true,
-                    ..
-                } => Some((line, op)),
-                _ => None,
-            })
-            .collect();
-        if sites.is_empty() {
+        let (_, overflows) = sources_and_overflows(&flow);
+        let overflows: Vec<u32> = overflows.nodes().to_vec();
+        if overflows.is_empty() {
             return;
         }
-        sites.sort();
-        sites.dedup();
-        let mut environment: Vec<Arc<str>> = nodes_of(&sources)
-            .into_iter()
-            .filter_map(|node| match node {
-                FlowNode::Env(name) => Some(name),
-                _ => None,
-            })
-            .collect();
-        environment.sort();
-        environment.dedup();
-        let operations = sites
-            .iter()
-            .map(|(line, op)| format!("{op} on line {line}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let from = if environment.is_empty() {
-            String::new()
-        } else {
-            format!(" with a value from {}", environment.join(", "))
-        };
-        self.report(
-            format!(
-                "The result of {operations} can leave the int range{from}, and {}.",
-                sink()
-            ),
+        self.record_sink(
             span,
-            5,
-            "arithmetic.intOverflow",
+            SinkKind::Float {
+                overflows,
+                sink: sink(),
+                every_float,
+            },
         );
     }
 
-    /// Reports `value`'s overflow where `what` converts it to an `int`.
-    pub(crate) fn report_overflow_converted(&mut self, value: &Type, span: Span, what: &str) {
-        self.report_overflow_into(value, span, || {
-            format!("{what} converts the float to PHP_INT_MIN with a warning")
-        });
-    }
-
-    /// Reports the overflow of an argument a builtin converts to an `int`
+    /// Records the overflow of an argument a builtin converts to an `int`
     /// without a declared `int` parameter (`intval()`'s value, and the
-    /// variable `settype()` gives the type `int`), and `intdiv()` of
-    /// `PHP_INT_MIN` by `-1`. `resolved` is the call's arguments by
-    /// parameter.
+    /// variable `settype()` gives the type `int`), and `intdiv()`, which
+    /// throws for `PHP_INT_MIN` by `-1`. `resolved` is the call's arguments
+    /// by parameter.
     pub(crate) fn check_overflow_in_builtin(
         &mut self,
         function: &str,
@@ -132,34 +117,41 @@ impl Checker<'_> {
             let dividend_ty = self.infer_expr(dividend, locals);
             let divisor_ty = self.infer_expr(divisor, locals);
             let (dividend_int, _) = dividend_ty.split_overflow_float();
-            if intdiv_can_overflow(&dividend_int, &divisor_ty)
-                && magnitude_known(&dividend_int)
-                && magnitude_known(&divisor_ty)
-            {
-                let mut environment: Vec<Arc<str>> = [&dividend_int, &divisor_ty]
-                    .iter()
-                    .flat_map(|ty| nodes_of(&sources_and_overflows(&ty.deep_flow()).0))
-                    .filter_map(|node| match node {
-                        FlowNode::Env(name) => Some(name),
-                        _ => None,
-                    })
-                    .collect();
-                environment.sort();
-                environment.dedup();
-                let from = if environment.is_empty() {
-                    String::new()
-                } else {
-                    format!(" with a value from {}", environment.join(", "))
+            if intdiv_can_overflow(&dividend_int, &divisor_ty) {
+                let kind = SinkKind::IntDiv {
+                    dividend: self.value_fact(&dividend_int),
+                    divisor: self.value_fact(&divisor_ty),
                 };
-                self.report(
-                    format!(
-                        "intdiv() can divide PHP_INT_MIN by -1{from}, whose result is past the int range: an ArithmeticError."
-                    ),
-                    dividend.span.to(divisor.span),
-                    5,
-                    "arithmetic.intOverflow",
-                );
+                self.record_sink(dividend.span.to(divisor.span), kind);
             }
+        }
+    }
+
+    /// Reports each use of an overflow's float, and each `intdiv()`, this
+    /// check recorded, judged from its own facts alone.
+    pub(crate) fn judge_overflow_sinks(&mut self) {
+        let facts = self.flow_facts.borrow();
+        if facts.sinks.is_empty() {
+            return;
+        }
+        let graph = Graph::new(
+            self.registry,
+            self.settings.platform.loop_iterations,
+            std::iter::once(&*facts),
+        );
+        let growth = self.settings.extras.check_int_overflow_growth;
+        let found: Vec<(Span, String, &'static str)> = facts
+            .sinks
+            .iter()
+            .filter_map(|sink| {
+                let overflow = graph.judge(sink)?;
+                let identifier = overflow.identifier(growth)?;
+                Some((sink.span, overflow.message, identifier))
+            })
+            .collect();
+        drop(facts);
+        for (span, message, identifier) in found {
+            self.report(message, span, 5, identifier);
         }
     }
 

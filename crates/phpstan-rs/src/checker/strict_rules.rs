@@ -589,6 +589,11 @@ impl<'a> Checker<'a> {
                 &mut self.current_function_native_return,
                 native_return,
             ),
+            statics: std::mem::replace(
+                &mut self.current_function_statics,
+                std::rc::Rc::new(static_variable_names(body)),
+            ),
+            loop_iteration_bounds: std::mem::take(&mut self.loop_iteration_bounds),
         }
     }
 
@@ -598,6 +603,8 @@ impl<'a> Checker<'a> {
         self.current_function_counters = previous.counters;
         self.current_function_owner = previous.owner;
         self.current_function_native_return = previous.native_return;
+        self.current_function_statics = previous.statics;
+        self.loop_iteration_bounds = previous.loop_iteration_bounds;
     }
 
     /// Whether an assignment to `name` could have run before the one at
@@ -911,6 +918,38 @@ pub(crate) struct EnteredBody {
     counters: std::rc::Rc<crate::checker::loop_counters::LoopCounters>,
     owner: crate::checker::flow_nodes::Owner,
     native_return: Option<types::Type>,
+    statics: std::rc::Rc<rustc_hash::FxHashSet<String>>,
+    loop_iteration_bounds: Vec<Option<i64>>,
+}
+
+/// The variables `body` declares `static`, not counting those of the
+/// functions and closures it declares.
+fn static_variable_names(body: &[Stmt]) -> rustc_hash::FxHashSet<String> {
+    struct Statics(rustc_hash::FxHashSet<String>);
+    impl<'ast> syntax::visit::Visitor<'ast> for Statics {
+        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            match &stmt.kind {
+                StmtKind::StaticVar(vars) => {
+                    self.0.extend(vars.iter().map(|(name, _)| name.to_string()));
+                }
+                StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => return,
+                _ => {}
+            }
+            syntax::visit::walk_stmt(self, stmt);
+        }
+
+        fn visit_expr(&mut self, expr: &'ast Expr) {
+            if !matches!(
+                expr.kind,
+                ExprKind::Closure(_) | ExprKind::ArrowFn(_) | ExprKind::NewAnonymousClass(_)
+            ) {
+                syntax::visit::walk_expr(self, expr);
+            }
+        }
+    }
+    let mut statics = Statics(rustc_hash::FxHashSet::default());
+    syntax::visit::walk_stmts(&mut statics, body);
+    statics.0
 }
 
 pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {

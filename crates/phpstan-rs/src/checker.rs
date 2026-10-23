@@ -247,6 +247,7 @@ pub(crate) struct PassMark {
     exit_points: usize,
     inlay_param_name_hints: usize,
     inlay_local_type_hints: usize,
+    flow_facts: flow_facts::FactsMark,
 }
 
 /// Walks function/method bodies, inferring a best-effort type for each
@@ -567,6 +568,17 @@ pub struct Checker<'a> {
     // The return type the function whose body is being checked declares
     // natively, which PHP enforces.
     pub(crate) current_function_native_return: Option<Type>,
+    // The variables the function whose body is being checked declares
+    // `static`.
+    pub(crate) current_function_statics: Rc<FxHashSet<String>>,
+    // What this check records of where values go (`flow_facts`).
+    pub(crate) flow_facts: std::cell::RefCell<flow_facts::FlowFacts>,
+    // The iterations of each loop around the statement being checked,
+    // innermost last; `None` for one with no bound.
+    pub(crate) loop_iteration_bounds: Vec<Option<i64>>,
+    // Whether the uses of an overflow's float are judged by the project,
+    // with every file's facts, rather than at the end of this check.
+    pub(crate) defer_overflow_sinks: bool,
     // Set to `true` immediately before `check_expr` is called for a
     // `StmtKind::Expression`'s top-level expression (a bare `foo();`, its
     // return value going nowhere by construction), cleared the instant
@@ -633,6 +645,9 @@ pub struct Checker<'a> {
     // `current_file` as the reports spell it (`project::shown_path`): what
     // a rule that reads the file's name by its directories reads.
     pub(crate) current_file_shown: Option<std::path::PathBuf>,
+    // `current_file_absolute`, or `current_file` without it, as the text
+    // a data-flow site names.
+    pub(crate) flow_file: Arc<str>,
     // Paths the file tests with `file_exists()` and friends, as keys of
     // `CheckSettings::path_case`.
     pub(crate) include_guarded_paths: FxHashSet<String>,
@@ -960,6 +975,8 @@ pub(crate) use completion::{ExitKind, ExitPoint, GotoState};
 pub(crate) use labels::{CalleeLabel, MemberKind, MemberLabel};
 mod array_access;
 mod flow_derivation;
+pub(crate) mod flow_eval;
+pub(crate) mod flow_facts;
 mod flow_nodes;
 pub(crate) mod flow_sources;
 mod infer_cache;
@@ -1241,6 +1258,10 @@ impl<'a> Checker<'a> {
             current_function_counters: Default::default(),
             current_function_owner: flow_nodes::Owner::Named("{main}".into()),
             current_function_native_return: None,
+            current_function_statics: Rc::default(),
+            flow_facts: std::cell::RefCell::default(),
+            loop_iteration_bounds: Vec::new(),
+            defer_overflow_sinks: false,
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,
@@ -1250,6 +1271,7 @@ impl<'a> Checker<'a> {
             current_file: None,
             current_file_id: None,
             current_file_absolute: None,
+            flow_file: "".into(),
             current_file_shown: None,
             include_guarded_paths: FxHashSet::default(),
             include_env: None,
@@ -1333,10 +1355,21 @@ impl<'a> Checker<'a> {
         self.current_file = Some(path.to_path_buf());
         self.current_file_shown = Some(shown.to_path_buf());
         self.current_file_id = Some(file);
+        self.refresh_flow_file();
     }
 
     pub(crate) fn set_current_file_absolute(&mut self, path: std::path::PathBuf) {
         self.current_file_absolute = Some(path);
+        self.refresh_flow_file();
+    }
+
+    fn refresh_flow_file(&mut self) {
+        self.flow_file = self
+            .current_file_absolute
+            .as_ref()
+            .or(self.current_file.as_ref())
+            .map(|path| path.to_string_lossy().into())
+            .unwrap_or_else(|| "".into());
     }
 
     /// Leaves the private property type checks to the caller, who takes
@@ -1375,6 +1408,7 @@ impl<'a> Checker<'a> {
             exit_points: self.current_function_exit_points.len(),
             inlay_param_name_hints: self.inlay_param_name_hints.len(),
             inlay_local_type_hints: self.inlay_local_type_hints.len(),
+            flow_facts: self.flow_facts.borrow().mark(),
         }
     }
 
@@ -1403,6 +1437,7 @@ impl<'a> Checker<'a> {
             .truncate(mark.inlay_param_name_hints);
         self.inlay_local_type_hints
             .truncate(mark.inlay_local_type_hints);
+        self.flow_facts.get_mut().rewind_to(mark.flow_facts);
     }
 
     /// `textDocument/semanticTokens/full`'s own collection - see
@@ -2013,7 +2048,11 @@ impl<'a> Checker<'a> {
             #[cfg(debug_assertions)]
             self.forget_dropped_reports_from(diagnostics_before);
             self.property_type_sites.clear();
+            self.flow_facts.get_mut().sinks.clear();
             self.saw_dynamic_var_construct = false;
+        }
+        if !self.defer_overflow_sinks {
+            self.judge_overflow_sinks();
         }
         if !self.defer_property_type_checks {
             let sites = std::mem::take(&mut self.property_type_sites);

@@ -212,6 +212,10 @@ const MOVED_KEYS: &[(&str, &[&str])] = &[
         &["ext", "extras", "check_native_type_hints"],
     ),
     (
+        "check_int_overflow_growth",
+        &["ext", "extras", "check_int_overflow_growth"],
+    ),
+    (
         "check_parent_constructor_call",
         &["ext", "strict-rules", "check_parent_constructor_call"],
     ),

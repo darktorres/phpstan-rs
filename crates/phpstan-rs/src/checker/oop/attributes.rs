@@ -120,6 +120,7 @@ impl<'a> Checker<'a> {
                 defining_class: Some(&canonical),
                 is_builtin: self.registry.is_builtin_class(&canonical),
                 span: attr.span,
+                receiver: None,
             });
         }
     }

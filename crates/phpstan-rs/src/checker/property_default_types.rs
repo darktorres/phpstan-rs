@@ -50,6 +50,14 @@ impl<'a> Checker<'a> {
             let previous_class = self.current_class.replace(fqn.to_string());
             let default_ty = self.infer_expr(default, &self.new_locals());
             self.current_class = previous_class;
+            self.record_field_write(
+                None,
+                crate::checker::flow_nodes::FlowNode::Property {
+                    class: fqn.into(),
+                    name: p.name.as_ref().into(),
+                },
+                &default_ty,
+            );
             if self.accepts(property_ty, &default_ty).yes() {
                 continue;
             }

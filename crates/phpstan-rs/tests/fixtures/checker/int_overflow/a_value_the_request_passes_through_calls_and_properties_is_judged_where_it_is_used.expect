@@ -1,0 +1,3 @@
+24:25-24:52 arithmetic.intOverflow L5 | The result of * on line 24 can leave the int range with a value from $_GET through parameter $query of Page::fromQuery(), parameter $number of Page::__construct(), Page::$number, and passing the float to parameter #1 $n of function takesInt throws a TypeError.
+30:21-30:27 arithmetic.intOverflow L5 | The result of * on line 30 can leave the int range with a value from $_GET through parameter $n of triple(), and passing the float to parameter #1 $n of function takesInt throws a TypeError.
+60:21-60:25 arithmetic.intOverflow L5 | The result of + on line 58 can leave the int range with a value from $_GET through parameter $prices of uncapped(), and passing the float to parameter #1 $n of function takesInt throws a TypeError.

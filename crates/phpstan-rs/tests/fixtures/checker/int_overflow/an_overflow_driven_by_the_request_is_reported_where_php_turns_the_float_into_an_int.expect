@@ -1,19 +1,19 @@
 16:24-16:35 arithmetic.intOverflow L5 | The result of * on line 16 can leave the int range with a value from $_GET, and assigning the float to Counter::$total throws a TypeError.
 17:25-17:36 arithmetic.intOverflow L5 | The result of * on line 17 can leave the int range with a value from $_GET, and assigning the float to Counter::$shared throws a TypeError.
-18:9-18:36 arithmetic.intOverflow L5 | The result of * on line 18 can leave the int range with a value from $_GET, and assigning the float to Counter::$total throws a TypeError.
+18:9-18:36 arithmetic.intOverflow L5 | The result of * on line 18, + on line 18 can leave the int range with a value from $_GET, and assigning the float to Counter::$total throws a TypeError.
 26:23-26:30 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and passing the float to parameter #1 $n of function takesInt throws a TypeError.
 27:17-27:24 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and passing the float to parameter #1 $codepoint of function chr throws a TypeError.
-29:11-29:18 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and using it as an array key converts the float to PHP_INT_MIN with a warning.
-30:15-30:22 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and using it as an array key converts the float to PHP_INT_MIN with a warning.
-33:20-33:27 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and using it as an array key converts the float to PHP_INT_MIN with a warning.
-34:12-34:19 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `%` converts the float to PHP_INT_MIN with a warning.
-35:13-35:20 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `&` converts the float to PHP_INT_MIN with a warning.
-36:16-36:23 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `<<` converts the float to PHP_INT_MIN with a warning.
-37:17-37:24 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `~` converts the float to PHP_INT_MIN with a warning.
-38:19-38:26 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `(int)` converts the float to PHP_INT_MIN with a warning.
-39:21-39:28 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and intval() converts the float to PHP_INT_MIN with a warning.
-40:13-40:20 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and settype() converts the float to PHP_INT_MIN with a warning.
-41:30-41:40 arithmetic.intOverflow L5 | The result of * on line 41 can leave the int range with a value from $_GET, and placeholder #1 ("%d") of sprintf converts the float to PHP_INT_MIN with a warning.
+29:11-29:18 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and using it as an array key wraps the float into the int range with a warning.
+30:15-30:22 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and using it as an array key wraps the float into the int range with a warning.
+33:20-33:27 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and using it as an array key wraps the float into the int range with a warning.
+34:12-34:19 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `%` wraps the float into the int range with a warning.
+35:13-35:20 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `&` wraps the float into the int range with a warning.
+36:16-36:23 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `<<` wraps the float into the int range with a warning.
+37:17-37:24 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `~` wraps the float into the int range with a warning.
+38:19-38:26 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and `(int)` wraps the float into the int range with a warning.
+39:21-39:28 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and intval() wraps the float into the int range with a warning.
+40:13-40:20 arithmetic.intOverflow L5 | The result of * on line 25 can leave the int range with a value from $_GET, and settype() wraps the float into the int range with a warning.
+41:30-41:40 arithmetic.intOverflow L5 | The result of * on line 41 can leave the int range with a value from $_GET, and placeholder #1 ("%d") of sprintf wraps the float into the int range with a warning.
 42:24-42:55 arithmetic.intOverflow L5 | intdiv() can divide PHP_INT_MIN by -1 with a value from $_GET, whose result is past the int range: an ArithmeticError.
 45:23-45:28 arithmetic.intOverflow L5 | The result of ++ on line 44 can leave the int range with a value from $_GET, and passing the float to parameter #1 $n of function takesInt throws a TypeError.
 46:12-46:21 arithmetic.intOverflow L5 | The result of + on line 46 can leave the int range with a value from $_GET, and returning the float throws a TypeError.
