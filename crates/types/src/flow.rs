@@ -1,6 +1,7 @@
 //! Where a value came from: a set of data-flow nodes, numbered by whoever
 //! checks the code, carried on a type's scalar parts (an `int`, a range or a
-//! literal, a float, a string, `mixed`) and through an array's values.
+//! literal, a float, a string, `mixed`), on its objects (where they were
+//! made), and through an array's values.
 //!
 //! Type equality ignores the set, as it ignores how a type was written: a
 //! loop's convergence compares the sets itself (`Type::deep_flow`). A
@@ -50,6 +51,14 @@ impl Flow {
         }
     }
 
+    /// These nodes but `node`.
+    pub fn without(&self, node: u32) -> Flow {
+        if !self.nodes().contains(&node) {
+            return self.clone();
+        }
+        Flow::of(self.nodes().iter().copied().filter(|&n| n != node))
+    }
+
     /// Whether every node of `other` is one of these.
     pub fn contains_all(&self, other: &Flow) -> bool {
         other
@@ -66,6 +75,8 @@ enum Family {
     Int,
     Float,
     String,
+    /// An object: the sets name where it was made and what it went through.
+    Object,
     /// `mixed` or a template: a value of any kind.
     Any,
 }
@@ -77,6 +88,7 @@ fn family(ty: &Type) -> Option<Family> {
         Repr::String | Repr::StringLiteral(_) | Repr::ClassString(_) | Repr::ClassKindString(_) => {
             Some(Family::String)
         }
+        Repr::Object(..) | Repr::ObjectWithoutClass => Some(Family::Object),
         Repr::Intersection(members) => members
             .iter()
             .find_map(family)
@@ -92,6 +104,7 @@ pub struct FamilyFlows {
     int: Flow,
     float: Flow,
     string: Flow,
+    object: Flow,
     any: Flow,
 }
 
@@ -101,6 +114,7 @@ impl FamilyFlows {
             Family::Int => &mut self.int,
             Family::Float => &mut self.float,
             Family::String => &mut self.string,
+            Family::Object => &mut self.object,
             Family::Any => &mut self.any,
         };
         *slot = slot.union(flow);
@@ -110,6 +124,7 @@ impl FamilyFlows {
         self.int.is_empty()
             && self.float.is_empty()
             && self.string.is_empty()
+            && self.object.is_empty()
             && self.any.is_empty()
     }
 
@@ -119,6 +134,7 @@ impl FamilyFlows {
             int: self.int.union(&other.int),
             float: self.float.union(&other.float),
             string: self.string.union(&other.string),
+            object: self.object.union(&other.object),
             any: self.any.union(&other.any),
         }
     }
@@ -128,6 +144,7 @@ impl FamilyFlows {
         self.int
             .union(&self.float)
             .union(&self.string)
+            .union(&self.object)
             .union(&self.any)
     }
 
@@ -138,6 +155,7 @@ impl FamilyFlows {
             Family::Int => self.int.union(&self.any),
             Family::Float => self.float.union(&self.any),
             Family::String => self.string.union(&self.any),
+            Family::Object => self.object.union(&self.any),
             Family::Any => self.all(),
         }
     }
@@ -248,6 +266,23 @@ impl Type {
             )),
             _ if !self.flow().is_empty() => Type::new(self.repr().clone()),
             _ => self.clone(),
+        })
+    }
+
+    /// This type without `node` in the sets its scalar parts carry; an
+    /// array's values keep theirs.
+    pub fn without_flow_node(&self, node: u32) -> Type {
+        if !self.has_flow() {
+            return self.clone();
+        }
+        stack::guard(|| match self.repr() {
+            Repr::Union(members) => Type::new(Repr::Union(
+                members.iter().map(|m| m.without_flow_node(node)).collect(),
+            )),
+            Repr::BenevolentUnion(members) => Type::new(Repr::BenevolentUnion(
+                members.iter().map(|m| m.without_flow_node(node)).collect(),
+            )),
+            _ => self.with_own_flow(self.flow().without(node)),
         })
     }
 
