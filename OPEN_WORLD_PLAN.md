@@ -447,6 +447,32 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
       too; `$tag_length = strlen($tag_name)` must be carried through two loops. The
       domain's own facts are what the clauses receive for this. `skip_script_data` 1558
       is proved at 3e8 (18 s).
+  - **What the remaining unknowns need** (diagnostics on the 35, `spike/emit/wp-tag8`,
+    `wp-tag9`; each assumes, without proof, that every int field of the object and of the
+    tracked elements stays within 2^57):
+    - Assumed where public methods are entered only: 6 of the 35 are proved (public methods
+      that read the fields they were entered with). Z3 does not carry the bound through
+      the 175 internal predicates within the budget.
+    - Assumed wherever a clause starts at a predicate: 21 are proved, among them 13 of the
+      16 cursor sites, both comparator sites and 7 of the shift-sum sites. So the domain's
+      facts have to reach the clauses at every predicate, not only at entries, and the
+      domain has to prove those bounds itself: the cursors are positions in the document,
+      and `bytes_already_parsed += $shift` runs only while the replacement starts before
+      the cursor, so the cursor stays above `start - length`.
+    - Still unknown: 7 sums over the collection (`$accumulated_shift_for_given_point`, 2633;
+      `head_delta`/`tail_delta` and the bookmark positions, 2674–2683;
+      `$before_current_tag`, 4953), which no bound on one element bounds, and 7 relations
+      between locals (1146, 2337, 2352 and the `skip_rcdata`/`skip_script_data` loops).
+  - **The pairwise invariant over `lexical_updates` is false in WordPress.**
+    `remove_attribute()` appends a removal for every duplicate attribute each time it is
+    called, with no deduplication (also in trunk, 7.2-alpha). Under PHP 8.5 with the real
+    classes (`spike/wpdup/`): on `<div x=1 x=22 x=333>`, two calls queue 5 replacements and
+    produce `<div   x=333>after</ >after<>after</div>` (49 bytes from 40); a bookmark on a
+    later tag moves to -103 after 10 calls, -11983 after 1,000, and -99193 after 100 calls
+    with a 1,002-byte duplicate: linearly in the number of calls. Tracking two elements
+    cannot prove what is not true, so the shift sums stay unproven. Whether they reach
+    2^63 depends on how fast the corrupted document grows against the memory bound, which
+    is not settled.
   - **Open before the design is settled:** the ledger's rows O8.1 to O8.7 (the tag processor
     rerun, the pairwise collection invariant, the subclass's writes, the sodium ladder, the
     `WP_Query::get_posts` scale test, the solver portfolio, Windows and macOS).
