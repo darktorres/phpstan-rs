@@ -324,13 +324,28 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
   - **Heap.** Strong updates only for a declared, hook-free, never-referenced property of a
     must-alias object, with coercion modelled; weak otherwise (PHP 8.5 probes: set hooks,
     coercion, references, `__set`, unset all break strong updates).
+  - **Collections: exact aggregates.** Each collection of value objects carries, as ghost
+    state the encoding maintains, its element count and the sum of each numeric field
+    (`length`, `start`, `strlen(text)`), updated on every insert, keyed replace (the old
+    element read through the second instance is subtracted), `unset`, reset and sort. A loop
+    over the collection is bounded by those totals; count times the field's range is the
+    fallback where a sum cannot be tracked. No pairwise invariant is needed, and overlapping
+    elements stay correct.
+  - **Memory accounting.** What the process holds stays under the memory bound
+    (`[deployment] memory_limit`, else 2^56 bytes): objects and array slots by `zend_mm`'s
+    size classes, measured per PHP version; strings counted once, a fresh concatenation
+    separately from a shared or interned copy; charged at creation, released when the value
+    dies. So an element count and the lengths it can sum limit each other.
   - **CHC per remaining finding.** The same pass emits Horn clauses (entry, summary and
     class-invariant predicates; call depth below 2^50; loop counters, `foreach` at most
     2^30 iterations, others 2^59; a public-call counter at most 2^59). Each finding the
     domain does not clear is solved: a proof drops it; a counterexample is a witness only
-    when replayed against exact semantics; otherwise it is reported as unproven under its
-    own identifier. Zero unknowns is not reachable (the tag processor's bookmarks need a
-    quantified invariant over a sorted, disjoint list).
+    when every step of the derivation is exact (no havoc, no abstracted builtin, no open
+    choice) and, where the path depends on string contents, when an interpreter over
+    compressed strings (ropes with repetition) replays it with PHP's semantics; otherwise
+    it is reported as unproven under its own identifier, with its numbers. Zero unknowns
+    is not reachable: integer arithmetic with products is undecidable, and the solver has
+    a budget.
   - **Established by the spikes:**
     - Builtins need exact PHP 8 length models (`substr` with negative length or offset
       past the end, `strspn`/`strcspn` offsets); a faithful model turns unsolvable
