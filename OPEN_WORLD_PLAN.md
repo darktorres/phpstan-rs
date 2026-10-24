@@ -13,8 +13,9 @@ the open/closed decision with stated criteria.
 What is already committed on `master` (all with fixtures): the `mixed + mixed` arithmetic
 fallback (`07adbd097`), `??` on an absent element (`9715b34c6`), the clippy fix
 (`d5de8b100`), PHPStan's function-level stub PHPDoc (`2c189db92`), the trait-method scope
-fix (`0566039d1`). `WORK_STACK.md` level 10 tracks the work; `OPEN_WORLD_LEDGER.md` holds the
-measurement rows, `BY_REF_WARNING_AND_FIBER_DESIGN.md` the open-world and handler designs,
+fix (`0566039d1`). The status of every item below, the decisions it waits on (Q1, Q3) and
+the measurement rows are in `OPEN_WORLD_LEDGER.md`; `WORK_STACK.md` level 10 points there.
+This file holds the design, `BY_REF_WARNING_AND_FIBER_DESIGN.md` the open-world and handler designs,
 and `OVERFLOW_MEASUREMENT.md` the overflow measurement.
 
 ## What the measurements settled
@@ -250,6 +251,50 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
       `type: library` means library, anything else (or no composer.json) means
       application.
 
+- **As built (O4, O5, O7).**
+  - O4: types carry data-flow node sets (`types/src/flow.rs`), kept through union,
+    intersection, narrowing, widening and loop convergence; the checker derives them at
+    expressions (`checker/flow_derivation.rs`). Nodes (`checker/flow_nodes.rs`): request
+    superglobals and `$argc` (environment), parameters, property reads, call results,
+    globals and statics, and an overflow site carried by its float. A site is real when its
+    operands come from the environment or have no source and a bounded range; an unbounded
+    value with no source counts as unknown. Sinks (`checker/overflow_sinks.rs`) report
+    `arithmetic.intOverflow` for real sites: native `int` parameters, returns and
+    properties, builtin `int` parameters, array keys, `%`, bitwise operators, shifts, `~`,
+    `(int)`, `intval`, `settype`, `printf` integer placeholders; and `intdiv(PHP_INT_MIN,
+    -1)`.
+  - O5: environment sources (`checker/flow_sources.rs`): file, stream, socket, terminal,
+    environment, ini, database and stat builtins, `unserialize`, `filter_input`, `$argv`,
+    and the request and result methods of PSR-7, Symfony, Laravel, mysqli, PDO, SQLite3 and
+    `SplFileObject`; `[sources] functions` and `methods` name more. A counter stepped once
+    an iteration of a by-value `foreach` over an array is bounded by the array's size (at
+    most 2^30); a by-reference `foreach`, a `Traversable`, a step in a nested loop and a
+    body with `goto` keep the run's bound.
+  - O7: each check records where values go (`checker/flow_facts.rs`), and
+    `checker/flow_eval.rs` judges overflow sinks from every file's facts. A node of a
+    function has a value per call of the function: a parameter holds what that call passes,
+    joined over the caller's calls; a call on a new object or on `$this` runs once per
+    context of its caller (to depth 3), so a constructor writes each object's own arguments.
+    An object is the `new` that made it in one context of its function; an object made where
+    the checked code doesn't show is one more object, whose properties hold their defaults
+    and what is written through receivers that can be it. Each operation is judged per
+    context, refined through chains of up to four calls. A cycle that adds or subtracts
+    amounts from outside it is a counter, moved by them as many times as its loops or the
+    run let it run; a cycle the environment feeds holds what it chooses; any other runs its
+    operations that many times (128 at most, then what the last run added is carried on for
+    the rest) and narrows after, so `%`, `>>` and `&` hold it. `x - ((x >> k) << k)` and `x
+    - (((x + c) >> k) << k)` keep what is below bit `k`. `(int)` of a float is at most 2^63
+    - 1024. The float reaching a use is judged as PHP computes it, in doubles from the
+    operands converted to doubles and through the steps it goes on through (`+ - *`, `/` by
+    an `int`, unary minus, `abs()`, and `max()`/`min()` beside an `int`, which keep it only
+    past that `int`; past four steps, or through another operation, by its exact result): a
+    `strict_types` typed target rejects every float, any other use only one a double doesn't
+    convert to an `int` from, so an overflow just below `PHP_INT_MIN` that rounds to `-2^63`
+    is taken. `$_SERVER['REQUEST_TIME']` and `['REQUEST_TIME_FLOAT']` are the clock, not the
+    environment's choice. An overflow the environment drives is `arithmetic.intOverflow`;
+    one where values grow with nothing in the environment choosing them is
+    `arithmetic.intOverflowGrowth`, reported only with `[ext.extras]
+    check_int_overflow_growth` until O8 bounds relations.
 - **O8. Relational domain.** Guards must clear findings: `$maxAge > PHP_INT_MAX - $now`
   (guzzle), `$depth > $this->maxNormalizeDepth` (monolog), `$pos <= strlen($s)`, and
   invariants an object keeps across its public calls (the WordPress tag processor's cursor
@@ -389,11 +434,9 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     `apply_attributes_updates`, whose bound needs the replacements sorted, disjoint and
     within the document (a sum over the collection, which one tracked element cannot
     state). Those stay unproven unless the domain carries that invariant.
-  - **Open before the design is settled:** the tag processor rerun with the heap model and
-    the corrected slicing (`run2.sh`, all 233 sites), and the toy `heap.php` rerun under
-    it; the sodium X25519 ladder (bit-vector and integer encodings, XOR-mask swaps);
-    a scale test on `WP_Query::get_posts` (168 variables); the solver portfolio and its
-    budget. Windows and macOS validation of the solver build come after Linux.
+  - **Open before the design is settled:** the ledger's rows O8.1 to O8.7 (the tag processor
+    rerun, the pairwise collection invariant, the subclass's writes, the sodium ladder, the
+    `WP_Query::get_posts` scale test, the solver portfolio, Windows and macOS).
 - **O9. Library mode: contracts.** Checking a library alone, what a public API needs
   from its callers to avoid overflow is reported as a contract (opt-in report), not a
   finding. Laravel's `firstItem()` is such a contract in Laravel and a finding in an app
@@ -437,7 +480,7 @@ length and clock bounds hold only for the deployment platforms configured.
   (`Top`, `Function(imports)`, `Other`) as the map from "which locals are globals".
   The `must_invoke` and `closure_flow` modules keep reading their own per-file facts until
   B6.
-- **B5. The `world` setting** as defined above, default per decision Q1, with a docs entry
+- **B5. The `world` setting** as defined above, default per decision Q1 (in the ledger), with a docs entry
   and sidecar support. Fixtures run in both modes where they differ.
 - **B6. By-reference captures and closure scope.** A closure's by-reference captures are
   shared state: calls inside the body mix them under the same rules, replacing the
@@ -447,7 +490,7 @@ length and clock bounds hold only for the deployment platforms configured.
   when it is in the project; keep the havoc for unresolved targets. This is where the
   WordPress cost goes down.
 
-### C. Error handlers and fibers (decision Q3 below)
+### C. Error handlers and fibers (decision Q3 in the ledger)
 
 The design is in `BY_REF_WARNING_AND_FIBER_DESIGN.md`,
 revised decisions D1 to D5. It builds on B: one "may run other code" summary per function,
