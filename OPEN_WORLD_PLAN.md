@@ -488,6 +488,31 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     cannot prove what is not true, so the shift sums stay unproven. Whether they reach
     2^63 depends on how fast the corrupted document grows against the memory bound, which
     is not settled.
+  - **Collections as entry cells** (`spike/emit/emit.php`). Tracking membership per object
+    (one flag and one key per tracked object) is unsound: an object stored under two keys,
+    as `after_tag()` does between `$this->lexical_updates[] = $update` and the `unset`, is
+    found under only one, and `unset($this->P[$k])` was not translated. Each collection is
+    now tracked by one entry cell (a key chosen once, whether it is present, the id it holds)
+    with its exact entry count and next append key; stores, appends, unsets, copies, resets,
+    renumbering and reordering sorts, `count()` and the comparator use it, and a `foreach`
+    walks a snapshot that visits each entry once and leaves when none is left. On the toy
+    the unsafe class still gives a counterexample (0.6 s) and `step` is safe; `end_of`
+    becomes unknown at 3e8, since its proof now links an entry's id to the tracked object's
+    fields.
+  - **Sizes under PHP 8.5.4** (`spike/sizes/sizes.php`, `memory_get_usage()` over 2^20
+    elements): a packed list slot 16 bytes, a hash bucket 40 (sparse int keys), an object
+    with two or three properties 96, a string of length L 24 + L + 1 rounded up to
+    `zend_mm`'s size class (1: 32, 24: 56, 100: 128, 1000: 1280), the empty string and a
+    string shared by reference nothing.
+  - **The sums with the count and memory facts** (`wp-tag10`, `--memory 2^31`, each array
+    holding at most memory / 16 entries, fields bounded by the memory as a diagnostic): the 14
+    remaining unknowns stay unknown. The loop invariant 2633 needs, |acc| at most 2M times the
+    iterations so far, is proved in 0.1 s on a three-variable encoding of the loop
+    (`spike/agg/acc.smt2`) and not found in the 212-argument encoding at 3e8 (465 s). The
+    solver does not synthesize such invariants over the whole class's state; the checker's
+    counter rule states this one directly (a by-value `foreach` steps it at most once per
+    element, an array has at most memory / 16 elements), so it has to reach the clauses as
+    a fact, not be left for the solver.
   - **Open before the design is settled:** the ledger's rows O8.1 to O8.7 (the tag processor
     rerun, the pairwise collection invariant, the subclass's writes, the sodium ladder, the
     `WP_Query::get_posts` scale test, the solver portfolio, Windows and macOS).
