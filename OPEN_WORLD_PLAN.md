@@ -420,23 +420,33 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     the verdict. Counterexamples are read from Z3's refutation (`produce-proofs`, with
     `fp.xform.inline_*` and `coalesce_rules` off so each method shows;
     `spike/emit/prooftree.py`).
-  - **Heap model on the tag processor, first run** (sliced with the defects above, so not
-    a result): 184 safe, 17 counterexamples, 32 unknown; slicing kept about 80% of the
-    arguments (37,400 of 46,600), solving took 57 minutes, and slicing a 17 MB encoding
-    in Python took seconds to tens of seconds per query on top.
-  - **The tag processor's unknowns are of two kinds.** Local positions (`skip_rcdata`
-    1440–1464, `skip_script_data` 1558/1706, `parse_next_tag` 1822–1954: `strpos` results
-    plus `strlen` lengths) need only that every string is shorter than the size bound,
-    which the encoding states where public methods and the constructor are entered but
-    not at the internal predicates (loop heads, joins, call summaries), so the solver
-    has to rediscover it for each of 174 predicates. Stating it wherever a clause starts
-    at a predicate is sound and is being measured. Cursor fields (`base_class_next_token`
-    1037/1146/1148, `parse_next_tag` 1762: `bytes_already_parsed - token_starts_at`)
-    need the cursors bounded across public calls; every write is a position within the
-    document plus a constant, except `bytes_already_parsed += $shift` in
-    `apply_attributes_updates`, whose bound needs the replacements sorted, disjoint and
-    within the document (a sum over the collection, which one tracked element cannot
-    state). Those stay unproven unless the domain carries that invariant.
+  - **Tag processor with the heap model** (`spike/emit/wp-tag7`, unsliced, Z3 GSpacer,
+    `rlimit` 3e7, 69 minutes of solving): 198 of 233 sites safe, 35 unknown, no
+    counterexamples. The encoding states every string shorter than the size bound wherever a
+    clause starts at a predicate (loop heads, joins, call summaries, second instances), not
+    only where public methods are entered; that alone proved 14 sites, among them the local
+    positions of `skip_rcdata`, `skip_script_data`, `parse_next_tag` and
+    `parse_next_attribute`. A sort's comparator is entered at the sort with two members of
+    the collection, and protected methods are entries. Slicing each query to its cone of
+    influence kept about 80% of the arguments and saved little, while slicing a 17 MB
+    encoding in Python took tens of seconds per query.
+  - **The 35 unknowns:**
+    - Cursor fields across calls (16): `base_class_next_token` 1037/1146/1148,
+      `parse_next_tag` 1762/2192, `parse_next_attribute` 2288/2337/2352,
+      `get_full_comment_text` 3680, `subdivide_text_appropriately` 3734/3745,
+      `set_modifiable_text` 4044/4048 (two), `set_attribute` 4731, `get_updated_html` 4953.
+      They need the cursors bounded across public calls. Every write is a position within
+      the document plus at most 9, except `bytes_already_parsed += $shift` in
+      `apply_attributes_updates`.
+    - The shift sums of `apply_attributes_updates` (13, 2624–2683). Their bound needs the
+      pending replacements pairwise disjoint and within the document: a property of pairs
+      of elements, which one tracked element cannot state.
+    - The comparator's field differences (2, 2762/2776): the elements' positions come from
+      the cursors.
+    - Local loop relations in `skip_rcdata` (3, 1440/1456/1464): unknown at `rlimit` 3e8
+      too; `$tag_length = strlen($tag_name)` must be carried through two loops. The
+      domain's own facts are what the clauses receive for this. `skip_script_data` 1558
+      is proved at 3e8 (18 s).
   - **Open before the design is settled:** the ledger's rows O8.1 to O8.7 (the tag processor
     rerun, the pairwise collection invariant, the subclass's writes, the sodium ladder, the
     `WP_Query::get_posts` scale test, the solver portfolio, Windows and macOS).
