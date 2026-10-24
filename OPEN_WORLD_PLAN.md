@@ -348,8 +348,11 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     - Collections of value objects: one tracked object per value class (id, fields), its
       membership and key per collection, ids from a counter, null as id 0, other objects
       read through a second instance of the same point (cell morphing). Correct on safe
-      and unsafe toys. Each query is sliced to its cone of influence before solving
-      (114 s to 10 s on the toy). Element invariants are proved where elements are
+      and unsafe toys, but slow: the safe `end_of` takes 114 s unsliced and 227 s sliced
+      at `rlimit` 3e8 (load about 10), and `sorted` (a `usort` then a `foreach`) is unknown
+      after 2,746 s. Slicing each query to its cone of influence keeps every answer and
+      saves little; the earlier 10 s came from the slicer's dropped clauses. Element
+      invariants are proved where elements are
       created, not assumed where they are read.
     - Solvers: no single engine solves every case. Z3 Spacer with
       `fp.spacer.global` proves linear invariants the default engine misses; Golem `kind`
