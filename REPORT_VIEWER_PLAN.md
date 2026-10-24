@@ -80,7 +80,7 @@ Crates and gates:
   features, docs, benches and fuzz compile, each feature alone, `cargo machete`,
   `cargo deny`. The Windows and macOS legs run the tests and fixtures.
 
-The level 9 plan (`~/.claude/plans/another-session-is-finishing-majestic-comet.md`)
+The level 9 plan (`docs/level-9/README.md`)
 redesigns the session as a salsa pipeline (its item 15, "Designed: H4") and keeps
 `AnalysisResult` as its value, owning the inline-ignore records. Its LOAD-2.2
 last part also touches `project/session.rs` and `project.rs`.

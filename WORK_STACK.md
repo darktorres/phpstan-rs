@@ -36,7 +36,7 @@ start condition holds. Its place against levels 8 and 9 is open.
 
 Levels 1 to 7 are deferred; see Where to resume.
 
-### 0. The CI split — `/home/torres/.claude/plans/the-ci-files-could-curried-nautilus.md`
+### 0. The CI split — `CI_SPLIT_PLAN.md`
 
 Started on 2026-10-18, during the cross-platform fixes. One CI run took 35 minutes, because the `gates` and `platforms` jobs ran their steps one after another, and those rounds are checked on CI, so each one waits that long. Its commits are on `callgrind-20g`: `cbb51738`, `076b9d2a`, `5421d398`, `c222556c`, `a9f1c05d`, `7c10e994`, `87e137ed`, `ee272e48`, `dbe6c371`, `5e0af885`, and the docs commit after them. Nothing is pushed. It waits on the user for:
 
@@ -250,9 +250,9 @@ The off-run rows still open:
   E9 (CHECK-5, folded into CHECK-6.16) and E12 (CACHE-7) are SKIP; D3, D6, C7 and
   C8 are decided.
 
-### 9. The batch after the cross-platform fixes — `~/.claude/plans/another-session-is-finishing-majestic-comet.md`
+### 9. The batch after the cross-platform fixes — `docs/level-9/README.md`
 
-Designed in plan mode on 2026-10-18 and 2026-10-19 (`~/.claude/plans/another-session-is-finishing-majestic-comet.md`).
+Designed on 2026-10-18 and 2026-10-19.
 The plan is in `docs/level-9/`: one file per part, indexed by `docs/level-9/README.md`. It has no
 Part M; the review's rulings live in the parts. The ledger and stack edits that approval implies are listed in `docs/level-9/01-overview.md` (Edits at approval), and follow it.
 
@@ -286,9 +286,9 @@ Leftovers from plan mode, to delete when it ends: the helper scripts, backups an
 probes in the scratchpad (`/tmp/claude-1000/-home-torres-projects-phpstan-rs/0fdc40b5-accc-4267-853a-f5ef8f30c07c/scratchpad`),
 the empty `~/.cache/prs-ledger-gen`, and `/tmp/claude-1000/regfields.txt`.
 
-### 10. The open-world cost — `~/.cache/phpstan-rs-scratch/design/open-world-ledger.md`
+### 10. The open-world cost — `OPEN_WORLD_PLAN.md`, `OPEN_WORLD_LEDGER.md`
 
-Started on 2026-10-21. It measures what it costs to treat variables as possibly written by code outside the checked set: mixing them to `mixed` before each statement that can run code. The design, the measurements and the classifications are in `~/.cache/phpstan-rs-scratch/design/by-ref-warning-and-fiber.md` (section "Open-world cost, measured") and the ledger above; binaries and corpus outputs are in `~/.cache/phpstan-rs-scratch/adv/`. The experiment code is reverted, and the last variant measured is X7. The done rows are in the ledger. Open rows:
+Started on 2026-10-21. It measures what it costs to treat variables as possibly written by code outside the checked set: mixing them to `mixed` before each statement that can run code. The design, the measurements and the classifications are in `BY_REF_WARNING_AND_FIBER_DESIGN.md` (section "Open-world cost, measured") and the ledger above; binaries and corpus outputs are in `~/.cache/phpstan-rs-scratch/adv/`. The experiment code is reverted, and the last variant measured is X7. The done rows are in the ledger. Open rows:
 
 - **Measurement**
   - M1 (rerun on HEAD, 2026-10-21): Piwigo HEAD 592 (old base 586; +6), X7 on HEAD 589, lost 3, gained 0. Mago HEAD 5159 (old 5150), X7 on HEAD 4994, lost 209, gained 44. The mago losses and gains are unclassified (G rows).
@@ -305,7 +305,7 @@ Started on 2026-10-21. It measures what it costs to treat variables as possibly 
 - **Decisions for the user**
   - P1: error handlers, fibers and `trigger_error` are not modelled. The by-ref and fiber designs are deferred until this is decided.
   - P2: open world as the default, or closed world as opt-in (D5). Decide after M1 to M4.
-- **Integer overflow (group O of `~/.claude/plans/synchronous-wiggling-muffin.md`)**, worked before the global-write model. The measurements and the classification are in `~/.cache/phpstan-rs-scratch/design/overflow-measurement.md`.
+- **Integer overflow (group O of `OPEN_WORLD_PLAN.md`)**, worked before the global-write model. The measurements and the classification are in `OVERFLOW_MEASUREMENT.md`.
   - Done: a marked overflow float; exact `int` arithmetic, with `abs`, unary minus, `++` and `--` at the limits; `count()` at most 2^30; right-shift ranges; the `strcmp` family within 32 bits; `min`/`max` ranges; the `[deployment]` setting (operating systems bound `time()`, default any; a string is shorter than `memory_limit`, the listed architectures' address space and 2^56 bytes; `max_run_seconds`, default a year); the counter rule for loop locals and statics.
   - Done (O4): types carry data-flow node sets (`types/src/flow.rs`), kept through union, intersection, narrowing, widening and loop convergence; the checker derives them at expressions (`checker/flow_derivation.rs`). Nodes (`checker/flow_nodes.rs`): request superglobals and `$argc` (environment), parameters, property reads, call results, globals and statics, and an overflow site carried by its float. A site is real when its operands come from the environment or have no source and a bounded range; an unbounded value with no source counts as unknown. Sinks (`checker/overflow_sinks.rs`) report `arithmetic.intOverflow` for real sites: native `int` parameters, returns and properties, builtin `int` parameters, array keys, `%`, bitwise operators, shifts, `~`, `(int)`, `intval`, `settype`, `printf` integer placeholders; and `intdiv(PHP_INT_MIN, -1)`.
   - Done (O5): environment sources (`checker/flow_sources.rs`): file, stream, socket, terminal, environment, ini, database and stat builtins, `unserialize`, `filter_input`, `$argv`, and the request and result methods of PSR-7, Symfony, Laravel, mysqli, PDO, SQLite3 and `SplFileObject`; `[sources] functions` and `methods` name more. A counter stepped once an iteration of a by-value `foreach` over an array is bounded by the array's size (at most 2^30); a by-reference `foreach`, a `Traversable`, a step in a nested loop and a body with `goto` keep the run's bound.
@@ -322,7 +322,7 @@ Started on 2026-10-21. It measures what it costs to treat variables as possibly 
     - Database values are bounded by nothing: no schema or driver bound yet (O2), and `COUNT(*)` is not known to be at least 0, so Piwigo's tests that add to a fetched count or a `smallint` column are reported.
     - A value bounded only by its relation to another grows as the run model allows: a position advanced by a string's length within that string (league-commonmark `Cursor`, a stream wrapper's `$position += strlen($chunk)`), a tree's counts (`$parent->count -= 1 + $child->count`). With no environment value in them these are `arithmetic.intOverflowGrowth`, off by default; O8 bounds them and then that check can be on by default.
   - Next: the O7 gaps above; the counter rule for private properties and by-ref captures; then O8 relational guards, O9 library contracts and the `mode` setting (application or library; composer `type: library` when unset), O10 coverage counts.
-  - Paused: settling the O8 design with Linux spikes. The design, its validation tables and what the spikes established are in the plan's O8 item (`~/.claude/plans/synchronous-wiggling-muffin.md`); encodings, the translator (`spike/emit/emit.php`, `slice.py`, `run2.sh`) and verdict files are under `~/.cache/phpstan-rs-scratch/spike/`. Resume with the tag processor run with the heap model and per-query slicing (all 233 sites), then the sodium X25519 ladder encodings (`spike/ladder/`), then the `WP_Query::get_posts` scale test; then present the design for approval.
+  - Paused: settling the O8 design with Linux spikes. The design, its validation tables and what the spikes established are in the plan's O8 item (`OPEN_WORLD_PLAN.md`); encodings, the translator (`spike/emit/emit.php`, `slice.py`, `run2.sh`) and verdict files are under `~/.cache/phpstan-rs-scratch/spike/`. Resume with the tag processor run with the heap model and per-query slicing (all 233 sites), then the sodium X25519 ladder encodings (`spike/ladder/`), then the `WP_Query::get_posts` scale test; then present the design for approval.
 - **Queued, after the O8 design is settled** (rows of `PROFILE_DRILL_PIWIGO_LEDGER.md`)
   - VAL-2.16 (the `&&`/`||` right-operand definedness change) and VAL-2.17 (by-reference captures see every write of the enclosing body): the code is committed and the corpus runs are read; the user's approval of the output changes is open. Accepted false positives: `Grapheme.php:296` and `DebugClassLoader.php:1154` (path-correlated, VAL-2.16); guzzle `Utils.php:106/118` (VAL-2.17, removed by the call-site states).
   - The call-site states of VAL-2.17: a closure called directly sees the state at its call, not the union of every write. Seven `checker/by_ref_capture/` fixtures for it are written and not committed until they pass; the global written by a callee at top level goes with B.
