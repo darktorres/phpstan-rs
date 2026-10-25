@@ -534,6 +534,42 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     context; a second solver checks each proof; the translator is tested against PHP;
     string witnesses come from the rope interpreter; deep witnesses come from accelerated
     transitions.
+  - **Replay over ropes** (`spike/rope/`). The class's source is rewritten so string builtins
+    (14 of them), concatenation, interpolation, string offsets and their `isset`, `==` and
+    `===`, array keys, `in_array`, `array_key_exists` and the subjects of `switch` and `match`
+    go through a rope library, and `string` types admit ropes; everything else runs as PHP
+    itself, so overflow to float, exceptions and objects keep PHP's semantics. A rope is a
+    run-length list of pieces, held as a native string up to 4 KiB. Ropes are immutable
+    and shared like a `zend_string`, so the bytes of the live ropes are the bytes the process
+    would hold, and a replay that exceeds the memory bound is no witness. A builtin the
+    library does not cover for a long string stops the replay as unsupported, never with a
+    wrong value.
+    - Each rope builtin against PHP over 1.7 million random cases: no difference. The tests
+      found three defects, now fixed: `substr_compare`'s parameter name, its result for
+      length 0, and `str_replace` across copies of a piece.
+    - The rewritten tag processor against the original on 3,000 random documents of up to
+      40 operations: identical traces with ropes above 16 bytes; with every string a rope,
+      5% stop as unsupported, each after a prefix identical to PHP's.
+    - The witness: `<a x=1 x=` + `y` × 2^54 + `><b>text</b>`, 600 `remove_attribute('x')`
+      calls, then `get_updated_html()`. The later bookmark's start becomes the float
+      -1.079e19 (the shift sums at 2633, 2674 and 2682 overflow), the long strings peak at
+      2^55 bytes (under the default bound of 2^56), and the next `seek()` throws a
+      `TypeError` from `strpos`. The replay takes 0.09 s. The shift-sum sites are true
+      positives under the default deployment. Under a `memory_limit` of 128M the same drift
+      needs 2^37 calls, so the replay needs the loop of calls accelerated: a witness
+      combines ropes for long strings with acceleration for long runs.
+    - The witness came from a small concrete case (`spike/wpdup/`) with one run of bytes
+      pumped. That is the procedure to automate: the solver's counterexample gives the
+      calls, the lengths and the integers; a small concrete case gives the contents (string
+      solving works at length 10); a run is pumped to the lengths; the replay decides.
+  - **Exactness of clauses** (`spike/emit/exact.py`): a variable is fixed when it is an
+    argument of a body predicate or equals a term over fixed variables; a clause is exact
+    when its head is fixed. The tag processor has 333 exact rules of 792, the hierarchy 988
+    of 3,647. The free variables are either choices of the environment (inputs, when
+    destructors run) or abstractions (string contents, the results of `strspn`, `strpos`,
+    `strcspn`). For code over strings a derivation is rarely exact: the check filters and
+    the replay decides. The translator has to tag each fresh variable as a choice or an
+    abstraction where it creates it.
   - **Open before the design is settled:** the ledger's rows O8.1 to O8.7 (the tag processor
     rerun, the pairwise collection invariant, the subclass's writes, the sodium ladder, the
     `WP_Query::get_posts` scale test, the solver portfolio, Windows and macOS).
