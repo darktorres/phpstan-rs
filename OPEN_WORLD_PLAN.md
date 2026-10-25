@@ -572,6 +572,32 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     `[-C, 2^k - C)`. Without it the bounds grow to 2^162. The coefficient 2^k is outside
     octagons: the domain needs a remainder transfer function, or a polyhedron pack over the
     shifted value and its quotient.
+  - **The class with its subclass** (`spike/emit/hier-esc`, `WP_HTML_Processor` added to the
+    tag processor; 182 functions, 3,652 clauses, 464 sites):
+    - Inherited code dispatches `$this->m()` to the subclass's overrides (38 calls, among
+      them `next_token()` and `get_tag()`), so each subclass runs its own copy of every
+      inherited method; private methods are not dispatched.
+    - `goto` is translated exactly (a predicate per label; the subclass jumps backward
+      too). Havocking at a `goto` and falling through is unsound: a path that returns
+      before the label never reaches it.
+    - Hierarchy code acting on another instance: a method it calls there is entered from the
+      invariant, private or not (`reset_insertion_mode_appropriately`); a write there is
+      an entry applying that write (`create_fragment_at_current_node` writes the new
+      processor's `compat_mode` and two `bookmarks` entries).
+    - What reaches `$this` from outside comes only through the closures that capture it:
+      the push and pop handlers set `parsing_namespace`, and `WP_HTML_Token::__destruct`
+      calls `parent::release_bookmark()`. A destructor runs whenever a token's last
+      reference goes or the cycle collector runs, so any entry of `bookmarks` can be
+      removed at any point: the entry cell may empty and the count fall at every
+      predicate. Unknown calls then change only `parsing_namespace`, not all of `$this`.
+    - Results (Z3 GSpacer): at `rlimit` 3e7 every sampled site exhausts the budget, sites
+      the class alone proves in 13 s. At 3e8, 11 of 14 sampled sites are proved in 85 to 330 s
+      (the parent's sites on its own instances and on the subclass's, and the subclass's
+      own), no counterexamples, and 3 run out of a 4 GB memory cap (4857, 4858, 5121
+      `++$this->bookmark_counter`, a subclass property the encoding leaves untracked).
+      Without a cap, one query took 16.6 GB.
+    - In library mode, a class that is not final can be extended by code outside the
+      project, which may write its protected properties: they are as open as public ones.
   - **Scale: `WP_Query`** (`spike/emit/wpq`, 5,160 lines, 69 functions, `get_posts` with 122
     arguments per predicate, an 80 MB encoding; Z3 GSpacer at `rlimit` 3e7, load about 18
     from other jobs): of 15 sites, 14 exhaust the budget, among them `have_posts`'s
@@ -580,6 +606,13 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     of `-9223372036854775808` reaches `abs()` as `PHP_INT_MIN`, which returns a float. Whole-
     class encodings do not scale to such methods: the solver gets the loop or block a site
     sits in, with the domain's facts for the rest.
+  - **Solver portfolio.** Z3 GSpacer is the one CHC engine, bundled, with a fresh context per
+    query, `rlimit` for the budget and `memory_max_size` for memory. The other engines' only
+    unique answers are covered without them: Golem's `sodium_mul` (k-induction) is a loop
+    of constant trip count 27 that intervals unrolled bound by 2^54; Eldarica's
+    `guarded_product` is what the product-guard rule clears. No engine proves the ladder,
+    which the domain does. Proofs are certified clause by clause by cvc5, a plain SMT
+    solver. Deep witnesses come from accelerated transitions, which Z3 finds.
   - **Exactness of clauses** (`spike/emit/exact.py`): a variable is fixed when it is an
     argument of a body predicate or equals a term over fixed variables; a clause is exact
     when its head is fixed. The tag processor has 333 exact rules of 792, the hierarchy 988
