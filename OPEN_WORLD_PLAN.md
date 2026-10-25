@@ -513,6 +513,27 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     counter rule states this one directly (a by-value `foreach` steps it at most once per
     element, an array has at most memory / 16 elements), so it has to reach the clauses as
     a fact, not be left for the solver.
+  - **Adversarial validation of the additions** (exceptional exits, entries that bypass
+    methods, the hierarchy, proof certification, differential testing, strings, nonlinear
+    arithmetic, deep witnesses):
+
+    | attack | evidence | verdict |
+    |---|---|---|
+    | a method's summary covers only its normal return | `spike/wpdup/attack.php`, PHP 8.5: after 100 `remove_attribute` calls on a duplicate, `seek` throws `ValueError` from `strpos` with the cursor left at -1183, and every later call throws the same | holds: summaries carry exceptional exits with the state at the throw, and a caller that catches continues from that state |
+    | objects enter only through methods | `clone` copies the processor shallowly: the clone's `bookmarks` hold the same `WP_HTML_Span` objects (`===`); an edit through the clone moved the original's bookmark to 67 in a 19-byte document (`spike/wpdup/clone.php`). The html-api does not use Reflection or `Closure::bind` | holds: `clone`, `unserialize`/`__wakeup`, Reflection, `Closure::bind` and subclasses are entries; an element reachable from two owners is updated weakly |
+    | the method is the unit of local solving (frame) | `spike/frame/footprint.php`: of 27 properties, the transitive footprint of the 34 entry methods has median 6, but `next_tag` touches 26, `seek` 22, `next_token`, `parse_next_tag` and `get_updated_html` 21 | fails for the methods that matter: the unit is the loop or block, with the rest of the state replaced by the domain's facts |
+    | the solver's proof can be trusted | `spike/cert/certify.py` turns Z3's model into one check per clause: cvc5 1.2.1 verified the 772 clauses of a tag-processor proof in 90 s (Z3's model 23 MB, Z3 107 s) | holds: every proof is checked by a second solver before a finding is dropped |
+    | the encoding is faithful to PHP | the 31 counterexamples of the first translation and the dropped clauses of the slicer were translator defects, found only by reading refutations | holds: the translator is tested against PHP itself (each translated fragment run and its states compared), not only on its own output |
+    | witness strings by SMT string theory | `spike/str/`: Z3 and cvc5 time out on a string of length 1,000 with `str.indexof`, and at length 2^53 without it; length 10 is instant | fails: witnesses over string contents are built by the symbolic interpreter (ropes with repetition, O8.12), never by the string theory |
+    | products need the nonlinear portfolio here | the 233 tag-processor queries contain no product of two variables | the portfolio stays for sodium and guarded products; the tag processor is linear |
+    | iteration-by-iteration search finds deep witnesses | `spike/agg/deep.smt2` (2^23 added once per entry, overflow after 2^40 entries): Z3 GSpacer timeout at 120 s, Golem `spacer` no answer in 548 s, Golem `tpa` no answer in 2 h 10 min, Eldarica unknown at 120 s. With the loop accelerated (`deep-acc.smt2`, k iterations as one step adding 2^23·k) Z3 finds it in 0.1 s, Golem in 0.03 s | fails: witnesses are searched over transitions accelerated by the exact aggregates, which the domain states in closed form |
+
+  - **Revisions from that validation:** summaries have exceptional exits; `clone`,
+    deserialization, Reflection, `Closure::bind` and subclasses are entries, and shared
+    elements are updated weakly; local solving works per loop or block in the domain's
+    context; a second solver checks each proof; the translator is tested against PHP;
+    string witnesses come from the rope interpreter; deep witnesses come from accelerated
+    transitions.
   - **Open before the design is settled:** the ledger's rows O8.1 to O8.7 (the tag processor
     rerun, the pairwise collection invariant, the subclass's writes, the sodium ladder, the
     `WP_Query::get_posts` scale test, the solver portfolio, Windows and macOS).
