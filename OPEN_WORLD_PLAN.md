@@ -621,9 +621,9 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     `strcspn`). For code over strings a derivation is rarely exact: the check filters and
     the replay decides. The translator has to tag each fresh variable as a choice or an
     abstraction where it creates it.
-  - **Open before the design is settled:** the ledger's rows O8.1 to O8.7 (the tag processor
-    rerun, the pairwise collection invariant, the subclass's writes, the sodium ladder, the
-    `WP_Query::get_posts` scale test, the solver portfolio, Windows and macOS).
+  - **Open before the design is settled:** the ledger's rows O8.7 (Windows and macOS), O8.14
+    (reentrancy through user code, which waits on Q3) and O8.15 (automated witness
+    synthesis).
 - **O9. Library mode: contracts.** Checking a library alone, what a public API needs
   from its callers to avoid overflow is reported as a contract (opt-in report), not a
   finding. Laravel's `firstItem()` is such a contract in Laravel and a finding in an app
