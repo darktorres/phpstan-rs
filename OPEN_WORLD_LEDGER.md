@@ -99,7 +99,7 @@ arithmetic fallback. Any comparison made before that commit's rerun is stale for
 | O8.15 | Witness synthesis: the counterexample's calls, lengths and integers, contents from a small concrete case, a run pumped, then the rope replay | OPEN | Done by hand for the `remove_attribute` drift (plan, O8) | Automate on the tag processor's shift sums |
 | O8.3 | `WP_HTML_Processor`'s writes to the parent's `bookmarks` (`new WP_HTML_Span(0, 0)`, `(here->start, 0)`, also on another instance) | OPEN | not in the encoding | Model the subclass's writes as entries of the hierarchy |
 | O8.4 | sodium X25519 ladder (bit-vector and integer encodings, XOR-mask swaps) | DONE | Z3 (both engines, both encodings) and Eldarica: no answer in 600 s. The domain proves it: limbs within 2^26 inductive, overflow refuted by intervals, given the floor-division relation (plan, O8) | The domain's remainder transfer function |
-| O8.5 | Scale: `WP_Query::get_posts` (168 variables) | OPEN | | Translate and solve |
+| O8.5 | Scale: `WP_Query::get_posts` (168 variables) | DONE | 80 MB encoding: 14 of 15 sites exhaust `rlimit` 3e7, even one the counter fact bounds; 1256 `abs()` of a request's `cat` is a true counterexample (plan, O8) | The solver gets the loop or block, with the domain's facts |
 | O8.6 | Solver portfolio and budget | OPEN | the solver matrix in the plan | Settle after O8.1, O8.4, O8.5 |
 | O8.7 | Windows and macOS: Z3 build and determinism | OPEN | Linux only | After Linux |
 

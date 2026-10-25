@@ -572,6 +572,14 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
     `[-C, 2^k - C)`. Without it the bounds grow to 2^162. The coefficient 2^k is outside
     octagons: the domain needs a remainder transfer function, or a polyhedron pack over the
     shifted value and its quotient.
+  - **Scale: `WP_Query`** (`spike/emit/wpq`, 5,160 lines, 69 functions, `get_posts` with 122
+    arguments per predicate, an 80 MB encoding; Z3 GSpacer at `rlimit` 3e7, load about 18
+    from other jobs): of 15 sites, 14 exhaust the budget, among them `have_posts`'s
+    `$this->current_post + 1`, which the counter fact alone bounds. The 15th, 1256
+    `abs($cat)` in `parse_tax_query`, is a counterexample and true: a `cat` query variable
+    of `-9223372036854775808` reaches `abs()` as `PHP_INT_MIN`, which returns a float. Whole-
+    class encodings do not scale to such methods: the solver gets the loop or block a site
+    sits in, with the domain's facts for the rest.
   - **Exactness of clauses** (`spike/emit/exact.py`): a variable is fixed when it is an
     argument of a body predicate or equals a term over fixed variables; a clause is exact
     when its head is fixed. The tag processor has 333 exact rules of 792, the hierarchy 988
