@@ -98,7 +98,7 @@ arithmetic fallback. Any comparison made before that commit's rerun is stale for
 | O8.14 | Reentrancy: user code run by filters (`__`, `esc_attr`), `_doing_it_wrong` and error handlers calling the object's public methods mid-method | OPEN | Not in the encoding; a call out to user code would be a sequence of public calls on `$this` from the current state | Depends on Q3 |
 | O8.15 | Witness synthesis: the counterexample's calls, lengths and integers, contents from a small concrete case, a run pumped, then the rope replay | OPEN | Done by hand for the `remove_attribute` drift (plan, O8) | Automate on the tag processor's shift sums |
 | O8.3 | `WP_HTML_Processor`'s writes to the parent's `bookmarks` (`new WP_HTML_Span(0, 0)`, `(here->start, 0)`, also on another instance) | OPEN | not in the encoding | Model the subclass's writes as entries of the hierarchy |
-| O8.4 | sodium X25519 ladder (bit-vector and integer encodings, XOR-mask swaps) | OPEN | `spike/ladder/ladder_bv.smt2`, `ladder_lia.smt2` | Run on Z3, Golem, Eldarica |
+| O8.4 | sodium X25519 ladder (bit-vector and integer encodings, XOR-mask swaps) | DONE | Z3 (both engines, both encodings) and Eldarica: no answer in 600 s. The domain proves it: limbs within 2^26 inductive, overflow refuted by intervals, given the floor-division relation (plan, O8) | The domain's remainder transfer function |
 | O8.5 | Scale: `WP_Query::get_posts` (168 variables) | OPEN | | Translate and solve |
 | O8.6 | Solver portfolio and budget | OPEN | the solver matrix in the plan | Settle after O8.1, O8.4, O8.5 |
 | O8.7 | Windows and macOS: Z3 build and determinism | OPEN | Linux only | After Linux |

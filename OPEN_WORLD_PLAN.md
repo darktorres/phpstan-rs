@@ -562,6 +562,16 @@ at the limit) is in `OVERFLOW_MEASUREMENT.md`, last section.
       pumped. That is the procedure to automate: the solver's counterexample gives the
       calls, the lengths and the integers; a small concrete case gives the contents (string
       solving works at length 10); a run is pumped to the lengths; the replay decides.
+  - **The sodium X25519 ladder** (`spike/ladder/`, two limbs, products of limbs, XOR-mask
+    swaps; load about 18 from other jobs): no solver answers in 600 s, neither Z3 (default and
+    GSpacer, on the integer and the bit-vector encodings) nor Eldarica. The domain does: limbs
+    within 2^26 is inductive (checked by SMT in 0.26 s), and interval arithmetic over the
+    transition maps those bounds into themselves and refutes the overflow test, but only
+    with the relation a floor division gives: `q = (h + C) >> k` implies
+    `2^k·q <= h + C < 2^k·(q + 1)`, so the reduced limb `h - 2^k·q` lies in
+    `[-C, 2^k - C)`. Without it the bounds grow to 2^162. The coefficient 2^k is outside
+    octagons: the domain needs a remainder transfer function, or a polyhedron pack over the
+    shifted value and its quotient.
   - **Exactness of clauses** (`spike/emit/exact.py`): a variable is fixed when it is an
     argument of a body predicate or equals a term over fixed variables; a clause is exact
     when its head is fixed. The tag processor has 333 exact rules of 792, the hierarchy 988
