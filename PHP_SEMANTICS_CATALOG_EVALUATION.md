@@ -138,7 +138,8 @@ domains cite the pinned function source, Zend layout, parser source, and linked
 LLVM evidence; the LLVM record depends on all three source records. The witness is
 [`strlen-llvm-witness.json`](tools/php-catalog/experiments/comparison/results/evaluation/strlen-llvm-witness.json);
 its linked module SHA-256 is
-`e3427ce81f98f9a04db3e04ce822c3e0f1c731137f0d63e0440f862b1e61c93e`. The report
+`37de322fa6b5a9b475f55ded6e22b8f712288e225acfbd39896ee8fa46a2c350` (the module rebuilt on
+2026-10-24; the 2026-10-09 witness recorded `e3427ce8…`). The report
 is recreated by [extract_strlen_llvm_witness.py](tools/php-catalog/experiments/comparison/extract_strlen_llvm_witness.py) from the locked source and
 linked `php-cli.bc`. Regeneration from the locked source and report is
 byte-identical at that checkpoint to the then-current schema-v6 artifact (SHA-256

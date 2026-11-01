@@ -64,7 +64,9 @@ function worker_command(string $php, bool $zendMm, array $sandbox, ?array $modul
         if (str_starts_with($phpDir, '/home/')) {
             array_push($command, '--ro-bind', $phpDir, $phpDir);
         }
-        array_push($command, '--size', (string) $sandbox['cap'], '--tmpfs', '/home/worker', '--chdir', '/home/worker');
+        // /tmp is a private tmpfs too: the host's is read-only here, and a builtin that writes its
+        // temporary files there (ImageMagick's pixel cache) segfaults when it cannot.
+        array_push($command, '--size', (string) $sandbox['cap'], '--tmpfs', '/home/worker', '--size', (string) $sandbox['cap'], '--tmpfs', '/tmp', '--chdir', '/home/worker');
         return [...$command, ...$interpreter];
     }
     if ($sandbox['mode'] === 'sudo-unshare') {

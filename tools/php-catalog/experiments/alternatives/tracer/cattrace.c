@@ -68,6 +68,15 @@ static void relation_of(smart_str *s, zend_execute_data *call, zend_object *o)
 	smart_str_appends(s, "-");
 }
 
+/* The internal function clone() runs __clone on a new copy of its argument 0, the object
+ * cloned, which is therefore the place 0 of the call. */
+static bool is_clone_frame(zend_execute_data *call)
+{
+	return call->func->type == ZEND_INTERNAL_FUNCTION
+		&& call->func->common.function_name
+		&& zend_string_equals_literal(call->func->common.function_name, "clone");
+}
+
 static void record(zend_execute_data *call, zend_execute_data *user)
 {
 	zend_function *uf = user->func;
@@ -91,8 +100,11 @@ static void record(zend_execute_data *call, zend_execute_data *user)
 		smart_str_appends(&key, "-");
 	}
 	smart_str_appendc(&key, '\t');
-	/* the user object's place among the internal call's arguments */
-	if (Z_TYPE(user->This) == IS_OBJECT && !(uf->common.fn_flags & ZEND_ACC_CLOSURE)) {
+	/* the user object's place among the internal call's arguments: a clone's __clone runs on
+	 * the new object, and the object cloned is argument 0 of the clone */
+	if (is_clone_frame(call)) {
+		smart_str_appends(&key, "0");
+	} else if (Z_TYPE(user->This) == IS_OBJECT && !(uf->common.fn_flags & ZEND_ACC_CLOSURE)) {
 		relation_of(&key, call, Z_OBJ(user->This));
 	} else {
 		smart_str_appends(&key, "-");

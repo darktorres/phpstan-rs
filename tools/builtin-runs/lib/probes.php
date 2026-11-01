@@ -310,7 +310,27 @@ function zip_entry_sample(): mixed
  */
 function known_parameter_value(ReflectionParameter $param): ?Closure
 {
-    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? pdo_value($param) ?? xml_value($param) ?? named_value($param);
+    return sodium_length_value($param) ?? mbstring_value($param) ?? bcmath_value($param) ?? hash_value($param) ?? uri_value($param) ?? openssl_value($param) ?? imagick_value($param) ?? memcached_value($param) ?? pdo_value($param) ?? xml_value($param) ?? named_value($param);
+}
+
+/**
+ * The valid value of a Memcached parameter the stubs leave untyped: a connection string (empty, since a
+ * host name is not one: the constructor's allocation fails on it) and a CAS token, a float (the extension
+ * fails on a string that is not a number).
+ */
+function memcached_value(ReflectionParameter $param): ?Closure
+{
+    $function = $param->getDeclaringFunction();
+    if (!$function instanceof ReflectionMethod || strtolower($function->getDeclaringClass()->getName()) !== 'memcached') {
+        return null;
+    }
+    if ($function->isConstructor() && $param->getName() === 'connection_str') {
+        return static fn (): string => '';
+    }
+    if (in_array($function->getName(), ['cas', 'casByKey'], true) && $param->getName() === 'cas_token') {
+        return static fn (): float => 1.0;
+    }
+    return null;
 }
 
 /** The valid value of a bcmath parameter: a number string, a modulus that is not zero, or a scale. */
@@ -466,6 +486,33 @@ function imagick_blob_sample(): string
     return $image->getImageBlob();
 }
 
+/** The path of a PNG file of imagick_blob_sample(), in the temporary directory. */
+function imagick_sample_path(): string
+{
+    $path = sys_get_temp_dir() . '/rec-' . getmypid() . '.png';
+    file_put_contents($path, imagick_blob_sample());
+    return $path;
+}
+
+/** Whether the parameter is the matrix of ImagickDraw::affine. */
+function imagick_matrix(ReflectionParameter $param): bool
+{
+    $function = $param->getDeclaringFunction();
+    return $function instanceof ReflectionMethod
+        && strtolower($function->getDeclaringClass()->getName()) === 'imagickdraw'
+        && $function->getName() === 'affine';
+}
+
+/** Whether the parameter is the `files` of Imagick's constructor. */
+function imagick_constructor(ReflectionParameter $param): bool
+{
+    $function = $param->getDeclaringFunction();
+    return $function instanceof ReflectionMethod
+        && strtolower($function->getDeclaringClass()->getName()) === 'imagick'
+        && $function->isConstructor()
+        && $param->getName() === 'files';
+}
+
 /** The valid value of an Imagick colour or a PDO fetch mode. */
 function imagick_value(ReflectionParameter $param): ?Closure
 {
@@ -496,8 +543,27 @@ function imagick_value(ReflectionParameter $param): ?Closure
     if ($class === 'imagick' && $name === 'pseudo_format') {
         return static fn (): string => 'xc:white';
     }
+    // ImageMagick asserts that a layer comparison's metric (the stub's name for its method) is one of the three compare methods; 0 aborts the child.
+    if ($class === 'imagick' && strtolower($function->getName()) === 'compareimagelayers') {
+        return static fn (): int => Imagick::LAYERMETHOD_COMPAREANY;
+    }
     if ($class === 'imagick' && $name === 'image' && in_array(strtolower($function->getName()), ['readimageblob', 'pingimageblob'], true)) {
         return static fn (): string => imagick_blob_sample();
+    }
+    // The matrix of an affine transform is an array of six keys: an array without them segfaults the extension.
+    if (imagick_matrix($param)) {
+        return static fn (): array => ['sx' => 1, 'rx' => 0, 'ry' => 0, 'sy' => 1, 'tx' => 0, 'ty' => 0];
+    }
+    if (imagick_constructor($param)) {
+        return static fn (): string => imagick_sample_path();
+    }
+    // liquidRescaleImage takes a size no larger than the image: the probes' image is one pixel, and a larger size segfaults the library.
+    if ($class === 'imagick' && in_array($name, ['width', 'height'], true) && strtolower($function->getName()) === 'liquidrescaleimage') {
+        return static fn (): int => 1;
+    }
+    // readImages reads each element as a string: an int element segfaults the extension, a missing file is the error it reports.
+    if ($class === 'imagick' && $name === 'filenames' && strtolower($function->getName()) === 'readimages') {
+        return static fn (): array => ['missing.png'];
     }
     if ($class === 'imagick' && !admits($param->getType(), 'string')) {
         return match ($name) {

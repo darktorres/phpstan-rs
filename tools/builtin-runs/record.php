@@ -186,11 +186,12 @@ $passes = [];
 for ($pass = 0; $pass < ($verify ? 2 : 1); $pass++) {
     $passes[] = run_units($plan['units'], $plan['weights'], $run);
 }
-[$unitLines, $failed] = $passes[0];
+[$unitLines, $failed, $lost] = $passes[0];
 $differing = [];
 if ($verify) {
-    [$second, $lostSecond] = $passes[1];
+    [$second, $lostSecond, $lostChildren] = $passes[1];
     $failed = array_merge($failed, $lostSecond);
+    $lost = array_merge($lost, $lostChildren);
     foreach (array_keys($plan['units']) as $index) {
         if (!isset($unitLines[$index]) || !isset($second[$index])) {
             $unitLines[$index] = $unitLines[$index] ?? $second[$index] ?? [];
@@ -247,6 +248,8 @@ if ($failed === [] && ($out !== null || $update !== null)) {
         'selection' => ['only' => $only, 'extensions' => $extensions, 'modules' => $modules],
         'flags' => array_values(array_filter($argv, static fn (string $argument): bool => str_starts_with($argument, '--'))),
         'totals' => $counts,
+        // The children that died or timed out in their retry too: the rows they would have given are missing.
+        'lost' => array_values(array_unique($lost)),
     ];
     write_atomic($target, table_text($final));
     $probedNames = [];

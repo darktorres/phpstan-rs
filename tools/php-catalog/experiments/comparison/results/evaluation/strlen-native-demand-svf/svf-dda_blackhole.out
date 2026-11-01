@@ -26,14 +26,14 @@ TotalCallSite       15
 TotalFieldObjects   14813
 TotalObjects        22793
 TotalPTASVFStmts    95629
-TotalPointers       84054
+TotalPointers       84079
 TotalSVFStmts       150867
 VarArrayObj         14
 VarStructObj        3159
 ----------------Time and memory stats--------------------
-LLVMIRTime          0.857144
-SVFIRTime           1.81227
-SymbolTableTime     0.245407
+LLVMIRTime          0.463
+SVFIRTime           1.214
+SymbolTableTime     0.132
 #######################################################
 
 *********PTACallGraph Stats (Andersen analysis)***************
@@ -55,16 +55,16 @@ AvgIn/OutCopyEdge   0.50137
 AvgIn/OutEdge       1.44348
 AvgIn/OutLoadEdge   0.000949093
 AvgIn/OutStoreEdge  0.311148
-AvgPtsSetSize       0.758468
+AvgPtsSetSize       0.75829
 AvgTopLvlPtsSize    0.994852
 CollapseTime        0
 CopyGepTime         0
 LoadStoreTime       0
-MemoryUsageVmrss    227592
-MemoryUsageVmsize   227292
+MemoryUsageVmrss    227876
+MemoryUsageVmsize   227272
 SCCDetectTime       0
 SCCMergeTime        0
-TotalTime           1.61668
+TotalTime           1.099
 UpdateCGTime        0
 ----------------Numbers stats----------------------------
 AddrProcessed       53104
@@ -101,7 +101,7 @@ NumOfSFRs           0
 NumOfStores         26227
 NumOfValidNode      84291
 NumOfValidObjNode   14888
-Pointers            84054
+Pointers            84079
 PointsToBlkPtr      0
 PointsToConstPtr    241
 SolveIterations     3
@@ -109,7 +109,7 @@ StoreProcessed      26226
 TotalCycleNum       1
 TotalObjects        22793
 TotalPWCCycleNum    0
-TotalPointers       84054
+TotalPointers       84079
 #######################################################
 
 ****Persistent Points-To Cache Statistics: Andersen's analysis bitvector****
@@ -136,11 +136,11 @@ PreemptiveIntersections  0
 ################ (program : strlen-native-demand.bc)###############
 ----------------Time and memory stats--------------------
 AverageRegSize      1
-GenMUCHITime        0.000372
-GenRegionTime       0.148
-InsertPHITime       6.5e-05
-SSARenameTime       0.00016
-TotalMSSATime       0.149279
+GenMUCHITime        0
+GenRegionTime       0.094
+InsertPHITime       0
+SSARenameTime       0
+TotalMSSATime       0.094
 ----------------Numbers stats----------------------------
 BBHasMSSAPhi        8
 CSChiNode           4
@@ -163,13 +163,13 @@ StoreHasChi         35
 *********SVFG Statistics***************
 ################ (program : strlen-native-demand.bc)###############
 ----------------Time and memory stats--------------------
-ATNodeTime          0.038324
+ATNodeTime          0.019
 AvgWeight           1
 ConnDirEdgeTime     0
-ConnIndEdgeTime     0.020122
+ConnIndEdgeTime     0.009
 OptTime             0
 TLNodeTime          0
-TotalTime           0.058462
+TotalTime           0.028
 ----------------Numbers stats----------------------------
 ActualIn            6
 ActualOut           4
@@ -245,11 +245,11 @@ TotalRetEdge        4
 AvgCPtsSize         0
 AvgDPMAtLoc         1
 AvgPtsSize          0
-AvgTimePerQuery     0.000707
-MemoryUsageVmrss    28
+AvgTimePerQuery     0.001
+MemoryUsageVmrss    32
 MemoryUsageVmsize   0
-TotalBKCondTime     4.94066e-324
-TotalQueryTime      0.000707
+TotalBKCondTime     0
+TotalQueryTime      0.001
 ----------------Numbers stats----------------------------
 IndEdgeSolved       0
 MaxCPtsSize         0
@@ -301,6 +301,6 @@ One target callsites: 0
 Two target callsites: 0
 More than two target callsites: 0
 =================================================
-##<> Source Loc: { "ln": 769, "cl": 7, "fl": "Zend/zend_API.c" }
-Ptr 66572 		PointsTo: {empty}
+##<> Source Loc: { "ln": 769, "cl": 7, "fl": "./Zend/zend_API.c" }
+Ptr 66575 		PointsTo: {empty}
 

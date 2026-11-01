@@ -2,7 +2,12 @@
   "status": "PAUSED at user request; full Phase F remains OPEN",
   "php_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
   "llvm_source_commit": "2078da43e25a4623cab2d0d60decddf709aaea28",
-  "svf_source_commit": "e889a5139dbca132142b07d90192efab9a16c614",
+  "svf_source_commit": "5c45081f75d16afffc5fc9121e1f2f7a614e0bef",
+  "svf_release_tag": "SVF-3.3",
+  "svf_source_commit_superseded": {
+    "value": "e889a5139dbca132142b07d90192efab9a16c614",
+    "reason": "an unreleased master commit 108 commits after SVF-3.3; replaced by the release tag, owner decision 2026-10-24"
+  },
   "binary_analysis_packages": [
     "angr==9.3.4",
     "angr-data==0.1.1",

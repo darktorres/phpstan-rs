@@ -1,8 +1,14 @@
 {
   "php_commit": "e5e09d06c13e2d280a4c5066ac3d62d88dbf5b03",
-  "svf_commit": "e889a5139dbca132142b07d90192efab9a16c614",
-  "svf_version": "3.4",
-  "svf_extapi_sha256": "65339c216145dc8744fe176a477ee11b0da6d4f2e9770d7ba8ce72894e99a779",
+  "svf_commit": "5c45081f75d16afffc5fc9121e1f2f7a614e0bef",
+  "svf_version": "3.3 (release tag SVF-3.3; its CMakeLists.txt declares VERSION 3.4)",
+  "svf_release": {
+    "tag": "SVF-3.3",
+    "asset": "SVF-3.3-ubuntu-24.04-x86_64.zip",
+    "asset_sha256": "1515c0c95a0c566c809a07771ef51813eae5219d1299d0f063ec89a1a95d60a9",
+    "source": "https://github.com/SVF-tools/SVF/releases/download/SVF-3.3/SVF-3.3-ubuntu-24.04-x86_64.zip"
+  },
+  "svf_extapi_sha256": "5469f625e14c5245e15a9e2745c74ca4db6f2955b93aa39d92e3a876e62dc731",
   "z3_experimental_version": "4.13.3; not the proposed production Z3 5.1.0 lock",
   "z3_library_sha256": "eff8f0f91482d0809aae7aa0ed54cb52ff5ee9b5fe1ed1d2bfa9153c4a2fcfaf",
   "compiler_versions": {
@@ -32,10 +38,10 @@
     "libz3-4_4.13.3-1build1_amd64.deb": "40390573227a6965210a477554d6c9aa0ab51edcc0daad51db9352a6b9bfdeb4",
     "re2c_4.4-1_amd64.deb": "4f4ec5f0ae2b6aa6edfb03ce3c85f1e8de4f5835dc45299e77ed61e26a917c00"
   },
-  "resource_acceptance": "kernel-enforced 10 GiB aggregate cap observed on the path-free build: whole-svf-dda and whole-compact-dda exit 247 in enforcing cgroups with kernel OOM proof (oom_kill >= 1, peak at the cap); the reviewed outcomes are in expected_outcomes",
+  "resource_acceptance": "kernel-enforced 10 GiB aggregate cap on the SVF-3.3 pin (2026-10-24): whole-compact-dda (compact build from the tag) and whole-svf-dda (stock build of the tag, local, no compact patch) each exit 247 in enforcing cgroups with kernel OOM proof, peak at the cap; the release dvf (SVF-3.3 archive) aborts on the whole-program module with an LLVM assertion (hasUseList) after 14 s and is not a resource outcome; the reviewed outcomes are in expected_outcomes",
   "coverage": "Native representation and pointer prerequisites; no closed PHP BehaviorGraph or full Phase F completion",
   "runtime_fixture_scope": "hybrid-call-8.5.4.json uses runtime-hybrid-call-13.php; runtime.php current 16-sentinel evidence is separately pinned by tailcall-call-reference-8.5.4.json",
-  "link_manifest_sha256": "589c9a3318f5f8adaa800829ba60bac2eebe5d8a3a77c34c38cbc40081f86bb6",
+  "link_manifest_sha256": "b4c23e98548609e7ef7118f0a83ae3301d9398f7b3a6c45b6ec4167743520504",
   "recorded_root": "/tmp/php-catalog-comparison",
   "representation_correspondence_inputs": {
     "campaign_inputs": "76ae87328dccdcadb1a61051ffca6b438b9f57989890a04f2a92830cf7d15e10",
@@ -55,10 +61,9 @@
     "source": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
   },
   "svf_binary_sha256": {
-    "bin/dvf": "80bcf3c48ab4b55da0acf6f8c49877b2cfd3e31518383b380f0f0d0cb6eb8c91",
-    "bin/wpa": "cbab61507d30ae25e4d02b54481afcdf942bce1f430d1f65ca3b3c8606d5b3f1"
+    "bin/dvf": "4ca2135cd4fda5d15a9e3d2a01e82b4eff535f4bbf7464d18f5cbaa131c53610",
+    "bin/wpa": "5e965b0695d349a0936d66b0ae5e496bd457c9c2fa798c5edc882adb4600f8ae"
   },
-  "svf_relocatable_patch_sha256": "c984c1e928e58ec2100517f832843f4cc0116dc05d0ffb204d20058a50a648e1",
   "php_cli_sha256": "23250df2186ac1f9c7b5323a3518f9f466cdf5b248cca04448ea73c7dd005386",
   "php_fixed_time_header_sha256": "10c976349a063f02b37ac44817f24ab2a5fd0dfa075ad0e878d66334f7ed448a",
   "superseded_pins": {
@@ -66,13 +71,36 @@
       "value": "64e848a4993d4913d5ac0c68a3fd48cfbc1080c5244fe1899553f5d4a530a245",
       "reason": "built with the absolute build-directory extapi candidate and an absolute source path; not reproducible from another root"
     },
+    "svf_commit": {
+      "value": "e889a5139dbca132142b07d90192efab9a16c614",
+      "reason": "an unreleased master commit 108 commits after the SVF-3.3 tag; replaced by the release tag, owner decision 2026-10-24"
+    },
+    "svf_version": {
+      "value": "3.4",
+      "reason": "the version of the unreleased master commit; the pin is now the 3.3 release"
+    },
+    "svf_extapi_sha256_master_build": {
+      "value": "65339c216145dc8744fe176a477ee11b0da6d4f2e9770d7ba8ce72894e99a779",
+      "reason": "extapi.bc of the path-free build of e889a513; the release ships its own extapi.bc"
+    },
+    "svf_binary_sha256": {
+      "value": {
+        "bin/dvf": "80bcf3c48ab4b55da0acf6f8c49877b2cfd3e31518383b380f0f0d0cb6eb8c91",
+        "bin/wpa": "cbab61507d30ae25e4d02b54481afcdf942bce1f430d1f65ca3b3c8606d5b3f1"
+      },
+      "reason": "built from e889a513 with the path-free build; replaced by the SVF-3.3 release binaries"
+    },
+    "svf_relocatable_patch_sha256": {
+      "value": "c984c1e928e58ec2100517f832843f4cc0116dc05d0ffb204d20058a50a648e1",
+      "reason": "the release build does not apply svf-relocatable-extapi.patch; the patch still applies to the local path-free build of a master commit"
+    },
     "compiler_versions.php": {
       "value": "PHP 8.5.4 (cli) (built: Sep  2 2026 14:42:18) (NTS)",
       "reason": "built with the build root in __FILE__ and the build time in the binary"
     },
     "link_manifest_sha256": {
-      "value": "42cce39683efc9854bf0708fcf741689e29d2b2858152f3475ceea2dd2402324",
-      "reason": "the manifest of the link made from the absolute-path php tree, before the relative-source and prefix-map link"
+      "value": "589c9a3318f5f8adaa800829ba60bac2eebe5d8a3a77c34c38cbc40081f86bb6",
+      "reason": "the linked-module manifest was re-issued on 2026-10-24 for the rebuilt CLI module (digest 37de322f...) and normalised to the <cache>/<repo> placeholders; the 2026-10-12 manifest is in git history"
     },
     "php_cli_sha256": {
       "value": "373a40c22fef3e0864f6a6b61df631af3065cbbdbafb0daeb536c024d6c6eb6d",
@@ -115,6 +143,10 @@
         "source": "0d4477170a78540131893a8cfca2b9d1033c79eab754f9ca3d85e05ae6919505"
       },
       "reason": "the correspondence inputs were the earlier campaign and producer archives"
+    },
+    "resource_acceptance_path_free_master": {
+      "value": "kernel-enforced 10 GiB aggregate cap observed on the path-free build: whole-svf-dda and whole-compact-dda exit 247 in enforcing cgroups with kernel OOM proof (oom_kill >= 1, peak at the cap); the reviewed outcomes are in expected_outcomes",
+      "reason": "measured with the path-free build of the unreleased master commit e889a513; replaced by the SVF-3.3 pin's measurements"
     },
     "resource_acceptance": {
       "value": "Observed peaks; kernel-enforced aggregate 10 GiB acceptance remains OPEN",

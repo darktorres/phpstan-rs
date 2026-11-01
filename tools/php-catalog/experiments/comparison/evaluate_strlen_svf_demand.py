@@ -269,7 +269,7 @@ def main() -> None:
             "source_commit": source_lock["svf_commit"],
             "llvm_version": source_lock["compiler_versions"]["llvm-config-21"],
             "build_identity": {
-                "relocatable_patch_sha256": digest(HERE / "svf-relocatable-extapi.patch"),
+                "release_asset_sha256": source_lock["svf_release"]["asset_sha256"],
                 "extapi_sha256": digest(dvf.parent.parent / "lib" / "extapi.bc"),
             },
             "binary": {"path": record_text(dvf), "sha256": digest(dvf)},

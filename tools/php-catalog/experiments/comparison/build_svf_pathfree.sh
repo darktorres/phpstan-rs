@@ -1,9 +1,11 @@
 #!/bin/bash
 # Builds SVF's wpa and dvf from the pinned commit at ROOT, with no build path in
-# the binaries. Usage: build_svf_pathfree.sh ROOT SVF_CLONE DEPS_PREFIX
+# the binaries. Usage: build_svf_pathfree.sh ROOT SVF_CLONE DEPS_PREFIX [RELOCATABLE_PATCH]
 #
 #   SVF_CLONE is a checkout of SVF at the lock's svf_commit (it is copied, not
 #   modified). DEPS_PREFIX is the usr/ directory of the extracted Z3 packages.
+#   RELOCATABLE_PATCH defaults to svf-relocatable-extapi.patch (the master commit);
+#   the SVF-3.3 tag takes svf-relocatable-extapi-3.3.patch.
 #
 # The patch removes the build-directory candidate from SVF's extapi.bc lookup, so
 # analysis needs `-extapi=` (see svf-relocatable-extapi.patch). Prefix maps and
@@ -19,7 +21,7 @@ mkdir -p "$ROOT"
 cp -a "$SVF_CLONE" "$ROOT/SVF"
 # CMake writes compile_commands.json into the directory it runs from, so run it inside ROOT.
 cd "$ROOT"
-git -C "$ROOT/SVF" apply "$HERE/svf-relocatable-extapi.patch"
+git -C "$ROOT/SVF" apply "${4:-$HERE/svf-relocatable-extapi.patch}"
 cmake -S "$ROOT/SVF" -B "$ROOT/svf-build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=clang-21 -DCMAKE_CXX_COMPILER=clang++-21 \
   -DLLVM_DIR=/usr/lib/llvm-21/lib/cmake/llvm \

@@ -1,31 +1,31 @@
 {
- "keys": 1183,
- "calls": 4028427,
+ "keys": 1182,
+ "calls": 4027793,
  "derived_covered_keys": 187,
- "union_covered_keys": 555,
+ "union_covered_keys": 556,
  "fallback_covered_keys": 66,
  "by_status": {
   "calls-kind": {
    "keys": 208,
-   "calls": 1029785,
+   "calls": 1029657,
    "derived": 0,
    "union": 208
   },
   "missing": {
-   "keys": 217,
-   "calls": 125158,
+   "keys": 223,
+   "calls": 125188,
    "derived": 73,
    "union": 132
   },
   "not-a-row/callable-unplaced": {
-   "keys": 245,
-   "calls": 1425,
+   "keys": 244,
+   "calls": 1411,
    "derived": 0,
    "union": 30
   },
   "not-a-row/generator-resume": {
    "keys": 80,
-   "calls": 2352427,
+   "calls": 2351887,
    "derived": 0,
    "union": 0
   },
@@ -36,8 +36,8 @@
    "union": 0
   },
   "not-a-row/reached-otherwise": {
-   "keys": 271,
-   "calls": 397187,
+   "keys": 265,
+   "calls": 397114,
    "derived": 15,
    "union": 59
   },
@@ -48,16 +48,16 @@
    "union": 6
   },
   "not-a-row/registered-callback": {
-   "keys": 8,
-   "calls": 235,
+   "keys": 7,
+   "calls": 225,
    "derived": 0,
    "union": 0
   },
   "table": {
-   "keys": 120,
-   "calls": 122002,
+   "keys": 121,
+   "calls": 122103,
    "derived": 99,
-   "union": 120
+   "union": 121
   }
  },
  "by_hole": {
@@ -80,20 +80,20 @@
    "union": 0
   },
   "none": {
-   "keys": 1180,
-   "calls": 4028385,
+   "keys": 1179,
+   "calls": 4027751,
    "derived": 187,
-   "union": 555
+   "union": 556
   }
  },
- "union_misses_outside_holes": 625,
- "union_misses_outside_holes_calls": 2740951,
+ "union_misses_outside_holes": 623,
+ "union_misses_outside_holes_calls": 2740343,
  "union_misses_by_status": {
-  "not-a-row/callable-unplaced": 215,
-  "not-a-row/reached-otherwise": 212,
-  "missing": 83,
-  "not-a-row/registered-callback": 8,
+  "not-a-row/callable-unplaced": 214,
+  "not-a-row/reached-otherwise": 206,
+  "missing": 89,
   "not-a-row/receives-argument": 27,
+  "not-a-row/registered-callback": 7,
   "not-a-row/generator-resume": 80
  }
 }

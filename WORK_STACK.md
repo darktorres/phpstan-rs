@@ -40,9 +40,9 @@ State as of 2026-10-12, `master` at `e32fd95d`.
    user class's constructor can run user code the table's grammar cannot name.
    Plan: `/home/torres/.claude/plans/1-in-this-plan-woolly-dragon.md`, steps 0-10.
    Step 1 is not closed. Coverage gaps, with a reason each, are in
-   `tools/builtin-runs/scan/coverage-gaps.tsv` (1,380 of 6,333 positions: 1,042 server,
-   85 state, 122 value, 39 not-recordable, 22 arity, 21 class-name, 20 file-or-font,
-   19 serialised, 7 session, 2 scope, 1 crash).
+   `tools/builtin-runs/scan/coverage-gaps.tsv` (1,363 rows, counted from the file on 2026-10-23: 1,048 server,
+   78 state, 126 value, 20 not-recordable, 22 arity, 21 class-name, 19 file-or-font,
+   19 serialised, 7 session, 2 scope, 1 crash; the earlier 1,380 total did not match the file).
    Next: the server decision, then the state and value gaps. See the plan's closing section.
    Step 0 added the passing controls `redis_get_precise` and
    `memcached_getdelayed_callback`; each failing fixture comes with the step
@@ -117,6 +117,8 @@ State as of 2026-10-12, `master` at `e32fd95d`.
    (6) the solver decision, F06.1, F06.3-F06.5. F04.2 is deferred to C22.
    The semantic gate reads the F headings and the R rows; the checkpoint lists
    what is not accepted (`checkpoint-validation.json`).
+   Investigation of the partial and open F tasks (2026-10-23, ledger notes): none is closable; the notes under each entry list the blockers. The missing evaluation cache (linked php-cli.bc, SVF, bison, re2c, Z3) blocks F02.1, F02.3, F03.2 to F03.4, F06.3 and F06.4, and one restore unblocks them. The rest need owner decisions the notes list.
+   SVF pin (2026-10-24): the lock pins the SVF-3.3 release tag (`5c45081f…`, archive `1515c0c9…`); the master commit `e889a513…` is superseded. The SVF-dependent campaign steps were re-run on the pin (ledger, "SVF-dependent remeasurement"): the fixtures pass, and `whole-compact-dda` reaches the 10 GiB cap. The release `dvf` aborts on the whole-program module with an LLVM assertion; a local stock build of the same tag reaches the cap too. Still open: the campaign's combined checkpoint (it needs an admission report from an enforcing worker), the builtin-runs sidecar (a single-worker `--verify` recording is running; the group regeneration is in the ledger and is not adopted), and the end-to-end `restore_environment.py` run. The CBMC steps, the complementary steps and the corpus check were rerun on 2026-10-24 (ledger). The tracer's clone fix is in `cattrace.c`; its re-recording and replay are in the ledger.
 4. **Then pop back, in this order:** level 3 (140 open review tasks, and steps
    19 and 21 of the stage A/B fix plan, `~/.claude/plans/peppy-drifting-coral.md`),
    then level 2 (the crate split from Stage C on), then level 1 (the lanes).

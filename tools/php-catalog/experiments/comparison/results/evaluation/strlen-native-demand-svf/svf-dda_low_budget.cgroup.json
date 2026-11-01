@@ -1,0 +1,19 @@
+{
+  "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p3508469-i28669794.scope",
+  "memory_max_bytes": 10737418240,
+  "swap_max_bytes": 0,
+  "aggregate_hard_limit_enforced": true,
+  "command": [
+    "/home/torres/.cache/php-catalog-digest/svf-3.3/unpacked/SVF-linux-x86_64/bin/dvf",
+    "-extapi=/home/torres/.cache/php-catalog-digest/svf-3.3/unpacked/SVF-linux-x86_64/lib/extapi.bc",
+    "-dfs",
+    "-flow-bg=1",
+    "-query=funptr",
+    "-stat",
+    "-print-query-pts",
+    "/home/torres/.cache/php-catalog-digest/svf-demand-release/capsules/strlen-native-demand.bc"
+  ],
+  "exit_code": 0,
+  "memory_peak_bytes": 535232512,
+  "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+}

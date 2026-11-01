@@ -46,6 +46,12 @@ call_user_func_array	0[]	method	func1	3	2	True	Zend/tests/access_modifiers/acces
 call_user_func_array	0[]	method	func2	3	3	True	Zend/tests/access_modifiers/access_modifiers_011.php
 call_user_func_array	0[]	method	func3	2	2	True	Zend/tests/dynamic_call/bug48770_2.php
 call_user_func_array	0[]	method	throwexception	1	1	True	ext/standard/tests/general_functions/bug31190.php
+clone	0	method	$foo::set	2	1	True	Zend/tests/clone/clone_with_012.php
+clone	0	method	$hooked::set	6	3	True	Zend/tests/clone/clone_with_003.php
+clone	0	method	$maxlength::set	3	2	True	Zend/tests/clone/clone_with_004.php
+clone	0	method	$minlength::set	3	2	True	Zend/tests/clone/clone_with_004.php
+clone	0	method	gethash	1	1	True	ext/spl/tests/SplObjectStorage/bug67582.php
+clone	0	method	{closure}	14	8	True	Zend/tests/clone/clone_with_009.php
 dirname	0	method	__tostring	1	1	True	ext/standard/tests/strings/dirname_variation.php
 dom\htmldocument::savehtmlfile	?	wrapper	stream_open	1	1	False	ext/dom/tests/modern/html/serializer/HTMLDocument_serialize_failing_stream.php
 dom\htmldocument::savehtmlfile	?	wrapper	stream_write	2	1	False	ext/dom/tests/modern/html/serializer/HTMLDocument_serialize_failing_stream.php
@@ -173,7 +179,7 @@ splfileobject::__construct	?	wrapper	url_stat	2	2	True	ext/spl/tests/SplFileObje
 splfileobject::current	this	method	getcurrentline	4	2	True	ext/phar/tests/phar_oo_008.php
 splheap::extract	this	method	compare	1	1	False	ext/spl/tests/heap_corruption.php
 splheap::insert	0	method	__tostring	6	1	False	ext/spl/tests/gh16337.php
-splheap::insert	this	method	compare	36	10	False	ext/spl/tests/SplHeap_serialize_corrupted.php
+splheap::insert	this	method	compare	37	10	False	ext/spl/tests/SplHeap_serialize_corrupted.php
 splobjectstorage::offsetexists	this	method	gethash	2	1	True	ext/spl/tests/SplObjectStorage/bug67582.php
 splobjectstorage::offsetget	this	method	gethash	4	1	True	ext/spl/tests/SplObjectStorage/SplObjectStorage_getHash.php
 splobjectstorage::offsetset	this	method	gethash	5	2	True	ext/spl/tests/SplObjectStorage/SplObjectStorage_getHash.php

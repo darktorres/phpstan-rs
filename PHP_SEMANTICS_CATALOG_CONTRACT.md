@@ -123,20 +123,27 @@ future schema.
 
 Cleanup is part of the same simulation obligation, not an exception to it. A
 normal cleanup continuation that resumes a pending completion preserves that
-completion and its accumulated state. A cleanup return may replace a pending
-PHP throw; that is the sole replacement cell modeled and tested today. Cleanup
-throws and all cleanup fatal, suspension, or native-unwind completions while
-any completion is pending are rejected with `UnsupportedCleanupReplacement`.
-They remain unsupported until a rule and regression evidence exist. In
-particular, no pending fatal, suspension, or native-unwind completion may be
-silently converted to a normal return or PHP throw.
+completion and its accumulated state. While a PHP throw is pending, a cleanup
+destructor can produce five completions, and each is a modeled replacement cell
+backed by a runtime oracle case in `strlen-host-oracle-8.5.4.json`:
+`cleanup_destructor_returns` (a normal return preserves the pending throw),
+`cleanup_destructor_throws` (a PHP throw replaces it), `cleanup_destructor_exits`
+(`exit()`, modeled as the native-unwind completion), `cleanup_destructor_fatal`
+(a fatal replaces it), and `cleanup_destructor_suspends` (a suspension, whose
+resumption re-raises the pending throw). The evaluator's matrix test
+`cleanup_replacement_matrix_allows_evidenced_php_throw_replacements_only` pins
+these cells. The replacement is the outcome only: the model does not record the
+replaced throw as the previous exception of the replacing one, and the oracle
+does not observe that link.
 
-The evaluator and certificate replay enforce this rule. The current supported
-matrix is intentionally narrow: no pending completion permits a cleanup
-replacement, except pending PHP throw plus cleanup `Return`. Normal cleanup
-events, branches, joins, and `Resume` preserve the pending completion. Other
-replacement cells fail closed under R01.5 and remain outside the modeled
-behavior claim.
+Cleanup replacement of a pending fatal, suspension, or native-unwind completion
+remains rejected with `UnsupportedCleanupReplacement` until a rule and regression
+evidence exist. In particular, no pending fatal, suspension, or native-unwind
+completion may be silently converted to a normal return or PHP throw. The
+evaluator and certificate replay enforce this rule. Normal cleanup events,
+branches, joins, and `Resume` preserve the pending completion. Replacement cells
+over any other pending kind fail closed under R01.5 and remain outside the
+modeled behavior claim.
 
 The evaluator and post-fixpoint certificate validator check a narrower,
 host-relative invariant: under the supplied host's operations and
@@ -226,10 +233,11 @@ Sequential composition passes each normal state and result into the next
 operation. A PHP throw, fatal exit, or suspension bypasses normal-only
 operations. Effects that happened before the exit remain visible. A cleanup
 continuation may run for a pending exit. Resuming cleanup preserves the pending
-completion. The only replacement rule currently modeled and tested is cleanup
-`Return` replacing a pending PHP throw. Every other abrupt cleanup replacement
-is rejected until modeled and tested. The evaluator must not silently convert
-pending fatal, suspension, or native-unwind completions into another kind.
+completion. The replacement rules modeled and tested are the five cells over a pending PHP
+throw listed in the cleanup paragraph above. Every replacement of a pending
+fatal, suspension, or native-unwind completion is rejected until modeled and
+tested. The evaluator must not silently convert pending fatal, suspension, or
+native-unwind completions into another kind.
 
 Alternative paths retain their guard and outcome correlation until a sound
 join is required. Joining can add possible values or events, but cannot remove
@@ -327,7 +335,7 @@ sequence is semantic.
 | A closed wrapper invokes an open child but retains its own closed return coverage, or omits child coverage entirely or by domain. | The wrapper's result may depend on child behavior, so child uncertainty must compose into the result and incomplete metadata must not default to closed. | `open_child_coverage_opens_a_closed_parent_domain`; `incomplete_child_coverage_rejects_the_evaluation`; `omitted_child_coverage_rejects_the_evaluation` |
 | An invoked child marks its invocation domain not applicable while returning a complete coverage vector. | A composed call necessarily has invocation behavior; a full vector cannot make that fact inapplicable. | `invoked_child_cannot_mark_invocation_not_applicable` |
 | A maybe-applicable target graph is selected as definitely applicable, or its uncovered remainder is dropped. | The target set includes configurations whose behavior was not established. | `target_selection_keeps_unknown_remainder_and_selects_exact_scenario`; target-module correlated-scenario tests |
-| A loop joins or widens abstract state while the returned domain metadata remains `Exact`. | Consumers could treat a joined or extrapolated fact as exact and overstate its precision. | `cyclic_graph_reaches_a_stable_joined_exit`; `widening_is_reflected_in_domain_precision` |
+| A loop joins or widens abstract state while the returned domain metadata remains `Exact`. | Consumers could treat a joined or extrapolated fact as exact and overstate its precision. | `cyclic_graph_reaches_a_stable_joined_exit`; `widening_preserves_the_transferred_lower_bound_and_reflects_precision` |
 | A host join or widening returns a state/result that does not contain both incoming possibilities. | The worklist can reach an empty queue after silently dropping a reachable value, so queue exhaustion alone is not a closure argument. | `evaluator_rejects_a_join_that_drops_a_reachable_state`; `evaluator_rejects_a_value_join_that_drops_a_reachable_result`; `evaluator_rejects_a_widening_that_drops_a_reachable_state` |
 
 These tests check structural behavior in a small evaluator host. They do not

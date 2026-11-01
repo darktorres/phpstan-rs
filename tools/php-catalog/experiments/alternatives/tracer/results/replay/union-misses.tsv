@@ -1,14 +1,14 @@
 fn	place	kind	detail	count	status	hole	derived	example
-generator::send	?	user-function	inflatestream	2349855	not-a-row/generator-resume		0	ext/zlib/tests/inflate_add_basic.php
-random\randomizer::getbytesfromstring	?	other-method	generate	147720	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/engine_unsafe_biased.php
+generator::send	?	user-function	inflatestream	2349315	not-a-row/generator-resume		0	ext/zlib/tests/inflate_add_basic.php
+random\randomizer::getbytesfromstring	?	other-method	generate	147683	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/engine_unsafe_biased.php
 random\randomizer::getint	?	other-method	generate	80065	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/compatibility_user.php
 random\randomizer::getbytes	?	other-method	generate	62898	not-a-row/reached-otherwise		0	ext/random/tests/02_engine/user_reference_return.php
 random\randomizer::shufflearray	?	other-method	generate	20698	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/engine_unsafe_biased.php
 random\randomizer::shufflebytes	?	other-method	generate	20581	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/engine_unsafe_biased.php
-random\randomizer::pickarraykeys	?	other-method	generate	15900	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/engine_unsafe_biased.php
+random\randomizer::pickarraykeys	?	other-method	generate	15924	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/engine_unsafe_biased.php
 random\randomizer::nextint	?	other-method	generate	10003	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/engine_unsafe_biased.php
 random\randomizer::nextfloat	?	other-method	generate	10000	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/methods/nextFloat.php
-random\randomizer::getfloat	?	other-method	generate	8470	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/methods/getFloat.php
+random\randomizer::getfloat	?	other-method	generate	8472	not-a-row/reached-otherwise		0	ext/random/tests/03_randomizer/methods/getFloat.php
 var_dump	?	other-method	__destruct	5000	not-a-row/reached-otherwise		0	Zend/tests/gc/gc_045.php
 intlchar::enumchartypes	?	other-method	privatemethod	4144	not-a-row/reached-otherwise		0	Zend/tests/bug78770.php
 generator::send	?	user-function	deflatestream	1260	not-a-row/generator-resume		0	ext/zlib/tests/deflate_add_basic.php
@@ -20,24 +20,23 @@ xsltprocessor::transformtoxml	?	user-function	testphpfunction	101	not-a-row/call
 curl_exec	?	user-function	{closure}	95	not-a-row/callable-unplaced		0	ext/curl/tests/curl_progress.php
 gc_collect_cycles	?	other-method	__destruct	83	not-a-row/reached-otherwise		0	Zend/tests/fibers/destructors_001.php
 callbackfilteriterator::accept	?	other-method	test	72	not-a-row/reached-otherwise		0	ext/spl/tests/CallbackFilterIteratorTest.php
-file_get_contents	?	user-function	stream_notification_callback	70	not-a-row/callable-unplaced		0	ext/standard/tests/http/bug47021.php
+file_get_contents	?	user-function	stream_notification_callback	63	not-a-row/callable-unplaced		0	ext/standard/tests/http/bug47021.php
 session_start	?	other-method	open	55	not-a-row/reached-otherwise		0	ext/session/tests/gh12504.php
 session_start	?	other-method	read	54	not-a-row/reached-otherwise		0	ext/session/tests/gh12504.php
 generator::next	?	user-function	gen	50	not-a-row/generator-resume		0	Zend/tests/generators/backtrace_multi_yield_from.php
-clone	?	other-method	__clone	44	not-a-row/reached-otherwise		0	Zend/tests/clone/clone_005.php
 generator::send	?	user-function	gen	42	not-a-row/generator-resume		0	Zend/tests/generators/bug68775.php
 session_write_close	?	other-method	close	40	not-a-row/reached-otherwise		0	ext/session/tests/user_session_module/basic_set_save_handler_test.php
 session_write_close	?	other-method	write	40	not-a-row/reached-otherwise		0	ext/session/tests/user_session_module/basic_set_save_handler_test.php
 reflectionclass::initializelazyobject	0	receives-argument	{closure}	38	not-a-row/lazy-initializer	H3	0	Zend/tests/lazy_objects/clone_initialized.php
 iconv_mime_encode	?	user-function	my_error_handler	36	not-a-row/callable-unplaced		0	ext/iconv/tests/iconv_mime_encode.php
 callbackfilteriterator::accept	?	user-function	{closure}	34	not-a-row/callable-unplaced		0	Zend/tests/gh7958.php
-curl_exec	?	other-method	__call	34	not-a-row/reached-otherwise		0	ext/curl/tests/curl_progress_trampoline.php
 pdostatement::fetchall	?	other-method	__construct	34	not-a-row/reached-otherwise		0	ext/pdo_sqlite/tests/bug46139.php
 array_intersect_ukey	?	other-method	static_compare_func	32	not-a-row/reached-otherwise		0	ext/standard/tests/array/array_intersect_ukey_variation9.php
-curl_exec	?	user-function	foo	31	not-a-row/callable-unplaced		0	ext/curl/tests/curl_copy_handle_xferinfo.php
+curl_exec	?	other-method	__call	31	not-a-row/reached-otherwise		0	ext/curl/tests/curl_progress_trampoline.php
 reflectionattribute::newinstance	?	other-method	__construct	30	not-a-row/reached-otherwise		0	Zend/tests/attributes/002_rfcexample.php
 reflectionclass::initializelazyobject	?	user-function	{closure}	30	not-a-row/callable-unplaced		0	Zend/tests/lazy_objects/convert_to_array.php
 array_udiff_uassoc	?	other-method	comp_func_key	28	not-a-row/reached-otherwise		0	ext/standard/tests/array/array_udiff_uassoc_basic.php
+curl_exec	?	user-function	foo	28	not-a-row/callable-unplaced		0	ext/curl/tests/curl_copy_handle_xferinfo.php
 preg_replace_callback_array	?	other-method	__call	25	not-a-row/reached-otherwise		0	ext/pcre/tests/preg_replace_callback_array_trampoline.php
 callbackfilteriterator::accept	?	user-function	test	24	not-a-row/callable-unplaced		0	ext/spl/tests/CallbackFilterIteratorTest.php
 session_start	?	user-function	{closure}	23	not-a-row/callable-unplaced		0	ext/session/tests/gh12504.php
@@ -66,6 +65,7 @@ array_intersect_ukey	2[]	method	class_compare_func	16	missing		0	ext/standard/te
 file_get_contents	?	user-function	{closure}	16	not-a-row/callable-unplaced		0	ext/standard/tests/streams/gh10031.php
 sqlite3::querysingle	?	other-method	__call	16	not-a-row/reached-otherwise		0	ext/sqlite3/tests/sqlite3_trampoline_create_aggregate.php
 closure::call	?	user-function	{closure}	15	not-a-row/callable-unplaced		0	Zend/tests/closures/bug70987.php
+clone	0	method	{closure}	14	missing		0	Zend/tests/clone/clone_with_009.php
 debug_zval_dump	?	user-function	{closure}	14	not-a-row/callable-unplaced		0	ext/standard/tests/bug79821.php
 stream_filter_remove	?	other-method	filter	14	not-a-row/reached-otherwise		0	ext/standard/tests/filters/bug46164-1.php
 xml_parse	0	receives-argument	startelement	14	not-a-row/receives-argument		0	ext/xml/tests/bug26614_libxml_gte2_11.php
@@ -97,7 +97,6 @@ array_intersect_uassoc	2[]	method	class_compare_func	10	missing		0	ext/standard/
 array_map	?	other-method	foo	10	not-a-row/reached-otherwise		0	Zend/tests/callable_self_parent_static_deprecation.php
 assert	?	user-function	{closure}	10	not-a-row/callable-unplaced		0	Zend/tests/assert/gh16293_002.php
 call_user_func_array	?	other-method	foo	10	not-a-row/reached-otherwise		0	Zend/tests/callable_self_parent_static_deprecation.php
-clone	0	receives-argument	{closure}	10	not-a-row/registered-callback		0	Zend/tests/clone/clone_with_009.php
 pdo::quote	?	user-function	{closure}	10	not-a-row/callable-unplaced		0	ext/pdo_sqlite/tests/gh13952.php
 serialize	0	receives-argument	{closure}	10	not-a-row/registered-callback		0	Zend/tests/lazy_objects/init_trigger_serialize.php
 session_write_close	?	user-function	close	10	not-a-row/callable-unplaced		0	ext/session/tests/user_session_module/session_set_save_handler_basic.php
@@ -139,7 +138,7 @@ var_export	0	method	$changed::get	7	missing		0	Zend/tests/property_hooks/dump.ph
 array_map	?	other-method	square	6	not-a-row/reached-otherwise		0	ext/standard/tests/array/array_map_object1.php
 array_map	?	other-method	staticparent1	6	not-a-row/reached-otherwise		0	ext/standard/tests/array/array_map_object3.php
 call_user_func	?	other-method	__callstatic	6	not-a-row/reached-otherwise		0	Zend/tests/fr47160.php
-clone	?	other-method	$hooked::set	6	not-a-row/reached-otherwise		0	Zend/tests/clone/clone_with_003.php
+clone	0	method	$hooked::set	6	missing		0	Zend/tests/clone/clone_with_003.php
 generator::current	?	user-function	delegate	6	not-a-row/generator-resume		0	Zend/tests/generators/gc_with_root_parent_mismatch.php
 generator::next	?	user-function	g	6	not-a-row/generator-resume		0	Zend/tests/generators/gh15275-003.php
 generator::next	?	user-function	gen2	6	not-a-row/generator-resume		0	Zend/tests/generators/generator_in_multipleiterator.php
@@ -172,7 +171,6 @@ array_multisort	?	user-function	error_handle	4	not-a-row/callable-unplaced		0	ex
 arrayiterator::current	?	user-function	{closure}	4	not-a-row/callable-unplaced		0	ext/spl/tests/ArrayObject/gh15833_1.php
 assert	?	other-method	assert	4	not-a-row/reached-otherwise		0	ext/standard/tests/assert/assert.php
 call_user_func_array	?	other-method	__construct	4	not-a-row/reached-otherwise		0	ext/standard/tests/general_functions/bug40398.php
-clone	?	user-function	{closure}	4	not-a-row/callable-unplaced		0	Zend/tests/lazy_objects/clone_creates_object_with_independent_state_001.php
 curl_multi_exec	?	other-method	__invoke	4	not-a-row/reached-otherwise		0	ext/curl/tests/curl_pause_001.php
 fgets	?	other-method	filter	4	not-a-row/reached-otherwise		0	ext/standard/tests/file/userfilters.php
 gc_collect_cycles	?	user-function	f	4	not-a-row/callable-unplaced		0	Zend/tests/generators/gh15330-003.php
@@ -211,8 +209,8 @@ call_user_func	?	other-method	f2	3	not-a-row/reached-otherwise		0	tests/classes/
 call_user_func_array	?	other-method	__callstatic	3	not-a-row/reached-otherwise		0	Zend/tests/lsb/lsb_022.php
 class_exists	?	user-function	testfunc1	3	not-a-row/callable-unplaced		0	ext/spl/tests/spl_autoload_001.php
 class_exists	?	user-function	testfunc2	3	not-a-row/callable-unplaced		0	ext/spl/tests/spl_autoload_001.php
-clone	?	other-method	$maxlength::set	3	not-a-row/reached-otherwise		0	Zend/tests/clone/clone_with_004.php
-clone	?	other-method	$minlength::set	3	not-a-row/reached-otherwise		0	Zend/tests/clone/clone_with_004.php
+clone	0	method	$maxlength::set	3	missing		0	Zend/tests/clone/clone_with_004.php
+clone	0	method	$minlength::set	3	missing		0	Zend/tests/clone/clone_with_004.php
 domdocument::validate	?	user-function	{closure}	3	not-a-row/callable-unplaced		0	ext/libxml/tests/libxml_set_external_entity_loader_basic.php
 enum_exists	?	user-function	{closure}	3	not-a-row/callable-unplaced		0	Zend/tests/enum/enum_exists.php
 fclose	?	other-method	onclose	3	not-a-row/reached-otherwise		0	ext/standard/tests/filters/bug35916.php
@@ -283,7 +281,7 @@ class_exists	?	user-function	autoload_first	2	not-a-row/callable-unplaced		0	ext
 class_implements	?	user-function	test_error_handler	2	not-a-row/callable-unplaced		0	ext/spl/tests/class_implements_variation1.php
 class_implements	?	user-function	{closure}	2	not-a-row/callable-unplaced		0	ext/spl/tests/class_implements_variation.php
 class_uses	?	user-function	test_error_handler	2	not-a-row/callable-unplaced		0	ext/spl/tests/class_uses_variation1.php
-clone	?	other-method	$foo::set	2	not-a-row/reached-otherwise		0	Zend/tests/clone/clone_with_012.php
+clone	0	method	$foo::set	2	missing		0	Zend/tests/clone/clone_with_012.php
 curl_exec	0	receives-argument	curl_read	2	not-a-row/receives-argument		0	ext/curl/tests/bug68937.php
 curl_exec	0	receives-argument	custom_readfunction	2	not-a-row/receives-argument		0	ext/curl/tests/curl_read_callback.php
 domdocument::loadxml	?	user-function	{closure}	2	not-a-row/callable-unplaced		0	ext/libxml/tests/libxml_set_external_entity_loader_variation1.php
@@ -425,7 +423,7 @@ class_exists	?	other-method	dynaload	1	not-a-row/reached-otherwise		0	ext/spl/te
 class_exists	?	user-function	myautoload	1	not-a-row/callable-unplaced		0	ext/spl/tests/spl_autoload_008.php
 class_parents	?	user-function	{closure}	1	not-a-row/callable-unplaced		0	ext/spl/tests/spl_003.php
 class_uses	?	user-function	{closure}	1	not-a-row/callable-unplaced		0	ext/spl/tests/class_uses_variation.php
-clone	?	other-method	gethash	1	not-a-row/reached-otherwise		0	ext/spl/tests/SplObjectStorage/bug67582.php
+clone	0	method	gethash	1	missing		0	ext/spl/tests/SplObjectStorage/bug67582.php
 collator::__construct	?	user-function	{closure}	1	not-a-row/callable-unplaced		0	ext/intl/tests/gh8115.php
 curl_exec	0	receives-argument	curl_callback	1	not-a-row/receives-argument		0	ext/curl/tests/curl_write_callback.php
 curl_exec	0	receives-argument	curl_header_callback	1	not-a-row/receives-argument		0	ext/curl/tests/curl_writeheader_callback.php

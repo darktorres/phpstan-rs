@@ -172,6 +172,8 @@ function run_units(array $units, array $weights, array $run): array
 {
     $unitLines = [];
     $failed = [];
+    // The children that died or timed out in their retry too: their rows are missing from the table.
+    $lost = [];
     $tries = [];
     $done = 0;
     $respawns = 0;
@@ -359,6 +361,11 @@ function run_units(array $units, array $weights, array $run): array
                         $quiet[] = $index;
                         $keysByUnit[$index] = is_array($message[2]) ? ($message[2]['keys'] ?? []) : [];
                     } else {
+                        if ($quietMode) {
+                            foreach (is_array($message[2] ?? null) ? ($message[2]['keys'] ?? []) : [] as $child) {
+                                $lost[] = implode(' ', $units[$index]) . "\t" . $child;
+                            }
+                        }
                         $key = $keyOf($index);
                         if ($key !== null && $run['cache'] !== null) {
                             cache_write($run['cache'], $key, array_values(array_map(strval(...), array_keys($unitLines[$index]))));
@@ -397,8 +404,8 @@ function run_units(array $units, array $weights, array $run): array
             $spawn();
         }
     }
-    /** @var array{array<int, array<string, true>>, list<array{string, string, string, int, int}>} $result */
-    $result = [$unitLines, $failed];
+    /** @var array{array<int, array<string, true>>, list<array{string, string, string, int, int}>, list<string>} $result */
+    $result = [$unitLines, $failed, $lost];
     return $result;
 }
 

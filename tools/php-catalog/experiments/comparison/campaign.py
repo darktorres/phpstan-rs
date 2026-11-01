@@ -195,13 +195,14 @@ def compact_build(cache, runner):
     head = subprocess.check_output(['git', '-C', str(clone), 'rev-parse', 'HEAD'], text=True).strip()
     if head != lock['svf_commit']:
         raise RuntimeError(f'compact source is at {head}, not the locked {lock["svf_commit"]}')
+    relocatable = HERE / 'svf-relocatable-extapi-3.3.patch'
     subprocess.run([str(HERE / 'build_svf_pathfree.sh'), str(build_root), str(clone),
-                    str(cache / 'root/deps/usr')], check=True)
+                    str(cache / 'root/deps/usr'), str(relocatable)], check=True)
     binary = build_root / 'svf-build/bin/dvf'
     (runner.output / 'compact-lock.json').write_text(json.dumps(dict(
         source_commit=head,
         patch_sha256=digest(HERE / 'svf-compact.patch'),
-        relocatable_patch_sha256=digest(HERE / 'svf-relocatable-extapi.patch'),
+        relocatable_patch_sha256=digest(relocatable),
         binary_sha256=digest(binary),
         build='build_svf_pathfree.sh (full build from the pinned commit; no object reuse)'), indent=2) + '\n')
     return binary

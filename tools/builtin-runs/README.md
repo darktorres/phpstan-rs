@@ -74,8 +74,10 @@ which is what the regeneration is checked against.
 A worker under `bwrap` sees the host's files read-only, a private home
 directory at `/home/worker` that is a tmpfs capped at 256 MiB (less when the
 memory available cannot hold every worker's at twice that; the run refuses
-below 256 MiB), where its directories are made; no network; and its own pid,
-uts and ipc namespaces. Each child runs under
+below 256 MiB), where its directories are made; a private `/tmp`, also a
+tmpfs of that size, since the host's is read-only there and a builtin that
+writes its temporary files into it (ImageMagick's pixel cache) segfaults; no
+network; and its own pid, uts and ipc namespaces. Each child runs under
 `RLIMIT_AS` 2 GiB, `RLIMIT_FSIZE` 64 MiB, `RLIMIT_NOFILE` 1024, `RLIMIT_CORE`
 0 and `RLIMIT_CPU` 60 s, with `SIGXFSZ` ignored, so a write over the limit
 fails rather than killing the child. Before a worker takes a unit it runs a

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Compares the tracer's observations with the builtin-runs table and the type-derived bound's
-vocabulary. Usage: compare.py TRACE.tsv TABLE.tsv OUT_DIR"""
+vocabulary. Usage: compare.py TRACE.tsv TABLE.tsv OUT_DIR [TEST_ROOT]
+
+TEST_ROOT, when given, is the php-src tree prefix stripped from the script names in the examples."""
 import collections, json, os, sys
 
 import classify
 
 trace_path, table_path, out = sys.argv[1:4]
+test_root = sys.argv[4] if len(sys.argv) > 4 else None
 os.makedirs(out, exist_ok=True)
 
 WRAPPER = {"stream_open", "stream_read", "stream_write", "stream_close", "stream_eof", "stream_tell",
@@ -48,7 +51,7 @@ for line in open(trace_path, errors="replace"):
         key = (fn_l, "?", "other-method", m)
     o = obs[key]
     o["count"] += int(count)
-    o["scripts"].add(script.replace("/home/torres/.cache/php-alt-exp/exp3/php-src-tests/", ""))
+    o["scripts"].add(script.replace(test_root, "") if test_root else script)
 
 summary = collections.Counter()
 new_rows, bound_holes = [], []

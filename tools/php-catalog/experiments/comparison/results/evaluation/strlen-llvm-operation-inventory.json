@@ -66,15 +66,15 @@
       "calls": [
         "zend_parse_arg_str_weak"
       ],
-      "extracted_bitcode_sha256": "7c8680beb855471b7cc08c1080fb5c7b80a113cc9fe5ade09c1de6bc7842eeeb",
-      "extracted_ir_sha256": "0ddd5c2e42104b0f8a20c529c0c065c6b814d742558247220e5ea305e3b70a33"
+      "extracted_bitcode_sha256": "65434e4f56f42ae270d68942df0131a88df8898dbfddf4e3f61cbf307111432f",
+      "extracted_ir_sha256": "44809dbdd61f83b8355fef99f64a81b610bf098e67f06d8af2b8da5ce9b69dac"
     },
     "zend_parse_arg_str_slow": {
       "calls": [
         "zend_parse_arg_str_weak"
       ],
-      "extracted_bitcode_sha256": "1e5941516861ab82f5c732756df2f77153b7419bb8e77a936c8a075d84e768a9",
-      "extracted_ir_sha256": "2c46955ac23c0675a3c6eb42e97a1a61c1270aaf579271e64973b463e4750a0d"
+      "extracted_bitcode_sha256": "bf9fa874c64406a95fe985e5673367bd9ce6be042d06e79b9bfb9230a8be9836",
+      "extracted_ir_sha256": "41917ce96baf78521f5d2edc7a6d7ff5ea61e7da9d2d47c33be65f9a33e7a2b0"
     },
     "zend_parse_arg_str_weak": {
       "calls": [
@@ -82,8 +82,8 @@
         "zend_null_arg_deprecated",
         "zend_objects_store_del"
       ],
-      "extracted_bitcode_sha256": "05ee2e8b8e687ff8f7cac706255f22c1b1a3eed50596610019a8a4b17fe1f254",
-      "extracted_ir_sha256": "adfb034c20bf18547951a3da1d9c723f6f74bf4640bef98f6573e34cf0f53b93"
+      "extracted_bitcode_sha256": "0cdece9e1a65045b380e00a693dc7d343a137c0b8b7df367709b3e36a367acdd",
+      "extracted_ir_sha256": "ae7a4f0f5006eddd57fa81835e9a0de23460f281311cc32cdaa73b8b0a138ec2"
     }
   },
   "ir_witness": [
@@ -96,10 +96,10 @@
     "store i64 %193, ptr %195, align 8, !dbg !60"
   ],
   "linked_bitcode": {
-    "extracted_bitcode_sha256": "bf6696c0e9952198988cbdaa765b88d409e57ce25d9538877ea9d535dbf8922e",
-    "extracted_ir_sha256": "9e5f1e2bfe8ae4bb40dd318359d013210ab168dc157ae08186fbf5018f19a5ee",
+    "extracted_bitcode_sha256": "99b66710b9747d7ba96647c56a25379c48c871504ab37bb93bac2e5be17bbce1",
+    "extracted_ir_sha256": "a6424955d6d807f8985c6c2e93919380ca17184595390149d86410b9d979e45c",
     "function": "zif_strlen",
-    "sha256": "e3427ce81f98f9a04db3e04ce822c3e0f1c731137f0d63e0440f862b1e61c93e"
+    "sha256": "37de322fa6b5a9b475f55ded6e22b8f712288e225acfbd39896ee8fa46a2c350"
   },
   "mapping": {
     "debug_line_matches_source_return": true,

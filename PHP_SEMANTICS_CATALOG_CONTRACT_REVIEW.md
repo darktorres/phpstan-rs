@@ -499,8 +499,9 @@ here was committed.
 ### Results by item
 
 - **F02.1 (was Complete, now Partial).** Source commit `e5e09d06` matches both PHP trees.
-  clang 21.1.8 and gcc 15.2.0 match the lock. The linked bitcode hash `e3427ce8…` matches
-  `whole-clang/php-cli.bc`. Of the lock's eleven `source_sha256` entries, two no longer
+  clang 21.1.8 and gcc 15.2.0 match the lock. The linked bitcode hash recorded at review time
+  was `e3427ce8…`, the 2026-10-09 module; the module was rebuilt on 2026-10-24 to
+  `37de322f…`, which the witness and the builder pin now record. Of the lock's eleven `source_sha256` entries, two no longer
   match: `runtime.php` (already RV-11) and `run.py`, which changed in `4e7d29a3` after the
   lock was written in `043f2c78`. See RV-19.
 - **F01.3 (Complete stands).** Each claimed category has a test. Dropped transfer candidate:

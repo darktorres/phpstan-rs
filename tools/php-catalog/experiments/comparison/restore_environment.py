@@ -19,6 +19,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from run import resolve_record
@@ -90,6 +92,26 @@ def _matches(path: Path, digest: str) -> bool:
     return path.is_file() and sha(path) == digest
 
 
+def svf_release(root: Path, verify_only: bool) -> Path:
+    """Fetches the pinned SVF release archive, checks its digest, and returns its install directory."""
+    release = LOCK["svf_release"]
+    archive = root / release["asset"]
+    if not archive.is_file() and not verify_only:
+        urllib.request.urlretrieve(release["source"], archive)
+    require(archive.is_file(), f"SVF release archive not present: {archive}")
+    require(sha(archive) == release["asset_sha256"],
+            f"SVF release archive differs from the lock: {archive.name}")
+    install = root / "svf-release"
+    marker = install / ".extracted"
+    if not marker.is_file():
+        require(not verify_only, "the SVF release is not extracted; run without --verify-only")
+        install.mkdir(exist_ok=True)
+        with zipfile.ZipFile(archive) as release_zip:
+            release_zip.extractall(install)
+        marker.write_text(release["asset"] + "\n")
+    return install / "SVF-linux-x86_64"
+
+
 def canary(root: Path, units: int = 2, manifest_path: Path = None) -> None:
     """Re-emit the first units of the linked module from the link manifest and compare their digests.
 
@@ -130,12 +152,7 @@ def main(argv=None) -> int:
         svf_digests = {"bin/dvf": LOCK["svf_binary_sha256"]["bin/dvf"],
                        "bin/wpa": LOCK["svf_binary_sha256"]["bin/wpa"],
                        "lib/extapi.bc": LOCK["svf_extapi_sha256"]}
-        svf_root = root / "svf-pathfree"
-        svf_output = svf_root / "svf-build"
-        if not all(_matches(svf_output / name, digest) for name, digest in svf_digests.items()):
-            require(not args.verify_only, "the SVF build is missing or differs; run without --verify-only")
-            subprocess.run([str(HERE / "build_svf_pathfree.sh"), str(svf_root),
-                            str(root / "SVF"), str(deps)], check=True)
+        svf_output = svf_release(root, args.verify_only)
         for name, digest in svf_digests.items():
             require(sha(svf_output / name) == digest, f"SVF output differs from the lock: {name}")
         php_cli = root / "php-cli"
