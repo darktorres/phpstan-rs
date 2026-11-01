@@ -130,44 +130,95 @@ They change the registry's data model, and `e7b2521f` and `0f32829b` change the 
 
 Since `791d29cb` the 20 G plan's items 1 to 5 have landed in part: LOAD-1 (item 1), LOAD-2 except its last deletion, LOAD-3.2, 3.4 and 3.6, and LOAD-4.3 to 4.5 (their rows in §3). Their instruction counts and heap were measured on 2026-10-16 and 17 (the rows below the table), and the wall time at `aa896697` on 2026-10-17 (MEAS-4). The Piwigo gate has not run. The items 1 to 3 fixes (`ITEMS_1_TO_3_FIXES_PLAN.md`, LOAD-8) started on 2026-10-17: LOAD-8.1 (`6016499f`), LOAD-3.3's load part (`a5a4d85f`), CACHE-12 (`6705eedd`), LOAD-8.15 (`d6ca3442`), LOAD-8.2 (`68af1c72`, `276ed5ad`), LOAD-8.3 (`75b628f8`), LOAD-8.4 (`1ba57cc0`), LOAD-8.6 (`59bf55bc`), LOAD-8.14 (`1f351379`, `6e49d4e7`), LOAD-8.13 (`4a996352`), LOAD-8.10 (`9513479b`), LOAD-8.5 (`0fb1a4de`), LOAD-8.8 (`f676049c`), LOAD-8.9 (`098af486`, the editor's) and LOAD-8.7 (`30aa2002`, `8a1ca1e0`) are in, each measured against the row before it: every row of the plan.
 
-The rows that moved the Ir, in order (callgrind, off mode). Each row's output was byte-identical to the base's; each row's record has its checks.
+The completed tasks, in commit order. A row with an Ir figure moved the Ir (callgrind, off mode), and its output was byte-identical to the base's; its record has its checks. A row marked — has no Ir figure of its own: it falls inside one of the range rows, or was not measured.
 
-| row | from | commit | Ir after | change |
-|---|---|---|---|---|
-| base | | `5fb858c9`'s code | 25,625,190,065 | |
-| STUB-1 (with STUB-2, STUB-3) | off E1 (with P1, P5) | `3d5434b3` | 25,029,730,463 | −595.5 M |
-| CACHE-1, CACHE-2, CACHE-3 | off P2, D5, E13 | `c2cd1586` | 24,498,907,030 | −530.8 M |
-| STUB-4 | off P3 | `a13f4ed2` | 24,155,076,222 | −343.8 M |
-| STUB-5 | off P4 | `0ce52479` | 23,866,820,730 | −288.3 M |
-| CHECK-1 | off E2 | `60b0cd33` | 23,812,168,909 | −54.7 M |
-| CHECK-2 | off E3 | `07a0f111` | 23,785,065,626 | −27.1 M |
-| TYPE-1 | off E5 | `5ec70c1e` | 23,725,134,207 | −59.9 M |
-| TYPE-2 | off E6 | `f2f65cbb` | 23,701,951,690 | −23.2 M |
-| TYPE-3 | off E7 | `60e85393` | 23,672,079,898 | −29.9 M |
-| CHECK-3 | off E10 | `e081dbe9` | 23,619,596,541 | −52.5 M |
-| DOC-1 | off P7 | `a4035361` | 23,216,039,715 | −403.6 M |
-| REG-1 | off P9 | `c0dd2788` | 22,362,774,991 | −853.3 M |
-| PROD-1 | off P8a | `7726dacf` | 22,014,267,117 | −348.5 M |
-| PROD-2 | off P8b1 | `11837a04` | 21,775,661,606 | −238.6 M |
-| PROD-3 | off P8b | `791d29cb` | 20,928,053,254 | −847.6 M |
-| item 1, LOAD-1 | | `428ed943` → `99b1c2e4` | 21,114,767,711 | +226.2 M: path keys, their hashing and component walks (`aab67287`, `7bef998a`; about +128 M of self cost); `walk::resolve`'s `canonicalize` of symlinks (+24.6 M, `aab67287`); the content hash of every file (+25 M, `3334ebc9`, LOAD-1.4) |
-| the eight fixes (range; `fixes8`, one run) | | `99b1c2e4` → `ee56851c` | 20,909,227,687 | −205.5 M |
-| items 2 and 3, 28 commits | | `ee56851c` → `d870ddcb` | 21,289,129,115 | +379.9 M: `845efaab` (LOAD-3.4) +394 M, the other 27 commits −14 M |
-| item 5, LOAD-4.3 to 4.5 (range, unattributed) | | `d870ddcb` → `aa896697` | 21,331,572,685 | +42.4 M |
-| LOAD-8.1 | fixes R1 | `6016499f` | 20,948,523,065 | −381.2 M against `aa896697`'s code built again and measured beside it (21,329,725,495); warm −136.9 M |
-| LOAD-3.3, the load | fixes R11 | `a5a4d85f` | 20,809,876,336 | −138.6 M: mimalloc's cross-thread frees; the main thread −265.0 M |
-| CACHE-12 | off E11; fixes R12 | `6705eedd` | 20,806,948,614 | −2.9 M, inside the noise: a warm row. Warm −31.8 M (13,209,699,103 → 13,177,851,490); the main thread −394.7 M warm |
-| LOAD-8.15 | fixes R15 | `d6ca3442` | 20,803,639,377 | −3.3 M, inside the noise: a wall row. Off −21.6 ms (60 pairs, p = 0.031) for +18.9 MiB of peak RSS; the 745 purges (105.5 MiB) are gone |
-| LOAD-8.2 | fixes R2 | `68af1c72`, `276ed5ad` | 20,785,126,006 | −18.5 M: the walk's tree finds a file's directory by the hash its path carries (`Walk::merge` 50.4 M → 29.8 M), and the listings take the carried hash (`DirListings::listing` 31.9 M → 19.6 M) |
-| LOAD-8.3 | fixes R3 | `75b628f8` | 20,704,757,165 | −80.4 M: a directory's reach is made from its parent's, where every directory scanned its ancestors (`Starts::reaching` 74.8 M → 18.3 M inclusive, `Walk::prunes` 14.5 M → 0, for `Starts::below`'s 7.2 M); `Path::hash` −57.3 M of self cost |
-| LOAD-8.4 | fixes R4 | `1ba57cc0` | 20,657,737,639 | −47.0 M: the hand-over finds each file's parse by the hash its path carries (the main thread −27.8 M, its `Path::hash` 53.4 M → 26.1 M); the other −19.2 M is spread over the pool, inside MEAS-3's spread |
-| LOAD-8.6 | fixes R6 | `59bf55bc` | 20,533,513,526 | −124.2 M: vendor discovery places a path by its directory and reads kinds from the listings (its thread 391.0 M → 262.0 M: the drop and deduplication 119.2 M → 23.9 M, `Resolver::path` 97.8 M → 63.4 M). Warm −130.6 M, and the warm vendor wait −38.3 ms (p = 0.011) |
-| LOAD-8.14 | fixes R14 | `1f351379`, `6e49d4e7` | 20,522,048,368 | −11.5 M: the walk takes the vendor paths that discovery resolved (the main thread −7.9 M, `Walk::add_file` 6.5 M → 0), and its `readlink`s fall from 7,478 to 3,055 and its `statx` calls from 2,231 to 238. The main thread's stretch before the walk, 16 to 20 ms → 0 to 4 ms; warm −65.6 ms (p = 0.033), more than that stretch can give |
-| LOAD-8.13 | fixes R13 | `4a996352` | 20,512,402,375 | −9.6 M: a warm row; off, the discovery thread −5.7 M, as it builds each path in one buffer. Warm −181.3 M (12,894,418,032 → 12,713,085,018), all of it the discovery thread's: a warm load reads the generated files' entries from the per-file cache, and `parse_generated_file`'s 163.0 M is gone. The warm vendor wait fell from about 85 to 38 ms in two recordings each, with no wall change beyond the noise (p = 0.709) |
-| LOAD-8.10 | fixes R10 | `9513479b` | 20,582,303,714 | +69.9 M: a wall row. The walk's own code +0.9 M; the check parses 1,899 more doc comments (+54 M), since the memo they are read from is bounded and the context files, parsed last now, fill it. Warm −65.4 ms (p = 0.017): the parse starts at once, beside vendor discovery, where the pool waited 42 to 48 ms for it |
-| LOAD-8.5 | fixes R5 | `0fb1a4de` | 20,535,375,165 | −46.9 M: the use sites are kept by the file's number, so the merge routes a file's sites by it, and `judge_property_types` tests a set of numbers (`Path::hash` 50.4 M → 21.0 M: `file_tables::bucket`'s 13.65 M and the judgement's 13.65 M are gone); no wall change beyond the noise (p = 0.601) |
-| LOAD-8.8 | fixes R8 | `f676049c` | 20,499,751,098 | −35.6 M: a project's diagnostics are kept by the file's number until the report, which names each file from the table once (`Path::hash` 21.0 M → 1.3 M, the report's own map; `path_hash` 5.4 M → 0, as the check hands `checker_for` the number it holds); no wall change beyond the noise, off (p = 0.940) or warm (p = 0.247) |
-| LOAD-8.7 | fixes R7 | `30aa2002`, `8a1ca1e0` | 20,373,086,199 | −126.7 M: a path's name, its directory, a prefix and what is left after it are read from its bytes (`composer::path_bytes`), where `Path` walked its components, and the walk carries what it holds (each directory's place among the packages' directories, the file roots of one directory as one job); std's path code 117.4 M → 11.5 M of self cost, its entries by caller 140.9 M → 16.2 M, for 14.2 M of byte reads. The second commit −2.9 M, inside MEAS-3's spread (its path code −12 M by function). No wall change beyond the noise, off (p = 0.313) or warm (p = 0.627) |
+| row | from | commit | Ir after | warm wall (s) | change |
+|---|---|---|---|---|---|
+| base | | `5fb858c9`'s code | 25,625,190,065 | 1.561 | |
+| STUB-1 (with STUB-2, STUB-3) | off E1 (with P1, P5) | `3d5434b3` | 25,029,730,463 | 1.509 | −595.5 M |
+| CACHE-1, CACHE-2, CACHE-3 | off P2, D5, E13 | `c2cd1586` | 24,498,907,030 | 1.522 | −530.8 M |
+| STUB-4 | off P3 | `a13f4ed2` | 24,155,076,222 | 1.522 | −343.8 M |
+| STUB-5 | off P4 | `0ce52479` | 23,866,820,730 | 1.512 | −288.3 M |
+| CACHE-4 | off E15 | `efe621ad` | 23,857,481,881 | 1.511 | Add `vendor/phpstan-src/stubs` to the inputs that the stub cache key hashes (defect) |
+| SYN-5 | off E14 | `6dd06124` | 23,880,426,756 | 1.489 | Read `instanceof`'s right side with `parse_new_class_reference` (defect) |
+| CHECK-1 | off E2 | `60b0cd33` | 23,812,168,909 | 1.499 | −54.7 M |
+| CHECK-2 | off E3 | `07a0f111` | 23,785,065,626 | 1.497 | −27.1 M |
+| CACHE-5 | off E16 | `480107e3` | 23,804,196,359 | 1.484 | A map or set of names writes its entries in the order of the names (defect) |
+| TYPE-1 | off E5 | `5ec70c1e` | 23,725,134,207 | 1.519 | −59.9 M |
+| TYPE-2 | off E6 | `f2f65cbb` | 23,701,951,690 | 1.474 | −23.2 M |
+| TYPE-3 | off E7 | `60e85393` | 23,672,079,898 | 1.553 | −29.9 M |
+| CHECK-3 | off E10 | `e081dbe9` | 23,619,596,541 | 1.505 | −52.5 M |
+| DOC-1 | off P7 | `a4035361` | 23,216,039,715 | 1.492 | −403.6 M |
+| REG-1 | off P9 | `c0dd2788` | 22,362,774,991 | 1.287 | −853.3 M |
+| PROD-1 | off P8a | `7726dacf` | 22,014,267,117 | 1.306 | −348.5 M |
+| PROD-2 | off P8b1 | `11837a04` | 21,775,661,606 | 1.313 | −238.6 M |
+| PROD-3 | off P8b | `791d29cb` | 20,928,053,254 | 1.314 | −847.6 M |
+| REG-3 | split C4 gatetime | `58cfc5d2` | 20,909,151,679 | 1.300 | `xtask gatetime`: `--record` and `--since <hash>`, medians of three runs on prebuilt binaries |
+| REG-4.4 | split C4 data model | `8d35c99d` | 20,951,452,722 | 1.292 | Per-member flags: a property's finality on the property |
+| REG-4.6 | split C4 data model | `7a61603e` | 20,937,644,775 | 1.301 | A property's native type as an `Option` |
+| REG-4.3 | split C4 data model | `5401afc9` | 20,899,469,157 | 1.294 | A class's templates as one list of parameters, each with bound, variance, default and scope, where five… |
+| REG-4.8 | split C4 data model | `e7b2521f` | 20,888,392,940 | 1.304 | The explicit-`mixed` flags (`explicit_mixed_hint`, `return_explicit_mixed_hint`) read from the types |
+| LOAD-1.1 | 20 G 1 | `aab67287` | 20,868,337,508 | 1.446 | One identity |
+| LOAD-1.3 | 20 G 1 | `c9f6a85c` | 20,923,137,503 | 1.424 | One configuration |
+| LOAD-1.4 | 20 G 1 | `3334ebc9` | 20,933,054,693 | 1.429 | One load |
+| LOAD-1.5 | 20 G 1 | `5061565f` | 20,902,682,233 | 1.441 | One analysis |
+| LOAD-1.2 | 20 G 1 | `7bef998a` | 21,053,857,458 | 1.450 | What the identity decides |
+| LOAD-1.7 | 20 G 1 | `11e820f8` | 21,068,306,204 | 1.440 | Folders |
+| item 1, LOAD-1 | | `428ed943` → `99b1c2e4` | 21,114,767,711 | 1.436 | +226.2 M: path keys, their hashing and component walks (`aab67287`, `7bef998a`; about +128 M of self cost); `walk::resolve`'s `canonicalize` of symlinks (+24.6 M, `aab67287`); the content hash of every file (+25 M, `3334ebc9`, LOAD-1.4) |
+| LOAD-1.8 | 20 G 1 | `99b1c2e4` | 21,056,855,524 | 1.436 | Off the message loop |
+| the eight fixes (range; `fixes8`, one run) | | `99b1c2e4` → `ee56851c` | 20,909,227,687 | 1.336 | −205.5 M |
+| LOAD-2.1 | 20 G 2 | `3d2dc7c3` | 20,885,053,597 | 1.327 | One listing per directory per load |
+| LOAD-2.8 | 20 G 2 | `27c3b093` | 20,958,713,630 | 1.301 | The walk's other allocations |
+| LOAD-2.2 | 20 G 2 | `85a4ecad` | 20,985,628,110 | 1.304 | One task per directory, on the pool |
+| LOAD-2.3 | 20 G 2 | `07595369` | 20,974,273,289 | 1.293 | Spellings built, not respelled |
+| LOAD-2.7 | 20 G 2 | `2cd13c8e` | 20,937,216,372 | 1.299 | A path stored once |
+| LOAD-2.6 | 20 G 2 | `c1db8372` | 20,883,807,255 | 1.299 | Path data from the walk, all resolved |
+| LOAD-2.5 | 20 G 2 | `8590ff55` | 20,797,042,644 | 1.294 | Order without comparisons |
+| LOAD-2.4 | 20 G 2 | `df804239` | 20,932,605,952 | 1.323 | Parsing starts as directories are listed |
+| LOAD-3.2 | 20 G 3 | `001bd4f2` | 20,938,756,080 | 1.313 | A context file's state has the cached shape: the worker builds it, so a parsed and a cached context file give… |
+| LOAD-3.4 | 20 G 3 | `845efaab` | 21,284,535,789 | 1.336 | A context file is read into the worker's reusable read buffer; only a file whose tree is kept gets a source… |
+| LOAD-3.6 | 20 G 3 | `11f03ec9` | 21,294,721,749 | 1.345 | `ast_of` reads the overlay before the disk, so an open file with unsaved edits is parsed from its editor text |
+| items 2 and 3, 28 commits | | `ee56851c` → `d870ddcb` | 21,289,129,115 | 1.341 | +379.9 M: `845efaab` (LOAD-3.4) +394 M, the other 27 commits −14 M |
+| LOAD-4.4 | 20 G 5 | `412fafbc` | 21,229,976,221 | 1.335 | Whole-program merges by path rank |
+| LOAD-4.3 | 20 G 5 | `6bda466c` | 21,286,266,239 | 1.253 | The merge sharded |
+| LOAD-4.5 | 20 G 5 | `e9b253b4` | 21,332,054,362 | 1.243 | Keys stay keys, and files stay `FileId`s, |
+| item 5, LOAD-4.3 to 4.5 (range, unattributed) | | `d870ddcb` → `aa896697` | 21,331,572,685 | 1.304 | +42.4 M |
+| LOAD-8.1 | fixes R1 | `6016499f` | 20,948,523,065 | 1.305 | −381.2 M against `aa896697`'s code built again and measured beside it (21,329,725,495); warm −136.9 M |
+| LOAD-3.3, the load | fixes R11 | `a5a4d85f` | 20,809,876,336 | 1.305 | −138.6 M: mimalloc's cross-thread frees; the main thread −265.0 M |
+| CACHE-12 | off E11; fixes R12 | `6705eedd` | 20,806,948,614 | 1.244 | −2.9 M, inside the noise: a warm row. Warm −31.8 M (13,209,699,103 → 13,177,851,490); the main thread −394.7 M warm |
+| LOAD-8.15 | fixes R15 | `d6ca3442` | 20,803,639,377 | 1.220 | −3.3 M, inside the noise: a wall row. Off −21.6 ms (60 pairs, p = 0.031) for +18.9 MiB of peak RSS; the 745 purges (105.5 MiB) are gone |
+| LOAD-8.2 | fixes R2 | `68af1c72`, `276ed5ad` | 20,785,126,006 | 1.217 | −18.5 M: the walk's tree finds a file's directory by the hash its path carries (`Walk::merge` 50.4 M → 29.8 M), and the listings take the carried hash (`DirListings::listing` 31.9 M → 19.6 M) |
+| LOAD-8.3 | fixes R3 | `75b628f8` | 20,704,757,165 | 1.232 | −80.4 M: a directory's reach is made from its parent's, where every directory scanned its ancestors (`Starts::reaching` 74.8 M → 18.3 M inclusive, `Walk::prunes` 14.5 M → 0, for `Starts::below`'s 7.2 M); `Path::hash` −57.3 M of self cost |
+| LOAD-8.4 | fixes R4 | `1ba57cc0` | 20,657,737,639 | 1.255 | −47.0 M: the hand-over finds each file's parse by the hash its path carries (the main thread −27.8 M, its `Path::hash` 53.4 M → 26.1 M); the other −19.2 M is spread over the pool, inside MEAS-3's spread |
+| LOAD-8.6 | fixes R6 | `59bf55bc` | 20,533,513,526 | 1.180 | −124.2 M: vendor discovery places a path by its directory and reads kinds from the listings (its thread 391.0 M → 262.0 M: the drop and deduplication 119.2 M → 23.9 M, `Resolver::path` 97.8 M → 63.4 M). Warm −130.6 M, and the warm vendor wait −38.3 ms (p = 0.011) |
+| LOAD-8.14 | fixes R14 | `1f351379`, `6e49d4e7` | 20,522,048,368 | 1.165 | −11.5 M: the walk takes the vendor paths that discovery resolved (the main thread −7.9 M, `Walk::add_file` 6.5 M → 0), and its `readlink`s fall from 7,478 to 3,055 and its `statx` calls from 2,231 to 238. The main thread's stretch before the walk, 16 to 20 ms → 0 to 4 ms; warm −65.6 ms (p = 0.033), more than that stretch can give |
+| LOAD-8.13 | fixes R13 | `4a996352` | 20,512,402,375 | 1.149 | −9.6 M: a warm row; off, the discovery thread −5.7 M, as it builds each path in one buffer. Warm −181.3 M (12,894,418,032 → 12,713,085,018), all of it the discovery thread's: a warm load reads the generated files' entries from the per-file cache, and `parse_generated_file`'s 163.0 M is gone. The warm vendor wait fell from about 85 to 38 ms in two recordings each, with no wall change beyond the noise (p = 0.709) |
+| LOAD-8.10 | fixes R10 | `9513479b` | 20,582,303,714 | 1.087 | +69.9 M: a wall row. The walk's own code +0.9 M; the check parses 1,899 more doc comments (+54 M), since the memo they are read from is bounded and the context files, parsed last now, fill it. Warm −65.4 ms (p = 0.017): the parse starts at once, beside vendor discovery, where the pool waited 42 to 48 ms for it |
+| LOAD-8.5 | fixes R5 | `0fb1a4de` | 20,535,375,165 | 1.090 | −46.9 M: the use sites are kept by the file's number, so the merge routes a file's sites by it, and `judge_property_types` tests a set of numbers (`Path::hash` 50.4 M → 21.0 M: `file_tables::bucket`'s 13.65 M and the judgement's 13.65 M are gone); no wall change beyond the noise (p = 0.601) |
+| LOAD-8.8 | fixes R8 | `f676049c` | 20,499,751,098 | 1.084 | −35.6 M: a project's diagnostics are kept by the file's number until the report, which names each file from the table once (`Path::hash` 21.0 M → 1.3 M, the report's own map; `path_hash` 5.4 M → 0, as the check hands `checker_for` the number it holds); no wall change beyond the noise, off (p = 0.940) or warm (p = 0.247) |
+| LOAD-8.9 | fixes R9 | `098af486` | 20,481,715,754 | 1.083 | The bytes hashed once in the editor: |
+| LOAD-8.7 | fixes R7 | `30aa2002`, `8a1ca1e0` | 20,373,086,199 | 1.075 (reference, median of 80 runs) | −126.7 M: a path's name, its directory, a prefix and what is left after it are read from its bytes (`composer::path_bytes`), where `Path` walked its components, and the walk carries what it holds (each directory's place among the packages' directories, the file roots of one directory as one job); std's path code 117.4 M → 11.5 M of self cost, its entries by caller 140.9 M → 16.2 M, for 14.2 M of byte reads. The second commit −2.9 M, inside MEAS-3's spread (its path code −12 M by function). No wall change beyond the noise, off (p = 0.313) or warm (p = 0.627) |
+| SYN-1.1 | 20 G 9.1 | `2f9b1281` | 20,298,457,208 | 1.063 | `peeled` becomes a loop, with no guard |
+| REG-14.4 | 20 G 8 | `8739437e` | 20,292,388,994 | 1.080 | `from_decl` passes the parameters on, not a `Vec<&str>` of their names: the assert code takes a predicate,… |
+| LOAD-5.4 | 20 G 19 | `a5ab84c4` | 20,293,140,242 | 1.071 | No reader gets an empty file: `FileState::ast` goes, and every reader asks `ast_of` |
+| COMP-1 | plan #40; Part A's A1 | `097c164b` | 20,291,672,939 | 1.077 | `config.vendor-dir`, `COMPOSER_VENDOR_DIR` and `COMPOSER` are read as Composer reads them (`Config::get`,… |
+| LOAD-9 | LOAD-8.14's measurement | `3dcb1192` | 20,285,895,689 | 1.078 | The installed packages resolved once, beside discovery |
+| COMP-7 | plan #40 ("also (a)"); Part A's A1 | `acf48fb8` | 20,289,540,849 | 1.083 | third-party code that Composer installed outside the vendor directory (`installer-paths`: Drupal's… |
+| COMP-4 | plan #40; STUB-7.5's prerequisite (H4.1) | `2c6f1eec` | 20,305,576,530 | 1.099 | `psr-0` in `Autoload` and the generated maps' keys (the classmap's class names, the PSR prefixes) |
+| COMP-6 | plan #40; Part A's A8 | `088089ed` | 22,391,006,529 | 1.179 | a package's bundled `vendor/` (`rector/rector`, `symplify/easy-coding-standard`) is vendor context |
+| COMP-8 | plan #40 ("also (b)"); Part A's A8 | `5b76d855` | 22,400,420,145 | 1.179 | a degrade root's nested Composer projects: their vendor contexts, their owners and `unbuilt`, found by a scan… |
+| SRV-1 | crate split F1 (plan #22) | `4460dee39` | 22,379,706,006 | 1.182 | the debounce thread gets the pool's stack size |
+| SRV-2 | crate split F1 | `cfb7b9cb5` | 22,378,300,750 | 1.169 | `queue_change` writes `latest_text`, so an edit is the live buffer when it arrives |
+| SRV-3 | crate split F1 | `9f2fde136` | 22,381,199,992 | 1.165 | `didClose` restores the disk's content, and an edit taken after the close is not applied |
+| SRV-4 | crate split F1 | `8d68e6a1a` | 22,375,607,138 | 1.179 | `--generate-baseline` keeps the entries of the files it did not analyse |
+| SRV-5 | crate split F1 | `b8a332b38` | 22,372,148,952 | 1.182 | `--fix` writes a file only while its bytes are the bytes it analysed |
+| SRV-6 | crate split F1 | `e93890d8f` | 22,373,125,495 | 1.188 | a closed stdout ends the run quietly with status 141 |
+| SRV-7 | crate split F1 | `75cc49526` | 22,370,985,229 | 1.170 | rename refuses a name that a qualified name, an alias or an import would leave stale |
+| FIX-10 | STAGE_B_FIX_REVIEW.md F10 | `2091070e` | 22,382,485,498 | 1.230 | a bare `yield` before a word or symbol operator is tested and checked, not skipped (F10's tests); its symptom… |
+| FIX-20 | STAGE_B_FIX_REVIEW.md F20 | `eb24e5b44` | 23,049,222,454 | 1.174 | the recursion guard is a crate of its own; every recursive library function starts with it; a panic inside a… |
+| FIX-21 | STAGE_B_FIX_REVIEW.md F21 | `98d46d9a` | 23,066,904,033 | 1.205 (output differs from the oracle) | the error type is a kind of `mixed`, and explicit `mixed` is a kind of its own |
+| SYN-1.11 | Part B, B6 and B7 step 0 | `07d56bdf3` | 23,079,837,953 | 1.245 (output differs from the oracle) | prerequisites on the old tree, Part B step 0: `xtask tree-stats` (node counts by kind over live nodes, token… |
+| COMP-2 | plan #40; J1.1 | `fa8e001b7` | 23,074,333,396 | 1.303 (output differs from the oracle) | Composer's constraint grammar: whitespace after an operator, a window inside one minor, a bare version as… |
 
 The fixes' rows are measured against the row before them, both built in a worktree of their own (`~/.cache/prs-profile/fixes/`): there `aa896697`'s code measured 21,329,725,495, 1.8 M under `regress-item5`'s run, inside MEAS-3's spread. The four range rows are measurements of commit ranges, not rows. Item 1's and items 2 and 3's are attributed; the eight fixes' and item 5's are not. Each is one off-mode callgrind run per commit with default threads, on the dhat profile, from `~/.cache/prs-profile/`: `item1-regress` (base and head), `fixes8` and `regress-item5`. MEAS-3 puts the noise at up to 16.9 M. The +380 M of items 2 and 3 is attributed (the 28-commit row): `845efaab` (LOAD-3.4) adds a lossy UTF-8 decode of every file's text, for its length, in `read_and_parse_file` (`session.rs:1224`), which is 394 M of `Utf8Chunks::next`'s callers in the off run. The other 27 commits net −14 M. The function diff came from `callers.py` and `cgfn.py` on the two runs' callgrind files, with no new build.
 
