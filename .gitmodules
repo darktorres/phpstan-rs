@@ -1,0 +1,3 @@
+[submodule "vendor/phpstan-src"]
+	path = vendor/phpstan-src
+	url = https://github.com/phpstan/phpstan-src.git
