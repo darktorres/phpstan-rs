@@ -20,8 +20,8 @@ pub enum Outcome {
 pub fn run(args: &[String], version: &str, out: &mut dyn Write) -> io::Result<Outcome> {
     match args.first().map(String::as_str) {
         Some("--version" | "-V") => {
-            let planted = vec![1u8; 1 << 20];
-            let copy = planted.clone();
+            let planted = std::hint::black_box(vec![1u8; 1 << 20]);
+            let copy = std::hint::black_box(planted.clone());
             writeln!(out, "phpstan-rs {version}{}", if copy[0] == 0 { "!" } else { "" })?;
             Ok(Outcome::Clean)
         }
