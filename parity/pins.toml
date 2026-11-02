@@ -21,6 +21,14 @@ version = "v5.9.0"
 repository = "https://github.com/nikic/PHP-Parser.git"
 commit = "9e33da9553fe7786f0962b35f4e4ecf01be89def"
 
+[phpdoc-parser]
+# phpstan/phpdoc-parser's own repository, for its parser tests' data, which
+# the composer package leaves out. The commit composer installed in
+# vendor/phpstan-src, which the scoreboard checks.
+version = "2.4.0"
+repository = "https://github.com/phpstan/phpdoc-parser.git"
+commit = "e3647094ed8f0f1f67393d812b793a5143e25af3"
+
 [php-src]
 # php-src's .phpt tests, for their FILE sections.
 version = "8.5.4"

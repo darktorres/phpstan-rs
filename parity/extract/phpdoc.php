@@ -2,21 +2,27 @@
 
 // The phpdoc suite's expected side (docs/design/scoreboard.md, "phpdoc").
 //
-// Usage: php phpdoc.php <phpstan-src> --list < inputs.tsv > docs.tsv
+// Usage: php phpdoc.php <phpstan-src> --list <phpdoc-parser> <store> < inputs.tsv > docs.tsv
 //        php phpdoc.php <phpstan-src> < docs.tsv > cases.jsonl
-//        php phpdoc.php <phpstan-src> --show <id> <file> <offset> <length>
+//        php phpdoc.php <phpstan-src> --show <id> <kind> <file> <offset> <length>
 //
-// --list reads the parser suite's inputs (one id, a tab and a file per line)
-// and prints every distinct doc comment once, at its first occurrence in
-// that order: its case id (the input's id, "@" and the comment's byte
-// offset), a tab, the file, the offset and the length, tab-separated.
+// --list prints the suite's cases, one per line: the case id, the kind
+// ("doc" or "type"), the file, the byte offset and the length of the text,
+// tab-separated. The cases are:
+// - every distinct doc comment of the parser suite's inputs (read on stdin,
+//   one id, a tab and a file per line), at its first occurrence in that
+//   order. The id is the input's id, "@" and the comment's offset;
+// - the inputs of phpdoc-parser's own parser tests, from the data providers
+//   of PhpDocParserTest (doc comments) and TypeParserTest (types), written
+//   to <store>/<sha256>.txt. The id is phpdoc-parser/<test>::<provider>#<key>.
 //
-// Without --list it reads those lines and parses each comment as PHPStan's
-// PhpDocStringResolver does: phpdoc-parser's Lexer, then PhpDocParser with
-// the ParserConfig of conf/services.neon (the lines attributes), then
+// Without --list it reads those lines and parses each text as PHPStan does,
+// with phpdoc-parser's Lexer and the ParserConfig of conf/services.neon (the
+// lines attributes): a doc as PhpDocStringResolver does (PhpDocParser), a
+// type as TypeStringResolver does (TypeParser), then
 // consumeTokenType(TOKEN_END). One output line per case: its id, the node
 // count, the SHA-256 of the canonical tree, the SHA-256 of the printed tree
-// ((string) of the PhpDocNode) and the message of the exception thrown, or
+// ((string) of the root node) and the message of the exception thrown, or
 // null. With --show it prints that case's canonical tree, pretty-printed.
 //
 // The canonical tree:
@@ -38,7 +44,7 @@ use PHPStan\PhpDocParser\Parser\TokenIterator;
 use PHPStan\PhpDocParser\Parser\TypeParser;
 use PHPStan\PhpDocParser\ParserConfig;
 
-$src = $argv[1] ?? throw new RuntimeException('usage: phpdoc.php <phpstan-src> [--list | --show <id> <file> <offset> <length>]');
+$src = $argv[1] ?? throw new RuntimeException('usage: phpdoc.php <phpstan-src> [--list <phpdoc-parser> <store> | --show <id> <kind> <file> <offset> <length>]');
 require_once $src . '/vendor/autoload.php';
 
 const FLAGS = JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
@@ -46,6 +52,13 @@ const DEPTH = 2147483647;
 const AST = 'PHPStan\\PhpDocParser\\Ast\\';
 
 if (($argv[2] ?? null) === '--list') {
+	[, , , $repository, $store] = $argv + array_fill(0, 5, null);
+	if ($store === null) {
+		throw new RuntimeException('--list needs the phpdoc-parser repository and a store');
+	}
+	if (!is_dir($store) && !mkdir($store, 0777, true)) {
+		throw new RuntimeException("cannot create $store");
+	}
 	$seen = [];
 	while (($line = fgets(STDIN)) !== false) {
 		$line = rtrim($line, "\n");
@@ -64,10 +77,63 @@ if (($argv[2] ?? null) === '--list') {
 				continue;
 			}
 			$seen[$token->text] = true;
-			echo $id, '@', $token->pos, "\t", $file, "\t", $token->pos, "\t", strlen($token->text), "\n";
+			echo $id, '@', $token->pos, "\tdoc\t", $file, "\t", $token->pos, "\t", strlen($token->text), "\n";
 		}
 	}
+	foreach (providedInputs($repository) as $id => [$kind, $text]) {
+		$path = $store . '/' . hash('sha256', $text) . '.txt';
+		if (!is_file($path)) {
+			file_put_contents($path . '.tmp', $text);
+			rename($path . '.tmp', $path);
+		}
+		echo $id, "\t", $kind, "\t", $path, "\t0\t", strlen($text), "\n";
+	}
 	exit(0);
+}
+
+/**
+ * The `$input` or `$phpDoc` argument of every data set of the parser tests'
+ * data providers, by case id. A PhpDocParserTest input that is not a whole
+ * doc comment (testParseTagValue's tag values) is not something PHPStan
+ * parses, so it is left out.
+ *
+ * @return array<string, array{string, string}> the kind and the text
+ */
+function providedInputs(string $repository): array
+{
+	$tests = $repository . '/tests/PHPStan/Parser';
+	foreach (glob($tests . '/Doctrine/*.php') ?: [] as $file) {
+		require_once $file;
+	}
+	require_once $tests . '/NodeCollectingVisitor.php';
+	$out = [];
+	foreach (['PhpDocParserTest' => 'doc', 'TypeParserTest' => 'type'] as $short => $kind) {
+		require_once "$tests/$short.php";
+		$class = 'PHPStan\\PhpDocParser\\Parser\\' . $short;
+		foreach ((new ReflectionClass($class))->getMethods() as $method) {
+			if (!str_starts_with($method->getName(), 'test')) {
+				continue;
+			}
+			$position = null;
+			foreach ($method->getParameters() as $parameter) {
+				if (in_array($parameter->getName(), ['input', 'phpDoc'], true)) {
+					$position = $parameter->getPosition();
+				}
+			}
+			preg_match_all('/@dataProvider\s+(\w+)/', (string) $method->getDocComment(), $providers);
+			foreach ($position === null ? [] : $providers[1] as $provider) {
+				foreach ((new $class($method->getName()))->$provider() as $key => $data) {
+					$text = $data[$position];
+					if ($kind === 'doc' && !str_starts_with($text, '/**')) {
+						continue;
+					}
+					$out["phpdoc-parser/$short::$provider#$key"] = [$kind, $text];
+				}
+			}
+		}
+	}
+	ksort($out, SORT_STRING);
+	return $out;
 }
 
 $config = new ParserConfig(['lines' => true]);
@@ -77,9 +143,9 @@ $lexer = new Lexer($config);
 $parser = new PhpDocParser($config, $typeParser, $constExprParser);
 
 /** @return array{Node|null, string|null} the tree and the exception's message */
-function parse(Lexer $lexer, PhpDocParser $parser, string $doc): array
+function parse(Lexer $lexer, PhpDocParser|TypeParser $parser, string $text): array
 {
-	$tokens = new TokenIterator($lexer->tokenize($doc));
+	$tokens = new TokenIterator($lexer->tokenize($text));
 	try {
 		$node = $parser->parse($tokens);
 		$tokens->consumeTokenType(Lexer::TOKEN_END);
@@ -146,12 +212,21 @@ function comment(string $file, string $offset, string $length): string
 	return $doc;
 }
 
+function parserFor(string $kind, PhpDocParser $phpDocParser, TypeParser $typeParser): PhpDocParser|TypeParser
+{
+	return match ($kind) {
+		'doc' => $phpDocParser,
+		'type' => $typeParser,
+		default => throw new RuntimeException("unknown kind $kind"),
+	};
+}
+
 if (($argv[2] ?? null) === '--show') {
-	[, , , $id, $file, $offset, $length] = $argv + array_fill(0, 7, null);
+	[, , , $id, $kind, $file, $offset, $length] = $argv + array_fill(0, 8, null);
 	if ($length === null) {
-		throw new RuntimeException('--show needs a case id, its file, offset and length');
+		throw new RuntimeException('--show needs a case id, its kind, file, offset and length');
 	}
-	[$node, $error] = parse($lexer, $parser, comment($file, $offset, $length));
+	[$node, $error] = parse($lexer, parserFor($kind, $parser, $typeParser), comment($file, $offset, $length));
 	$count = 0;
 	echo json_encode($node === null ? ['exception' => $error] : canonical($node, $count), FLAGS | JSON_PRETTY_PRINT, DEPTH), "\n";
 	exit(0);
@@ -162,8 +237,8 @@ while (($line = fgets(STDIN)) !== false) {
 	if ($line === '') {
 		continue;
 	}
-	[$id, $file, $offset, $length] = explode("\t", $line, 4) + [1 => '', 2 => '', 3 => ''];
-	[$node, $error] = parse($lexer, $parser, comment($file, $offset, $length));
+	[$id, $kind, $file, $offset, $length] = explode("\t", $line, 5) + [1 => '', 2 => '', 3 => '', 4 => ''];
+	[$node, $error] = parse($lexer, parserFor($kind, $parser, $typeParser), comment($file, $offset, $length));
 	$count = 0;
 	$digest = $node === null ? null : hash('sha256', json_encode(canonical($node, $count), FLAGS, DEPTH));
 	echo json_encode([

@@ -83,6 +83,23 @@ impl Oracle {
         })
     }
 
+    /// The commit composer installed `package` at in phpstan-src: its
+    /// `source.reference` in `vendor/composer/installed.json`.
+    pub(crate) fn installed_reference(&self, package: &str) -> Result<String, String> {
+        let path = self.src.join("vendor/composer/installed.json");
+        let bytes = fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let json: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        json["packages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|entry| entry["name"] == package)
+            .and_then(|entry| entry["source"]["reference"].as_str())
+            .map(str::to_owned)
+            .ok_or_else(|| format!("{} names no source reference for {package}", path.display()))
+    }
+
     /// A value of `parity/pins.toml`.
     pub(crate) fn pin(&self, section: &str, key: &str) -> Result<String, String> {
         pin(&self.table, section, key)

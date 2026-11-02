@@ -93,39 +93,44 @@ fn materialized(oracle: &Oracle) -> Result<Vec<u8>, String> {
     let nikic = pins::nikic(oracle)?;
     let php_src = pins::php_src(oracle)?;
     let store = oracle.cache.join("inputs/store");
-    let path = |p: &Path| {
-        p.to_str()
-            .map(str::to_owned)
-            .ok_or_else(|| format!("{} is not UTF-8", p.display()))
-    };
-    let args = [path(&nikic)?, path(&php_src)?, path(&store)?];
+    let args = [path_text(&nikic)?, path_text(&php_src)?, path_text(&store)?];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     oracle.extract_valid("inputs", &["inputs.php"], &args, b"", |manifest| {
-        manifest_files(manifest).all(|file| Path::new(file).is_file())
+        line_fields(manifest, 1).all(|file| Path::new(file).is_file())
     })
 }
 
-fn manifest_files(manifest: &[u8]) -> impl Iterator<Item = &str> {
-    std::str::from_utf8(manifest)
+/// The `index`-th tab-separated field of each line.
+fn line_fields(lines: &[u8], index: usize) -> impl Iterator<Item = &str> {
+    std::str::from_utf8(lines)
         .unwrap_or_default()
         .lines()
-        .filter_map(|line| line.split('\t').nth(1))
+        .filter_map(move |line| line.split('\t').nth(index))
 }
 
-/// The suite's input lines: the inputs, or for phpdoc the doc comments in
-/// them, one `<case id>\t<file>\t<offset>\t<length>` line each.
+/// The suite's input lines: the inputs, or for phpdoc its cases, one
+/// `<case id>\t<kind>\t<file>\t<offset>\t<length>` line each: the doc
+/// comments in the inputs and phpdoc-parser's own test inputs.
 fn suite_inputs(suite: &Suite, oracle: &Oracle) -> Result<Vec<u8>, String> {
     let inputs = inputs(oracle)?;
     if !suite.docs {
         return Ok(inputs);
     }
+    let repository = path_text(&pins::phpdoc_parser(oracle)?)?;
+    let store = path_text(&oracle.cache.join("inputs/store"))?;
     oracle.extract_valid(
         "phpdoc-docs",
         &[suite.extractor],
-        &["--list"],
+        &["--list", &repository, &store],
         &inputs,
-        |docs| manifest_files(docs).all(|file| Path::new(file).is_file()),
+        |docs| line_fields(docs, 2).all(|file| Path::new(file).is_file()),
     )
+}
+
+fn path_text(path: &Path) -> Result<String, String> {
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("{} is not UTF-8", path.display()))
 }
 
 pub(crate) fn run(suite: &Suite, oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, String> {

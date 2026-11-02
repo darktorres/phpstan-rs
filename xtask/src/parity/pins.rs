@@ -12,9 +12,27 @@ use super::oracle::{Oracle, hex, text};
 
 /// nikic/PHP-Parser's repository at the pinned commit.
 pub(crate) fn nikic(oracle: &Oracle) -> Result<PathBuf, String> {
-    let repository = oracle.pin("nikic-php-parser", "repository")?;
-    let commit = oracle.pin("nikic-php-parser", "commit")?;
-    fetched(oracle, &format!("nikic-php-parser-{commit}"), |dir| {
+    repository(oracle, "nikic-php-parser")
+}
+
+/// phpstan/phpdoc-parser's repository at the pinned commit, which must be
+/// the one composer installed in phpstan-src.
+pub(crate) fn phpdoc_parser(oracle: &Oracle) -> Result<PathBuf, String> {
+    let commit = oracle.pin("phpdoc-parser", "commit")?;
+    let installed = oracle.installed_reference("phpstan/phpdoc-parser")?;
+    if installed != commit {
+        return Err(format!(
+            "phpstan-src installed phpstan/phpdoc-parser at {installed}, but the pin is {commit}"
+        ));
+    }
+    repository(oracle, "phpdoc-parser")
+}
+
+/// The git repository of the `section` pin at its commit, fetched alone.
+fn repository(oracle: &Oracle, section: &str) -> Result<PathBuf, String> {
+    let repository = oracle.pin(section, "repository")?;
+    let commit = oracle.pin(section, "commit")?;
+    fetched(oracle, &format!("{section}-{commit}"), |dir| {
         let git = |args: &[&str]| -> Result<String, String> {
             text(Command::new("git").arg("-C").arg(dir).args(args))
         };

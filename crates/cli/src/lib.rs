@@ -34,8 +34,8 @@ pub fn run(args: &[String], version: &str, out: &mut dyn Write) -> io::Result<Ou
 /// The hidden `debug <suite>` subcommands that the parity scoreboard drives
 /// (`docs/design/scoreboard.md`). The lexer and parser read one
 /// `<case id>\t<file>` line per input on stdin, or take `--show <case id>
-/// <file>`; phpdoc reads `<case id>\t<file>\t<offset>\t<length>` lines, one
-/// per doc comment, or takes `--show` with the same four. A suite whose code is not ported yet answers with one
+/// <file>`; phpdoc reads `<case id>\t<kind>\t<file>\t<offset>\t<length>`
+/// lines, one per doc comment or type, or takes `--show` with the same five. A suite whose code is not ported yet answers with one
 /// `{"unported": "<suite>"}` line.
 fn debug(args: &[String], out: &mut dyn Write) -> io::Result<Outcome> {
     match args.first().map(String::as_str) {
@@ -46,7 +46,7 @@ fn debug(args: &[String], out: &mut dyn Write) -> io::Result<Outcome> {
         _ => {
             writeln!(
                 out,
-                "Usage: phpstan-rs debug <lexer|parser> [--show <case id> <file>] < inputs\n       phpstan-rs debug phpdoc [--show <case id> <file> <offset> <length>] < docs\n       phpstan-rs debug <types|rules>"
+                "Usage: phpstan-rs debug <lexer|parser> [--show <case id> <file>] < inputs\n       phpstan-rs debug phpdoc [--show <case id> <kind> <file> <offset> <length>] < cases\n       phpstan-rs debug <types|rules>"
             )?;
             Ok(Outcome::Usage)
         }

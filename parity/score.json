@@ -60,7 +60,7 @@
   "phpdoc": {
     "error": 0,
     "excluded": 0,
-    "fail": 41290,
+    "fail": 41908,
     "groups": {
       "nikic": {
         "pass": 0,
@@ -69,6 +69,10 @@
       "php-src": {
         "pass": 0,
         "total": 137
+      },
+      "phpdoc-parser": {
+        "pass": 0,
+        "total": 618
       },
       "tests": {
         "pass": 0,

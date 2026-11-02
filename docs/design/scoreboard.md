@@ -38,7 +38,7 @@ A cache hit skips stage 1. The cache is never committed.
 - the phar: 2.3.4, sha256 pinned;
 - `vendor/phpstan-src`: the 2.3.4 commit;
 - phpstan-src's composer dependencies, through its `composer.lock`. nikic/php-parser v5.9.0, phpdoc-parser 2.4.0 and PHPUnit 11.5.57 come from there;
-- nikic/php-parser's source at v5.9.0, for its test fixtures, which composer's dist leaves out;
+- nikic/php-parser's source at v5.9.0 and phpdoc-parser's at 2.4.0, for their test data, which composer's dist leaves out;
 - php-src at 8.5.4, for the `.phpt` corpus;
 - **the oracle php: 8.5.4.** Locally it is the installed php, and the scoreboard refuses any other version. CI uses the `php:8.5.4-cli` image, pinned by digest;
 - composer 2.9.5, pinned by digest, which installs phpstan-src's dependencies.
@@ -76,9 +76,12 @@ A cache hit skips stage 1. The cache is never committed.
 - **Exit bar:** zero false refusals over input 5. `php -l` is recorded informationally, using F11's result classes.
 
 ### phpdoc
-- **Oracle:** phpdoc-parser 2.4.0, parsing as PHPStan's `PhpDocStringResolver` does: its `Lexer`, then `PhpDocParser` with the `ParserConfig` of `conf/services.neon` (the `lines` attributes only), then `consumeTokenType(TOKEN_END)`.
-- **Inputs:** every distinct doc comment (`T_DOC_COMMENT`) of the parser suite's inputs, 41,290 of them. `phpdoc.php --list` finds them with `PhpToken::tokenize`, so the suite doesn't depend on our lexer, and prints one `<case id>\t<file>\t<offset>\t<length>` line per comment at its first occurrence in input order. The id is the input's id, `@` and the byte offset; the group is the input's. Both sides read those lines, and `--show` takes the same four values.
-  - phpdoc-parser's own test data joins later; its repository has to be pinned, since composer's dist leaves the tests out.
+- **Oracle:** phpdoc-parser 2.4.0, parsing as PHPStan does, with its `Lexer` and the `ParserConfig` of `conf/services.neon` (the `lines` attributes only):
+  - a doc comment as `PhpDocStringResolver` does: `PhpDocParser`, then `consumeTokenType(TOKEN_END)`;
+  - a type string as `TypeStringResolver` does (the function map's signatures, for one): `TypeParser`, then `consumeTokenType(TOKEN_END)`.
+- **Inputs:** `phpdoc.php --list` prints one `<case id>\t<kind>\t<file>\t<offset>\t<length>` line per case, with kind `doc` or `type`. Both sides read those lines, and `--show` takes the same five values.
+  - every distinct doc comment (`T_DOC_COMMENT`) of the parser suite's inputs, 41,290, at its first occurrence in input order. They are found with `PhpToken::tokenize`, so the suite doesn't depend on our lexer. The id is the input's id, `@` and the byte offset; the group is the input's;
+  - the inputs of phpdoc-parser's own parser tests, 618: the `$input` or `$phpDoc` argument of every data set of `PhpDocParserTest`'s providers (docs) and `TypeParserTest`'s (types), run from phpdoc-parser's repository at the commit composer installed (pinned, and checked against `installed.json`). `testParseTagValue`'s bare tag values are left out, since PHPStan never parses one alone, and so is `ConstExprParserTest`, since PHPStan never calls `ConstExprParser` alone. They go to the inputs store as `<sha256>.txt`; the id is `phpdoc-parser/<test>::<provider>#<key>`.
 - **Canonical tree:** a node is `node` (its class below `PHPStan\PhpDocParser\Ast\`), its public properties in declared order, then `attributes` with keys sorted. An `InvalidTagValueNode` also has `exception`, its parser exception's message. Bytes and floats are written as in the parser suite.
 - **Comparison:** the exception `consumeTokenType` throws (its message), then the node count, then the SHA-256 of the compact canonical tree, then the SHA-256 of the printed tree (`(string) $phpDocNode`, which PHPStan's messages quote).
 
