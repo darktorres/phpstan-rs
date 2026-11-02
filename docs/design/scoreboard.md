@@ -43,11 +43,13 @@ A cache hit skips stage 1. The cache is never committed.
 ## Suites
 
 ### lexer
-- **Oracle:** `token_get_all($code, TOKEN_PARSE)` under the oracle php.
-- **Inputs:** every file of the parser suite.
-- **Comparison:** the token kinds and byte spans, case by case.
-- **Line breaks:** each input is also run with its line breaks rewritten as `\r\n` and as a lone `\r` (CP-6).
-- **PHP 8.6 syntax** (partial function application) is not in php 8.5. Its cases come from nikic's lexer emulation instead (20L-7).
+- **Oracle:** nikic/php-parser's `Lexer::tokenize`, with a collecting error handler.
+  - PHPStan lexes with nikic's lexers (`conf/parsers.neon`, `LexerFactory`): `Lexer\Emulative` for the newest version, and `Lexer` (or `Emulative` at the configured version) for analysed files.
+  - nikic v5.9.0's newest supported version is 8.5, the oracle php's version, so no emulator is active and both lexers give `Lexer::tokenize`'s output. That is `PhpToken::tokenize` plus nikic's post-processing: the two `&` token kinds, the sentinel token and the bad-character and unterminated-comment errors.
+- **Inputs:** the parser suite's inputs 1 and 5 (`tests/` and `vendor/` of phpstan-src), listed by xtask in byte order of their `/`-spelled paths. Inputs 2–4 join when they are pinned.
+- **Line breaks:** each input runs as it is, and with every `\r\n`, `\r` and `\n` rewritten to `\r\n` and to a lone `\r` (CP-6). Case ids are the path, then `#crlf` or `#cr` for the rewrites.
+- **Comparison:** each case's token stream, written one token per line as `kind pos length line` (kind is the `T_*` name, the character itself, or `EOF` for the sentinel), is compared by its SHA-256 and token count, and its errors (message, byte offset) by equality. Digests keep the cases file small; `--show <id>` reruns both sides for one case and prints the first differing token.
+- **Unported:** until M1, `phpstan-rs debug lexer` answers that the lexer is not ported, and every case is `fail` with that reason.
 
 ### parser
 - **Oracle:** nikic/php-parser v5.9.0's `--json-dump`, with the `startFilePos`/`endFilePos` attributes kept and the token positions dropped.
@@ -114,7 +116,7 @@ Why execute instead of parsing: 196 of 3,284 `analyse()` calls pass expectations
 
 `parity/score.json` is committed. It holds per-suite totals, plus counts per group (the test directory or milestone owner). It stays small enough to review in a diff.
 
-The per-case results go to `~/.cache/phpstan-rs/parity/results/<commit>.jsonl`. `--diff <commit>` compares two of these case by case and classifies each change (SB-6):
+The per-case results go to `~/.cache/phpstan-rs/parity/results/<commit>.jsonl`. A run of some suites, or one with `--filter`, writes `<commit>.partial.jsonl` instead. `score.json` is rewritten only for the suites a run covers, and not at all under `--filter`. `--diff <commit>` compares two of these case by case and classifies each change (SB-6):
 - for most suites: pass↔fail;
 - for types: equal, narrower, wider or incomparable.
 

@@ -3,6 +3,8 @@
 // A task reports to the terminal.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
+mod files;
+mod parity;
 mod port_map;
 
 use std::path::{Path, PathBuf};
@@ -15,7 +17,8 @@ fn main() -> ExitCode {
         Some("port-map") => {
             port_map::run(&root, args.get(1).map(String::as_str) == Some("--check"))
         }
-        _ => Err("usage: cargo xtask port-map [--check]".to_owned()),
+        Some("parity") => parity::run(&root, &args[1..]),
+        _ => Err("usage: cargo xtask port-map [--check]\n       cargo xtask parity [--suite <name>]... [--filter <glob>] [--show <case id>]".to_owned()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

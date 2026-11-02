@@ -12,3 +12,8 @@ signature = "https://github.com/phpstan/phpstan/releases/download/2.3.4/phpstan.
 # The vendor/phpstan-src submodule, the same release as the phar.
 version = "2.3.4"
 commit = "034afd3eea56205d2fa8167b74504da774a174ab"
+
+[oracle-php]
+# The php that runs every extractor. Locally it is the installed php; the
+# scoreboard refuses any other version.
+version = "8.5.4"

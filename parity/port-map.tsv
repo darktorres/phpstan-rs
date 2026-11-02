@@ -31,6 +31,7 @@ Analyser/EndStatementResult.php		todo
 Analyser/EnsuredNonNullabilityResult.php		todo	
 Analyser/EnsuredNonNullabilityResultExpression.php		todo	
 Analyser/Error.php		todo	
+Analyser/ExprHandler.php		todo	
 Analyser/ExprHandler/ArrayDimFetchHandler.php		todo	
 Analyser/ExprHandler/ArrayHandler.php		todo	
 Analyser/ExprHandler/ArrowFunctionHandler.php		todo	
@@ -112,7 +113,6 @@ Analyser/ExprHandler/Virtual/TypeExprHandler.php		todo
 Analyser/ExprHandler/Virtual/UnsetOffsetExprHandler.php		todo	
 Analyser/ExprHandler/YieldFromHandler.php		todo	
 Analyser/ExprHandler/YieldHandler.php		todo	
-Analyser/ExprHandler.php		todo	
 Analyser/ExprHandlerRegistry.php		todo	
 Analyser/ExpressionContext.php		todo	
 Analyser/ExpressionResult.php		todo	
@@ -201,6 +201,7 @@ Analyser/StatementExitPoint.php		todo
 Analyser/StatementListWalkState.php		todo	
 Analyser/StatementResult.php		todo	
 Analyser/StatementsHandler.php		todo	
+Analyser/StmtHandler.php		todo	
 Analyser/StmtHandler/BlockHandler.php		todo	
 Analyser/StmtHandler/BreakContinueHandler.php		todo	
 Analyser/StmtHandler/ClassConstHandler.php		todo	
@@ -233,7 +234,6 @@ Analyser/StmtHandler/TryCatchHandler.php		todo
 Analyser/StmtHandler/UnsetHandler.php		todo	
 Analyser/StmtHandler/UseHandler.php		todo	
 Analyser/StmtHandler/WhileHandler.php		todo	
-Analyser/StmtHandler.php		todo	
 Analyser/StmtHandlerRegistry.php		todo	
 Analyser/ThrowPoint.php		todo	
 Analyser/Traverser/CloneTypeTraverser.php		todo	
@@ -319,6 +319,7 @@ Command/WorkerCommand.php		todo
 Dependency/Dependencies.php		todo	
 Dependency/DependencyResolver.php		todo	
 Dependency/DependencyTypes.php		todo	
+Dependency/ExportedNode.php		todo	
 Dependency/ExportedNode/ExportedAttributeNode.php		todo	
 Dependency/ExportedNode/ExportedClassConstantNode.php		todo	
 Dependency/ExportedNode/ExportedClassConstantsNode.php		todo	
@@ -336,7 +337,6 @@ Dependency/ExportedNode/ExportedPropertiesNode.php		todo
 Dependency/ExportedNode/ExportedPropertyHookNode.php		todo	
 Dependency/ExportedNode/ExportedTraitNode.php		todo	
 Dependency/ExportedNode/ExportedTraitUseAdaptation.php		todo	
-Dependency/ExportedNode.php		todo	
 Dependency/ExportedNodeDecoder.php		todo	
 Dependency/ExportedNodeFetcher.php		todo	
 Dependency/ExportedNodeResolver.php		todo	
@@ -805,13 +805,13 @@ Reflection/PhpVersionStaticAccessor.php		todo
 Reflection/PropertiesClassReflectionExtension.php		todo	
 Reflection/PropertyReflection.php		todo	
 Reflection/RealClassClassConstantReflection.php		todo	
+Reflection/ReflectionProvider.php		todo	
 Reflection/ReflectionProvider/DirectReflectionProviderProvider.php		todo	
 Reflection/ReflectionProvider/DummyReflectionProvider.php		todo	
 Reflection/ReflectionProvider/LazyReflectionProviderProvider.php		todo	
 Reflection/ReflectionProvider/MemoizingReflectionProvider.php		todo	
 Reflection/ReflectionProvider/ReflectionProviderFactory.php		todo	
 Reflection/ReflectionProvider/ReflectionProviderProvider.php		todo	
-Reflection/ReflectionProvider.php		todo	
 Reflection/ReflectionProviderStaticAccessor.php		todo	
 Reflection/RequireExtension/RequireExtendsMethodsClassReflectionExtension.php		todo	
 Reflection/RequireExtension/RequireExtendsPropertiesClassReflectionExtension.php		todo	

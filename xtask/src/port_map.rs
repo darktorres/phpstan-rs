@@ -9,7 +9,9 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use crate::files;
 
 const HEADER: &str = "phpstan_file\trust_module\tstatus\tnote";
 const STATUSES: [&str; 3] = ["todo", "ported", "wontport"];
@@ -17,8 +19,7 @@ const STATUSES: [&str; 3] = ["todo", "ported", "wontport"];
 pub(crate) fn run(root: &Path, check: bool) -> Result<(), String> {
     let src = root.join("vendor/phpstan-src/src");
     let map_path = root.join("parity/port-map.tsv");
-    let mut files = Vec::new();
-    collect_php_files(&src, &src, &mut files)?;
+    let files = files::php_files(&src, &src)?;
     if files.is_empty() {
         return Err(format!(
             "no PHP files under {}; run `git submodule update --init vendor/phpstan-src`",
@@ -39,32 +40,8 @@ pub(crate) fn run(root: &Path, check: bool) -> Result<(), String> {
     if check {
         return Err("parity/port-map.tsv is out of date; run `cargo xtask port-map`".to_owned());
     }
-    write_atomically(&map_path, &rendered)?;
+    files::write_atomically(&map_path, rendered.as_bytes())?;
     println!("port-map: {} files written", files.len());
-    Ok(())
-}
-
-/// Collects every `.php` file below `dir` as a `/`-separated path relative
-/// to `base`. Directory entries are sorted, so the result is in byte order.
-fn collect_php_files(base: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
-    let mut entries: Vec<PathBuf> = fs::read_dir(dir)
-        .map_err(|error| format!("{}: {error}", dir.display()))?
-        .map(|entry| entry.map(|e| e.path()))
-        .collect::<Result<_, _>>()
-        .map_err(|error| format!("{}: {error}", dir.display()))?;
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            collect_php_files(base, &path, out)?;
-        } else if path.extension().is_some_and(|ext| ext == "php") {
-            let relative = path.strip_prefix(base).expect("walked below base");
-            let parts: Vec<_> = relative
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy())
-                .collect();
-            out.push(parts.join("/"));
-        }
-    }
     Ok(())
 }
 
@@ -127,14 +104,6 @@ fn render(files: &[String], existing: &BTreeMap<String, Row>) -> String {
         ));
     }
     out
-}
-
-/// Writes `text` to a temporary file beside `path`, then renames it over
-/// `path`, so a failed write never leaves a truncated file.
-fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
-    let temporary = path.with_extension("tsv.tmp");
-    fs::write(&temporary, text).map_err(|error| format!("{}: {error}", temporary.display()))?;
-    fs::rename(&temporary, path).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 #[cfg(test)]

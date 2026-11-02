@@ -1,0 +1,18 @@
+{
+  "lexer": {
+    "error": 0,
+    "excluded": 0,
+    "fail": 39858,
+    "groups": {
+      "tests": {
+        "pass": 0,
+        "total": 19419
+      },
+      "vendor": {
+        "pass": 0,
+        "total": 20439
+      }
+    },
+    "pass": 0
+  }
+}

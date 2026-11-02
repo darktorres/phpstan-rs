@@ -23,8 +23,28 @@ pub fn run(args: &[String], version: &str, out: &mut dyn Write) -> io::Result<Ou
             writeln!(out, "phpstan-rs {version}")?;
             Ok(Outcome::Clean)
         }
+        Some("debug") => debug(&args[1..], out),
         _ => {
             writeln!(out, "Usage: phpstan-rs --version")?;
+            Ok(Outcome::Usage)
+        }
+    }
+}
+
+/// The hidden `debug <suite>` subcommands that the parity scoreboard drives
+/// (`docs/design/scoreboard.md`). A suite whose code is not ported yet
+/// answers with one `{"unported": "<suite>"}` line.
+fn debug(args: &[String], out: &mut dyn Write) -> io::Result<Outcome> {
+    match args.first().map(String::as_str) {
+        Some(suite @ "lexer") => {
+            writeln!(out, "{{\"unported\":\"{suite}\"}}")?;
+            Ok(Outcome::Clean)
+        }
+        _ => {
+            writeln!(
+                out,
+                "Usage: phpstan-rs debug lexer <phpstan-src> [--show <case id>]"
+            )?;
             Ok(Outcome::Usage)
         }
     }
@@ -46,5 +66,13 @@ mod tests {
     fn no_arguments_is_a_usage_error() {
         let mut out = Vec::new();
         assert_eq!(run(&[], "1", &mut out).unwrap(), Outcome::Usage);
+    }
+
+    #[test]
+    fn debug_lexer_answers_unported() {
+        let mut out = Vec::new();
+        let args = ["debug".to_owned(), "lexer".to_owned()];
+        assert_eq!(run(&args, "1", &mut out).unwrap(), Outcome::Clean);
+        assert_eq!(out, b"{\"unported\":\"lexer\"}\n");
     }
 }

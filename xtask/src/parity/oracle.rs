@@ -1,0 +1,334 @@
+//! The oracle side of the scoreboard: the pinned php and phpstan-src, the
+//! extractors under `parity/extract/`, and the extraction cache.
+
+use std::fs;
+use std::io::{ErrorKind, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+
+use sha2::{Digest, Sha256};
+
+use crate::files;
+
+/// The pinned oracle inputs, checked when a run starts.
+pub(crate) struct Oracle {
+    /// `vendor/phpstan-src`.
+    pub(crate) src: PathBuf,
+    /// `parity/extract`.
+    extract: PathBuf,
+    /// `php -v`, which names the build as well as the version.
+    php_v: String,
+    /// The phpstan-src commit.
+    src_commit: String,
+    /// SHA-256 of phpstan-src's `vendor/composer/installed.json`: the
+    /// composer dependencies as installed.
+    installed: String,
+    /// `parity/pins.toml`.
+    pins: Vec<u8>,
+    /// `<cache>/phpstan-rs/parity`.
+    pub(crate) cache: PathBuf,
+}
+
+impl Oracle {
+    /// Checks the pins against what is installed: the oracle php's version
+    /// and the phpstan-src commit.
+    pub(crate) fn open(root: &Path) -> Result<Self, String> {
+        let pins_path = root.join("parity/pins.toml");
+        let pins =
+            fs::read(&pins_path).map_err(|error| format!("{}: {error}", pins_path.display()))?;
+        let table: toml::Table = std::str::from_utf8(&pins)
+            .map_err(|error| format!("{}: {error}", pins_path.display()))?
+            .parse()
+            .map_err(|error| format!("{}: {error}", pins_path.display()))?;
+        let pin = |section: &str, key: &str| -> Result<String, String> {
+            table
+                .get(section)
+                .and_then(|s| s.get(key))
+                .and_then(toml::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| format!("parity/pins.toml has no {section}.{key}"))
+        };
+        let php_version = text(Command::new("php").args(["-r", "echo PHP_VERSION;"]))?;
+        let pinned_php = pin("oracle-php", "version")?;
+        if php_version != pinned_php {
+            return Err(format!(
+                "the oracle php is {pinned_php}, but `php` is {php_version}"
+            ));
+        }
+        let src = root.join("vendor/phpstan-src");
+        let src_commit = text(
+            Command::new("git")
+                .arg("-C")
+                .arg(&src)
+                .args(["rev-parse", "HEAD"]),
+        )?;
+        let pinned_commit = pin("phpstan-src", "commit")?;
+        if src_commit != pinned_commit {
+            return Err(format!(
+                "vendor/phpstan-src is at {src_commit}, but the pin is {pinned_commit}; run `git submodule update vendor/phpstan-src`"
+            ));
+        }
+        let installed_path = src.join("vendor/composer/installed.json");
+        let installed = fs::read(&installed_path).map_err(|error| {
+            format!(
+                "{}: {error}; run `composer install` in vendor/phpstan-src",
+                installed_path.display()
+            )
+        })?;
+        let cache = files::cache_dir()?.join("phpstan-rs/parity");
+        Ok(Self {
+            extract: root.join("parity/extract"),
+            php_v: text(Command::new("php").arg("-v"))?,
+            src_commit,
+            installed: hex(&Sha256::digest(&installed)),
+            pins,
+            src,
+            cache,
+        })
+    }
+
+    /// The extraction output of `suite` for `inputs`, from the cache when its
+    /// key matches, otherwise by running the `script` extractor with `args`
+    /// and `inputs` on stdin. `script` is the only extractor file it reads.
+    pub(crate) fn extract(
+        &self,
+        suite: &str,
+        script: &str,
+        args: &[&str],
+        inputs: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        let script_path = self.extract.join(script);
+        let extractor = fs::read(&script_path)
+            .map_err(|error| format!("{}: {error}", script_path.display()))?;
+        let key = cache_key(&KeyInputs {
+            extractor: &extractor,
+            args,
+            php_v: &self.php_v,
+            src_commit: &self.src_commit,
+            installed: &self.installed,
+            pins: &self.pins,
+            inputs,
+        });
+        cached(&self.cache.join(suite).join(&key), || {
+            self.php(script, args, inputs)
+        })
+    }
+
+    /// Runs the `script` extractor with `args` after the phpstan-src path,
+    /// feeding it `stdin`, and returns its stdout.
+    pub(crate) fn php(&self, script: &str, args: &[&str], stdin: &[u8]) -> Result<Vec<u8>, String> {
+        let mut command = Command::new("php");
+        command
+            .args(["-d", "memory_limit=-1"])
+            .arg(self.extract.join(script))
+            .arg(&self.src)
+            .args(args);
+        piped(&mut command, stdin)
+    }
+}
+
+/// `<dir>/cases.jsonl` if it exists; otherwise `produce`'s output, stored
+/// there first.
+fn cached(
+    dir: &Path,
+    produce: impl FnOnce() -> Result<Vec<u8>, String>,
+) -> Result<Vec<u8>, String> {
+    let cases = dir.join("cases.jsonl");
+    match fs::read(&cases) {
+        Ok(bytes) => return Ok(bytes),
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("{}: {error}", cases.display())),
+    }
+    let output = produce()?;
+    fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    files::write_atomically(&cases, &output)?;
+    Ok(output)
+}
+
+/// Every input an extraction's output depends on. The cache key is built
+/// from all of its fields, so a new input can't be left out of the key
+/// without changing this struct.
+struct KeyInputs<'a> {
+    extractor: &'a [u8],
+    args: &'a [&'a str],
+    php_v: &'a str,
+    src_commit: &'a str,
+    installed: &'a str,
+    pins: &'a [u8],
+    inputs: &'a [u8],
+}
+
+fn cache_key(inputs: &KeyInputs<'_>) -> String {
+    let KeyInputs {
+        extractor,
+        args,
+        php_v,
+        src_commit,
+        installed,
+        pins,
+        inputs,
+    } = inputs;
+    let mut hasher = Sha256::new();
+    let mut field = |bytes: &[u8]| {
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    };
+    field(extractor);
+    field(&(args.len() as u64).to_le_bytes());
+    for arg in *args {
+        field(arg.as_bytes());
+    }
+    field(php_v.as_bytes());
+    field(src_commit.as_bytes());
+    field(installed.as_bytes());
+    field(pins);
+    field(inputs);
+    hex(&hasher.finalize())
+}
+
+/// Lower-case hexadecimal.
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+}
+
+/// Runs `command` with `stdin` written from another thread, so neither side
+/// blocks on a full pipe, and returns its stdout. A non-zero exit is an
+/// error carrying stderr.
+pub(crate) fn piped(command: &mut Command, stdin: &[u8]) -> Result<Vec<u8>, String> {
+    let name = format!("{command:?}");
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("{name}: {error}"))?;
+    let mut pipe = child.stdin.take().expect("stdin is piped");
+    let input = stdin.to_vec();
+    // A child that stops reading early closes the pipe; that is not an error.
+    let writer = thread::spawn(move || match pipe.write_all(&input) {
+        Err(error) if error.kind() != ErrorKind::BrokenPipe => Err(error),
+        _ => Ok(()),
+    });
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("{name}: {error}"))?;
+    writer
+        .join()
+        .expect("the stdin writer does not panic")
+        .map_err(|error| format!("{name}: writing stdin: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{name} failed ({}):\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(output.stdout)
+}
+
+/// The trimmed stdout of a command that must succeed.
+fn text(command: &mut Command) -> Result<String, String> {
+    let stdout = piped(command, &[])?;
+    Ok(String::from_utf8_lossy(&stdout).trim().to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key_with(change: usize) -> String {
+        let base = |i: usize, value: &'static str| if i == change { "changed" } else { value };
+        let args = [base(1, "arg")];
+        cache_key(&KeyInputs {
+            extractor: base(0, "script").as_bytes(),
+            args: &args,
+            php_v: base(2, "PHP 8.5.4"),
+            src_commit: base(3, "commit"),
+            installed: base(4, "installed"),
+            pins: base(5, "pins").as_bytes(),
+            inputs: base(6, "inputs").as_bytes(),
+        })
+    }
+
+    #[test]
+    fn every_key_input_changes_the_key() {
+        let unchanged = key_with(usize::MAX);
+        for field in 0..7 {
+            assert_ne!(
+                key_with(field),
+                unchanged,
+                "field {field} is not in the key"
+            );
+        }
+    }
+
+    #[test]
+    fn fields_are_length_prefixed() {
+        let one = cache_key(&KeyInputs {
+            extractor: b"ab",
+            args: &[],
+            php_v: "c",
+            src_commit: "",
+            installed: "",
+            pins: b"",
+            inputs: b"",
+        });
+        let two = cache_key(&KeyInputs {
+            extractor: b"a",
+            args: &[],
+            php_v: "bc",
+            src_commit: "",
+            installed: "",
+            pins: b"",
+            inputs: b"",
+        });
+        assert_ne!(one, two);
+    }
+
+    #[test]
+    fn a_warm_extraction_reads_the_cache_and_writes_nothing() {
+        let scratch = files::cache_dir()
+            .unwrap()
+            .join("phpstan-rs/test-scratch")
+            .join(format!("cached-{}", std::process::id()));
+        let dir = scratch.join("key");
+        let cold = cached(&dir, || Ok(b"cases".to_vec())).unwrap();
+        assert_eq!(cold, b"cases");
+        let written = fs::metadata(dir.join("cases.jsonl"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let listing = |dir: &Path| {
+            let mut names: Vec<_> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect();
+            names.sort();
+            names
+        };
+        let before = listing(&dir);
+        let warm = cached(&dir, || panic!("a warm run must not extract")).unwrap();
+        assert_eq!(warm, b"cases");
+        assert_eq!(listing(&dir), before);
+        assert_eq!(
+            fs::metadata(dir.join("cases.jsonl"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            written
+        );
+        fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    #[test]
+    fn hex_is_lower_case_and_padded() {
+        assert_eq!(hex(&[0x00, 0x0f, 0xab]), "000fab");
+    }
+}
