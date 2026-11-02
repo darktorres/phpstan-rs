@@ -21,7 +21,7 @@ env:
 jobs:
   lint:
     name: fmt, clippy, doc, port map
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        os: [ubuntu-26.04, ubuntu-26.04-arm, macos-26, windows-2025-vs2026]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -52,7 +52,7 @@ jobs:
   # run in an optimized profile too.
   test-optimized:
     name: test (release)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,7 +61,7 @@ jobs:
 
   dependencies:
     name: cargo deny, machete
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,15 +75,31 @@ jobs:
   # php. The committed parity/score.json must equal the run.
   parity:
     name: parity scoreboard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # With the level oracle extracted cold, the job took 8 minutes.
     timeout-minutes: 45
     container:
       # parity/pins.toml [oracle-php] image; a step below checks they agree.
       image: php:8.5.4-cli@sha256:cfa277c10f9f1859addbbed6739673a50a9c1b5777f64c0441118eca148b8056
     steps:
+      # From the Debian archive as it was on that day, at exact versions.
       - name: Install git, patch and unzip
-        run: apt-get update && apt-get install -y --no-install-recommends git patch unzip
+        run: |
+          cat > /etc/apt/sources.list.d/debian.sources <<'EOF'
+          Types: deb
+          URIs: http://snapshot.debian.org/archive/debian/20261102T000000Z
+          Suites: trixie trixie-updates
+          Components: main
+          Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp
+
+          Types: deb
+          URIs: http://snapshot.debian.org/archive/debian-security/20261102T000000Z
+          Suites: trixie-security
+          Components: main
+          Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp
+          EOF
+          apt-get -o Acquire::Check-Valid-Until=false update
+          apt-get install -y --no-install-recommends git=1:2.47.3-0+deb13u1 patch=2.8-2 unzip=6.0-29+deb13u1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Trust the checkout
         run: git config --global --add safe.directory '*'
@@ -125,7 +141,7 @@ jobs:
   # build of the base commit made in the same job.
   cost:
     name: cost gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -134,8 +150,16 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           submodules: "true"
+      # From the Ubuntu archive as it was on that day, at an exact version.
       - name: Install valgrind
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+        run: |
+          snapshot=https://snapshot.ubuntu.com/ubuntu/20261102T000000Z
+          for suite in resolute resolute-updates resolute-security; do
+            echo "deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] $snapshot $suite main universe"
+          done | sudo tee /etc/apt/snapshot.list
+          apt="sudo apt-get -o Dir::Etc::SourceList=/etc/apt/snapshot.list -o Dir::Etc::SourceParts=-"
+          $apt update
+          $apt install -y --no-install-recommends valgrind=1:3.26.0-0ubuntu1
       - name: Measure against the base commit
         env:
           BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}

@@ -19,17 +19,18 @@ jobs:
       matrix:
         include:
           # Linux binaries are static musl builds, so they run on any distro,
-          # whatever glibc it has.
-          - os: ubuntu-latest
+          # whatever glibc it has. Rust's musl targets bring their own C
+          # runtime, so no musl C toolchain is installed.
+          - os: ubuntu-26.04
             target: x86_64-unknown-linux-musl
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             target: aarch64-unknown-linux-musl
-          - os: macos-latest
+          - os: macos-26
             target: aarch64-apple-darwin
           # Built on the arm64 runner and run there under Rosetta 2.
-          - os: macos-latest
+          - os: macos-26
             target: x86_64-apple-darwin
-          - os: windows-latest
+          - os: windows-2025-vs2026
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -43,9 +44,6 @@ jobs:
           cache: "false"
       - name: Add the target
         run: rustup target add ${{ matrix.target }}
-      - name: Install the musl toolchain
-        if: ${{ contains(matrix.target, 'musl') }}
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Install Rosetta 2 where the image lacks it
         if: ${{ matrix.target == 'x86_64-apple-darwin' }}
         run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
