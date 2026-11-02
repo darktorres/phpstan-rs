@@ -18,10 +18,10 @@
 
 ## Scoreboard
 
-`cargo xtask parity` runs the lexer, parser, types and rules suites; `parity/score.json` holds the totals, and CI checks it against a full run under the pinned `php:8.5.4-cli` image on every push. Nothing is ported yet, so every case fails. The lexer and parser read phpstan-src's `tests/` and `vendor/`, nikic's parser fixtures (284 sections) and php-src 8.5.4's `.phpt` FILE sections (21,445), the last two fetched by their pins.
+`cargo xtask parity` runs the lexer, parser, types and rules suites; `parity/score.json` holds the totals, and CI checks it against a full run under the pinned `php:8.5.4-cli` image on every push. Nothing is ported yet, so every case fails. The lexer and parser read phpstan-src's `tests/` and `vendor/`, nikic's parser fixtures (284 sections) php-src 8.5.4's `.phpt` FILE sections (21,445), the last two fetched by their pins, and 14,142 generated operator pairs.
 
 ```
-lexer 0/105045 parser 0/35015 types 0/21299 rules 0/3609
+lexer 0/147471 parser 0/49157 types 0/21299 rules 0/3609
 ```
 
 Where the legacy binary (`legacy-final`) stood, measured once through what its command line can do:
@@ -44,11 +44,10 @@ The legacy's heap is not measurable this way (it allocates through mimalloc), an
 
 ## Next
 
-1. The parser suite's generated operator-pair input (D25-2).
-2. The phpdoc suite.
-3. The level-oracle and end-to-end suites.
-4. `cargo xtask parity --diff <commit>`, classifying each changed case.
-5. M1's design doc (`docs/design/syntax.md`), once the Phase 2 exit holds.
+1. The phpdoc suite.
+2. The level-oracle and end-to-end suites.
+3. `cargo xtask parity --diff <commit>`, classifying each changed case.
+4. M1's design doc (`docs/design/syntax.md`), once the Phase 2 exit holds.
 
 ## Later
 

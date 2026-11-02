@@ -56,3 +56,11 @@ The other ~120 approved rows are listed in `CRATE_SPLIT_CAUSES.md` Appendix I at
 | key | PHPStan | runtime | source |
 |---|---|---|---|
 | `class-not-in-autoloader` | a class its locators can't find is `class.notFound` | the class may exist (a second class in a shared file, or a file the autoloader doesn't list) | PO-1 |
+
+## Parser
+
+PHPStan never finishes on these inputs, which a port can't match. The port reports the parse error `php` gives, and the generated parser input leaves them out, because no extractor survives an endless loop.
+
+| key | PHPStan | runtime | source |
+|---|---|---|---|
+| `prefix-incdec-new-hangs` | `++new A;` and `--new A;` never finish parsing: nikic/php-parser v5.9.0's error recovery (`ErrorHandler\Collecting`, which `RichParser` and `SimpleParser` use) loops forever; without a collecting handler it throws at once. `phpstan analyse` 2.3.4 on a two-line file ran past 60 s with no output. `++(new A)` and `--(new A)` finish | `php -l`: "syntax error, unexpected token ";", expecting "("" (php 8.5.4) | probed 2026-11-01 |

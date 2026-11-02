@@ -2,11 +2,15 @@
   "lexer": {
     "error": 0,
     "excluded": 0,
-    "fail": 105045,
+    "fail": 147471,
     "groups": {
       "nikic": {
         "pass": 0,
         "total": 852
+      },
+      "operators": {
+        "pass": 0,
+        "total": 42426
       },
       "php-src": {
         "pass": 0,
@@ -27,11 +31,15 @@
   "parser": {
     "error": 0,
     "excluded": 0,
-    "fail": 35015,
+    "fail": 49157,
     "groups": {
       "nikic": {
         "pass": 0,
         "total": 284
+      },
+      "operators": {
+        "pass": 0,
+        "total": 14142
       },
       "php-src": {
         "pass": 0,

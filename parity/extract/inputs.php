@@ -2,7 +2,8 @@
 
 // Materializes the parser and lexer suites' inputs that are not plain files
 // (docs/design/scoreboard.md, "parser"): the code sections of nikic's parser
-// fixtures and the FILE sections of php-src's .phpt tests.
+// fixtures, the FILE sections of php-src's .phpt tests, and the generated
+// operator pairs.
 //
 // Usage: php inputs.php <phpstan-src> <nikic-php-parser> <php-src> <store> > manifest.tsv
 //
@@ -10,7 +11,7 @@
 // inputs share a file and a store is never stale. One manifest line per
 // input: its case id, a tab, and its file. Case ids are
 // nikic/<fixture path>#<n> (the fixture's n-th code section, from 0) and
-// php-src/<test path>.
+// php-src/<test path> and operators/<expression>.
 
 [, , $nikic, $phpSrc, $store] = $argv + [null, null, null, null, null];
 if ($nikic === null || $phpSrc === null || $store === null) {
@@ -112,6 +113,53 @@ foreach (files($phpSrc, '.phpt') as $relative) {
 		continue;
 	}
 	emit($store, 'php-src/' . $relative, $sections['FILE']);
+}
+
+// Every ordered pair of operator forms, the inner form in the outer one's
+// first and last operand, bare and parenthesized: the bare one shows how
+// precedence and associativity group them, or that PHP refuses the pair.
+// "#" marks an operand; operands are named $a, $b, ... left to right. Each
+// expression is returned from a function, so yield is allowed.
+$forms = [];
+foreach (['or', 'xor', 'and', '??', '||', '&&', '|', '^', '&', '==', '!=', '===', '!==', '<>', '<=>', '<', '<=', '>', '>=', '<<', '>>', '+', '-', '*', '/', '%', '.', '**', 'instanceof', '|>', '?:'] as $operator) {
+	$forms[] = "# $operator #";
+}
+foreach (['=', '+=', '-=', '*=', '/=', '.=', '%=', '**=', '&=', '|=', '^=', '<<=', '>>=', '??=', '=&'] as $operator) {
+	$forms[] = "# $operator #";
+}
+$forms[] = '# ? # : #';
+foreach (['!', '-', '+', '~', '@', '++', '--', '(int) ', '(float) ', '(string) ', '(bool) ', '(array) ', '(object) ', 'clone ', 'print ', 'yield ', 'yield # => ', 'throw ', 'include ', 'require_once ', 'fn() => ', 'new '] as $prefix) {
+	$forms[] = $prefix . '#';
+}
+$forms[] = '#++';
+$forms[] = '#--';
+$forms[] = '#->m()';
+$forms[] = '#[0]';
+$expressions = [];
+foreach ($forms as $outer) {
+	$slots = substr_count($outer, '#');
+	foreach ($forms as $inner) {
+		foreach (array_unique([0, $slots - 1]) as $slot) {
+			foreach ([$inner, "($inner)"] as $operand) {
+				$parts = explode('#', $outer);
+				$expression = '';
+				foreach ($parts as $i => $part) {
+					$expression .= $part . ($i === count($parts) - 1 ? '' : ($i === $slot ? $operand : '#'));
+				}
+				$expressions[$expression] = true;
+			}
+		}
+	}
+}
+// nikic's error recovery never finishes on these, so neither does PHPStan
+// (parity/known-deviations.md, prefix-incdec-new-hangs).
+unset($expressions['++new #'], $expressions['--new #']);
+foreach (array_keys($expressions) as $expression) {
+	$name = 'a';
+	$code = preg_replace_callback('/#/', static function () use (&$name): string {
+		return '$' . $name++;
+	}, (string) $expression);
+	emit($store, 'operators/' . $code, "<?php\n\nfunction f()\n{\n\treturn $code;\n}\n");
 }
 
 fwrite(STDERR, "skipped: $skippedNikic nikic sections, $skippedPhpt php-src tests\n");

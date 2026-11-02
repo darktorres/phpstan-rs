@@ -4,8 +4,9 @@
 //! resolution, as PHPStan parses a file).
 //!
 //! Both read the same inputs, one `<case id>\t<file>` line each: phpstan-src's
-//! own PHP files, nikic's parser fixtures and php-src's `.phpt` tests, the
-//! last two materialized into files by `inputs.php`.
+//! own PHP files, nikic's parser fixtures, php-src's `.phpt` tests and the
+//! generated operator pairs, the last three materialized into files by
+//! `inputs.php`.
 
 use std::path::Path;
 use std::process::Command;
@@ -42,8 +43,8 @@ pub(crate) const PARSER: Suite = Suite {
 /// The inputs, one `<case id>\t<file>` line each, in byte order:
 /// - every `.php` file under phpstan-src's `tests` and `vendor`, its id its
 ///   `/`-spelled path there;
-/// - the code sections of nikic's fixtures and the FILE sections of
-///   php-src's tests, from `inputs.php`'s manifest.
+/// - the code sections of nikic's fixtures, the FILE sections of php-src's
+///   tests and the operator pairs, from `inputs.php`'s manifest.
 fn inputs(oracle: &Oracle) -> Result<Vec<u8>, String> {
     let mut lines = Vec::new();
     for dir in ["tests", "vendor"] {
@@ -121,7 +122,8 @@ pub(crate) fn run(suite: &Suite, oracle: &Oracle, binary: &Path) -> Result<Vec<C
         .collect())
 }
 
-/// The first component of the id: `tests`, `vendor`, `nikic` or `php-src`.
+/// The first component of the id: `tests`, `vendor`, `nikic`, `php-src` or
+/// `operators`.
 fn group(id: &str) -> String {
     id.split('/').next().unwrap_or_default().to_owned()
 }
