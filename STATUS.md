@@ -1,6 +1,6 @@
 # Status
 
-**Phase 1: the repo's skeleton and process.**
+**Phase 2: the scoreboard and the cost meter.** Phase 1 is done.
 
 ## Done
 
@@ -13,6 +13,8 @@
 - The workspace has 14 empty crates in PHPStan's layout, plus the xtask.
 - The CLI runs on its own thread, and a closed pipe exits with 141.
 - `parity/port-map.tsv` lists 2,032 PHPStan files, all `todo`.
+- **CI** runs on every push, and is green: fmt, clippy, doc and the port-map check; tests on Linux x86_64, Linux aarch64, macOS and Windows; tests in release; `cargo deny` and `machete`.
+- **The release workflow** builds five targets with checksums. The Linux binaries are static musl builds. A dry run is green on all five.
 
 ## Scoreboard
 
@@ -24,10 +26,10 @@ Not built yet (Phase 2).
 
 ## Next
 
-1. CI green on all four legs.
-2. The release workflow: the five targets, with Linux binaries built for an older glibc or for musl.
-3. Phase 2: `docs/design/scoreboard.md`, then the extractors and `cargo xtask parity`.
-4. Phase 2: `docs/design/cost-meter.md`, then `cargo xtask cost` and its CI gate.
+1. `docs/design/scoreboard.md`: the extractors, the oracle php pinned for CI, and the comparison per suite.
+2. `cargo xtask parity`, with the lexer and parser suites first; their oracles need no port code.
+3. `docs/design/cost-meter.md`, then `cargo xtask cost` and its CI gate.
+4. The nsrt, rules, level-oracle and end-to-end extractors, with their baselines recorded.
 5. Run the legacy binary through the suites it can drive, for the baseline line.
 
 ## Later
