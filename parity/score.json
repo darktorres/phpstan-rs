@@ -14,5 +14,21 @@
       }
     },
     "pass": 0
+  },
+  "parser": {
+    "error": 0,
+    "excluded": 0,
+    "fail": 13286,
+    "groups": {
+      "tests": {
+        "pass": 0,
+        "total": 6473
+      },
+      "vendor": {
+        "pass": 0,
+        "total": 6813
+      }
+    },
+    "pass": 0
   }
 }

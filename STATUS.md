@@ -18,10 +18,10 @@
 
 ## Scoreboard
 
-`cargo xtask parity` runs the lexer suite; `parity/score.json` holds the totals.
+`cargo xtask parity` runs the lexer and parser suites; `parity/score.json` holds the totals.
 
 ```
-lexer 0/39858
+lexer 0/39858 parser 0/13286
 ```
 
 The rules and types extractors run (`parity/extract/`), and their suites are not wired into the driver yet:
@@ -34,10 +34,10 @@ Not built yet (Phase 2).
 
 ## Next
 
-1. The parser suite (nikic's `--json-dump`), on the lexer suite's inputs.
-2. The types and rules suites in the driver, with their `debug` subcommands.
-3. The scoreboard in CI: the pinned `php:8.5.4-cli` image, phpstan-src's composer install, and the per-push subset.
-4. `docs/design/cost-meter.md`, then `cargo xtask cost` and its CI gate.
+1. The types and rules suites in the driver, with their `debug` subcommands.
+2. The scoreboard in CI: the pinned `php:8.5.4-cli` image, phpstan-src's composer install, and the per-push subset.
+3. `docs/design/cost-meter.md`, then `cargo xtask cost` and its CI gate.
+4. The parser suite's other inputs (nikic's fixtures, php-src's `.phpt` files, the operator pairs), pinned.
 5. The phpdoc, level-oracle and end-to-end suites; then the legacy binary's baseline line.
 
 ## Later

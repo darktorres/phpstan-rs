@@ -1,5 +1,7 @@
-//! The lexer suite: nikic/php-parser's token stream for every input, as it
-//! is and with its line breaks rewritten (`parity/extract/lexer.php`).
+//! The suites whose cases compare a digest of each input's whole output,
+//! plus a count and the errors: the lexer (nikic's token stream, also with
+//! the line breaks rewritten) and the parser (nikic's AST after name
+//! resolution, as PHPStan parses a file).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -11,8 +13,26 @@ use super::oracle::{Oracle, piped};
 use super::score::{Case, Verdict};
 use crate::files;
 
-pub(crate) const NAME: &str = "lexer";
-const EXTRACTOR: &str = "lexer.php";
+/// One digest suite.
+pub(crate) struct Suite {
+    pub(crate) name: &'static str,
+    /// The extractor under `parity/extract/`.
+    extractor: &'static str,
+    /// The fields of a case that must be equal, in the order they are checked.
+    fields: &'static [&'static str],
+}
+
+pub(crate) const LEXER: Suite = Suite {
+    name: "lexer",
+    extractor: "lexer.php",
+    fields: &["tokens", "sha256", "errors"],
+};
+
+pub(crate) const PARSER: Suite = Suite {
+    name: "parser",
+    extractor: "parser.php",
+    fields: &["errors", "nodes", "sha256"],
+};
 
 /// The inputs: every `.php` file under phpstan-src's `tests` and `vendor`,
 /// one `/`-spelled path per line, in byte order.
@@ -28,15 +48,17 @@ fn inputs(oracle: &Oracle) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-pub(crate) fn run(oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, String> {
+pub(crate) fn run(suite: &Suite, oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, String> {
     let inputs = inputs(oracle)?;
-    let expected = by_id(&oracle.extract(NAME, EXTRACTOR, &[], &inputs)?)?;
+    let expected = by_id(&oracle.extract(suite.name, suite.extractor, &[], &inputs)?)?;
     let output = piped(
-        Command::new(binary).args(["debug", NAME]).arg(&oracle.src),
+        Command::new(binary)
+            .args(["debug", suite.name])
+            .arg(&oracle.src),
         &inputs,
     )?;
     let actual = parse_lines(&output)?;
-    if let Some(reason) = unported(&actual) {
+    if let Some(reason) = unported(suite, &actual) {
         return Ok(expected
             .into_keys()
             .map(|id| Case {
@@ -52,7 +74,7 @@ pub(crate) fn run(oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, String> {
         .map(|(id, want)| {
             let verdict = match actual.remove(&id) {
                 None => Verdict::Error("phpstan-rs printed nothing for this case".to_owned()),
-                Some(got) => compare(&want, &got),
+                Some(got) => compare(suite, &want, &got),
             };
             Case {
                 group: group(&id),
@@ -68,8 +90,8 @@ fn group(id: &str) -> String {
     id.split('/').next().unwrap_or_default().to_owned()
 }
 
-fn compare(want: &Value, got: &Value) -> Verdict {
-    for field in ["tokens", "sha256", "errors"] {
+fn compare(suite: &Suite, want: &Value, got: &Value) -> Verdict {
+    for &field in suite.fields {
         if want.get(field) != got.get(field) {
             return Verdict::Fail(format!(
                 "{field}: expected {}, got {}",
@@ -81,12 +103,12 @@ fn compare(want: &Value, got: &Value) -> Verdict {
     Verdict::Pass
 }
 
-/// `--show <id>`: prints the first token where the two sides differ.
-pub(crate) fn show(oracle: &Oracle, binary: &Path, id: &str) -> Result<(), String> {
-    let want = oracle.php(EXTRACTOR, &["--show", id], &[])?;
+/// `--show <id>`: prints the first line where the two sides' dumps differ.
+pub(crate) fn show(suite: &Suite, oracle: &Oracle, binary: &Path, id: &str) -> Result<(), String> {
+    let want = oracle.php(suite.extractor, &["--show", id], &[])?;
     let got = piped(
         Command::new(binary)
-            .args(["debug", NAME])
+            .args(["debug", suite.name])
             .arg(&oracle.src)
             .args(["--show", id]),
         &[],
@@ -96,9 +118,9 @@ pub(crate) fn show(oracle: &Oracle, binary: &Path, id: &str) -> Result<(), Strin
     if let Some(reason) = got
         .lines()
         .next()
-        .and_then(|line| unported(&[serde_json::from_str(line).ok()?]))
+        .and_then(|line| unported(suite, &[serde_json::from_str(line).ok()?]))
     {
-        println!("{reason}; the expected stream starts:");
+        println!("{reason}; the expected dump starts:");
         for line in want.lines().take(20) {
             println!("  {line}");
         }
@@ -113,9 +135,10 @@ pub(crate) fn show(oracle: &Oracle, binary: &Path, id: &str) -> Result<(), Strin
         .take_while(|(_, pair)| *pair != (None, None))
         .find(|(_, (w, g))| w != g);
     match mismatch {
-        None => println!("{id}: the token streams are equal"),
+        None => println!("{id}: the dumps are equal"),
         Some((index, (w, g))) => println!(
-            "{id}: token {index} differs\n  expected: {}\n  got:      {}",
+            "{id}: line {} differs\n  expected: {}\n  got:      {}",
+            index + 1,
             w.unwrap_or("(end)"),
             g.unwrap_or("(end)")
         ),
@@ -123,11 +146,12 @@ pub(crate) fn show(oracle: &Oracle, binary: &Path, id: &str) -> Result<(), Strin
     Ok(())
 }
 
-/// A binary that has no lexer yet answers with one `{"unported": ...}` line.
-fn unported(lines: &[Value]) -> Option<String> {
+/// A binary that lacks a suite's code answers with one `{"unported": ...}`
+/// line.
+fn unported(suite: &Suite, lines: &[Value]) -> Option<String> {
     let [line] = lines else { return None };
     line.get("unported")
-        .map(|_| "the lexer is not ported".to_owned())
+        .map(|_| format!("the {} is not ported", suite.name))
 }
 
 fn parse_lines(bytes: &[u8]) -> Result<Vec<Value>, String> {

@@ -6,7 +6,7 @@
 //! rewrites `parity/score.json`; every run writes the per-case results under
 //! the cache directory and prints a one-line summary.
 
-mod lexer;
+mod digest;
 mod oracle;
 mod score;
 
@@ -17,7 +17,7 @@ use oracle::Oracle;
 use score::{CaseResult, Exclusions};
 
 /// The suites, in the summary's order.
-const SUITES: [&str; 1] = [lexer::NAME];
+const SUITES: [&str; 2] = [digest::LEXER.name, digest::PARSER.name];
 
 const USAGE: &str =
     "usage: cargo xtask parity [--suite <name>]... [--filter <glob>] [--show <case id>]";
@@ -36,17 +36,17 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
         let [suite] = options.suites.as_slice() else {
             return Err("--show needs exactly one --suite".to_owned());
         };
-        return match suite.as_str() {
-            lexer::NAME => lexer::show(&oracle, &binary, id),
-            _ => Err(format!("--show is not available for suite {suite}")),
+        return match digest_suite(suite) {
+            Some(digest) => digest::show(digest, &oracle, &binary, id),
+            None => Err(format!("--show is not available for suite {suite}")),
         };
     }
     let exclusions = Exclusions::read(&root.join("parity/exclusions.md"))?;
     let mut results: Vec<CaseResult> = Vec::new();
     for suite in &options.suites {
-        let cases = match suite.as_str() {
-            lexer::NAME => lexer::run(&oracle, &binary)?,
-            _ => unreachable!("suite names are checked when parsing"),
+        let cases = match digest_suite(suite) {
+            Some(digest) => digest::run(digest, &oracle, &binary)?,
+            None => unreachable!("suite names are checked when parsing"),
         };
         results.extend(score::judge(
             suite,
@@ -64,6 +64,12 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
     println!("{}", score::summary(&scores));
     println!("results: {}", results_path.display());
     Ok(())
+}
+
+fn digest_suite(name: &str) -> Option<&'static digest::Suite> {
+    [&digest::LEXER, &digest::PARSER]
+        .into_iter()
+        .find(|suite| suite.name == name)
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {

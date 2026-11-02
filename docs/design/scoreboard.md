@@ -52,16 +52,23 @@ A cache hit skips stage 1. The cache is never committed.
 - **Unported:** until M1, `phpstan-rs debug lexer` answers that the lexer is not ported, and every case is `fail` with that reason.
 
 ### parser
-- **Oracle:** nikic/php-parser v5.9.0's `--json-dump`, with the `startFilePos`/`endFilePos` attributes kept and the token positions dropped.
+- **Oracle:** the AST PHPStan gets when it parses a file (`SimpleParser`, `RichParser`):
+  - nikic v5.9.0's `Php8` parser over `Lexer\Emulative`, with a collecting error handler. Any collected error rejects the file;
+  - then nikic's `NameResolver` with `preserveOriginalNames`, as `conf/services.neon` configures it. An `Error` it throws (a conflicting `use`, an invalid class name) is a parse error too;
+  - each error is what `FileAnalyser` reports as `phpstan.parse`: `getMessage()` and the start line.
+
+  `RichParser`'s other visitors annotate the tree for the analyser, so they belong to M5a's tests, not to this suite.
 - **Inputs:**
   1. every `.php` file under `vendor/phpstan-src/tests` (data files included);
   2. nikic's `test/code/parser` fixtures, including the error-recovery ones;
   3. php-src 8.5.4's `.phpt` `--FILE--` sections (F11). `--INI--` lines become `-d` flags; the rules for `--FILE_EXTERNAL--` and `--REDIRECTTEST--` are per F11;
   4. a generated operator-pair file (D25-2);
   5. `vendor/phpstan-src/vendor`, as the large vendor tree.
-- **Comparison:** normalized AST JSON equality.
-- **Files that fail to parse:** the same first error message and line as nikic. `php -l` is also recorded, informationally, using F11's result classes.
-- **Exit bar:** zero false refusals over input 5.
+
+  Inputs 1 and 5 run now. Inputs 2–4 join when their sources are pinned in `pins.toml`.
+- **Canonical AST:** nikic's JSON shape, made total and stable. A node is `nodeType`, then its sub-nodes in nikic's declared order, then `attributes`, with keys sorted and the token positions left out. A string that is not UTF-8 is `{"bytes": "<hex>"}`, and a float is `{"float": "<var_export>"}`, which covers `INF` and `NAN`.
+- **Comparison:** the errors by equality, then the node count, then the SHA-256 of the compact canonical JSON. `--show <id>` prints both sides pretty-printed and the first differing line.
+- **Exit bar:** zero false refusals over input 5. `php -l` is recorded informationally, using F11's result classes, once inputs 3 and 4 are in.
 
 ### phpdoc
 - **Oracle:** phpdoc-parser 2.4.0, run from PHP over every doc comment of the parser suite's inputs, plus phpdoc-parser's own test data.
