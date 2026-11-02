@@ -13,6 +13,11 @@
 // nikic/<fixture path>#<n> (the fixture's n-th code section, from 0) and
 // php-src/<test path> and operators/<expression>.
 
+// Every input is generated here, so any diagnostic is a bug in this script.
+set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+	throw new ErrorException($message, 0, $severity, $file, $line);
+});
+
 [, , $nikic, $phpSrc, $store] = $argv + [null, null, null, null, null];
 if ($nikic === null || $phpSrc === null || $store === null) {
 	throw new RuntimeException('usage: inputs.php <phpstan-src> <nikic-php-parser> <php-src> <store>');
@@ -157,7 +162,9 @@ unset($expressions['++new #'], $expressions['--new #']);
 foreach (array_keys($expressions) as $expression) {
 	$name = 'a';
 	$code = preg_replace_callback('/#/', static function () use (&$name): string {
-		return '$' . $name++;
+		$operand = '$' . $name;
+		$name = str_increment($name);
+		return $operand;
 	}, (string) $expression);
 	emit($store, 'operators/' . $code, "<?php\n\nfunction f()\n{\n\treturn $code;\n}\n");
 }

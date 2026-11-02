@@ -23,7 +23,7 @@ Each suite has three stages:
 
 Extraction is deterministic from pinned inputs. Its output is cached under `~/.cache/phpstan-rs/parity/<suite>/<key>/`. The key hashes:
 - every extractor script the run reads;
-- the php flags every extractor runs with, `-d memory_limit=-1 -d short_open_tag=1`. `short_open_tag` changes how `<?` lexes, and php.ini files differ on it (the image's php has the compiled default, on; a distribution's turns it off), so it is set to the default;
+- the php flags every extractor runs with: `-d memory_limit=-1 -d short_open_tag=1 -d error_reporting=-1 -d display_errors=stderr`. They make the local php.ini and the image's (which has none) give the same run: `short_open_tag` changes how `<?` lexes (the compiled default is on, a distribution's php.ini turns it off), and the CLI's compiled default prints diagnostics to stdout, into the output;
 - the extractor's arguments and its stdin;
 - the oracle php's `php -v`;
 - the inputs' content (the submodule commit, phpstan-src's installed dependencies, and `parity/pins.toml`).

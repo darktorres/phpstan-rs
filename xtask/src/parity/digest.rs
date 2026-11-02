@@ -57,6 +57,15 @@ fn inputs(oracle: &Oracle) -> Result<Vec<u8>, String> {
         }
     }
     let manifest = materialized(oracle)?;
+    if let Some(line) = std::str::from_utf8(&manifest)
+        .map_err(|error| format!("the inputs manifest is not UTF-8: {error}"))?
+        .lines()
+        .find(|line| !line.contains('\t'))
+    {
+        return Err(format!(
+            "the inputs manifest has a line without a file: {line}"
+        ));
+    }
     lines.extend(
         manifest
             .split_inclusive(|&byte| byte == b'\n')

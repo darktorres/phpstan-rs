@@ -172,11 +172,23 @@ fn pin(table: &toml::Table, section: &str, key: &str) -> Result<String, String> 
         .ok_or_else(|| format!("parity/pins.toml has no {section}.{key}"))
 }
 
-/// The php settings every extractor runs with. `short_open_tag` changes how
-/// `<?` lexes, and php.ini files differ on it (the image's php has the
-/// compiled default, on; a distribution's php.ini turns it off), so it is
-/// set to the default here.
-const PHP_FLAGS: [&str; 4] = ["-d", "memory_limit=-1", "-d", "short_open_tag=1"];
+/// The php settings every extractor runs with, so that the local php.ini and
+/// the image's (which has none) give the same run:
+/// - `short_open_tag` changes how `<?` lexes; the compiled default is on,
+///   and a distribution's php.ini turns it off;
+/// - every diagnostic is reported, as the compiled default does, and on
+///   stderr: the CLI's compiled default prints it to stdout, into the
+///   extraction's output.
+const PHP_FLAGS: [&str; 8] = [
+    "-d",
+    "memory_limit=-1",
+    "-d",
+    "short_open_tag=1",
+    "-d",
+    "error_reporting=-1",
+    "-d",
+    "display_errors=stderr",
+];
 
 /// `<dir>/cases.jsonl` if it exists and is `valid`; otherwise `produce`'s output, stored
 /// there first.
