@@ -1,7 +1,8 @@
 //! The suites whose cases compare a digest of each input's whole output,
 //! plus a count and the errors: the lexer (nikic's token stream, also with
-//! the line breaks rewritten) and the parser (nikic's AST after name
-//! resolution, as PHPStan parses a file).
+//! the line breaks rewritten), the parser (nikic's AST after name
+//! resolution, as PHPStan parses a file) and phpdoc (phpdoc-parser's tree of
+//! each distinct doc comment, as PHPStan parses one).
 //!
 //! Both read the same inputs, one `<case id>\t<file>` line each: phpstan-src's
 //! own PHP files, nikic's parser fixtures, php-src's `.phpt` tests and the
@@ -26,18 +27,30 @@ pub(crate) struct Suite {
     extractor: &'static str,
     /// The fields of a case that must be equal, in the order they are checked.
     fields: &'static [&'static str],
+    /// Whether the cases are the doc comments the extractor's `--list` finds
+    /// in the inputs, rather than the inputs themselves.
+    docs: bool,
 }
 
 pub(crate) const LEXER: Suite = Suite {
     name: "lexer",
     extractor: "lexer.php",
     fields: &["tokens", "sha256", "errors"],
+    docs: false,
 };
 
 pub(crate) const PARSER: Suite = Suite {
     name: "parser",
     extractor: "parser.php",
     fields: &["errors", "nodes", "sha256"],
+    docs: false,
+};
+
+pub(crate) const PHPDOC: Suite = Suite {
+    name: "phpdoc",
+    extractor: "phpdoc.php",
+    fields: &["error", "nodes", "sha256", "printed"],
+    docs: true,
 };
 
 /// The inputs, one `<case id>\t<file>` line each, in byte order:
@@ -96,11 +109,27 @@ fn manifest_files(manifest: &[u8]) -> impl Iterator<Item = &str> {
     std::str::from_utf8(manifest)
         .unwrap_or_default()
         .lines()
-        .filter_map(|line| line.split_once('\t').map(|(_, file)| file))
+        .filter_map(|line| line.split('\t').nth(1))
+}
+
+/// The suite's input lines: the inputs, or for phpdoc the doc comments in
+/// them, one `<case id>\t<file>\t<offset>\t<length>` line each.
+fn suite_inputs(suite: &Suite, oracle: &Oracle) -> Result<Vec<u8>, String> {
+    let inputs = inputs(oracle)?;
+    if !suite.docs {
+        return Ok(inputs);
+    }
+    oracle.extract_valid(
+        "phpdoc-docs",
+        &[suite.extractor],
+        &["--list"],
+        &inputs,
+        |docs| manifest_files(docs).all(|file| Path::new(file).is_file()),
+    )
 }
 
 pub(crate) fn run(suite: &Suite, oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, String> {
-    let inputs = inputs(oracle)?;
+    let inputs = suite_inputs(suite, oracle)?;
     let expected = by_id(&oracle.extract(suite.name, &[suite.extractor], &[], &inputs)?)?;
     let output = piped(Command::new(binary).args(["debug", suite.name]), &inputs)?;
     let actual = parse_lines(&output)?;
@@ -151,22 +180,25 @@ fn compare(suite: &Suite, want: &Value, got: &Value) -> Verdict {
 }
 
 /// `--show <id>`: prints the first line where the two sides' dumps differ.
-/// A lexer id may end in `#crlf` or `#cr`, naming its rewritten variant.
+/// Both sides get the id and the rest of its input line as arguments. A
+/// lexer id may end in `#crlf` or `#cr`, naming its rewritten variant.
 pub(crate) fn show(suite: &Suite, oracle: &Oracle, binary: &Path, id: &str) -> Result<(), String> {
     let input = id
         .strip_suffix("#crlf")
         .or_else(|| id.strip_suffix("#cr"))
         .unwrap_or(id);
-    let inputs = inputs(oracle)?;
-    let file = std::str::from_utf8(&inputs)
+    let inputs = suite_inputs(suite, oracle)?;
+    let rest = std::str::from_utf8(&inputs)
         .map_err(|error| format!("the inputs are not UTF-8: {error}"))?
         .lines()
         .find_map(|line| line.strip_prefix(input)?.strip_prefix('\t'))
         .ok_or_else(|| format!("no input has the id {input}"))?;
+    let mut args = vec!["--show", id];
+    args.extend(rest.split('\t'));
     let work = oracle.cache.join(suite.name).join("work");
-    let want = oracle.php(suite.extractor, &["--show", id, file], &[], &work)?;
+    let want = oracle.php(suite.extractor, &args, &[], &work)?;
     let got = piped(
-        Command::new(binary).args(["debug", suite.name, "--show", id, file]),
+        Command::new(binary).args(["debug", suite.name]).args(&args),
         &[],
     )?;
     let want = String::from_utf8_lossy(&want);

@@ -76,8 +76,11 @@ A cache hit skips stage 1. The cache is never committed.
 - **Exit bar:** zero false refusals over input 5. `php -l` is recorded informationally, using F11's result classes.
 
 ### phpdoc
-- **Oracle:** phpdoc-parser 2.4.0, run from PHP over every doc comment of the parser suite's inputs, plus phpdoc-parser's own test data.
-- **Comparison:** the printed node tree (`PhpDocNode::__toString` and a structural dump).
+- **Oracle:** phpdoc-parser 2.4.0, parsing as PHPStan's `PhpDocStringResolver` does: its `Lexer`, then `PhpDocParser` with the `ParserConfig` of `conf/services.neon` (the `lines` attributes only), then `consumeTokenType(TOKEN_END)`.
+- **Inputs:** every distinct doc comment (`T_DOC_COMMENT`) of the parser suite's inputs, 41,290 of them. `phpdoc.php --list` finds them with `PhpToken::tokenize`, so the suite doesn't depend on our lexer, and prints one `<case id>\t<file>\t<offset>\t<length>` line per comment at its first occurrence in input order. The id is the input's id, `@` and the byte offset; the group is the input's. Both sides read those lines, and `--show` takes the same four values.
+  - phpdoc-parser's own test data joins later; its repository has to be pinned, since composer's dist leaves the tests out.
+- **Canonical tree:** a node is `node` (its class below `PHPStan\PhpDocParser\Ast\`), its public properties in declared order, then `attributes` with keys sorted. An `InvalidTagValueNode` also has `exception`, its parser exception's message. Bytes and floats are written as in the parser suite.
+- **Comparison:** the exception `consumeTokenType` throws (its message), then the node count, then the SHA-256 of the compact canonical tree, then the SHA-256 of the printed tree (`(string) $phpDocNode`, which PHPStan's messages quote).
 
 ### Recording PHPStan's tests (types and rules)
 Both suites come from **running PHPStan's own test methods without running PHPStan's analysis** (`parity/extract/tests.php`).

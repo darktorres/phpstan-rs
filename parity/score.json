@@ -57,6 +57,31 @@
     "pass": 0,
     "passing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
+  "phpdoc": {
+    "error": 0,
+    "excluded": 0,
+    "fail": 41290,
+    "groups": {
+      "nikic": {
+        "pass": 0,
+        "total": 6
+      },
+      "php-src": {
+        "pass": 0,
+        "total": 137
+      },
+      "tests": {
+        "pass": 0,
+        "total": 8320
+      },
+      "vendor": {
+        "pass": 0,
+        "total": 32827
+      }
+    },
+    "pass": 0,
+    "passing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "rules": {
     "error": 0,
     "excluded": 0,

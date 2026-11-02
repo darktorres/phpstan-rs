@@ -20,9 +20,10 @@ use oracle::Oracle;
 use score::{CaseResult, Exclusions};
 
 /// The suites, in the summary's order.
-const SUITES: [&str; 4] = [
+const SUITES: [&str; 5] = [
     digest::LEXER.name,
     digest::PARSER.name,
+    digest::PHPDOC.name,
     recorded::TYPES,
     recorded::RULES,
 ];
@@ -77,7 +78,7 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
 }
 
 fn digest_suite(name: &str) -> Option<&'static digest::Suite> {
-    [&digest::LEXER, &digest::PARSER]
+    [&digest::LEXER, &digest::PARSER, &digest::PHPDOC]
         .into_iter()
         .find(|suite| suite.name == name)
 }
