@@ -53,6 +53,26 @@ sha256 = "0603c1fedb9a67e384ae3f2dea8b1666753cb06364b70c62dae2a0ff59ffa3f2"
 version = "8.5.4"
 image = "php:8.5.4-cli@sha256:cfa277c10f9f1859addbbed6739673a50a9c1b5777f64c0441118eca148b8056"
 
+[e2e-monolog]
+# The end-to-end suite's projects. Each is analysed at its release commit,
+# with its composer dependencies installed (no dev ones) from the lock in
+# parity/e2e/<name>/, which composer wrote once for that release: the
+# project's own composer.json, with config.lock forced on, root-version the
+# release, prefer-stable. paths and exclude are relative to the project,
+# separated by spaces.
+version = "3.12.1"
+repository = "https://github.com/Seldaek/monolog.git"
+commit = "d7059e4c691d05ea1222b5124bed0f961be46e15"
+paths = "src"
+exclude = ""
+
+[e2e-console]
+version = "v8.1.10"
+repository = "https://github.com/symfony/console.git"
+commit = "5b6d9b127ec27bc6db59bf65e2e37b6fe5b00083"
+paths = "."
+exclude = "vendor Tests"
+
 [composer]
 # Installs phpstan-src's dependencies from its composer.lock, applying its
 # patches.

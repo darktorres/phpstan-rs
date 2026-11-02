@@ -130,9 +130,11 @@ Why execute instead of parsing: 196 of 3,284 `analyse()` calls in `Rules/` pass 
 - **When it runs:** on every push, like every suite, from its cached extraction, which reruns only when its own inputs change (the phar, phpstan-src, `levels.php`, the oracle php). A cold extraction is 34,342 runs, about 0.9 CPU-hours (spike S5).
 
 ### end-to-end
-- **Oracle:** the phar, against Piwigo (local only), monolog and symfony/console, each pinned by commit in `pins.toml`. It runs at every level, on the same `phpstan.neon`.
-- **Comparison:** the JSON output, after making paths project-relative (OM-2).
-- **When it runs:** from M7.
+- **Projects:** monolog 3.12.1 (`src`) and symfony/console v8.1.10 (its root, without `vendor` and `Tests`), each pinned by commit in `pins.toml` with its paths. Their dependencies come from a lock committed in `parity/e2e/<name>/`, written once by the pinned composer for that release (root version the release, `prefer-stable`) and installed without dev packages. Composer reads a copy of the project's `composer.json` with `config.lock` on, since monolog turns the lock off; PHPStan reads the project's own. Piwigo is not a suite: it is not public, and its config needs extensions (Phase 3b); it stays the milestone-end regression check.
+- **Oracle:** the phar as a user runs it, in the project's directory, so it finds the project's `composer.json` and autoloader: `analyse --debug --no-progress --error-format=json -c level-<n>.neon`, at every level, the config holding only the level, the paths, the excluded paths and a `tmpDir` (`parity/extract/e2e.php`). With no `phpVersion`, PHPStan takes the PHP versions from `composer.json`. `--debug` prints each analysed file's path, which names the cases, and changes no finding: the totals equal a plain run's.
+- **Cases:** one per project and level (`console@7`: the exit code and the errors of no file) and one per analysed file and level (`console/Application.php@7`: its findings, sorted, a trait's with the class it was analysed in). 3,311 cases; a cold extraction is about a minute here.
+- **phpstan-rs side:** `debug e2e` reads the same project lines until M7 ports the `analyse` command, which then runs on the same configs.
+- **Comparison:** exact, with paths relative to the project (OM-2). A failing file case counts per identifier the findings only one side reported.
 
 ## Output
 

@@ -98,7 +98,7 @@ fn compare(want: &Value, got: &Value) -> Verdict {
 
 /// `<identifier>: <n> PHPStan-only, <m> ours-only` for each identifier
 /// whose findings differ, matching findings equal in every field once each.
-fn unmatched(want: &Value, got: &Value) -> String {
+pub(super) fn unmatched(want: &Value, got: &Value) -> String {
     let empty = Vec::new();
     let mut ours: Vec<&Value> = got.as_array().unwrap_or(&empty).iter().collect();
     let mut counts: BTreeMap<String, (usize, usize)> = BTreeMap::new();

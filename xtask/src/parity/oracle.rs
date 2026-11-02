@@ -145,6 +145,11 @@ impl Oracle {
     }
 
     /// A value of `parity/pins.toml`.
+    /// `parity/`.
+    pub(crate) fn parity_dir(&self) -> &Path {
+        self.extract.parent().unwrap_or(&self.extract)
+    }
+
     pub(crate) fn pin(&self, section: &str, key: &str) -> Result<String, String> {
         pin(&self.table, section, key)
     }

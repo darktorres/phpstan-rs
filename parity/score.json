@@ -1,4 +1,21 @@
 {
+  "e2e": {
+    "error": 0,
+    "excluded": 0,
+    "fail": 3311,
+    "groups": {
+      "console": {
+        "pass": 0,
+        "total": 1925
+      },
+      "monolog": {
+        "pass": 0,
+        "total": 1386
+      }
+    },
+    "pass": 0,
+    "passing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "levels": {
     "error": 0,
     "excluded": 0,

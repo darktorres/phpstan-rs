@@ -76,8 +76,8 @@ jobs:
   parity:
     name: parity scoreboard
     runs-on: ubuntu-latest
-    # A cold level-oracle extraction is about 0.9 CPU-hours (spike S5).
-    timeout-minutes: 120
+    # With the level oracle extracted cold, the job took 8 minutes.
+    timeout-minutes: 45
     container:
       # parity/pins.toml [oracle-php] image; a step below checks they agree.
       image: php:8.5.4-cli@sha256:cfa277c10f9f1859addbbed6739673a50a9c1b5777f64c0441118eca148b8056
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/phpstan-rs/parity
-          key: parity-${{ hashFiles('parity/extract/**', 'parity/pins.toml', 'vendor/phpstan-src/composer.lock') }}
+          key: parity-${{ hashFiles('parity/extract/**', 'parity/e2e/**', 'parity/pins.toml', 'vendor/phpstan-src/composer.lock') }}
           restore-keys: parity-
       - run: cargo xtask parity
       - name: Check the committed score

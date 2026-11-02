@@ -208,7 +208,7 @@ It writes `parity/score.json` and a one-line summary, which every milestone comm
 | types | `nsrt/*.php`: `assertType`, `assertNativeType`, `assertVariableCertainty`, `assertSuperType` | the expected string against our `describe()` |
 | rules | `tests/PHPStan/Rules/**/*RuleTest.php` (418 files). A PHP script parses them with nikic to get each test's rule class, data files, expected `[message, line, tip]` and config; PHPStan is never executed | the error set per test method, with only that rule enabled |
 | level oracle | the phar against us over `tests/PHPStan/Rules/**/data` (2,936 files) and the corpus files, at every level, with C-1's recipe (FR-5, EV-5's level table) | per identifier: PHPStan-only, matched, ours-only |
-| end-to-end | the phar against us on Piwigo, monolog and symfony/console, at every level, with the same `phpstan.neon` | the JSON output diff |
+| end-to-end | the phar against us on monolog and symfony/console, at every level, with the same `phpstan.neon` (Piwigo is not public and needs extensions, so it stays the milestone-end regression check) | the JSON output diff |
 
 Rules for the scoreboard:
 - **The nsrt recipe** (C-1, EV-3):

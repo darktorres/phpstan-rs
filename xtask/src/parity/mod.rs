@@ -7,6 +7,7 @@
 //! the cache directory and prints a one-line summary.
 
 mod digest;
+mod e2e;
 mod jsonl;
 mod levels;
 mod oracle;
@@ -21,13 +22,14 @@ use oracle::Oracle;
 use score::{CaseResult, Exclusions};
 
 /// The suites, in the summary's order.
-const SUITES: [&str; 6] = [
+const SUITES: [&str; 7] = [
     digest::LEXER.name,
     digest::PARSER.name,
     digest::PHPDOC.name,
     recorded::TYPES,
     recorded::RULES,
     levels::LEVELS,
+    e2e::E2E,
 ];
 
 const USAGE: &str =
@@ -60,6 +62,7 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
             (None, recorded::TYPES) => recorded::run_types(&oracle, &binary)?,
             (None, recorded::RULES) => recorded::run_rules(&oracle, &binary)?,
             (None, levels::LEVELS) => levels::run(&oracle, &binary)?,
+            (None, e2e::E2E) => e2e::run(&oracle, &binary)?,
             (None, _) => unreachable!("suite names are checked when parsing"),
         };
         results.extend(score::judge(
