@@ -18,7 +18,7 @@
 
 ## Scoreboard
 
-`cargo xtask parity` runs the lexer, parser, phpdoc, types, rules, level-oracle and end-to-end suites; `parity/score.json` holds the totals, and CI checks it against a full run under the pinned `php:8.5.4-cli` image on every push. Nothing is ported yet, so every case fails. The lexer and parser read phpstan-src's `tests/` and `vendor/`, nikic's parser fixtures (284 sections), php-src 8.5.4's `.phpt` FILE sections (21,445) and 14,142 generated operator pairs; nikic and php-src are fetched by their pins. The phpdoc suite parses every distinct doc comment in them, and the inputs of phpdoc-parser's own parser tests. The level oracle runs the phar on each of the 3,122 rule data files at every level; a cold extraction is about 0.9 CPU-hours. The end-to-end suite runs it on monolog and symfony/console at every level.
+`cargo xtask parity` runs the lexer, parser, phpdoc, types, rules, level-oracle and end-to-end suites; `parity/score.json` holds the totals, and CI checks it against a full run under the pinned `php:8.5.4-cli` image on every push. `--diff <commit>` lists the cases fixed, broken, changed, added and removed since an earlier run, and how each changed types answer relates to the old one. Nothing is ported yet, so every case fails. The lexer and parser read phpstan-src's `tests/` and `vendor/`, nikic's parser fixtures (284 sections), php-src 8.5.4's `.phpt` FILE sections (21,445) and 14,142 generated operator pairs; nikic and php-src are fetched by their pins. The phpdoc suite parses every distinct doc comment in them, and the inputs of phpdoc-parser's own parser tests. The level oracle runs the phar on each of the 3,122 rule data files at every level; a cold extraction is about 0.9 CPU-hours. The end-to-end suite runs it on monolog and symfony/console at every level.
 
 ```
 lexer 0/147471 parser 0/49157 phpdoc 0/41908 types 0/21299 rules 0/3609 levels 0/34342 e2e 0/3311
@@ -44,8 +44,7 @@ The legacy's heap is not measurable this way (it allocates through mimalloc), an
 
 ## Next
 
-1. `cargo xtask parity --diff <commit>`, classifying each changed case.
-2. M1's design doc (`docs/design/syntax.md`), once the Phase 2 exit holds.
+1. M1's design doc (`docs/design/syntax.md`), once the Phase 2 exit holds.
 
 ## Later
 

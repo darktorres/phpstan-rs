@@ -59,6 +59,22 @@ pub(crate) fn run_types(oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, Str
     })
 }
 
+/// The expected and actual values of a types case's failure detail,
+/// `expected <json>, got <json>`; `None` for a part that does not read.
+pub(crate) fn expected_and_actual(detail: &str) -> (Option<Value>, Option<Value>) {
+    let Some(rest) = detail.strip_prefix("expected ") else {
+        return (None, None);
+    };
+    let mut values = serde_json::Deserializer::from_str(rest).into_iter::<Value>();
+    let Some(Ok(expected)) = values.next() else {
+        return (None, None);
+    };
+    let actual = rest[values.byte_offset()..]
+        .strip_prefix(", got ")
+        .and_then(|got| serde_json::from_str(got).ok());
+    (Some(expected), actual)
+}
+
 pub(crate) fn run_rules(oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, String> {
     let records = records(oracle)?;
     let mut expected = BTreeMap::new();
@@ -182,6 +198,23 @@ fn judge(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_types_detail_is_read_back() {
+        let want = Value::String("'a, got b'".to_owned());
+        let got = Value::String("string".to_owned());
+        let detail = format!("expected {want}, got {got}");
+        assert_eq!(
+            expected_and_actual(&detail),
+            (Some(want.clone()), Some(got))
+        );
+        let nothing = format!("expected {want}, got {}", Value::Null);
+        assert_eq!(
+            expected_and_actual(&nothing),
+            (Some(want), Some(Value::Null))
+        );
+        assert_eq!(expected_and_actual("other text"), (None, None));
+    }
 
     #[test]
     fn expected_errors_compare_as_a_multiset() {

@@ -140,11 +140,13 @@ Why execute instead of parsing: 196 of 3,284 `analyse()` calls in `Rules/` pass 
 
 `parity/score.json` is committed. It holds per-suite totals, counts per group (the input tree, the assert kind or the test's namespace), and a digest of the passing case ids. It stays small enough to review in a diff.
 
-The per-case results go to `~/.cache/phpstan-rs/parity/results/<commit>.jsonl`. A run of some suites, or one with `--filter`, writes `<commit>.partial.jsonl` instead. `score.json` is rewritten only for the suites a run covers, and not at all under `--filter`. `--diff <commit>` (not built yet) compares two of these case by case and classifies each change (SB-6):
-- for most suites: pass↔fail;
-- for types: equal, narrower, wider or incomparable.
+The per-case results go to `~/.cache/phpstan-rs/parity/results/<commit>.jsonl`. A run of some suites, or one with `--filter`, writes `<commit>.partial.jsonl` instead. `score.json` is rewritten only for the suites a run covers, and not at all under `--filter`. `--diff <commit>` compares this run's results with `<commit>`'s, case by case, over the suites and `--filter` of this run (SB-6). It reads that commit's clean full run if there is one, then a run from a dirty tree at it, then a partial run; a suite the earlier run did not cover is named and skipped. Each case that differs is:
+- **fixed** (passes now), **broken** (passed before), **changed** (failed both times, with another outcome or detail), **added** or **removed**;
+- for a types case whose answer changed (not `assertVariableCertainty`), also classified by the new type's relation to the old one, as PHPStan's own types judge it (`parity/extract/relation.php`: both strings through the `TypeStringResolver` of the container PHPStan's tests use, then `isSuperTypeOf` both ways): **equal**, **narrower**, **wider**, **incomparable**, or **unparsed** for a string that is not a type. A passing case answered what it expected.
 
-The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N`.
+It prints a count per suite and class and the first ten cases of each class, and writes every case to `results/diff-<earlier>-<this>.txt`. It changes no result and no exit status: CI's gate stays `score.json`.
+
+The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N levels 0/N e2e 0/N`.
 
 ## CI
 

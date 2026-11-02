@@ -6,6 +6,7 @@
 //! rewrites `parity/score.json`; every run writes the per-case results under
 //! the cache directory and prints a one-line summary.
 
+mod diff;
 mod digest;
 mod e2e;
 mod jsonl;
@@ -32,13 +33,13 @@ const SUITES: [&str; 7] = [
     e2e::E2E,
 ];
 
-const USAGE: &str =
-    "usage: cargo xtask parity [--suite <name>]... [--filter <glob>] [--show <case id>]";
+const USAGE: &str = "usage: cargo xtask parity [--suite <name>]... [--filter <glob>] [--show <case id>] [--diff <commit>]";
 
 struct Options {
     suites: Vec<String>,
     filter: Option<String>,
     show: Option<String>,
+    diff: Option<String>,
 }
 
 pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
@@ -86,6 +87,16 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
     }
     println!("{}", score::summary(&scores));
     println!("results: {}", results_path.display());
+    if let Some(commit) = &options.diff {
+        diff::report(
+            &oracle,
+            root,
+            &results_path,
+            commit,
+            &options.suites,
+            options.filter.as_deref(),
+        )?;
+    }
     Ok(())
 }
 
@@ -100,6 +111,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         suites: Vec::new(),
         filter: None,
         show: None,
+        diff: None,
     };
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -123,6 +135,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--filter" => options.filter = Some(value()?),
             "--show" => options.show = Some(value()?),
+            "--diff" => options.diff = Some(value()?),
             _ => return Err(format!("unknown argument {arg}\n{USAGE}")),
         }
     }
