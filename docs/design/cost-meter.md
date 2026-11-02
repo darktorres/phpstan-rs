@@ -36,6 +36,9 @@ since = "M1"
 - **A workload never changes once added;** a larger variant gets a new name (9B-2).
 - **`cache` is part of its definition** (9B-2, HL-1). `off` gives the run a private, empty cache directory. `warm` fills it in a first run and checks it is byte-identical after the measured run; a run that rewrote its cache is invalid, not a data point. Series in different modes are never compared.
 - **The environment is empty** apart from `PATH` and `HOME` (a private directory). Ir counts every environment variable and argument byte, so an inherited shell would make two machines' runs differ for no reason.
+- **Nothing in the run may vary.** Three settings were needed, each found by a count that moved:
+  - `setarch -R` turns address randomization off, and `--vgdb=no` drops a pipe file named after the PID. Rust's thread setup parses `/proc/self/maps`, so both reached the count.
+  - `--fair-sched=yes` hands valgrind's lock out in FIFO order. The command runs on a thread of its own, and whether the main thread's join had to wait was a race worth 97 Ir (`__futex_abstimed_wait_cancelable64` and its callers); one full run in about seven took the other path. With the fair scheduler, 15 of 15 full runs gave the same counts.
 - **Both sides run from the same path.** Each binary is copied to one place before it is measured, because its own path (`argv[0]`) is counted too. Two builds of one commit measured from their build directories differed by 76 Ir; from one path, they are equal.
 
 The set grows with the port, as `PLAN.md` lists. The first two run before any port code exists:
@@ -71,7 +74,7 @@ Every memo has a hit counter (CLAUDE.md). The meter will print the counters from
   - Method: run `startup` and `parse-src-nsrt` five times each under callgrind and under DHAT, locally and in CI, with the empty environment.
   - Accept: within one machine, every run gives the same Ir, blocks, bytes, peak and live bytes.
   - Fallback: take the median of three runs and widen the thresholds to the spread seen.
-  - **Result locally (2026-11-01): accepted.** Five callgrind runs of `startup` gave 314,739 Ir each, and three DHAT runs gave 4,669 bytes in 27 blocks, a 2,236-byte peak and 548 bytes live, each time. Two meter runs gave identical tables. The CI half is read off the gate's first runs.
+  - **Result locally (2026-11-01): accepted, after three fixes.** Short repeated runs looked deterministic, but longer series showed two sources of variation, which the settings under "Workloads" remove. With them, 15 of 15 full meter runs gave identical tables. The CI half is read off the gate's first runs.
 - **S2: is valgrind's DHAT fast enough for the per-push gate?** The legacy used a patched dhat-rs for whole-stack Piwigo profiles, because valgrind's DHAT was too slow there (OH-1).
   - Method: time both tools on `parse-src-nsrt` once M1 can parse.
   - Accept: the whole gate, both sides and both tools, under 10 minutes.

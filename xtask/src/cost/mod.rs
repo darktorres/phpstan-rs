@@ -181,29 +181,74 @@ fn build_commit(root: &Path, commit: &str, scratch: &Path) -> Result<PathBuf, St
     let tree = scratch.join("base");
     let tree_arg = tree.to_string_lossy().into_owned();
     if tree.exists() {
+        unlink_submodule(&tree)?;
         git(root, &["worktree", "remove", "--force", &tree_arg])?;
     }
     git(root, &["worktree", "add", "--detach", &tree_arg, commit])?;
-    let reference = root
-        .join("vendor/phpstan-src")
-        .to_string_lossy()
-        .into_owned();
-    let result = git(
-        &tree,
-        &[
-            "submodule",
-            "update",
-            "--init",
-            "--reference",
-            &reference,
-            "vendor/phpstan-src",
-        ],
-    )
-    .and_then(|()| build(&tree, &scratch.join("target-base")));
-    let removed = git(root, &["worktree", "remove", "--force", &tree_arg]);
+    let result =
+        submodule(root, &tree, commit).and_then(|()| build(&tree, &scratch.join("target-base")));
+    let removed = unlink_submodule(&tree)
+        .and_then(|()| git(root, &["worktree", "remove", "--force", &tree_arg]));
     let binary = result?;
     removed?;
     Ok(binary)
+}
+
+/// Gives the base worktree its phpstan-src. At the head's commit, which is
+/// the usual case while the submodule is frozen, it is a link to the head's
+/// checkout; otherwise a clone of the base's commit.
+fn submodule(root: &Path, tree: &Path, commit: &str) -> Result<(), String> {
+    let gitlink = |rev: &str| {
+        command_text(
+            Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(["rev-parse", &format!("{rev}:vendor/phpstan-src")]),
+        )
+    };
+    if gitlink("HEAD")? != gitlink(commit)? {
+        return git(
+            tree,
+            &[
+                "submodule",
+                "update",
+                "--init",
+                "--depth",
+                "1",
+                "vendor/phpstan-src",
+            ],
+        );
+    }
+    let path = tree.join("vendor/phpstan-src");
+    if path.exists() {
+        fs::remove_dir(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    link(&root.join("vendor/phpstan-src"), &path)
+}
+
+#[cfg(unix)]
+fn link(target: &Path, path: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(target, path).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn link(_target: &Path, path: &Path) -> Result<(), String> {
+    Err(format!(
+        "{}: the cost meter runs on Linux only",
+        path.display()
+    ))
+}
+
+/// Removes the link `submodule` made, so removing the worktree can never
+/// reach the head's checkout through it.
+fn unlink_submodule(tree: &Path) -> Result<(), String> {
+    let path = tree.join("vendor/phpstan-src");
+    match fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            fs::remove_file(&path).map_err(|error| format!("{}: {error}", path.display()))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<(), String> {
@@ -255,7 +300,12 @@ fn measure_all(
                 .iter()
                 .map(|arg| arg.replace("{src}", &src.to_string_lossy()))
                 .collect();
-            measure(binary, &args, &stdin, &scratch.join("run"))
+            measure(
+                binary,
+                &args,
+                &stdin,
+                &scratch.join("run").join(&workload.name),
+            )
         })
         .collect()
 }
@@ -321,7 +371,14 @@ fn valgrind(
     home: &Path,
 ) -> Result<(), String> {
     let input = fs::File::open(stdin).map_err(|error| format!("{}: {error}", stdin.display()))?;
-    let output = Command::new("valgrind")
+    // The count must not depend on the run. The guest reads /proc/self/maps
+    // (Rust's thread setup does), so setarch -R turns address randomization
+    // off, and --vgdb=no drops the PID-named pipe valgrind would otherwise
+    // map (and create under /tmp). The command runs on its own thread, and
+    // whether the main thread's join has to wait was a race; --fair-sched
+    // hands valgrind's lock out in FIFO order, which fixes that order.
+    let output = Command::new("setarch")
+        .args(["-R", "valgrind", "--vgdb=no", "--fair-sched=yes"])
         .args(tool)
         .arg(binary)
         .args(args)
@@ -332,7 +389,9 @@ fn valgrind(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|error| format!("valgrind: {error}; the cost meter needs valgrind"))?;
+        .map_err(|error| {
+            format!("setarch: {error}; the cost meter needs setarch (util-linux) and valgrind")
+        })?;
     if output.status.success() {
         Ok(())
     } else {
