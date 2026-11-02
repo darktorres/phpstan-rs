@@ -337,9 +337,13 @@ fn measure(
         &input,
         &home,
     )?;
+    // Frames are spelled the same on every machine and in the base
+    // worktree: Rust's library as alloc/src/..., ours as <crate>/src/....
     valgrind(
         &[
             "--tool=dhat".to_owned(),
+            "--fullpath-after=/library/".to_owned(),
+            "--fullpath-after=crates/".to_owned(),
             format!("--dhat-out-file={}", dhat_out.display()),
         ],
         binary,

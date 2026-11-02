@@ -19,7 +19,9 @@ pub(crate) struct Heap {
 const ALLOCATOR_NAMES: [&str; 6] = [
     "malloc", "calloc", "realloc", "__rust_", "alloc::", "<alloc::",
 ];
-const ALLOCATOR_FILES: [&str; 2] = ["(library/alloc/", "(library/core/"];
+/// Rust's library frames read `alloc/src/...` and `core/src/...`, as the
+/// meter's `--fullpath-after` options spell them.
+const ALLOCATOR_FILES: [&str; 2] = ["(alloc/src/", "(core/src/"];
 
 fn is_allocator(frame: &str) -> bool {
     ALLOCATOR_NAMES.iter().any(|name| frame.starts_with(name))
@@ -92,7 +94,7 @@ mod tests {
 
     #[test]
     fn totals_sum_every_program_point_and_sites_skip_the_allocator() {
-        let text = r#"{"ftbl":["[root]","0x1: malloc (a.c:1)","0x2: alloc (library/alloc/src/alloc.rs:130)","0x3: parse (p.rs:3)","0x4: main (m.rs:4)"],
+        let text = r#"{"ftbl":["[root]","0x1: malloc (a.c:1)","0x2: alloc (alloc/src/alloc.rs:130)","0x3: parse (p.rs:3)","0x4: main (m.rs:4)"],
             "pps":[{"tb":10,"tbk":1,"gb":10,"eb":0,"fs":[1,2,3,4]},{"tb":5,"tbk":2,"gb":0,"eb":5,"fs":[1,4]}]}"#;
         let heap = parse(text).unwrap();
         assert_eq!(
