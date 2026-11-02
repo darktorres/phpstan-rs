@@ -89,6 +89,7 @@ fn fetched(
 ) -> Result<PathBuf, String> {
     let pins = oracle.cache.join("pins");
     let done = pins.join(name);
+    oracle.keep(done.clone());
     if done.is_dir() {
         return Ok(done);
     }

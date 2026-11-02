@@ -108,11 +108,14 @@ jobs:
       - name: Install phpstan-src's dependencies
         run: composer install --no-interaction --no-progress --working-dir=vendor/phpstan-src
       # The extractions are cached by their own keys inside this directory;
-      # this key only decides which directory is restored.
+      # this key only decides which directory is restored. An older one is
+      # restored too: its entries whose keys still match are reused, and the
+      # rest are extracted again.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/phpstan-rs/parity
           key: parity-${{ hashFiles('parity/extract/**', 'parity/pins.toml', 'vendor/phpstan-src/composer.lock') }}
+          restore-keys: parity-
       - run: cargo xtask parity
       - name: Check the committed score
         run: git diff --exit-code parity/score.json

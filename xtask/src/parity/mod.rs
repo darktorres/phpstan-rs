@@ -72,6 +72,12 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
     if options.filter.is_none() {
         score::write_score(&root.join("parity/score.json"), &scores)?;
     }
+    if !partial {
+        let removed = oracle.prune()?;
+        if !removed.is_empty() {
+            println!("pruned {} unused cache entries", removed.len());
+        }
+    }
     println!("{}", score::summary(&scores));
     println!("results: {}", results_path.display());
     Ok(())

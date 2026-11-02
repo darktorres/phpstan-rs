@@ -30,7 +30,7 @@ Extraction is deterministic from pinned inputs. Its output is cached under `~/.c
 
 The pinned inputs from outside the repository (nikic's repository, php-src's tarball) are fetched once into `~/.cache/phpstan-rs/parity/pins/<name>-<commit or sha256>`, checked against their pin, and renamed into place when complete.
 
-A cache hit skips stage 1. The cache is never committed.
+A cache hit skips stage 1. The cache is never committed. A full run (every suite, no filter) then removes what it did not use: the other entries of each extraction directory, stored inputs no list names, and pins no longer pinned. That keeps a cache restored from an older run, as CI's is, from growing.
 
 ## Oracle pins
 
@@ -127,7 +127,7 @@ Why execute instead of parsing: 196 of 3,284 `analyse()` calls in `Rules/` pass 
   - each finding used once;
   - "in context of class" copies collapsed.
 - **Comparison:** per identifier, the counts of PHPStan-only, matched and ours-only findings.
-- **When it runs:** the phar runs are expensive, so this suite runs at milestone ends and not in per-push CI.
+- **When it runs:** on every push, like every suite, from its cached extraction. A cold extraction is about 34,000 phar runs (3,122 data files at 11 levels), about 11 CPU-hours (spike S3), so it reruns only when its own inputs change.
 
 ### end-to-end
 - **Oracle:** the phar, against Piwigo (local only), monolog and symfony/console, each pinned by commit in `pins.toml`. It runs at every level, on the same `phpstan.neon`.
@@ -148,7 +148,7 @@ The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N`.
 
 - **Every push runs the whole scoreboard** in the `parity` job, inside the pinned `php:8.5.4-cli` image. phpstan-src's dependencies are installed by the pinned composer, and the extraction cache is kept between runs by `actions/cache`.
   - The image has far fewer extensions than the local php. All four extractions are byte-identical under both, checked on 2026-11-01.
-  - A full run is cheap while the extractions are cached: they rerun only when an extractor, a pin or phpstan-src's lock changes.
+  - A full run is cheap while the extractions are cached: each reruns only when its own key changes. The `actions/cache` key names the whole set of extractors and pins, and any older entry is restored (`restore-keys`), so a change to one extractor reruns only the extractions that read it.
 - **The committed `score.json` must equal the run** (`git diff --exit-code`). Each suite's entry holds a SHA-256 of its passing case ids, so a change in which cases pass fails CI even when the totals stay equal. A commit that changes the score commits the new `score.json` with it.
 
 ## Spikes
@@ -175,3 +175,14 @@ The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N`.
   - **Result (2026-11-01): replaced.** No reflection call is needed. The stand-in `TypeInferenceTestCase::gatherAssertTypes()` records the file each data provider passes it, so PHPUnit's own run gives the list: 1,986 records from 49 classes.
     - 45 PHPUnit errors are expected. They are tests whose data provider is built from `gatherAssertTypes()`, which the stand-in leaves empty.
     - `LegacyNodeScopeResolverTest`, `Generics\AnalysisContextTest` and `ScopePhpVersionTest` assert through their own `processFile` callbacks, not through assert calls. Their few cases each inspect the scope in a callback, so they need a case-by-case extractor; until then they are a "Later" line in `STATUS.md`. They are not exclusions: none of the exclusion kinds applies.
+- **S3: the cost of a phar run, for the level oracle.**
+  - Question: how long does one phar run on one rule data file take, and what can be cut without changing its output?
+  - Method: 30 data files, one in every 104 in byte order, each its own project, at levels 0 and 10, run one at a time under `nice -n 19`.
+  - Accept: a cold level-oracle extraction that fits a CI job (6 hours).
+  - Fallback: shard the extraction over a CI matrix.
+  - **Result (2026-11-02): accepted, at 1.2 s a run.**
+    - The plain run took 5.2 s. Of that, 2 s is loading the phar (`--version` alone), and a plain `analyse` also starts parallel workers, each of which loads the phar again.
+    - A warm `tmpDir`, per project or shared, saved nothing (4.6–6.3 s).
+    - `--debug` analyses in the one process: 2.8 s. With php's opcache file cache as well (`opcache.enable_cli`, `opcache.file_cache`, `file_cache_only`), 1.2 s from the second run on.
+    - The findings were identical every way; `--debug` only prints each file's path first.
+    - So a cold extraction is about 34,000 × 1.2 s ≈ 11.4 CPU-hours: about 3 hours on a 4-vCPU runner, 1.5–2 hours here.

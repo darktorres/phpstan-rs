@@ -1,6 +1,8 @@
 //! The oracle side of the scoreboard: the pinned php and phpstan-src, the
 //! extractors under `parity/extract/`, and the extraction cache.
 
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -29,6 +31,9 @@ pub(crate) struct Oracle {
     table: toml::Table,
     /// `<cache>/phpstan-rs/parity`.
     pub(crate) cache: PathBuf,
+    /// The cache entries, fetched pins and stored inputs this run used,
+    /// which `prune` keeps.
+    used: RefCell<BTreeSet<PathBuf>>,
 }
 
 impl Oracle {
@@ -80,7 +85,49 @@ impl Oracle {
             table,
             src,
             cache,
+            used: RefCell::default(),
         })
+    }
+
+    /// Marks `path`, under the cache, as used by this run.
+    pub(crate) fn keep(&self, path: PathBuf) {
+        self.used.borrow_mut().insert(path);
+    }
+
+    /// Removes what this run did not use: the other entries of each
+    /// extraction directory, the stored inputs no list names and the pins no
+    /// longer pinned. Only a run of every suite may call it, since a partial
+    /// run leaves other suites' entries unused. The per-case results are
+    /// kept.
+    pub(crate) fn prune(&self) -> Result<Vec<PathBuf>, String> {
+        let used = self.used.borrow();
+        let mut removed = Vec::new();
+        for dir in children(&self.cache)? {
+            let name = dir.file_name().unwrap_or_default();
+            if name == "results" || !dir.is_dir() {
+                continue;
+            }
+            for entry in children(&dir)? {
+                let entry_name = entry.file_name().unwrap_or_default();
+                if name != "pins" && entry_name == "work" {
+                    continue;
+                }
+                if name != "pins" && entry_name == "store" {
+                    for file in children(&entry)? {
+                        if !used.contains(&file) {
+                            remove(&file)?;
+                            removed.push(file);
+                        }
+                    }
+                    continue;
+                }
+                if !used.contains(&entry) {
+                    remove(&entry)?;
+                    removed.push(entry);
+                }
+            }
+        }
+        Ok(removed)
     }
 
     /// The commit composer installed `package` at in phpstan-src: its
@@ -152,6 +199,7 @@ impl Oracle {
             return Err(format!("suite {suite} names no extractor"));
         };
         let dir = self.cache.join(suite);
+        self.keep(dir.join(&key));
         cached(
             &dir.join(&key),
             || self.php(script, args, inputs, &dir.join("work")),
@@ -178,6 +226,34 @@ impl Oracle {
             .env("PARITY_WORK", work);
         piped(&mut command, stdin)
     }
+}
+
+/// The entries of `dir`, sorted; none if it doesn't exist.
+fn children(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("{}: {error}", dir.display())),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        out.push(
+            entry
+                .map_err(|error| format!("{}: {error}", dir.display()))?
+                .path(),
+        );
+    }
+    out.sort();
+    Ok(out)
+}
+
+fn remove(path: &Path) -> Result<(), String> {
+    let result = if path.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
+    result.map_err(|error| format!("removing {}: {error}", path.display()))
 }
 
 fn pin(table: &toml::Table, section: &str, key: &str) -> Result<String, String> {
@@ -417,6 +493,52 @@ mod tests {
         assert_eq!(redone, b"again");
         assert_eq!(fs::read(dir.join("cases.jsonl")).unwrap(), b"again");
         fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    #[test]
+    fn prune_removes_only_what_the_run_did_not_use() {
+        let cache = files::cache_dir()
+            .unwrap()
+            .join("phpstan-rs/test-scratch")
+            .join(format!("prune-{}", std::process::id()));
+        let paths = [
+            "lexer/used/cases.jsonl",
+            "lexer/stale/cases.jsonl",
+            "lexer/work/scratch",
+            "inputs/store/used.php",
+            "inputs/store/stale.php",
+            "pins/used/file",
+            "pins/stale/file",
+            "results/commit.jsonl",
+        ];
+        for path in paths {
+            let path = cache.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, b"").unwrap();
+        }
+        let oracle = Oracle {
+            src: PathBuf::new(),
+            extract: PathBuf::new(),
+            php_v: String::new(),
+            src_commit: String::new(),
+            installed: String::new(),
+            pins: Vec::new(),
+            table: toml::Table::new(),
+            cache: cache.clone(),
+            used: RefCell::default(),
+        };
+        for used in ["lexer/used", "inputs/store/used.php", "pins/used"] {
+            oracle.keep(cache.join(used));
+        }
+        let removed = oracle.prune().unwrap();
+        assert_eq!(
+            removed,
+            ["inputs/store/stale.php", "lexer/stale", "pins/stale"].map(|p| cache.join(p))
+        );
+        for path in paths {
+            assert_eq!(cache.join(path).exists(), !path.contains("stale"), "{path}");
+        }
+        fs::remove_dir_all(&cache).unwrap();
     }
 
     #[test]

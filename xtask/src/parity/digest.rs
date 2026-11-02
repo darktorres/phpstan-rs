@@ -9,7 +9,7 @@
 //! generated operator pairs, the last three materialized into files by
 //! `inputs.php`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
@@ -95,9 +95,11 @@ fn materialized(oracle: &Oracle) -> Result<Vec<u8>, String> {
     let store = oracle.cache.join("inputs/store");
     let args = [path_text(&nikic)?, path_text(&php_src)?, path_text(&store)?];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    oracle.extract_valid("inputs", &["inputs.php"], &args, b"", |manifest| {
+    let manifest = oracle.extract_valid("inputs", &["inputs.php"], &args, b"", |manifest| {
         line_fields(manifest, 1).all(|file| Path::new(file).is_file())
-    })
+    })?;
+    line_fields(&manifest, 1).for_each(|file| oracle.keep(PathBuf::from(file)));
+    Ok(manifest)
 }
 
 /// The `index`-th tab-separated field of each line.
@@ -118,13 +120,15 @@ fn suite_inputs(suite: &Suite, oracle: &Oracle) -> Result<Vec<u8>, String> {
     }
     let repository = path_text(&pins::phpdoc_parser(oracle)?)?;
     let store = path_text(&oracle.cache.join("inputs/store"))?;
-    oracle.extract_valid(
+    let docs = oracle.extract_valid(
         "phpdoc-docs",
         &[suite.extractor],
         &["--list", &repository, &store],
         &inputs,
         |docs| line_fields(docs, 2).all(|file| Path::new(file).is_file()),
-    )
+    )?;
+    line_fields(&docs, 2).for_each(|file| oracle.keep(PathBuf::from(file)));
+    Ok(docs)
 }
 
 fn path_text(path: &Path) -> Result<String, String> {
