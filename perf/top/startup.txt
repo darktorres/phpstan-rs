@@ -1,0 +1,45 @@
+# startup at 75a4b7944425b0752bb8351f3cc2d4ab19d37e0d
+
+## self Ir by function
+
+         51219  do_lookup_x
+         46031  __vfscanf_internal
+         42778  _dl_relocate_object_no_relro
+         30972  _dl_lookup_symbol_x
+         21922  ____strtoul_l_internal
+         19900  strcmp
+         10754  check_match
+          8041  _dl_check_map_versions
+          5294  intel_check_word.constprop.0
+          3956  _IO_sputbackc
+          3794  _dl_map_object_from_fd
+          3580  getdelim
+          3010  _int_malloc
+          2236  __isoc23_sscanf
+          1883  __GI___tunables_init
+          1881  dl_main
+          1697  _dl_cache_libcmp
+          1695  __memchr_avx2
+          1634  _IO_str_init_static_internal
+          1473  _dl_map_object_deps
+
+## bytes by allocation site
+
+          1024  _IO_file_doallocate (libio/./libio/filedoalloc.c:91) < _IO_doallocbuf (libio/./libio/genops.c:373) < _IO_file_underflow@@GLIBC_2.2.5 (libio/./libio/fileops.c:520)
+          1024  {closure#0} (std/src/io/stdio.rs:722) < {closure#0}<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<alloc::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>, std::io::stdio::stdout::{closure_env#0}> (std/src/sync/once_lock.rs:350) < {closure#0}<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<alloc::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<alloc::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>, std::io::stdio::stdout::{closure_env#0}>, !> (std/src/sync/once_lock.rs:572)
+           544  std::sys::pal::unix::stack_overflow::thread_info::set_current_info (std/src/sys/pal/unix/stack_overflow/thread_info.rs:122) < init (std/src/sys/pal/unix/stack_overflow.rs:185) < init (std/src/sys/pal/unix/mod.rs:38)
+           472  __fopen_internal (libio/./libio/iofopen.c:65) < fopen@@GLIBC_2.2.5 (libio/./libio/iofopen.c:86) < pthread_getattr_np@@GLIBC_2.32 (nptl/./nptl/pthread_getattr_np.c:85)
+           360  getdelim (libio/./libio/iogetdelim.c:65) < pthread_getattr_np@@GLIBC_2.32 (nptl/./nptl/pthread_getattr_np.c:122) < get_stack_start (std/src/sys/pal/unix/stack_overflow.rs:366)
+           304  __pthread_attr_extension (nptl/./nptl/pthread_attr_extension.c:28) < pthread_attr_setaffinity_np@@GLIBC_2.32 (nptl/./nptl/pthread_attr_setaffinity.c:45) < pthread_getattr_np@@GLIBC_2.32 (nptl/./nptl/pthread_getattr_np.c:194)
+           304  allocate_dtv (elf/../elf/dl-tls.c:470) < _dl_allocate_tls (elf/../elf/dl-tls.c:722) < allocate_stack (nptl/./nptl/allocatestack.c:568)
+           263  alloc (/rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/alloc/src/alloc.rs:130) < alloc_impl_runtime (/rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/alloc/src/alloc.rs:302) < alloc_impl (/rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/alloc/src/alloc.rs:424)
+            64  __cxa_thread_atexit_impl (stdlib/./stdlib/cxa_thread_atexit_impl.c:106) < get_or_init_slow<core::cell::Cell<std::thread::spawnhook::SpawnHooks>> (std/src/sys/thread_local/native/eager.rs:55) < get<core::cell::Cell<std::thread::spawnhook::SpawnHooks>> (std/src/sys/thread_local/native/eager.rs:38)
+            59  args (std/src/sys/args/unix.rs:58) < std::env::args_os (std/src/env.rs:864) < phpstan_rs::main (cli/src/main.rs:18)
+            48  alloc (std/src/sys/alloc/unix.rs:31) < alloc_impl (std/src/alloc.rs:161) < allocate (std/src/alloc.rs:223)
+            48  args (std/src/sys/args/unix.rs:24) < std::env::args_os (std/src/env.rs:864) < phpstan_rs::main (cli/src/main.rs:18)
+            32  pthread_attr_setaffinity_np@@GLIBC_2.32 (nptl/./nptl/pthread_attr_setaffinity.c:51) < pthread_getattr_np@@GLIBC_2.32 (nptl/./nptl/pthread_getattr_np.c:194) < current_guard (std/src/sys/pal/unix/stack_overflow.rs:580)
+            32  pthread_attr_setaffinity_np@@GLIBC_2.32 (nptl/./nptl/pthread_attr_setaffinity.c:51) < pthread_getattr_np@@GLIBC_2.32 (nptl/./nptl/pthread_getattr_np.c:194) < get_stack_start (std/src/sys/pal/unix/stack_overflow.rs:366)
+            32  pthread_getattr_np@@GLIBC_2.32 (nptl/./nptl/pthread_getattr_np.c:180) < current_guard (std/src/sys/pal/unix/stack_overflow.rs:580) < std::sys::pal::unix::stack_overflow::imp::make_handler (std/src/sys/pal/unix/stack_overflow.rs:250)
+            32  pthread_getattr_np@@GLIBC_2.32 (nptl/./nptl/pthread_getattr_np.c:180) < get_stack_start (std/src/sys/pal/unix/stack_overflow.rs:366) < stack_start_aligned (std/src/sys/pal/unix/stack_overflow.rs:383)
+            15  {closure#0} (std/src/sys/pal/unix/stack_overflow/thread_info.rs:114) < {closure#0}<std::sys::pal::unix::stack_overflow::thread_info::set_current_info::{closure_env#0}, core::option::Option<alloc::boxed::Box<str, alloc::alloc::Global>>> (std/src/thread/current.rs:234) < try_with_current<std::thread::current::with_current_name::{closure_env#0}<std::sys::pal::unix::stack_overflow::thread_info::set_current_info::{closure_env#0}, core::option::Option<alloc::boxed::Box<str, alloc::alloc::Global>>>, core::option::Option<alloc::boxed::Box<str, alloc::alloc::Global>>> (std/src/thread/current.rs:201)
+             4  {closure#0} (std/src/sys/pal/unix/stack_overflow/thread_info.rs:114) < {closure#0}<std::sys::pal::unix::stack_overflow::thread_info::set_current_info::{closure_env#0}, core::option::Option<alloc::boxed::Box<str, alloc::alloc::Global>>> (std/src/thread/current.rs:234) < try_with_current<std::thread::current::with_current_name::{closure_env#0}<std::sys::pal::unix::stack_overflow::thread_info::set_current_info::{closure_env#0}, core::option::Option<alloc::boxed::Box<str, alloc::alloc::Global>>>, core::option::Option<alloc::boxed::Box<str, alloc::alloc::Global>>> (std/src/thread/current.rs:204)
