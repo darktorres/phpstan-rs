@@ -83,3 +83,8 @@ Every memo has a hit counter (CLAUDE.md). The meter will print the counters from
   - Method: compare `--record`'s local rows with the gate's head numbers for the same commit.
   - Expected: they differ, through glibc and the memcpy variant chosen for the CPU, so the gate measures both sides itself.
   - If they are equal, the gate may compare against the committed rows instead of building the base.
+  - **Result (2026-11-01): they differ.** At ded8da58c, `startup` counts 312,225 Ir locally and 313,498 in CI, so the gate keeps building the base. In CI, base and head of an unchanged binary gave equal counts, which is S1's CI half.
+
+## The planted regression
+
+The gate was shown to fail on a throwaway pull request (#6, closed unmerged) whose `--version` cloned a 1 MiB vector: `startup` rose by 371% Ir and by 2 MiB of peak heap. The first version of the plant did not trip it, because the optimizer removed the unused allocation and its clone. A plant has to keep its work opaque (`std::hint::black_box`), or it measures nothing.

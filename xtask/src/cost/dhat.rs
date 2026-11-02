@@ -13,11 +13,18 @@ pub(crate) struct Heap {
     pub(crate) sites: Vec<(String, u64)>,
 }
 
-/// Frames that only say an allocation happened; a site is named by the
-/// first frames after them.
-const ALLOCATOR_FRAMES: [&str; 6] = [
+/// Frames that only say an allocation happened: the allocator's entry
+/// points, and anything inside Rust's `alloc` and `core` libraries. A site
+/// is named by the first frames after them.
+const ALLOCATOR_NAMES: [&str; 6] = [
     "malloc", "calloc", "realloc", "__rust_", "alloc::", "<alloc::",
 ];
+const ALLOCATOR_FILES: [&str; 2] = ["(library/alloc/", "(library/core/"];
+
+fn is_allocator(frame: &str) -> bool {
+    ALLOCATOR_NAMES.iter().any(|name| frame.starts_with(name))
+        || ALLOCATOR_FILES.iter().any(|file| frame.contains(file))
+}
 
 /// Frames shown per site.
 const SITE_FRAMES: usize = 3;
@@ -57,7 +64,7 @@ pub(crate) fn parse(text: &str) -> Result<Heap, String> {
             .unwrap_or_default();
         let start = stack
             .iter()
-            .position(|frame| !ALLOCATOR_FRAMES.iter().any(|a| frame.starts_with(a)))
+            .position(|frame| !is_allocator(frame))
             .unwrap_or(0);
         let site = stack[start..]
             .iter()
@@ -85,7 +92,7 @@ mod tests {
 
     #[test]
     fn totals_sum_every_program_point_and_sites_skip_the_allocator() {
-        let text = r#"{"ftbl":["[root]","0x1: malloc (a.c:1)","0x2: alloc::raw_vec::grow (b.rs:2)","0x3: parse (p.rs:3)","0x4: main (m.rs:4)"],
+        let text = r#"{"ftbl":["[root]","0x1: malloc (a.c:1)","0x2: alloc (library/alloc/src/alloc.rs:130)","0x3: parse (p.rs:3)","0x4: main (m.rs:4)"],
             "pps":[{"tb":10,"tbk":1,"gb":10,"eb":0,"fs":[1,2,3,4]},{"tb":5,"tbk":2,"gb":0,"eb":5,"fs":[1,4]}]}"#;
         let heap = parse(text).unwrap();
         assert_eq!(

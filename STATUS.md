@@ -26,14 +26,19 @@ lexer 0/39858 parser 0/13286 types 0/21299 rules 0/3609
 
 ## Cost
 
-`cargo xtask cost` measures the workloads of `perf/workloads.toml` under callgrind and DHAT. CI's cost gate compares each push with its base commit.
+`cargo xtask cost` measures the workloads of `perf/workloads.toml` under callgrind and DHAT. CI's cost gate compares each push with its base commit, and was shown to fail on a planted regression. `perf/history.tsv` holds the recorded rows (this machine):
+
+| workload | Ir | blocks | bytes | peak | live |
+|---|---|---|---|---|---|
+| startup | 312,225 | 27 | 4,661 | 2,236 | 548 |
+| parse-src-nsrt | 313,556 | 29 | 4,762 | 2,289 | 548 |
 
 ## Next
 
-1. The first recorded cost rows, and the gate shown to trip on a planted regression (a throwaway pull request).
+1. The legacy binary's baseline: its scoreboard line, and its reference cost rows (`legacy-final`).
 2. The parser suite's other inputs (nikic's fixtures, php-src's `.phpt` files, the operator pairs), pinned.
 3. The phpdoc suite.
-4. The level-oracle and end-to-end suites; then the legacy binary's baseline line.
+4. The level-oracle and end-to-end suites.
 5. `cargo xtask parity --diff <commit>`, classifying each changed case.
 
 ## Later
