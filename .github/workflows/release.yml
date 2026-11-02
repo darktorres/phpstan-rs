@@ -69,7 +69,7 @@ jobs:
           echo "$version_output"
           echo "$version_output" | grep -Eq '^phpstan-rs [0-9]+\.[0-9]+\.[0-9]+$'
           if [[ "$TARGET" == *linux-musl ]]; then
-            file "$dest" | tee /dev/stderr | grep -q 'statically linked'
+            file "$dest" | tee /dev/stderr | grep -Eq 'statically linked|static-pie linked'
           fi
           gzip -k "$dest"
           # macOS has no sha256sum; shasum writes the same line.
