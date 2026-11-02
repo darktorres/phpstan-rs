@@ -9,7 +9,7 @@
   - Its findings are in `RESTART_FINDINGS.md` at `legacy-final`, and its lessons in `LESSONS.md`.
   - Its data outside git is in `~/.cache/phpstan-rs-legacy/` (see `LOST.md` there).
   - The legacy binary is at `~/.cache/phpstan-rs-legacy/bin/phpstan-rs-legacy-final`.
-- `vendor/phpstan-src` is pinned to 2.3.4, the latest release, frozen. The 2.3.4 phar is pinned by digest in `parity/pins.toml`.
+- `vendor/phpstan-src` is pinned to 2.3.4, the latest release, frozen. The 2.3.4 phar is pinned by digest in `parity/pins.toml`, and the `phpstan/phpstan` package that holds it and the turbo extension by commit.
 - The workspace has 14 empty crates in PHPStan's layout, plus the xtask.
 - The CLI runs on its own thread, and a closed pipe exits with 141.
 - `parity/port-map.tsv` lists 2,032 PHPStan files, all `todo`.
@@ -18,10 +18,10 @@
 
 ## Scoreboard
 
-`cargo xtask parity` runs the lexer, parser, phpdoc, types and rules suites; `parity/score.json` holds the totals, and CI checks it against a full run under the pinned `php:8.5.4-cli` image on every push. Nothing is ported yet, so every case fails. The lexer and parser read phpstan-src's `tests/` and `vendor/`, nikic's parser fixtures (284 sections), php-src 8.5.4's `.phpt` FILE sections (21,445) and 14,142 generated operator pairs; nikic and php-src are fetched by their pins. The phpdoc suite parses every distinct doc comment in them, and the inputs of phpdoc-parser's own parser tests.
+`cargo xtask parity` runs the lexer, parser, phpdoc, types, rules and level-oracle suites; `parity/score.json` holds the totals, and CI checks it against a full run under the pinned `php:8.5.4-cli` image on every push. Nothing is ported yet, so every case fails. The lexer and parser read phpstan-src's `tests/` and `vendor/`, nikic's parser fixtures (284 sections), php-src 8.5.4's `.phpt` FILE sections (21,445) and 14,142 generated operator pairs; nikic and php-src are fetched by their pins. The phpdoc suite parses every distinct doc comment in them, and the inputs of phpdoc-parser's own parser tests. The level oracle runs the phar on each of the 3,122 rule data files at every level; a cold extraction is about 0.9 CPU-hours.
 
 ```
-lexer 0/147471 parser 0/49157 phpdoc 0/41908 types 0/21299 rules 0/3609
+lexer 0/147471 parser 0/49157 phpdoc 0/41908 types 0/21299 rules 0/3609 levels 0/34342
 ```
 
 Where the legacy binary (`legacy-final`) stood, measured once through what its command line can do:
@@ -44,10 +44,11 @@ The legacy's heap is not measurable this way (it allocates through mimalloc), an
 
 ## Next
 
-1. The level-oracle and end-to-end suites.
+1. The end-to-end suite.
 2. `cargo xtask parity --diff <commit>`, classifying each changed case.
 3. M1's design doc (`docs/design/syntax.md`), once the Phase 2 exit holds.
 
 ## Later
 
 - The types suite's three `processFile` classes (`LegacyNodeScopeResolverTest`, `Generics\AnalysisContextTest`, `ScopePhpVersionTest`) assert in scope callbacks and are not extracted yet.
+- Cache the level oracle's records per file, keyed by its content with the extraction's key, so a changed input list reruns only the new files.

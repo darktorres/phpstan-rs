@@ -2,11 +2,22 @@
 # CI fetches each one, checks its digest, and fails on a mismatch.
 
 [phpstan-phar]
+# The release's phar, whose digest the phpstan package's copy must have; the
+# level oracle runs that copy.
 version = "2.3.4"
 url = "https://github.com/phpstan/phpstan/releases/download/2.3.4/phpstan.phar"
 sha256 = "a961d12cc71941a31ad6560e6a330347d487612628c3202a718f71a59de21a7c"
 # Signed by "PHPStan Bot <ondrej+phpstanbot@mirtes.cz>", key CA7C2C7A30C8E8E1274A847651C67305FFC2E5C0.
 signature = "https://github.com/phpstan/phpstan/releases/download/2.3.4/phpstan.phar.asc"
+
+[phpstan]
+# The phpstan/phpstan composer package, which holds the same phpstan.phar and
+# next to it the turbo extension's binaries (turbo-ext/), which the phar
+# loads when they match its version. The level oracle runs the phar from
+# here, with the extension; the phar's SHA-256 must be the phpstan-phar pin's.
+version = "2.3.4"
+repository = "https://github.com/phpstan/phpstan.git"
+commit = "f20ce6f3c82556cfcfc086b152445a12d1d64fff"
 
 [phpstan-src]
 # The vendor/phpstan-src submodule, the same release as the phar.

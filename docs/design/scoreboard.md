@@ -119,15 +119,15 @@ Why execute instead of parsing: 196 of 3,284 `analyse()` calls in `Rules/` pass 
 - **Comparison:** the multiset of `[message, line, tip]`, as `RuleTestCase::analyse` compares them; for `fix`, the fixed file's text.
 
 ### level oracle
-- **Oracle:** the phar, run on `tests/PHPStan/Rules/**/data` and, later, on corpus files, at every level 0–10. It uses FR-5's recipe:
-  - run outside any `vendor/`, with `phpVersion` as a range;
-  - each file is its own project (CA-4, OWL-2);
-  - bleeding-edge toggles as each test sets them;
-  - findings matched by identifier: same file and line, then within 3 lines, then within 60 lines for the listed identifiers;
-  - each finding used once;
-  - "in context of class" copies collapsed.
-- **Comparison:** per identifier, the counts of PHPStan-only, matched and ours-only findings.
-- **When it runs:** on every push, like every suite, from its cached extraction. A cold extraction is about 34,000 phar runs (3,122 data files at 11 levels), about 11 CPU-hours (spike S3), so it reruns only when its own inputs change.
+- **Oracle:** the pinned phar from the `phpstan/phpstan` package, with the turbo extension beside it, run on every `.php` file under a `data` directory of `tests/PHPStan/Rules` (3,122 files) at every level 0–10 (`parity/extract/levels.php`). Each run is a project of its own (CA-4, OWL-2): the file and a `phpstan.neon` with the level and `phpVersion` as the range 70100–80599 (CA-4: never one version). It runs outside any `vendor/`, with no bleeding edge and no other configuration (FR-5).
+  - **How it runs** (spikes S3, S4 and S5): worker processes, one per CPU, each take a batch of 500 runs. Each worker slot has one project directory holding a `level-<n>.neon` per level (with no `paths`), its `tmpDir`, and the current run's data file. A worker loads the phar once, as its `bin/phpstan` does, then runs PHPStan's own console application and `AnalyseCommand` per run, as `phpstan analyse --debug --no-progress --error-format=json -c level-<n>.neon <file>` would in that directory. Since the file is named on the command line, the compiled DI container depends only on the level, so a slot compiles 11 and reuses them; `--debug` never uses the result cache. php's opcache file cache keeps the phar's compiled code between workers. Workers load the turbo extension and activate it as the package's `bin/phpstan` does. The records equal one phar process per run with the file in `phpstan.neon`'s `paths`, byte for byte.
+  - **The work directory** is the cache key's own, and `levels.php` empties it when it starts: compiled containers and opcache's code made under one php setup (turbo or not, a profiler extension or not) crash under another, and the key sees `php -v`, not the extensions.
+  - A worker that dies keeps its finished runs; its run is retried alone and the rest are queued again. `levels.log` in the work directory has a line per finished batch, per death, and per run that printed no JSON.
+  - A run where PHPStan itself crashes (it does on `Keywords/data/declare-position-nested.php`, `ShouldNotHappenException` in `MissingReturnRule`) records its exit code and the uncaught exception's message line.
+- **Records:** one per file and level, id `<file>@<level>`, group the rule family (the directory under `Rules`): the exit code, the findings (line, identifier, message, tip, ignorable; sorted by line, identifier and message) and PHPStan's other errors. Paths are project-relative (OM-2).
+- **phpstan-rs side:** `debug levels` reads the same `<id>\t<file>` lines and prints the same records, as `phpstan-rs analyse` on the same projects would report.
+- **Comparison:** exact. A case passes when the exit code, the findings and the other errors are equal. A failing case's reason counts, per identifier, the findings only PHPStan reported and those only phpstan-rs did. (FR-5's near-line matching was for the legacy, whose lines were often off; a port is held to the same lines.)
+- **When it runs:** on every push, like every suite, from its cached extraction, which reruns only when its own inputs change (the phar, phpstan-src, `levels.php`, the oracle php). A cold extraction is 34,342 runs, about 0.9 CPU-hours (spike S5).
 
 ### end-to-end
 - **Oracle:** the phar, against Piwigo (local only), monolog and symfony/console, each pinned by commit in `pins.toml`. It runs at every level, on the same `phpstan.neon`.
@@ -186,3 +186,24 @@ The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N`.
     - `--debug` analyses in the one process: 2.8 s. With php's opcache file cache as well (`opcache.enable_cli`, `opcache.file_cache`, `file_cache_only`), 1.2 s from the second run on.
     - The findings were identical every way; `--debug` only prints each file's path first.
     - So a cold extraction is about 34,000 × 1.2 s ≈ 11.4 CPU-hours: about 3 hours on a 4-vCPU runner, 1.5–2 hours here.
+- **S4: running the phar without a process per run.**
+  - Question: can the level oracle's runs share processes and compiled state without changing a single record?
+  - Method: a worker that loads the phar once and runs PHPStan's console application per run, first with a project per run, then with a fixed project per worker and the file on the command line. Each compared byte for byte with one phar process per run on 121 runs (11 files × 11 levels), then two full extractions compared with each other.
+  - Accept: identical records, and a cold extraction that fits a CI job.
+  - Fallback: one process per run with the opcache file cache (S3), sharded over a CI matrix.
+  - **Result (2026-11-02): accepted.**
+    - With a project per run, one at a time: 0.33 s a run, against 0.85 s for a process per run. The rest was mostly the DI container, compiled anew for each project: an empty file cost 0.71 s of a real file's 0.82 under the same load. Memory grew about 2 MB a run, with each run's container class.
+    - With a fixed project per worker and the file on the command line: 0.10 s a run, 11 containers per worker. Identical records.
+    - Two things made records differ until fixed: stdout and stderr must stay separate, as the console's `ConsoleOutput` keeps them (PHPStan prints notes to stderr), and php's `short_open_tag` has to be set, as for the extractors.
+    - Full extraction, 8 workers here: 14 min 38 s wall, 6,644 CPU-s. Two full runs gave identical records, except for 484 records of a first run that shared its work directory with a killed earlier run; the second, in a fresh directory, had no worker deaths and no failures but PHPStan's own crash on one file.
+- **S5: what else a run's cost can lose.**
+  - Question: with S4's workers, which of a run's costs can go without changing a record?
+  - Method: one worker on one batch of 506 runs (46 files spread over the inputs, × 11 levels), profiled with Excimer, then variants timed against each other in alternating rounds, every variant's records compared with the others'. Garbage collection timed by `gc_status()`'s own counters, since wall time here varies by up to 50% between identical runs.
+  - Accept: a gain beyond the rounds' spread, with identical records.
+  - Fallback: S4's workers as they are.
+  - **Result (2026-11-02):**
+    - A run is about 60 ms. About a quarter is building the container from the config, about 28% parsing stubs again (each run's container starts with empty memos), about 18% the collector freeing the run's 12,000 objects. Sharing a container between files would leak one file's classes into the next, so these stay.
+    - Collecting every 10, 50 or 100 runs instead of after each: 2–5% less collector time, for up to 3× the memory. Not taken.
+    - The turbo extension: about a fifth off a run's CPU time (median 0.80 of plain over five rounds); php's tracing JIT: about the same (0.83). php refuses the JIT beside any extension that overrides `zend_execute_ex`, the turbo extension included, so it is one or the other; the turbo extension is taken, as PHPStan's own package runs it. Both gave records identical to plain.
+    - Profiler extensions (SPX, xhprof, pcov) override `zend_execute_ex` too and made plain php about 40% slower here; the CLI here no longer loads them, as the CI image never does.
+    - Full extraction with the turbo extension, 8 workers here: 6 min 48 s wall, 3,095 CPU-s, against S4's 14 min 38 s and 6,644. Its records equal S4's second run's, except the crashing file's 11 records, whose message now names PHPStan's own exception.

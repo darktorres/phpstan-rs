@@ -95,8 +95,8 @@ impl Oracle {
     }
 
     /// Removes what this run did not use: the other entries of each
-    /// extraction directory, the stored inputs no list names and the pins no
-    /// longer pinned. Only a run of every suite may call it, since a partial
+    /// extraction directory and their work directories, the stored inputs no
+    /// list names and the pins no longer pinned. Only a run of every suite may call it, since a partial
     /// run leaves other suites' entries unused. The per-case results are
     /// kept.
     pub(crate) fn prune(&self) -> Result<Vec<PathBuf>, String> {
@@ -109,10 +109,7 @@ impl Oracle {
             }
             for entry in children(&dir)? {
                 let entry_name = entry.file_name().unwrap_or_default();
-                if name != "pins" && entry_name == "work" {
-                    continue;
-                }
-                if name != "pins" && entry_name == "store" {
+                if name != "pins" && (entry_name == "store" || entry_name == "work") {
                     for file in children(&entry)? {
                         if !used.contains(&file) {
                             remove(&file)?;
@@ -200,16 +197,23 @@ impl Oracle {
         };
         let dir = self.cache.join(suite);
         self.keep(dir.join(&key));
+        // The work directory is the key's own: what an extractor leaves there
+        // for its next run (compiled code, compiled configs) may only be
+        // reused by the same extractor, pins and php.
+        let work = dir.join("work").join(&key);
+        self.keep(work.clone());
         cached(
             &dir.join(&key),
-            || self.php(script, args, inputs, &dir.join("work")),
+            || self.php(script, args, inputs, &work),
             valid,
         )
     }
 
     /// Runs the `script` extractor with `args` after the phpstan-src path,
     /// feeding it `stdin`, and returns its stdout. `PARITY_WORK` names
-    /// `work`, a directory the extractor may write scratch files to.
+    /// `work`, a directory the extractor may write scratch files to, and
+    /// `PARITY_JOBS` how many processes it may run at once. Neither is part
+    /// of the cache key: an extractor's output may not depend on them.
     pub(crate) fn php(
         &self,
         script: &str,
@@ -223,7 +227,13 @@ impl Oracle {
             .arg(self.extract.join(script))
             .arg(&self.src)
             .args(args)
-            .env("PARITY_WORK", work);
+            .env("PARITY_WORK", work)
+            .env(
+                "PARITY_JOBS",
+                thread::available_parallelism()
+                    .map_or(1, usize::from)
+                    .to_string(),
+            );
         piped(&mut command, stdin)
     }
 }
@@ -504,7 +514,8 @@ mod tests {
         let paths = [
             "lexer/used/cases.jsonl",
             "lexer/stale/cases.jsonl",
-            "lexer/work/scratch",
+            "lexer/work/used/scratch",
+            "lexer/work/stale/scratch",
             "inputs/store/used.php",
             "inputs/store/stale.php",
             "pins/used/file",
@@ -527,13 +538,24 @@ mod tests {
             cache: cache.clone(),
             used: RefCell::default(),
         };
-        for used in ["lexer/used", "inputs/store/used.php", "pins/used"] {
+        for used in [
+            "lexer/used",
+            "lexer/work/used",
+            "inputs/store/used.php",
+            "pins/used",
+        ] {
             oracle.keep(cache.join(used));
         }
         let removed = oracle.prune().unwrap();
         assert_eq!(
             removed,
-            ["inputs/store/stale.php", "lexer/stale", "pins/stale"].map(|p| cache.join(p))
+            [
+                "inputs/store/stale.php",
+                "lexer/stale",
+                "lexer/work/stale",
+                "pins/stale"
+            ]
+            .map(|p| cache.join(p))
         );
         for path in paths {
             assert_eq!(cache.join(path).exists(), !path.contains("stale"), "{path}");

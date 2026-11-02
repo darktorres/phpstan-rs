@@ -35,18 +35,19 @@ pub fn run(args: &[String], version: &str, out: &mut dyn Write) -> io::Result<Ou
 /// (`docs/design/scoreboard.md`). The lexer and parser read one
 /// `<case id>\t<file>` line per input on stdin, or take `--show <case id>
 /// <file>`; phpdoc reads `<case id>\t<kind>\t<file>\t<offset>\t<length>`
-/// lines, one per doc comment or type, or takes `--show` with the same five. A suite whose code is not ported yet answers with one
+/// lines, one per doc comment or type, or takes `--show` with the same five;
+/// levels reads `<case id>\t<file>` lines, one per rule data file. A suite whose code is not ported yet answers with one
 /// `{"unported": "<suite>"}` line.
 fn debug(args: &[String], out: &mut dyn Write) -> io::Result<Outcome> {
     match args.first().map(String::as_str) {
-        Some(suite @ ("lexer" | "parser" | "phpdoc" | "types" | "rules")) => {
+        Some(suite @ ("lexer" | "parser" | "phpdoc" | "types" | "rules" | "levels")) => {
             writeln!(out, "{{\"unported\":\"{suite}\"}}")?;
             Ok(Outcome::Clean)
         }
         _ => {
             writeln!(
                 out,
-                "Usage: phpstan-rs debug <lexer|parser> [--show <case id> <file>] < inputs\n       phpstan-rs debug phpdoc [--show <case id> <kind> <file> <offset> <length>] < cases\n       phpstan-rs debug <types|rules>"
+                "Usage: phpstan-rs debug <lexer|parser> [--show <case id> <file>] < inputs\n       phpstan-rs debug phpdoc [--show <case id> <kind> <file> <offset> <length>] < cases\n       phpstan-rs debug <types|rules|levels>"
             )?;
             Ok(Outcome::Usage)
         }
@@ -73,7 +74,7 @@ mod tests {
 
     #[test]
     fn debug_suites_answer_unported() {
-        for suite in ["lexer", "parser", "phpdoc", "types", "rules"] {
+        for suite in ["lexer", "parser", "phpdoc", "types", "rules", "levels"] {
             let mut out = Vec::new();
             let args = ["debug".to_owned(), suite.to_owned()];
             assert_eq!(run(&args, "1", &mut out).unwrap(), Outcome::Clean);

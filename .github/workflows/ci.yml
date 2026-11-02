@@ -76,7 +76,8 @@ jobs:
   parity:
     name: parity scoreboard
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A cold level-oracle extraction is about 0.9 CPU-hours (spike S5).
+    timeout-minutes: 120
     container:
       # parity/pins.toml [oracle-php] image; a step below checks they agree.
       image: php:8.5.4-cli@sha256:cfa277c10f9f1859addbbed6739673a50a9c1b5777f64c0441118eca148b8056

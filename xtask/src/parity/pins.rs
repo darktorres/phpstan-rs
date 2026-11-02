@@ -1,5 +1,6 @@
 //! The pinned inputs fetched from outside the repository: nikic's parser
-//! fixtures and php-src's `.phpt` tests. Each is fetched once into
+//! fixtures, phpdoc-parser's tests, php-src's `.phpt` tests and the PHPStan
+//! package. Each is fetched once into
 //! `<cache>/pins/<name>-<id>`, checked against its pin, and then reused.
 
 use std::fs;
@@ -48,6 +49,23 @@ fn repository(oracle: &Oracle, section: &str) -> Result<PathBuf, String> {
         }
         Ok(())
     })
+}
+
+/// The PHPStan phar in the phpstan/phpstan package at the pinned commit,
+/// beside the turbo extension's binaries, checked against the phar's pinned
+/// SHA-256.
+pub(crate) fn phar(oracle: &Oracle) -> Result<PathBuf, String> {
+    let sha256 = oracle.pin("phpstan-phar", "sha256")?;
+    let phar = repository(oracle, "phpstan")?.join("phpstan.phar");
+    let bytes = fs::read(&phar).map_err(|error| format!("{}: {error}", phar.display()))?;
+    let got = hex(&Sha256::digest(&bytes));
+    if got != sha256 {
+        return Err(format!(
+            "{} has SHA-256 {got}, not the pinned {sha256}",
+            phar.display()
+        ));
+    }
+    Ok(phar)
 }
 
 /// php-src's release tarball, unpacked.

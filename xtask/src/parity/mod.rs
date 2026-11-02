@@ -8,6 +8,7 @@
 
 mod digest;
 mod jsonl;
+mod levels;
 mod oracle;
 mod pins;
 mod recorded;
@@ -20,12 +21,13 @@ use oracle::Oracle;
 use score::{CaseResult, Exclusions};
 
 /// The suites, in the summary's order.
-const SUITES: [&str; 5] = [
+const SUITES: [&str; 6] = [
     digest::LEXER.name,
     digest::PARSER.name,
     digest::PHPDOC.name,
     recorded::TYPES,
     recorded::RULES,
+    levels::LEVELS,
 ];
 
 const USAGE: &str =
@@ -57,6 +59,7 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
             (Some(digest), _) => digest::run(digest, &oracle, &binary)?,
             (None, recorded::TYPES) => recorded::run_types(&oracle, &binary)?,
             (None, recorded::RULES) => recorded::run_rules(&oracle, &binary)?,
+            (None, levels::LEVELS) => levels::run(&oracle, &binary)?,
             (None, _) => unreachable!("suite names are checked when parsing"),
         };
         results.extend(score::judge(

@@ -1,4 +1,145 @@
 {
+  "levels": {
+    "error": 0,
+    "excluded": 0,
+    "fail": 34342,
+    "groups": {
+      "Api": {
+        "pass": 0,
+        "total": 286
+      },
+      "Arrays": {
+        "pass": 0,
+        "total": 1947
+      },
+      "Cast": {
+        "pass": 0,
+        "total": 209
+      },
+      "Classes": {
+        "pass": 0,
+        "total": 1991
+      },
+      "Comparison": {
+        "pass": 0,
+        "total": 4301
+      },
+      "Constants": {
+        "pass": 0,
+        "total": 407
+      },
+      "DeadCode": {
+        "pass": 0,
+        "total": 1771
+      },
+      "Debug": {
+        "pass": 0,
+        "total": 165
+      },
+      "EnumCases": {
+        "pass": 0,
+        "total": 22
+      },
+      "Exceptions": {
+        "pass": 0,
+        "total": 1133
+      },
+      "Functions": {
+        "pass": 0,
+        "total": 5401
+      },
+      "Generators": {
+        "pass": 0,
+        "total": 77
+      },
+      "Generics": {
+        "pass": 0,
+        "total": 506
+      },
+      "Ignore": {
+        "pass": 0,
+        "total": 22
+      },
+      "InternalTag": {
+        "pass": 0,
+        "total": 187
+      },
+      "Keywords": {
+        "pass": 0,
+        "total": 396
+      },
+      "Methods": {
+        "pass": 0,
+        "total": 6545
+      },
+      "Missing": {
+        "pass": 0,
+        "total": 231
+      },
+      "Names": {
+        "pass": 0,
+        "total": 110
+      },
+      "Namespaces": {
+        "pass": 0,
+        "total": 55
+      },
+      "Operators": {
+        "pass": 0,
+        "total": 418
+      },
+      "PhpDoc": {
+        "pass": 0,
+        "total": 1177
+      },
+      "Playground": {
+        "pass": 0,
+        "total": 99
+      },
+      "Properties": {
+        "pass": 0,
+        "total": 3465
+      },
+      "Pure": {
+        "pass": 0,
+        "total": 341
+      },
+      "Regexp": {
+        "pass": 0,
+        "total": 33
+      },
+      "RestrictedUsage": {
+        "pass": 0,
+        "total": 121
+      },
+      "TooWideTypehints": {
+        "pass": 0,
+        "total": 429
+      },
+      "Traits": {
+        "pass": 0,
+        "total": 132
+      },
+      "Types": {
+        "pass": 0,
+        "total": 33
+      },
+      "Variables": {
+        "pass": 0,
+        "total": 2211
+      },
+      "Whitespace": {
+        "pass": 0,
+        "total": 55
+      },
+      "data": {
+        "pass": 0,
+        "total": 66
+      }
+    },
+    "pass": 0,
+    "passing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "lexer": {
     "error": 0,
     "excluded": 0,
