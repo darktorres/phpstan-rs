@@ -1,0 +1,24 @@
+# parse-src-nsrt at legacy-final
+
+## self Ir by function
+
+    1080424247  __memcmp_avx2_movbe
+     562776365  core::slice::sort::unstable::quicksort::quicksort::<composer::dir_listings::Entry, <[composer::dir_listings::Entry]>::sort_unstable_by<composer::dir_listings::read_listing::{closure#1}>::{closure#0}>'2
+     557651894  core::slice::sort::shared::smallsort::small_sort_general::<composer::dir_listings::Entry, <[composer::dir_listings::Entry]>::sort_unstable_by<composer::dir_listings::read_listing::{closure#1}>::{closure#0}>
+     412300844  <std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<core::option::Option<alloc::sync::Arc<composer::dir_listings::Listing>>>>::initialize<<std::sync::once_lock::OnceLock<core::option::Option<alloc::sync::Arc<composer::dir_listings::Listing>>>>::get_or_init<<composer::dir_listings::DirListings>::listing::{closure#2}>::{closure#0}, !>::{closure#0}>::{closure#0}
+     338433886  <std::sys::fs::unix::ReadDir as core::iter::traits::iterator::Iterator>::next
+     266311902  core::slice::sort::unstable::quicksort::quicksort::<composer::dir_listings::Entry, <[composer::dir_listings::Entry]>::sort_unstable_by<composer::dir_listings::read_listing::{closure#1}>::{closure#0}>
+     265042072  __memcpy_avx_unaligned_erms
+     259383746  mi_free
+     228418255  _mi_theap_malloc_zero
+     144989868  readdir
+     140189785  <syntax::lexer::Lexer>::next_token::{closure#0}
+     120803982  <syntax::lexer::Lexer>::next_tok
+     116065171  <syntax::parser::Parser>::fill
+     108745467  <syntax::lexer::Lexer>::next_raw::{closure#0}
+     104918272  <syntax::lexer::Lexer>::lex_word::{closure#0}
+      84408198  mi_malloc
+      76742309  __strlen_avx2
+      64608251  <syntax::lexer::Lexer>::name_and_bits
+      61816014  <syntax::parser::Parser>::skip
+      60454600  <syntax::name::Interner>::name_hashed

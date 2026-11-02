@@ -24,22 +24,31 @@
 lexer 0/39858 parser 0/13286 types 0/21299 rules 0/3609
 ```
 
+Where the legacy binary (`legacy-final`) stood, measured once through what its command line can do:
+- **types:** 8,125 of 20,188 `assertType` cases (40.2%). It has no `assertNativeType`, `assertSuperType` or `assertVariableCertainty`, so 8,125 of 21,299 overall. An assert counts as passing when its file was checked and no mismatch was reported on its line, which overcounts what it never evaluated.
+- **parser:** it has no nikic-shaped AST, so only its parse verdicts compare. They agree on 13,278 of 13,286 files, with no false refusals; the 8 others are files PHPStan rejects and it accepts (4 `NameResolver` errors, 4 compile-time errors such as a `void` parameter).
+- **lexer, rules:** its command line can print no tokens and run no single rule.
+
 ## Cost
 
-`cargo xtask cost` measures the workloads of `perf/workloads.toml` under callgrind and DHAT. CI's cost gate compares each push with its base commit, and was shown to fail on a planted regression. `perf/history.tsv` holds the recorded rows (this machine):
+`cargo xtask cost` measures the workloads of `perf/workloads.toml` under callgrind and DHAT. CI's cost gate compares each push with its base commit, and was shown to fail on a planted regression. `perf/history.tsv` holds the rows recorded on this machine:
 
-| workload | Ir | blocks | bytes | peak | live |
-|---|---|---|---|---|---|
-| startup | 312,225 | 27 | 4,661 | 2,236 | 548 |
-| parse-src-nsrt | 313,556 | 29 | 4,762 | 2,289 | 548 |
+| workload | | Ir | blocks | bytes | peak | live |
+|---|---|---|---|---|---|---|
+| startup | 75a4b7944 | 312,225 | 27 | 4,661 | 2,236 | 548 |
+| startup | legacy-final | 2,108,536 | - | - | - | - |
+| parse-src-nsrt | 75a4b7944 | 313,556 | 29 | 4,762 | 2,289 | 548 |
+| parse-src-nsrt | legacy-final (`check`) | 6,406,641,908 | - | - | - | - |
+
+The legacy's heap is not measurable this way (it allocates through mimalloc), and its Ir varies by about 0.24% between runs. The port's `parse-src-nsrt` row measures the unported answer until M1.
 
 ## Next
 
-1. The legacy binary's baseline: its scoreboard line, and its reference cost rows (`legacy-final`).
-2. The parser suite's other inputs (nikic's fixtures, php-src's `.phpt` files, the operator pairs), pinned.
-3. The phpdoc suite.
-4. The level-oracle and end-to-end suites.
-5. `cargo xtask parity --diff <commit>`, classifying each changed case.
+1. The parser suite's other inputs (nikic's fixtures, php-src's `.phpt` files, the operator pairs), pinned.
+2. The phpdoc suite.
+3. The level-oracle and end-to-end suites.
+4. `cargo xtask parity --diff <commit>`, classifying each changed case.
+5. M1's design doc (`docs/design/syntax.md`), once the Phase 2 exit holds.
 
 ## Later
 

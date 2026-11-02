@@ -5,14 +5,22 @@
 # stdin.files: globs under {src}; the matching files go to stdin, one path
 #   per line, in byte order.
 # cache: "off" runs with a private, empty cache directory.
+# legacy_args: the legacy binary's command line for the same work, for its
+#   reference rows; {files} stands for the stdin files, as arguments.
+# legacy_env: variables the legacy binary runs with. PHPSTAN_RS_THREADS=1
+#   keeps it to one worker thread, where its counts repeat.
 
 # The floor every other workload stands on.
 [startup]
 args = ["--version"]
 cache = "off"
+legacy_args = ["--version"]
+legacy_env = { PHPSTAN_RS_THREADS = "1" }
 
 # M1: parsing PHPStan's source and the nsrt files.
 [parse-src-nsrt]
 args = ["debug", "parser", "{src}"]
 stdin = { files = ["src/**/*.php", "tests/PHPStan/Analyser/nsrt/**/*.php"] }
 cache = "off"
+legacy_args = ["check", "{files}"]
+legacy_env = { PHPSTAN_RS_THREADS = "1" }

@@ -16,7 +16,10 @@ use std::process::{Command, Stdio};
 
 use crate::files;
 
-const USAGE: &str = "usage: cargo xtask cost [--workload <glob>] [--base <commit>] [--record]";
+const USAGE: &str = "usage: cargo xtask cost [--workload <glob>] [--base <commit>] [--record]\n       cargo xtask cost --record-legacy <binary> [--workload <glob>]";
+
+/// The commit name under which the legacy binary's rows are recorded.
+const LEGACY: &str = "legacy-final";
 
 /// Rows of the top-20 tables.
 const TOP: usize = 20;
@@ -34,22 +37,26 @@ struct Workload {
     args: Vec<String>,
     /// Globs under phpstan-src whose files go to stdin, one path per line.
     stdin_files: Vec<String>,
+    /// The legacy binary's command line for the same work, if it can do it.
+    /// `{files}` stands for the stdin files, as absolute paths.
+    legacy_args: Option<Vec<String>>,
+    /// Variables the legacy binary runs with, beyond `PATH` and `HOME`.
+    legacy_env: BTreeMap<String, String>,
 }
 
 struct Measurement {
     ir: u64,
-    blocks: u64,
-    bytes: u64,
-    peak: u64,
-    live: u64,
     functions: Vec<(String, u64)>,
-    sites: Vec<(String, u64)>,
+    /// None when the heap was not measured: the legacy binary allocates
+    /// through mimalloc, which DHAT doesn't see.
+    heap: Option<dhat::Heap>,
 }
 
 pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
     let mut filter = None;
     let mut base = None;
     let mut record = false;
+    let mut legacy = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let mut value = || {
@@ -61,6 +68,7 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
             "--workload" => filter = Some(value()?),
             "--base" => base = Some(value()?),
             "--record" => record = true,
+            "--record-legacy" => legacy = Some(PathBuf::from(value()?)),
             _ => return Err(format!("unknown argument {arg}\n{USAGE}")),
         }
     }
@@ -79,6 +87,22 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
         return Err("no workload matches".to_owned());
     }
     let scratch = files::cache_dir()?.join("phpstan-rs/cost");
+    if let Some(binary) = legacy {
+        if record || base.is_some() {
+            return Err(format!(
+                "--record-legacy takes no --record or --base\n{USAGE}"
+            ));
+        }
+        let driven: Vec<Workload> = workloads
+            .into_iter()
+            .filter(|w| w.legacy_args.is_some())
+            .collect();
+        let measured = measure_all(root, &binary, &driven, &scratch, true)?;
+        write_history(root, LEGACY, &driven, &measured)?;
+        print_counts(&driven, &measured);
+        println!("recorded {} workloads for {LEGACY}", driven.len());
+        return Ok(());
+    }
     let head_commit = if record {
         Some(clean_head(root)?)
     } else {
@@ -89,11 +113,12 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
         &build(root, &scratch.join("target"))?,
         &workloads,
         &scratch,
+        false,
     )?;
     match (base, head_commit) {
         (Some(base), _) => {
             let base_binary = build_commit(root, &base, &scratch)?;
-            let before = measure_all(root, &base_binary, &workloads, &scratch)?;
+            let before = measure_all(root, &base_binary, &workloads, &scratch, false)?;
             gate(root, &base, &workloads, &before, &head)
         }
         (None, Some(commit)) => {
@@ -142,6 +167,19 @@ fn read_workloads(path: &Path) -> Result<Vec<Workload>, String> {
                 name: name.clone(),
                 args: strings(spec.get("args")),
                 stdin_files: strings(spec.get("stdin").and_then(|stdin| stdin.get("files"))),
+                legacy_args: spec
+                    .get("legacy_args")
+                    .map(|_| strings(spec.get("legacy_args"))),
+                legacy_env: spec
+                    .get("legacy_env")
+                    .and_then(toml::Value::as_table)
+                    .map(|table| {
+                        table
+                            .iter()
+                            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             })
         })
         .collect()
@@ -269,11 +307,14 @@ fn git(dir: &Path, args: &[&str]) -> Result<(), String> {
     }
 }
 
+/// Measures `binary` on each workload; with `legacy`, through the
+/// workload's legacy command line, its files given as arguments.
 fn measure_all(
     root: &Path,
     binary: &Path,
     workloads: &[Workload],
     scratch: &Path,
+    legacy: bool,
 ) -> Result<Vec<Measurement>, String> {
     // Both sides run from the same path: the program's own path is part of
     // what it counts (argv[0]).
@@ -287,24 +328,47 @@ fn measure_all(
     workloads
         .iter()
         .map(|workload| {
-            let mut stdin = Vec::new();
-            for path in all_files
+            let paths: Vec<&String> = all_files
                 .iter()
                 .filter(|p| workload.stdin_files.iter().any(|g| files::glob(g, p)))
-            {
-                stdin.extend_from_slice(path.as_bytes());
-                stdin.push(b'\n');
-            }
-            let args: Vec<String> = workload
-                .args
-                .iter()
-                .map(|arg| arg.replace("{src}", &src.to_string_lossy()))
                 .collect();
+            let template = match (&workload.legacy_args, legacy) {
+                (Some(legacy_args), true) => legacy_args,
+                _ => &workload.args,
+            };
+            let mut args = Vec::new();
+            for arg in template {
+                if arg == "{files}" {
+                    args.extend(
+                        paths
+                            .iter()
+                            .map(|p| src.join(p).to_string_lossy().into_owned()),
+                    );
+                } else {
+                    args.push(arg.replace("{src}", &src.to_string_lossy()));
+                }
+            }
+            let mut stdin = Vec::new();
+            if !legacy {
+                for path in &paths {
+                    stdin.extend_from_slice(path.as_bytes());
+                    stdin.push(b'\n');
+                }
+            }
+            let env = if legacy {
+                workload.legacy_env.clone()
+            } else {
+                BTreeMap::new()
+            };
             measure(
-                binary,
-                &args,
+                &Run {
+                    binary,
+                    args: &args,
+                    env: &env,
+                },
                 &stdin,
                 &scratch.join("run").join(&workload.name),
+                !legacy,
             )
         })
         .collect()
@@ -312,11 +376,19 @@ fn measure_all(
 
 /// One workload under callgrind, then under DHAT, each with an empty
 /// environment apart from `PATH` and a private `HOME`.
+/// One program run: what the valgrind tools are wrapped around.
+struct Run<'a> {
+    binary: &'a Path,
+    args: &'a [String],
+    /// Variables beyond `PATH` and `HOME`.
+    env: &'a BTreeMap<String, String>,
+}
+
 fn measure(
-    binary: &Path,
-    args: &[String],
+    run: &Run<'_>,
     stdin: &[u8],
     dir: &Path,
+    with_heap: bool,
 ) -> Result<Measurement, String> {
     if dir.exists() {
         fs::remove_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -332,48 +404,44 @@ fn measure(
             "--tool=callgrind".to_owned(),
             format!("--callgrind-out-file={}", callgrind_out.display()),
         ],
-        binary,
-        args,
+        run,
         &input,
         &home,
     )?;
-    // Frames are spelled the same on every machine and in the base
-    // worktree: Rust's library as alloc/src/..., ours as <crate>/src/....
-    valgrind(
-        &[
-            "--tool=dhat".to_owned(),
-            "--fullpath-after=/library/".to_owned(),
-            "--fullpath-after=crates/".to_owned(),
-            format!("--dhat-out-file={}", dhat_out.display()),
-        ],
-        binary,
-        args,
-        &input,
-        &home,
-    )?;
+    if with_heap {
+        // Frames are spelled the same on every machine and in the base
+        // worktree: Rust's library as alloc/src/..., ours as <crate>/src/....
+        valgrind(
+            &[
+                "--tool=dhat".to_owned(),
+                "--fullpath-after=/library/".to_owned(),
+                "--fullpath-after=crates/".to_owned(),
+                format!("--dhat-out-file={}", dhat_out.display()),
+            ],
+            run,
+            &input,
+            &home,
+        )?;
+    }
     let read = |path: &Path| {
         fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))
     };
     let profile = callgrind::parse(&read(&callgrind_out)?)?;
-    let heap = dhat::parse(&read(&dhat_out)?)?;
+    let heap = if with_heap {
+        let mut heap = dhat::parse(&read(&dhat_out)?)?;
+        heap.sites.truncate(TOP);
+        Some(heap)
+    } else {
+        None
+    };
     Ok(Measurement {
         ir: profile.total,
-        blocks: heap.blocks,
-        bytes: heap.bytes,
-        peak: heap.peak,
-        live: heap.live,
         functions: profile.functions.into_iter().take(TOP).collect(),
-        sites: heap.sites.into_iter().take(TOP).collect(),
+        heap,
     })
 }
 
-fn valgrind(
-    tool: &[String],
-    binary: &Path,
-    args: &[String],
-    stdin: &Path,
-    home: &Path,
-) -> Result<(), String> {
+fn valgrind(tool: &[String], run: &Run<'_>, stdin: &Path, home: &Path) -> Result<(), String> {
     let input = fs::File::open(stdin).map_err(|error| format!("{}: {error}", stdin.display()))?;
     // The count must not depend on the run. The guest reads /proc/self/maps
     // (Rust's thread setup does), so setarch -R turns address randomization
@@ -384,11 +452,12 @@ fn valgrind(
     let output = Command::new("setarch")
         .args(["-R", "valgrind", "--vgdb=no", "--fair-sched=yes"])
         .args(tool)
-        .arg(binary)
-        .args(args)
+        .arg(run.binary)
+        .args(run.args)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", home)
+        .envs(run.env)
         .stdin(input)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -443,8 +512,18 @@ fn command_text(command: &mut Command) -> Result<String, String> {
 fn gated(m: &Measurement) -> [(&'static str, u64, f64, u64); 3] {
     [
         ("ir", m.ir, IR_RISE, IR_FLOOR),
-        ("peak", m.peak, HEAP_RISE, HEAP_FLOOR),
-        ("live", m.live, HEAP_RISE, HEAP_FLOOR),
+        (
+            "peak",
+            m.heap.as_ref().map_or(0, |h| h.peak),
+            HEAP_RISE,
+            HEAP_FLOOR,
+        ),
+        (
+            "live",
+            m.heap.as_ref().map_or(0, |h| h.live),
+            HEAP_RISE,
+            HEAP_FLOOR,
+        ),
     ]
 }
 
@@ -484,7 +563,9 @@ fn gate(
             .any(|f| f.starts_with(&format!("{} ", workload.name)))
         {
             print_diff("self Ir by function", &b.functions, &a.functions);
-            print_diff("bytes by allocation site", &b.sites, &a.sites);
+            if let (Some(b), Some(a)) = (&b.heap, &a.heap) {
+                print_diff("bytes by allocation site", &b.sites, &a.sites);
+            }
         }
     }
     if failures.is_empty() {
@@ -554,11 +635,28 @@ fn print_counts(workloads: &[Workload], measurements: &[Measurement]) {
         "workload", "ir", "blocks", "bytes", "peak", "live"
     );
     for (workload, m) in workloads.iter().zip(measurements) {
+        let [ir, blocks, bytes, peak, live] = columns(m);
         println!(
-            "{:<20} {:>14} {:>10} {:>12} {:>12} {:>12}",
-            workload.name, m.ir, m.blocks, m.bytes, m.peak, m.live
+            "{:<20} {ir:>14} {blocks:>10} {bytes:>12} {peak:>12} {live:>12}",
+            workload.name
         );
     }
+}
+
+/// A row's counts as text; heap columns are `-` when not measured.
+fn columns(m: &Measurement) -> [String; 5] {
+    let heap = |f: fn(&dhat::Heap) -> u64| {
+        m.heap
+            .as_ref()
+            .map_or_else(|| "-".to_owned(), |h| f(h).to_string())
+    };
+    [
+        m.ir.to_string(),
+        heap(|h| h.blocks),
+        heap(|h| h.bytes),
+        heap(|h| h.peak),
+        heap(|h| h.live),
+    ]
 }
 
 const HISTORY_HEADER: &str = "commit\tworkload\tir\tblocks\tbytes\tpeak_bytes\tlive_bytes";
@@ -593,8 +691,9 @@ fn write_history(
     for (workload, m) in workloads.iter().zip(measurements) {
         let _ = writeln!(
             out,
-            "{commit}\t{}\t{}\t{}\t{}\t{}\t{}",
-            workload.name, m.ir, m.blocks, m.bytes, m.peak, m.live
+            "{commit}\t{}\t{}",
+            workload.name,
+            columns(m).join("\t")
         );
     }
     files::write_atomically(&path, out.as_bytes())?;
@@ -608,11 +707,19 @@ fn write_history(
         for (name, cost) in &m.functions {
             let _ = writeln!(text, "{cost:>14}  {name}");
         }
-        text.push_str("\n## bytes by allocation site\n\n");
-        for (site, bytes) in &m.sites {
-            let _ = writeln!(text, "{bytes:>14}  {site}");
+        if let Some(heap) = &m.heap {
+            text.push_str("\n## bytes by allocation site\n\n");
+            for (site, bytes) in &heap.sites {
+                let _ = writeln!(text, "{bytes:>14}  {site}");
+            }
         }
-        files::write_atomically(&top.join(format!("{}.txt", workload.name)), text.as_bytes())?;
+        // The legacy binary's tables sit beside ours, named after it.
+        let name = if commit == LEGACY {
+            format!("{}.{LEGACY}.txt", workload.name)
+        } else {
+            format!("{}.txt", workload.name)
+        };
+        files::write_atomically(&top.join(name), text.as_bytes())?;
     }
     Ok(())
 }

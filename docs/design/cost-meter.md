@@ -62,7 +62,12 @@ On failure the job prints, per workload, the top-20 self-cost and allocation-sit
 - `cargo xtask cost --record` measures the checked-out commit, refusing a dirty tree, and replaces that commit's rows. The rows are committed with the next change, so each row names the commit it measured, never the commit that carries it.
 - **Rows are recorded locally**, on this machine, so the series is comparable with itself. A milestone end records one; so does any commit whose message has a `cost:` line.
 - `perf/top/<workload>.txt` holds the latest recorded top-20 tables, so their changes show in a diff.
-- Reference rows for the legacy binary (`~/.cache/phpstan-rs-legacy/bin/phpstan-rs-legacy-final`) are recorded under the commit name `legacy-final`, for the workloads its CLI can drive (L-1, PB-1). M8's comparison reads them.
+- **Reference rows for the legacy binary** (`~/.cache/phpstan-rs-legacy/bin/phpstan-rs-legacy-final`) come from `cargo xtask cost --record-legacy <binary>`. They are recorded under the commit name `legacy-final`, for the workloads it can drive, through each workload's `legacy_args` (L-1, PB-1); their top-20 tables are `perf/top/<workload>.legacy-final.txt`. M8's comparison reads them. Three limits apply:
+  - **its heap is not measured.** The legacy allocates through mimalloc, which takes memory from the kernel directly, so DHAT sees only libc's own allocations (98% of the bytes it reported were `opendir` buffers). Its heap columns are `-`;
+  - **its Ir is not deterministic:** three runs of `parse-src-nsrt` spread over 0.24%, even with `PHPSTAN_RS_THREADS=1`, because its rayon pool keeps a worker beside the main thread;
+  - its `parse-src-nsrt` is its `check` command over the same files, which also walks their directories; it is the nearest work it has, not the same work.
+
+**The meter needs the system allocator.** If this port ever chooses another global allocator (MG-11), the meter measures a build with the system allocator, and the allocator choice is judged by wall time.
 
 ## Memo counters
 

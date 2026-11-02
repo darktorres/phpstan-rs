@@ -1,0 +1,24 @@
+# startup at legacy-final
+
+## self Ir by function
+
+       1491679  _dl_relocate_object_no_relro
+        119230  do_lookup_x
+         59880  __vfscanf_internal
+         52915  _dl_lookup_symbol_x
+         38365  strcmp
+         28706  __memcpy_avx_unaligned_erms
+         28450  ____strtoul_l_internal
+         20287  check_match
+         17694  _mi_strlcpy
+         14688  _mi_strnicmp
+         13690  _dl_check_map_versions
+          8159  mi_option_get
+          7652  _mi_strnlen
+          7074  _mi_prim_getenv
+          7056  mi_page_free_list_extend
+          6359  _dl_map_object_from_fd
+          5933  mi_bitmap_setN
+          5294  intel_check_word.constprop.0
+          5184  _mi_toupper
+          5152  _IO_sputbackc
