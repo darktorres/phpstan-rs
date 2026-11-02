@@ -1,0 +1,18 @@
+# The cost meter's workloads (docs/design/cost-meter.md). A workload never
+# changes once added; a larger variant gets a new name.
+#
+# args: the phpstan-rs arguments; {src} is vendor/phpstan-src.
+# stdin.files: globs under {src}; the matching files go to stdin, one path
+#   per line, in byte order.
+# cache: "off" runs with a private, empty cache directory.
+
+# The floor every other workload stands on.
+[startup]
+args = ["--version"]
+cache = "off"
+
+# M1: parsing PHPStan's source and the nsrt files.
+[parse-src-nsrt]
+args = ["debug", "parser", "{src}"]
+stdin = { files = ["src/**/*.php", "tests/PHPStan/Analyser/nsrt/**/*.php"] }
+cache = "off"

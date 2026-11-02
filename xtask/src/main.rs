@@ -3,6 +3,7 @@
 // A task reports to the terminal.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
+mod cost;
 mod files;
 mod parity;
 mod port_map;
@@ -18,7 +19,8 @@ fn main() -> ExitCode {
             port_map::run(&root, args.get(1).map(String::as_str) == Some("--check"))
         }
         Some("parity") => parity::run(&root, &args[1..]),
-        _ => Err("usage: cargo xtask port-map [--check]\n       cargo xtask parity [--suite <name>]... [--filter <glob>] [--show <case id>]".to_owned()),
+        Some("cost") => cost::run(&root, &args[1..]),
+        _ => Err("usage: cargo xtask port-map [--check]\n       cargo xtask parity [--suite <name>]... [--filter <glob>] [--show <case id>]\n       cargo xtask cost [--workload <glob>] [--base <commit>] [--record]".to_owned()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

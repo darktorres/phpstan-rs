@@ -116,3 +116,30 @@ jobs:
       - run: cargo xtask parity
       - name: Check the committed score
         run: git diff --exit-code parity/score.json
+
+  # The cost gate: Ir, peak heap and live heap of every workload, against a
+  # build of the base commit made in the same job.
+  cost:
+    name: cost gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-rust
+        with:
+          submodules: "true"
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+      - name: Measure against the base commit
+        env:
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+            echo "no base commit; measuring only"
+            cargo xtask cost
+          else
+            base=$(git merge-base "$BEFORE" HEAD)
+            cargo xtask cost --base "$base"
+          fi

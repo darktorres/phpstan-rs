@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 use super::SUITES;
 use super::oracle::{Oracle, hex};
-use crate::files;
+use crate::files::{self, glob};
 
 /// A suite's verdict on one case, before exclusions apply.
 pub(crate) enum Verdict {
@@ -139,35 +139,6 @@ pub(crate) fn judge(
             }
         })
         .collect()
-}
-
-/// `*` matches any run of characters (`/` included) and `?` one character.
-fn glob(pattern: &str, text: &str) -> bool {
-    let (pattern, text): (Vec<char>, Vec<char>) =
-        (pattern.chars().collect(), text.chars().collect());
-    let (mut p, mut t) = (0, 0);
-    let mut star: Option<(usize, usize)> = None;
-    while t < text.len() {
-        match pattern.get(p) {
-            Some('*') => {
-                star = Some((p, t));
-                p += 1;
-            }
-            Some(&c) if c == '?' || c == text[t] => {
-                p += 1;
-                t += 1;
-            }
-            _ => match star {
-                Some((star_p, star_t)) => {
-                    p = star_p + 1;
-                    t = star_t + 1;
-                    star = Some((star_p, star_t + 1));
-                }
-                None => return false,
-            },
-        }
-    }
-    pattern[p..].iter().all(|&c| c == '*')
 }
 
 #[derive(Default)]
@@ -303,18 +274,6 @@ pub(crate) fn write_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn glob_matches_stars_across_slashes() {
-        assert!(glob("tests/*", "tests/a/b.php"));
-        assert!(glob("*.php#cr", "x/y.php#cr"));
-        assert!(glob("a?c", "abc"));
-        assert!(glob("*", ""));
-        assert!(!glob("tests/*", "vendor/a.php"));
-        assert!(!glob("a?c", "ac"));
-        assert!(glob("a*b*c", "axxbyyc"));
-        assert!(!glob("a*b*c", "axxbyy"));
-    }
 
     #[test]
     fn exclusions_skip_the_header_and_need_a_reason() {

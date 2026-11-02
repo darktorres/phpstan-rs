@@ -64,3 +64,49 @@ pub(crate) fn cache_dir() -> Result<PathBuf, String> {
     };
     dir.ok_or_else(|| "no cache directory: set HOME (LOCALAPPDATA on Windows)".to_owned())
 }
+
+/// Matches a `/`-spelled path or case id against `pattern`: `**/` matches
+/// zero or more whole segments, any other `**` any run of characters, `*`
+/// any run without a `/`, and `?` one character other than `/`.
+pub(crate) fn glob(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    matches(&pattern, &text)
+}
+
+fn matches(pattern: &[char], text: &[char]) -> bool {
+    match pattern {
+        [] => text.is_empty(),
+        ['*', '*', '/', rest @ ..] => {
+            (0..=text.len()).any(|i| (i == 0 || text[i - 1] == '/') && matches(rest, &text[i..]))
+        }
+        ['*', '*', rest @ ..] => (0..=text.len()).any(|i| matches(rest, &text[i..])),
+        ['*', rest @ ..] => {
+            let segment = text.iter().position(|&c| c == '/').unwrap_or(text.len());
+            (0..=segment).any(|i| matches(rest, &text[i..]))
+        }
+        ['?', rest @ ..] => text.first().is_some_and(|&c| c != '/') && matches(rest, &text[1..]),
+        [c, rest @ ..] => text.first() == Some(c) && matches(rest, &text[1..]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_single_star_stays_in_its_segment() {
+        assert!(glob("tests/*.php", "tests/a.php"));
+        assert!(!glob("tests/*.php", "tests/a/b.php"));
+        assert!(glob("tests/**", "tests/a/b.php"));
+        assert!(glob("src/**/*.php", "src/a/b/c.php"));
+        assert!(glob("src/**/*.php", "src/c.php"));
+        assert!(!glob("src/**/*.php", "src/ab/c.txt"));
+        assert!(glob("*.php#cr", "x.php#cr"));
+        assert!(glob("a?c", "abc"));
+        assert!(!glob("a?c", "a/c"));
+        assert!(glob("**", ""));
+        assert!(glob("a*b*c", "axxbyyc"));
+        assert!(!glob("a*b*c", "axxbyy"));
+    }
+}

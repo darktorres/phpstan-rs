@@ -26,11 +26,11 @@ lexer 0/39858 parser 0/13286 types 0/21299 rules 0/3609
 
 ## Cost
 
-Not built yet (Phase 2).
+`cargo xtask cost` measures the workloads of `perf/workloads.toml` under callgrind and DHAT. CI's cost gate compares each push with its base commit.
 
 ## Next
 
-1. `docs/design/cost-meter.md`, then `cargo xtask cost` and its CI gate.
+1. The first recorded cost rows, and the gate shown to trip on a planted regression (a throwaway pull request).
 2. The parser suite's other inputs (nikic's fixtures, php-src's `.phpt` files, the operator pairs), pinned.
 3. The phpdoc suite.
 4. The level-oracle and end-to-end suites; then the legacy binary's baseline line.
