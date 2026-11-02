@@ -203,11 +203,11 @@ It writes `parity/score.json` and a one-line summary, which every milestone comm
 | suite | oracle | compared |
 |---|---|---|
 | lexer | `token_get_all` under the pinned php; nikic's lexer emulation where versions differ (20L-7) | token kinds and spans, over every input below and over all three line breaks (CP-6) |
-| parser | nikic/php-parser `--json-dump` on these inputs:<br>• every PHP file in PHPStan's tests<br>• nikic's error-recovery fixtures<br>• php-src's `.phpt` sections (F11)<br>• the C7 compile-error corpus (OFF-6)<br>• the generated operator-pair file (D25-2)<br>• a large vendor tree (P-9, LED-9) | normalized AST JSON; the same first error as nikic and `php -l`; zero false refusals on the vendor tree |
+| parser | nikic/php-parser `--json-dump` on these inputs:<br>• every PHP file in PHPStan's tests<br>• nikic's error-recovery fixtures<br>• php-src's `.phpt` sections (F11), which also stand in for the C7 compile-error corpus (OFF-6), lost before Phase 0 (`LOST.md`)<br>• the generated operator-pair file (D25-2)<br>• a large vendor tree (P-9, LED-9) | normalized AST JSON; the same first error as nikic and `php -l`; zero false refusals on the vendor tree |
 | phpdoc | phpstan/phpdoc-parser run from PHP on the same files, plus its own test suite | the printed node tree |
 | types | `nsrt/*.php`: `assertType`, `assertNativeType`, `assertVariableCertainty`, `assertSuperType` | the expected string against our `describe()` |
 | rules | `tests/PHPStan/Rules/**/*RuleTest.php` (418 files). A PHP script parses them with nikic to get each test's rule class, data files, expected `[message, line, tip]` and config; PHPStan is never executed | the error set per test method, with only that rule enabled |
-| level oracle | the phar against us over `tests/PHPStan/Rules/**/data` (2,936 files) and the corpus files, at every level, with C-1's recipe (FR-5, EV-5's level table) | per identifier: PHPStan-only, matched, ours-only |
+| level oracle | the phar against us over `tests/PHPStan/Rules/**/data` (3,122 files at 2.3.4), at every level, with C-1's recipe (FR-5, EV-5's level table) | per identifier: PHPStan-only, matched, ours-only |
 | end-to-end | the phar against us on monolog and symfony/console, at every level, with the same `phpstan.neon` (Piwigo is not public and needs extensions, so it stays the milestone-end regression check) | the JSON output diff |
 
 Rules for the scoreboard:

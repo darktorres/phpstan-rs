@@ -1,6 +1,6 @@
 # Status
 
-**Phase 2: the scoreboard and the cost meter.** Phase 1 is done.
+**M1: the lexer and the parser.** Phases 0–2 are done.
 
 ## Done
 
@@ -15,6 +15,7 @@
 - `parity/port-map.tsv` lists 2,032 PHPStan files, all `todo`.
 - **CI** runs on every push, and is green: fmt, clippy, doc and the port-map check; tests on Linux x86_64, Linux aarch64, macOS and Windows; tests in release; `cargo deny` and `machete`.
 - **The release workflow** builds five targets with checksums. The Linux binaries are static musl builds. A dry run is green on all five.
+- **Phase 2** exit holds (2026-11-02): every suite runs in CI with its baseline in `score.json`; one case per suite was checked against the real tool (`docs/design/scoreboard.md`, "Spot checks"); the cost meter has its first M1 row, and its gate failed on a planted regression.
 
 ## Scoreboard
 
@@ -44,7 +45,9 @@ The legacy's heap is not measurable this way (it allocates through mimalloc), an
 
 ## Next
 
-1. M1's design doc (`docs/design/syntax.md`), once the Phase 2 exit holds.
+1. M1's design doc (`docs/design/syntax.md`).
+2. The lexer, against the lexer suite.
+3. The parser, against the parser suite.
 
 ## Later
 

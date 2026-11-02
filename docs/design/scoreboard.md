@@ -155,6 +155,16 @@ The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N lev
   - A full run is cheap while the extractions are cached: each reruns only when its own key changes. The `actions/cache` key names the whole set of extractors and pins, and any older entry is restored (`restore-keys`), so a change to one extractor reruns only the extractions that read it.
 - **The committed `score.json` must equal the run** (`git diff --exit-code`). Each suite's entry holds a SHA-256 of its passing case ids, so a change in which cases pass fails CI even when the totals stay equal. A commit that changes the score commits the new `score.json` with it.
 
+## Spot checks (Phase 2 exit, 2026-11-02)
+
+One case per suite, its expected side checked against the real tool, apart from the extractor:
+- **lexer:** `tests/PHPStan/Rules/Classes/data/instantiation.php` dumped by php's own `PhpToken::tokenize`: the same 1,115 tokens, kinds, offsets, lengths and lines; nikic's end-of-file sentinel adds the 1,116th.
+- **parser:** the phar on `Analyser/data/bug-10358.php` (a `NameResolver` error) and `Analyser/data/multipleParseErrors.php` (two syntax errors) reports exactly the extracted errors as `phpstan.parse`, messages and lines.
+- **phpdoc:** the parser exceptions in the 19 invalid tags of `PhpDoc/data/invalid-phpdoc.php`'s doc trees are word for word the phar's 18 `phpDoc.parseError` messages; the 19th is a `@psalm-param` tag, which `InvalidPhpDocTagValueRule` skips (`:77`).
+- **types:** `nsrt/array-is-list-type-specifying.php` with each `assertType('X', $e)` rewritten to `dumpType($e)`, run by the phar with bleedingEdge as `NodeScopeResolverTest` runs it: all 13 dumped types equal the extracted expectations.
+- **rules:** the phar at level 0 with bleedingEdge on the data files of `CallToNonExistentFunctionRuleTest::testCallToRemovedFunctionsOnPhp8` and `::testBug3576`: its `function.notFound` errors are the extracted 9 and 6, messages and lines.
+- **levels, e2e:** the phar's own output; the records equal one phar process per run (S4) and a plain run's totals (end-to-end).
+
 ## Spikes
 
 - **S1: the recording `RuleTestCase`.**
