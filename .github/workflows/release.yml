@@ -1,0 +1,95 @@
+name: Release
+
+# A `v*` tag push builds the five binaries, runs each, and uploads them to
+# that tag's release. `workflow_dispatch` is a dry run: the same builds and
+# runs, with the upload skipped.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux binaries are static musl builds, so they run on any distro,
+          # whatever glibc it has.
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # Built on the arm64 runner and run there under Rosetta 2.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      # Windows images check text out with CRLF by default.
+      - name: Check text out as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache: "false"
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+      - name: Install the musl toolchain
+        if: ${{ contains(matrix.target, 'musl') }}
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install Rosetta 2 where the image lacks it
+        if: ${{ matrix.target == 'x86_64-apple-darwin' }}
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin phpstan-rs
+
+      - name: Package and run the binary
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          suffix=""
+          if [[ "$TARGET" == *windows* ]]; then suffix=".exe"; fi
+          dest="phpstan-rs-$TARGET$suffix"
+          cp "target/$TARGET/release/phpstan-rs$suffix" "$dest"
+          run=("./$dest")
+          if [[ "$TARGET" == x86_64-apple-darwin ]]; then run=(arch -x86_64 "./$dest"); fi
+          version_output="$("${run[@]}" --version)"
+          echo "$version_output"
+          echo "$version_output" | grep -Eq '^phpstan-rs [0-9]+\.[0-9]+\.[0-9]+$'
+          if [[ "$TARGET" == *linux-musl ]]; then
+            file "$dest" | tee /dev/stderr | grep -q 'statically linked'
+          fi
+          gzip -k "$dest"
+          # macOS has no sha256sum; shasum writes the same line.
+          if command -v sha256sum > /dev/null; then
+            sha256sum "$dest.gz" > "$dest.gz.sha256"
+          else
+            shasum -a 256 "$dest.gz" > "$dest.gz.sha256"
+          fi
+
+      - name: Upload the release asset
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          suffix=""
+          if [[ "$TARGET" == *windows* ]]; then suffix=".exe"; fi
+          name="phpstan-rs-$TARGET$suffix"
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "" || true
+          gh release upload "$GITHUB_REF_NAME" "$name.gz" "$name.gz.sha256" --repo "$GITHUB_REPOSITORY" --clobber

@@ -12,6 +12,12 @@ inputs:
     description: Cargo tools to install, each name@version, comma-separated.
     required: false
     default: ""
+  cache:
+    description: >-
+      Whether to restore and save the cargo caches. A release build runs
+      without them, so no cache a branch saved goes into a shipped binary.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -28,6 +34,7 @@ runs:
 
     # Saved on failure too, so a red run still warms the next one.
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      if: ${{ inputs.cache == 'true' }}
       with:
         cache-on-failure: true
 
