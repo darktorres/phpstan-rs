@@ -1,0 +1,37 @@
+name: Set up Rust
+description: >-
+  Installs the pinned toolchain and restores the cargo caches, for a job
+  that builds this workspace.
+
+inputs:
+  submodules:
+    description: Whether to fetch the vendor/phpstan-src submodule.
+    required: false
+    default: "false"
+  tools:
+    description: Cargo tools to install, each name@version, comma-separated.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch the phpstan-src submodule
+      if: ${{ inputs.submodules == 'true' }}
+      shell: bash
+      run: git submodule update --init --depth 1 vendor/phpstan-src
+
+    # rust-toolchain.toml pins the toolchain and its components.
+    - name: Install the pinned toolchain
+      shell: bash
+      run: rustup install --no-self-update
+
+    # Saved on failure too, so a red run still warms the next one.
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        cache-on-failure: true
+
+    - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      if: ${{ inputs.tools != '' }}
+      with:
+        tool: ${{ inputs.tools }}
