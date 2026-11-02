@@ -36,7 +36,8 @@ A cache hit skips stage 1. The cache is never committed.
 - phpstan-src's composer dependencies, through its `composer.lock`. nikic/php-parser v5.9.0, phpdoc-parser 2.4.0 and PHPUnit 11.5.57 come from there;
 - nikic/php-parser's source at v5.9.0, for its test fixtures, which composer's dist leaves out;
 - php-src at 8.5.4, for the `.phpt` corpus;
-- **the oracle php: 8.5.4.** Locally it is the installed php, and the extractor refuses any other version. CI uses the `php:8.5.4-cli` image, pinned by digest.
+- **the oracle php: 8.5.4.** Locally it is the installed php, and the scoreboard refuses any other version. CI uses the `php:8.5.4-cli` image, pinned by digest;
+- composer 2.9.5, pinned by digest, which installs phpstan-src's dependencies.
 
 **Which nsrt files PHPStan runs depends on `PHP_VERSION_ID`** (`// lint` headers, and the conditions in `NodeScopeResolverTest::findTestFiles`). The scoreboard therefore measures exactly "PHPStan's suite as it runs under PHP 8.5.4".
 
@@ -125,9 +126,9 @@ Why execute instead of parsing: 196 of 3,284 `analyse()` calls in `Rules/` pass 
 
 ## Output
 
-`parity/score.json` is committed. It holds per-suite totals, plus counts per group (the test directory or milestone owner). It stays small enough to review in a diff.
+`parity/score.json` is committed. It holds per-suite totals, counts per group (the input tree, the assert kind or the test's namespace), and a digest of the passing case ids. It stays small enough to review in a diff.
 
-The per-case results go to `~/.cache/phpstan-rs/parity/results/<commit>.jsonl`. A run of some suites, or one with `--filter`, writes `<commit>.partial.jsonl` instead. `score.json` is rewritten only for the suites a run covers, and not at all under `--filter`. `--diff <commit>` compares two of these case by case and classifies each change (SB-6):
+The per-case results go to `~/.cache/phpstan-rs/parity/results/<commit>.jsonl`. A run of some suites, or one with `--filter`, writes `<commit>.partial.jsonl` instead. `score.json` is rewritten only for the suites a run covers, and not at all under `--filter`. `--diff <commit>` (not built yet) compares two of these case by case and classifies each change (SB-6):
 - for most suites: pass↔fail;
 - for types: equal, narrower, wider or incomparable.
 
@@ -135,8 +136,10 @@ The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N`.
 
 ## CI
 
-- **Every push:** the lexer, parser, phpdoc and types suites on a fixed `--filter` subset, in the release build, failing on any regression against the committed `score.json`.
-- **Milestone ends:** the full scoreboard runs locally and its `score.json` is committed. CI checks that the committed file matches a full run, on a schedule.
+- **Every push runs the whole scoreboard** in the `parity` job, inside the pinned `php:8.5.4-cli` image. phpstan-src's dependencies are installed by the pinned composer, and the extraction cache is kept between runs by `actions/cache`.
+  - The image has far fewer extensions than the local php. All four extractions are byte-identical under both, checked on 2026-11-01.
+  - A full run is cheap while the extractions are cached: they rerun only when an extractor, a pin or phpstan-src's lock changes.
+- **The committed `score.json` must equal the run** (`git diff --exit-code`). Each suite's entry holds a SHA-256 of its passing case ids, so a change in which cases pass fails CI even when the totals stay equal. A commit that changes the score commits the new `score.json` with it.
 
 ## Spikes
 

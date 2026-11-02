@@ -13,7 +13,8 @@
         "total": 20439
       }
     },
-    "pass": 0
+    "pass": 0,
+    "passing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "parser": {
     "error": 0,
@@ -29,7 +30,8 @@
         "total": 6813
       }
     },
-    "pass": 0
+    "pass": 0,
+    "passing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "rules": {
     "error": 0,
@@ -197,7 +199,8 @@
         "total": 3
       }
     },
-    "pass": 0
+    "pass": 0,
+    "passing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "types": {
     "error": 0,
@@ -221,6 +224,7 @@
         "total": 688
       }
     },
-    "pass": 0
+    "pass": 0,
+    "passing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   }
 }

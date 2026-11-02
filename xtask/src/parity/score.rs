@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
 use super::SUITES;
-use super::oracle::Oracle;
+use super::oracle::{Oracle, hex};
 use crate::files;
 
 /// A suite's verdict on one case, before exclusions apply.
@@ -173,6 +174,23 @@ fn glob(pattern: &str, text: &str) -> bool {
 pub(crate) struct Tally {
     counts: BTreeMap<&'static str, u64>,
     groups: BTreeMap<String, (u64, u64)>,
+    /// The ids of the passing cases, so equal totals with a different set
+    /// of passing cases still read as a change.
+    passing: Vec<String>,
+}
+
+impl Tally {
+    /// SHA-256 of the passing ids, sorted, one per line.
+    fn passing_sha256(&self) -> String {
+        let mut ids: Vec<&str> = self.passing.iter().map(String::as_str).collect();
+        ids.sort_unstable();
+        let mut hasher = Sha256::new();
+        for id in ids {
+            hasher.update(id.as_bytes());
+            hasher.update(b"\n");
+        }
+        hex(&hasher.finalize())
+    }
 }
 
 /// Per-suite tallies, keyed by suite name.
@@ -181,6 +199,9 @@ pub(crate) fn tally(results: &[CaseResult]) -> BTreeMap<String, Tally> {
     for result in results {
         let tally = tallies.entry(result.suite.clone()).or_default();
         *tally.counts.entry(result.outcome.name()).or_default() += 1;
+        if result.outcome == Outcome::Pass {
+            tally.passing.push(result.id.clone());
+        }
         if result.outcome != Outcome::Excluded {
             let group = tally.groups.entry(result.group.clone()).or_default();
             group.0 += u64::from(result.outcome == Outcome::Pass);
@@ -228,6 +249,7 @@ pub(crate) fn write_score(path: &Path, tallies: &BTreeMap<String, Tally>) -> Res
             .map(|(group, (pass, total))| (group.clone(), json!({ "pass": pass, "total": total })))
             .collect();
         counts.insert("groups".to_owned(), Value::Object(groups));
+        counts.insert("passing_sha256".to_owned(), json!(tally.passing_sha256()));
         score.insert(suite.clone(), Value::Object(counts));
     }
     let mut text = serde_json::to_string_pretty(&score).map_err(|error| error.to_string())?;
@@ -302,6 +324,34 @@ mod tests {
         assert!(!exclusions.excludes("lexer", "tests/y.php"));
         assert!(Exclusions::parse("| lexer | x | won't-port | |\n").is_err());
         assert!(Exclusions::parse("| nosuch | x | k | r |\n").is_err());
+    }
+
+    #[test]
+    fn the_passing_digest_follows_the_set_of_passing_cases() {
+        let digest = |passing: &[(&str, bool)]| {
+            let cases = passing
+                .iter()
+                .map(|&(id, pass)| Case {
+                    id: id.to_owned(),
+                    group: "g".to_owned(),
+                    verdict: if pass {
+                        Verdict::Pass
+                    } else {
+                        Verdict::Fail(String::new())
+                    },
+                })
+                .collect();
+            let results = judge("lexer", cases, &Exclusions { rows: Vec::new() }, None);
+            tally(&results)["lexer"].passing_sha256()
+        };
+        assert_eq!(
+            digest(&[("a", true), ("b", false)]),
+            digest(&[("b", false), ("a", true)])
+        );
+        assert_ne!(
+            digest(&[("a", true), ("b", false)]),
+            digest(&[("a", false), ("b", true)])
+        );
     }
 
     #[test]

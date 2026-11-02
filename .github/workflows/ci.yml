@@ -70,3 +70,49 @@ jobs:
           tools: cargo-deny@0.20.2,cargo-machete@0.9.2
       - run: cargo deny check
       - run: cargo machete
+
+  # The parity scoreboard, in full: every suite, under the pinned oracle
+  # php. The committed parity/score.json must equal the run.
+  parity:
+    name: parity scoreboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      # parity/pins.toml [oracle-php] image; a step below checks they agree.
+      image: php:8.5.4-cli@sha256:cfa277c10f9f1859addbbed6739673a50a9c1b5777f64c0441118eca148b8056
+    steps:
+      - name: Install git, patch and unzip
+        run: apt-get update && apt-get install -y --no-install-recommends git patch unzip
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trust the checkout
+        run: git config --global --add safe.directory '*'
+      - name: Check the image against the pin
+        run: grep -qxF 'image = "php:8.5.4-cli@sha256:cfa277c10f9f1859addbbed6739673a50a9c1b5777f64c0441118eca148b8056"' parity/pins.toml
+      - name: Install rustup
+        run: |
+          curl -sSfL -o /usr/local/bin/rustup-init https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init
+          echo "5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4  /usr/local/bin/rustup-init" | sha256sum -c
+          chmod +x /usr/local/bin/rustup-init
+          rustup-init -y --no-modify-path --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-rust
+        with:
+          submodules: "true"
+      - name: Install composer (parity/pins.toml)
+        run: |
+          url=$(sed -n '/^\[composer\]/,/^\[/s/^url = "\(.*\)"/\1/p' parity/pins.toml)
+          sum=$(sed -n '/^\[composer\]/,/^\[/s/^sha256 = "\(.*\)"/\1/p' parity/pins.toml)
+          curl -sSfL -o /usr/local/bin/composer "$url"
+          echo "$sum  /usr/local/bin/composer" | sha256sum -c
+          chmod +x /usr/local/bin/composer
+      - name: Install phpstan-src's dependencies
+        run: composer install --no-interaction --no-progress --working-dir=vendor/phpstan-src
+      # The extractions are cached by their own keys inside this directory;
+      # this key only decides which directory is restored.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/phpstan-rs/parity
+          key: parity-${{ hashFiles('parity/extract/**', 'parity/pins.toml', 'vendor/phpstan-src/composer.lock') }}
+      - run: cargo xtask parity
+      - name: Check the committed score
+        run: git diff --exit-code parity/score.json

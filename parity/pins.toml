@@ -15,5 +15,14 @@ commit = "034afd3eea56205d2fa8167b74504da774a174ab"
 
 [oracle-php]
 # The php that runs every extractor. Locally it is the installed php; the
-# scoreboard refuses any other version.
+# scoreboard refuses any other version. CI runs in this image, whose
+# extractions are byte-identical to the local php's.
 version = "8.5.4"
+image = "php:8.5.4-cli@sha256:cfa277c10f9f1859addbbed6739673a50a9c1b5777f64c0441118eca148b8056"
+
+[composer]
+# Installs phpstan-src's dependencies from its composer.lock, applying its
+# patches.
+version = "2.9.5"
+url = "https://getcomposer.org/download/2.9.5/composer.phar"
+sha256 = "c86ce603fe836bf0861a38c93ac566c8f1e69ac44b2445d9b7a6a17ea2e9972a"
