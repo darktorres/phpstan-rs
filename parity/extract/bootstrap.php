@@ -35,6 +35,9 @@ final class ParityRecorder
 
 	private static string $root;
 
+	/** @var array<string, int> analyse() and fix() calls so far, per test */
+	private static array $calls = [];
+
 	public static function open(string $out, string $root): void
 	{
 		self::$handle = fopen($out, 'wb') ?: throw new RuntimeException("cannot write $out");
@@ -46,11 +49,16 @@ final class ParityRecorder
 	 */
 	public static function record(object $test, string $kind, array $files, mixed $expected): void
 	{
+		// A test method can call analyse() more than once; the ordinal tells
+		// the calls apart in the case id.
+		$call = self::$calls[$test::class . '::' . $test->name() . '#' . $test->dataName()] ??= 0;
+		self::$calls[$test::class . '::' . $test->name() . '#' . $test->dataName()]++;
 		$record = [
 			'test' => $test::class,
 			'kind' => $kind,
 			'method' => $test->name(),
 			'data_set' => $test->dataName(),
+			'call' => $call,
 			'files' => array_map(self::relative(...), $files),
 			'expected' => $kind === 'fix' ? self::relative((string) $expected) : $expected,
 			'toggles' => self::toggles($test),

@@ -30,5 +30,197 @@
       }
     },
     "pass": 0
+  },
+  "rules": {
+    "error": 0,
+    "excluded": 0,
+    "fail": 3609,
+    "groups": {
+      "Analyser": {
+        "pass": 0,
+        "total": 23
+      },
+      "Build": {
+        "pass": 0,
+        "total": 19
+      },
+      "Fixable": {
+        "pass": 0,
+        "total": 1
+      },
+      "Node": {
+        "pass": 0,
+        "total": 10
+      },
+      "Reflection": {
+        "pass": 0,
+        "total": 2
+      },
+      "Reflection\\Annotations": {
+        "pass": 0,
+        "total": 3
+      },
+      "Rules": {
+        "pass": 0,
+        "total": 7
+      },
+      "Rules\\Api": {
+        "pass": 0,
+        "total": 28
+      },
+      "Rules\\Arrays": {
+        "pass": 0,
+        "total": 200
+      },
+      "Rules\\Cast": {
+        "pass": 0,
+        "total": 23
+      },
+      "Rules\\Classes": {
+        "pass": 0,
+        "total": 214
+      },
+      "Rules\\Comparison": {
+        "pass": 0,
+        "total": 461
+      },
+      "Rules\\Constants": {
+        "pass": 0,
+        "total": 36
+      },
+      "Rules\\DeadCode": {
+        "pass": 0,
+        "total": 167
+      },
+      "Rules\\Debug": {
+        "pass": 0,
+        "total": 16
+      },
+      "Rules\\EnumCases": {
+        "pass": 0,
+        "total": 2
+      },
+      "Rules\\Exceptions": {
+        "pass": 0,
+        "total": 128
+      },
+      "Rules\\Functions": {
+        "pass": 0,
+        "total": 546
+      },
+      "Rules\\Generators": {
+        "pass": 0,
+        "total": 7
+      },
+      "Rules\\Generics": {
+        "pass": 0,
+        "total": 51
+      },
+      "Rules\\Ignore": {
+        "pass": 0,
+        "total": 2
+      },
+      "Rules\\InternalTag": {
+        "pass": 0,
+        "total": 19
+      },
+      "Rules\\Keywords": {
+        "pass": 0,
+        "total": 32
+      },
+      "Rules\\Methods": {
+        "pass": 0,
+        "total": 676
+      },
+      "Rules\\Missing": {
+        "pass": 0,
+        "total": 22
+      },
+      "Rules\\Names": {
+        "pass": 0,
+        "total": 10
+      },
+      "Rules\\Namespaces": {
+        "pass": 0,
+        "total": 5
+      },
+      "Rules\\Operators": {
+        "pass": 0,
+        "total": 40
+      },
+      "Rules\\PhpDoc": {
+        "pass": 0,
+        "total": 118
+      },
+      "Rules\\Playground": {
+        "pass": 0,
+        "total": 9
+      },
+      "Rules\\Properties": {
+        "pass": 0,
+        "total": 358
+      },
+      "Rules\\Pure": {
+        "pass": 0,
+        "total": 34
+      },
+      "Rules\\Regexp": {
+        "pass": 0,
+        "total": 9
+      },
+      "Rules\\RestrictedUsage": {
+        "pass": 0,
+        "total": 13
+      },
+      "Rules\\TooWideTypehints": {
+        "pass": 0,
+        "total": 47
+      },
+      "Rules\\Traits": {
+        "pass": 0,
+        "total": 12
+      },
+      "Rules\\Types": {
+        "pass": 0,
+        "total": 3
+      },
+      "Rules\\Variables": {
+        "pass": 0,
+        "total": 248
+      },
+      "Rules\\Whitespace": {
+        "pass": 0,
+        "total": 5
+      },
+      "Testing": {
+        "pass": 0,
+        "total": 3
+      }
+    },
+    "pass": 0
+  },
+  "types": {
+    "error": 0,
+    "excluded": 0,
+    "fail": 21299,
+    "groups": {
+      "nativeType": {
+        "pass": 0,
+        "total": 418
+      },
+      "superType": {
+        "pass": 0,
+        "total": 5
+      },
+      "type": {
+        "pass": 0,
+        "total": 20188
+      },
+      "variableCertainty": {
+        "pass": 0,
+        "total": 688
+      }
+    },
+    "pass": 0
   }
 }

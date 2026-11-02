@@ -18,15 +18,11 @@
 
 ## Scoreboard
 
-`cargo xtask parity` runs the lexer and parser suites; `parity/score.json` holds the totals.
+`cargo xtask parity` runs the lexer, parser, types and rules suites; `parity/score.json` holds the totals. Nothing is ported yet, so every case fails.
 
 ```
-lexer 0/39858 parser 0/13286
+lexer 0/39858 parser 0/13286 types 0/21299 rules 0/3609
 ```
-
-The rules and types extractors run (`parity/extract/`), and their suites are not wired into the driver yet:
-- rules: 3,548 cases (3,544 `analyse`, 4 `fix`);
-- types: 21,299 asserts from 1,986 files, every expected value resolved.
 
 ## Cost
 
@@ -34,11 +30,11 @@ Not built yet (Phase 2).
 
 ## Next
 
-1. The types and rules suites in the driver, with their `debug` subcommands.
-2. The scoreboard in CI: the pinned `php:8.5.4-cli` image, phpstan-src's composer install, and the per-push subset.
-3. `docs/design/cost-meter.md`, then `cargo xtask cost` and its CI gate.
-4. The parser suite's other inputs (nikic's fixtures, php-src's `.phpt` files, the operator pairs), pinned.
-5. The phpdoc, level-oracle and end-to-end suites; then the legacy binary's baseline line.
+1. The scoreboard in CI: the pinned `php:8.5.4-cli` image, phpstan-src's composer install, and the per-push subset.
+2. `docs/design/cost-meter.md`, then `cargo xtask cost` and its CI gate.
+3. The parser suite's other inputs (nikic's fixtures, php-src's `.phpt` files, the operator pairs), pinned.
+4. The phpdoc suite.
+5. The level-oracle and end-to-end suites; then the legacy binary's baseline line.
 
 ## Later
 

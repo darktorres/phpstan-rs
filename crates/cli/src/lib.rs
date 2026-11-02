@@ -36,7 +36,7 @@ pub fn run(args: &[String], version: &str, out: &mut dyn Write) -> io::Result<Ou
 /// answers with one `{"unported": "<suite>"}` line.
 fn debug(args: &[String], out: &mut dyn Write) -> io::Result<Outcome> {
     match args.first().map(String::as_str) {
-        Some(suite @ ("lexer" | "parser")) => {
+        Some(suite @ ("lexer" | "parser" | "types" | "rules")) => {
             writeln!(out, "{{\"unported\":\"{suite}\"}}")?;
             Ok(Outcome::Clean)
         }
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn debug_suites_answer_unported() {
-        for suite in ["lexer", "parser"] {
+        for suite in ["lexer", "parser", "types", "rules"] {
             let mut out = Vec::new();
             let args = ["debug".to_owned(), suite.to_owned()];
             assert_eq!(run(&args, "1", &mut out).unwrap(), Outcome::Clean);

@@ -89,18 +89,25 @@ impl Oracle {
     }
 
     /// The extraction output of `suite` for `inputs`, from the cache when its
-    /// key matches, otherwise by running the `script` extractor with `args`
-    /// and `inputs` on stdin. `script` is the only extractor file it reads.
+    /// key matches, otherwise by running the first of `scripts` with `args`
+    /// and `inputs` on stdin. `scripts` lists every extractor file the run
+    /// reads, so each is part of the key.
     pub(crate) fn extract(
         &self,
         suite: &str,
-        script: &str,
+        scripts: &[&str],
         args: &[&str],
         inputs: &[u8],
     ) -> Result<Vec<u8>, String> {
-        let script_path = self.extract.join(script);
-        let extractor = fs::read(&script_path)
-            .map_err(|error| format!("{}: {error}", script_path.display()))?;
+        let mut extractor = Vec::new();
+        for script in scripts {
+            let path = self.extract.join(script);
+            let bytes = fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+            extractor.extend_from_slice(&(script.len() as u64).to_le_bytes());
+            extractor.extend_from_slice(script.as_bytes());
+            extractor.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+            extractor.extend_from_slice(&bytes);
+        }
         let key = cache_key(&KeyInputs {
             extractor: &extractor,
             args,
@@ -110,20 +117,32 @@ impl Oracle {
             pins: &self.pins,
             inputs,
         });
-        cached(&self.cache.join(suite).join(&key), || {
-            self.php(script, args, inputs)
+        let [script, ..] = scripts else {
+            return Err(format!("suite {suite} names no extractor"));
+        };
+        let dir = self.cache.join(suite);
+        cached(&dir.join(&key), || {
+            self.php(script, args, inputs, &dir.join("work"))
         })
     }
 
     /// Runs the `script` extractor with `args` after the phpstan-src path,
-    /// feeding it `stdin`, and returns its stdout.
-    pub(crate) fn php(&self, script: &str, args: &[&str], stdin: &[u8]) -> Result<Vec<u8>, String> {
+    /// feeding it `stdin`, and returns its stdout. `PARITY_WORK` names
+    /// `work`, a directory the extractor may write scratch files to.
+    pub(crate) fn php(
+        &self,
+        script: &str,
+        args: &[&str],
+        stdin: &[u8],
+        work: &Path,
+    ) -> Result<Vec<u8>, String> {
         let mut command = Command::new("php");
         command
             .args(["-d", "memory_limit=-1"])
             .arg(self.extract.join(script))
             .arg(&self.src)
-            .args(args);
+            .args(args)
+            .env("PARITY_WORK", work);
         piped(&mut command, stdin)
     }
 }

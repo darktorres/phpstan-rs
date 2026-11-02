@@ -7,7 +7,9 @@
 //! the cache directory and prints a one-line summary.
 
 mod digest;
+mod jsonl;
 mod oracle;
+mod recorded;
 mod score;
 
 use std::path::{Path, PathBuf};
@@ -17,7 +19,12 @@ use oracle::Oracle;
 use score::{CaseResult, Exclusions};
 
 /// The suites, in the summary's order.
-const SUITES: [&str; 2] = [digest::LEXER.name, digest::PARSER.name];
+const SUITES: [&str; 4] = [
+    digest::LEXER.name,
+    digest::PARSER.name,
+    recorded::TYPES,
+    recorded::RULES,
+];
 
 const USAGE: &str =
     "usage: cargo xtask parity [--suite <name>]... [--filter <glob>] [--show <case id>]";
@@ -44,9 +51,11 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<(), String> {
     let exclusions = Exclusions::read(&root.join("parity/exclusions.md"))?;
     let mut results: Vec<CaseResult> = Vec::new();
     for suite in &options.suites {
-        let cases = match digest_suite(suite) {
-            Some(digest) => digest::run(digest, &oracle, &binary)?,
-            None => unreachable!("suite names are checked when parsing"),
+        let cases = match (digest_suite(suite), suite.as_str()) {
+            (Some(digest), _) => digest::run(digest, &oracle, &binary)?,
+            (None, recorded::TYPES) => recorded::run_types(&oracle, &binary)?,
+            (None, recorded::RULES) => recorded::run_rules(&oracle, &binary)?,
+            (None, _) => unreachable!("suite names are checked when parsing"),
         };
         results.extend(score::judge(
             suite,

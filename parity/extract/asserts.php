@@ -3,7 +3,9 @@
 // Reads the type asserts of each file the types extraction recorded
 // (docs/design/scoreboard.md, "types").
 //
-// Usage: php asserts.php <phpstan-src> <recorded cases.jsonl> > asserts.jsonl
+// Usage: php asserts.php <phpstan-src> < records.jsonl > asserts.jsonl
+//
+// records.jsonl is tests.php's output; its "types" records name the files.
 //
 // One output line per assertType, assertNativeType, assertSuperType or
 // assertVariableCertainty call, with the call's line, its kind, the expected
@@ -19,7 +21,7 @@ use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\NodeVisitor\ParentConnectingVisitor;
 use PhpParser\ParserFactory;
 
-[, $src, $casesPath] = $argv;
+$src = $argv[1] ?? throw new RuntimeException('usage: asserts.php <phpstan-src> < records.jsonl');
 require_once $src . '/vendor/autoload.php';
 
 $kinds = [
@@ -31,7 +33,7 @@ $kinds = [
 
 /** @var array<string, list<string>> $files file => test classes */
 $files = [];
-foreach (file($casesPath, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+foreach (file('php://stdin', FILE_IGNORE_NEW_LINES) ?: [] as $line) {
 	$case = json_decode($line, true, flags: JSON_THROW_ON_ERROR);
 	if ($case['kind'] !== 'types') {
 		continue;

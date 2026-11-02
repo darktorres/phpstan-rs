@@ -3,12 +3,12 @@
 //! the line breaks rewritten) and the parser (nikic's AST after name
 //! resolution, as PHPStan parses a file).
 
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
 use serde_json::Value;
 
+use super::jsonl::{by_id, by_id_values, parse_lines, unported};
 use super::oracle::{Oracle, piped};
 use super::score::{Case, Verdict};
 use crate::files;
@@ -50,7 +50,7 @@ fn inputs(oracle: &Oracle) -> Result<Vec<u8>, String> {
 
 pub(crate) fn run(suite: &Suite, oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, String> {
     let inputs = inputs(oracle)?;
-    let expected = by_id(&oracle.extract(suite.name, suite.extractor, &[], &inputs)?)?;
+    let expected = by_id(&oracle.extract(suite.name, &[suite.extractor], &[], &inputs)?)?;
     let output = piped(
         Command::new(binary)
             .args(["debug", suite.name])
@@ -58,7 +58,7 @@ pub(crate) fn run(suite: &Suite, oracle: &Oracle, binary: &Path) -> Result<Vec<C
         &inputs,
     )?;
     let actual = parse_lines(&output)?;
-    if let Some(reason) = unported(suite, &actual) {
+    if let Some(reason) = unported(suite.name, &actual) {
         return Ok(expected
             .into_keys()
             .map(|id| Case {
@@ -105,7 +105,8 @@ fn compare(suite: &Suite, want: &Value, got: &Value) -> Verdict {
 
 /// `--show <id>`: prints the first line where the two sides' dumps differ.
 pub(crate) fn show(suite: &Suite, oracle: &Oracle, binary: &Path, id: &str) -> Result<(), String> {
-    let want = oracle.php(suite.extractor, &["--show", id], &[])?;
+    let work = oracle.cache.join(suite.name).join("work");
+    let want = oracle.php(suite.extractor, &["--show", id], &[], &work)?;
     let got = piped(
         Command::new(binary)
             .args(["debug", suite.name])
@@ -118,7 +119,7 @@ pub(crate) fn show(suite: &Suite, oracle: &Oracle, binary: &Path, id: &str) -> R
     if let Some(reason) = got
         .lines()
         .next()
-        .and_then(|line| unported(suite, &[serde_json::from_str(line).ok()?]))
+        .and_then(|line| unported(suite.name, &[serde_json::from_str(line).ok()?]))
     {
         println!("{reason}; the expected dump starts:");
         for line in want.lines().take(20) {
@@ -144,39 +145,4 @@ pub(crate) fn show(suite: &Suite, oracle: &Oracle, binary: &Path, id: &str) -> R
         ),
     }
     Ok(())
-}
-
-/// A binary that lacks a suite's code answers with one `{"unported": ...}`
-/// line.
-fn unported(suite: &Suite, lines: &[Value]) -> Option<String> {
-    let [line] = lines else { return None };
-    line.get("unported")
-        .map(|_| format!("the {} is not ported", suite.name))
-}
-
-fn parse_lines(bytes: &[u8]) -> Result<Vec<Value>, String> {
-    String::from_utf8_lossy(bytes)
-        .lines()
-        .filter(|line| !line.is_empty())
-        .map(|line| serde_json::from_str(line).map_err(|error| format!("{error}: {line}")))
-        .collect()
-}
-
-fn by_id(bytes: &[u8]) -> Result<BTreeMap<String, Value>, String> {
-    by_id_values(parse_lines(bytes)?)
-}
-
-fn by_id_values(lines: Vec<Value>) -> Result<BTreeMap<String, Value>, String> {
-    let mut map = BTreeMap::new();
-    for line in lines {
-        let id = line
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| format!("a case has no id: {line}"))?
-            .to_owned();
-        if map.insert(id.clone(), line).is_some() {
-            return Err(format!("case {id} appears twice"));
-        }
-    }
-    Ok(map)
 }
