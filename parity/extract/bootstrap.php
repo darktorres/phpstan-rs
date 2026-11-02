@@ -1,14 +1,19 @@
 <?php declare(strict_types = 1);
 
-// PHPUnit bootstrap for the rules suite's extraction (docs/design/scoreboard.md).
+// PHPUnit bootstrap for the scoreboard's extraction (docs/design/scoreboard.md).
 //
-// It puts a recording PHPStan\Testing\RuleTestCase in place of the real one,
-// then loads phpstan-src's own bootstrap. Each analyse() or fix() call records
-// what the test expects and returns without analysing anything: getRule() is
-// never called. Records go, one JSON object per line, to $PARITY_OUT.
+// It puts recording versions of PHPStan\Testing\RuleTestCase and
+// PHPStan\Testing\TypeInferenceTestCase in place of the real ones, then loads
+// phpstan-src's own bootstrap. Running a test then records what it expects,
+// without analysing anything:
+// - RuleTestCase: each analyse() or fix() call records its files and expected
+//   errors; getRule() is never called;
+// - TypeInferenceTestCase: each gatherAssertTypes() call records the file whose
+//   asserts the test checks, and returns no asserts.
+// Records go, one JSON object per line, to $PARITY_OUT.
 //
 // Environment: PHPSTAN_SRC (the vendor/phpstan-src checkout), PARITY_OUT,
-// PARITY_WORK (a directory for the generated class).
+// PARITY_WORK (a directory for the generated classes).
 
 use PhpParser\Node;
 use PhpParser\NodeTraverser;
@@ -22,7 +27,7 @@ $work = getenv('PARITY_WORK') ?: throw new RuntimeException('PARITY_WORK is not 
 
 require_once $src . '/vendor/autoload.php';
 
-final class ParityRuleRecorder
+final class ParityRecorder
 {
 
 	/** @var resource */
@@ -43,15 +48,29 @@ final class ParityRuleRecorder
 	{
 		$record = [
 			'test' => $test::class,
+			'kind' => $kind,
 			'method' => $test->name(),
 			'data_set' => $test->dataName(),
-			'kind' => $kind,
 			'files' => array_map(self::relative(...), $files),
 			'expected' => $kind === 'fix' ? self::relative((string) $expected) : $expected,
 			'toggles' => self::toggles($test),
 			'config_files' => array_map(self::relative(...), $test::getAdditionalConfigFiles()),
 		];
 		fwrite(self::$handle, json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n");
+	}
+
+	/**
+	 * @param class-string $testClass
+	 */
+	public static function recordTypeFile(string $testClass, string $file): void
+	{
+		$record = [
+			'test' => $testClass,
+			'kind' => 'types',
+			'files' => [self::relative($file)],
+			'config_files' => array_map(self::relative(...), $testClass::getAdditionalConfigFiles()),
+		];
+		fwrite(self::$handle, json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
 	}
 
 	private static function relative(string $path): string
@@ -103,44 +122,50 @@ final class ParityRuleRecorder
 
 }
 
-// Build the recording RuleTestCase from the real one: the same class, with the
-// bodies of analyse(), fix() and gatherAnalyserErrors() replaced.
-$generated = $work . '/RuleTestCase.php';
+// Build each recording class from the real one: the same class, with some
+// method bodies replaced. The classes are written elsewhere, so __DIR__ is
+// replaced too, to keep meaning the real file's directory.
 $parser = (new ParserFactory())->createForHostVersion();
-$ast = $parser->parse((string) file_get_contents($src . '/src/Testing/RuleTestCase.php'));
-$traverser = new NodeTraverser();
-$traverser->addVisitor(new class ($parser, $src . '/src/Testing') extends NodeVisitorAbstract {
+$standIns = [
+	'RuleTestCase' => [
+		'analyse' => '\ParityRecorder::record($this, "analyse", $files, $expectedErrors);',
+		'fix' => '\ParityRecorder::record($this, "fix", [$file], $expectedFile);',
+		'gatherAnalyserErrors' => 'return [];',
+	],
+	'TypeInferenceTestCase' => [
+		'gatherAssertTypes' => '\ParityRecorder::recordTypeFile(static::class, $file); return [];',
+	],
+];
+$generated = [];
+foreach ($standIns as $class => $bodies) {
+	$ast = $parser->parse((string) file_get_contents($src . '/src/Testing/' . $class . '.php'));
+	$traverser = new NodeTraverser();
+	$traverser->addVisitor(new class ($parser, $src . '/src/Testing', $bodies) extends NodeVisitorAbstract {
 
-	public function __construct(private \PhpParser\Parser $parser, private string $testingDir)
-	{
-	}
-
-	public function leaveNode(Node $node)
-	{
-		// The class is written elsewhere, so __DIR__ must keep meaning the
-		// real file's directory.
-		if ($node instanceof Node\Scalar\MagicConst\Dir) {
-			return new Node\Scalar\String_($this->testingDir);
+		/** @param array<string, string> $bodies */
+		public function __construct(private \PhpParser\Parser $parser, private string $testingDir, private array $bodies)
+		{
 		}
-		if (!$node instanceof Node\Stmt\ClassMethod) {
-			return null;
-		}
-		$body = match ($node->name->toString()) {
-			'analyse' => '\ParityRuleRecorder::record($this, "analyse", $files, $expectedErrors);',
-			'fix' => '\ParityRuleRecorder::record($this, "fix", [$file], $expectedFile);',
-			'gatherAnalyserErrors' => 'return [];',
-			default => null,
-		};
-		if ($body === null) {
-			return null;
-		}
-		$node->stmts = $this->parser->parse('<?php ' . $body);
-		return $node;
-	}
 
-});
-file_put_contents($generated, (new Standard())->prettyPrintFile($traverser->traverse($ast)));
+		public function leaveNode(Node $node)
+		{
+			if ($node instanceof Node\Scalar\MagicConst\Dir) {
+				return new Node\Scalar\String_($this->testingDir);
+			}
+			if (!$node instanceof Node\Stmt\ClassMethod || !isset($this->bodies[$node->name->toString()])) {
+				return null;
+			}
+			$node->stmts = $this->parser->parse('<?php ' . $this->bodies[$node->name->toString()]);
+			return $node;
+		}
 
-ParityRuleRecorder::open($out, $src);
-require_once $generated;
+	});
+	$generated[] = $path = $work . '/' . $class . '.php';
+	file_put_contents($path, (new Standard())->prettyPrintFile($traverser->traverse($ast)));
+}
+
+ParityRecorder::open($out, $src);
+foreach ($generated as $path) {
+	require_once $path;
+}
 require_once $src . '/tests/bootstrap.php';

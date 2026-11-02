@@ -68,14 +68,16 @@ A cache hit skips stage 1. The cache is never committed.
 ### types (nsrt)
 - **Extraction:**
   - The file list is what `NodeScopeResolverTest`'s data provider yields under the oracle php. That is computed by calling `findTestFiles()` and the lint-skip check, with no analysis.
-  - Each `assertType`, `assertNativeType`, `assertSuperType` and `assertVariableCertainty` call is read with nikic: the expected string or certainty, the line, the asserted expression's source text, and its kind (EV-3).
-- **Case id:** `file:line:kind`.
+  - The file list comes from running the 52 `TypeInferenceTestCase` classes under `parity/extract/bootstrap.php`, whose stand-in `gatherAssertTypes()` records each file and analyses nothing.
+  - `parity/extract/asserts.php` then reads each `assertType`, `assertNativeType`, `assertSuperType` and `assertVariableCertainty` call with nikic: the expected string or certainty, the line and column, the asserted expression's source text, and its kind (EV-3).
+  - PHPStan reads a non-literal expected argument through the scope as a constant string. The extractor folds the forms the suite uses: `X::class` (with `self`, `static` and `parent` taken from the enclosing class), constants declared in the file, concatenation, `sprintf` over constants, an assignment's value, and a variable assigned once in the enclosing function. Every one of the 21,299 asserts resolves.
+- **Case id:** `file:line:column:kind`. Nine lines hold two asserts, so the line alone is not unique.
 - **phpstan-rs side:** `debug nsrt <file>` analyses the file as its own project (CA-4). It prints `describe(precise)` of the asserted expression, or the certainty, at each assert.
 - **Comparison:** string equality. `describe()` aims at PHPStan's exact strings (CA-5), so no normalization is planned. If one is ever needed, it is listed in this doc with its reason.
 
 ### rules
 Extraction **runs PHPStan's own test methods without running PHPStan's analysis.**
-- `parity/extract/rules.php` puts a recording `PHPStan\Testing\RuleTestCase` on the autoloader before phpstan-src's own.
+- `parity/extract/bootstrap.php`, a PHPUnit bootstrap, puts recording `PHPStan\Testing\RuleTestCase` and `TypeInferenceTestCase` classes on the autoloader before phpstan-src's own. They are generated from the real classes by rewriting the methods that would analyse.
 - It then runs the `tests/PHPStan/Rules/**/*RuleTest.php` classes through PHPUnit. Data providers run, and `PHP_VERSION_ID` branches resolve under the oracle php.
 - The recording class records, for each `analyse($files, $expectedErrors)`:
   - the test class and method (and the data-set name);
@@ -144,3 +146,6 @@ The one-line summary is `lexer 0/N parser 0/N phpdoc 0/N types 0/N rules 0/N`.
   - Method: compare its result with a PHPUnit `--list-tests` run.
   - Accept: the lists are identical.
   - Fallback: copy the conditions into the extractor, with a test that diffs it against `--list-tests`.
+  - **Result (2026-11-01): replaced.** No reflection call is needed. The stand-in `TypeInferenceTestCase::gatherAssertTypes()` records the file each data provider passes it, so PHPUnit's own run gives the list: 1,986 files from 49 classes.
+    - 45 PHPUnit errors are expected. They are tests whose data provider is built from `gatherAssertTypes()`, which the stand-in leaves empty.
+    - `LegacyNodeScopeResolverTest`, `Generics\AnalysisContextTest` and `ScopePhpVersionTest` assert through their own `processFile` callbacks, not through assert calls. Their few cases each inspect the scope in a callback, so they need a case-by-case extractor; until then they are a "Later" line in `STATUS.md`. They are not exclusions: none of the exclusion kinds applies.

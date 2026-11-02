@@ -18,7 +18,9 @@
 
 ## Scoreboard
 
-Not built yet (Phase 2).
+Not built yet (Phase 2). The rules and types extractors run (`parity/extract/`):
+- rules: 3,548 cases (3,544 `analyse`, 4 `fix`);
+- types: 21,299 asserts from 1,986 files, every expected value resolved.
 
 ## Cost
 
@@ -29,7 +31,9 @@ Not built yet (Phase 2).
 1. `docs/design/scoreboard.md`: the extractors, the oracle php pinned for CI, and the comparison per suite.
 2. `cargo xtask parity`, with the lexer and parser suites first; their oracles need no port code.
 3. `docs/design/cost-meter.md`, then `cargo xtask cost` and its CI gate.
-4. The nsrt, rules, level-oracle and end-to-end extractors, with their baselines recorded.
+4. The level-oracle and end-to-end extractors; the rules and types baselines recorded.
 5. Run the legacy binary through the suites it can drive, for the baseline line.
 
 ## Later
+
+- The types suite's three `processFile` classes (`LegacyNodeScopeResolverTest`, `Generics\AnalysisContextTest`, `ScopePhpVersionTest`) assert in scope callbacks and are not extracted yet.
