@@ -9,6 +9,7 @@
 mod digest;
 mod jsonl;
 mod oracle;
+mod pins;
 mod recorded;
 mod score;
 

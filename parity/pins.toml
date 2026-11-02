@@ -13,6 +13,20 @@ signature = "https://github.com/phpstan/phpstan/releases/download/2.3.4/phpstan.
 version = "2.3.4"
 commit = "034afd3eea56205d2fa8167b74504da774a174ab"
 
+[nikic-php-parser]
+# nikic/php-parser's own repository, for its parser fixtures, which the
+# composer package leaves out. Pinned by commit: the release tarball leaves
+# the tests out too.
+version = "v5.9.0"
+repository = "https://github.com/nikic/PHP-Parser.git"
+commit = "9e33da9553fe7786f0962b35f4e4ecf01be89def"
+
+[php-src]
+# php-src's .phpt tests, for their FILE sections.
+version = "8.5.4"
+url = "https://github.com/php/php-src/archive/refs/tags/php-8.5.4.tar.gz"
+sha256 = "0603c1fedb9a67e384ae3f2dea8b1666753cb06364b70c62dae2a0ff59ffa3f2"
+
 [oracle-php]
 # The php that runs every extractor. Locally it is the installed php; the
 # scoreboard refuses any other version. CI runs in this image, whose

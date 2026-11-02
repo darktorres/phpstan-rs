@@ -24,8 +24,9 @@ pub(crate) struct Oracle {
     /// SHA-256 of phpstan-src's `vendor/composer/installed.json`: the
     /// composer dependencies as installed.
     installed: String,
-    /// `parity/pins.toml`.
+    /// `parity/pins.toml`, as bytes for the key and parsed.
     pins: Vec<u8>,
+    table: toml::Table,
     /// `<cache>/phpstan-rs/parity`.
     pub(crate) cache: PathBuf,
 }
@@ -41,14 +42,7 @@ impl Oracle {
             .map_err(|error| format!("{}: {error}", pins_path.display()))?
             .parse()
             .map_err(|error| format!("{}: {error}", pins_path.display()))?;
-        let pin = |section: &str, key: &str| -> Result<String, String> {
-            table
-                .get(section)
-                .and_then(|s| s.get(key))
-                .and_then(toml::Value::as_str)
-                .map(str::to_owned)
-                .ok_or_else(|| format!("parity/pins.toml has no {section}.{key}"))
-        };
+        let pin = |section: &str, key: &str| pin(&table, section, key);
         let php_version = text(Command::new("php").args(["-r", "echo PHP_VERSION;"]))?;
         let pinned_php = pin("oracle-php", "version")?;
         if php_version != pinned_php {
@@ -83,9 +77,15 @@ impl Oracle {
             src_commit,
             installed: hex(&Sha256::digest(&installed)),
             pins,
+            table,
             src,
             cache,
         })
+    }
+
+    /// A value of `parity/pins.toml`.
+    pub(crate) fn pin(&self, section: &str, key: &str) -> Result<String, String> {
+        pin(&self.table, section, key)
     }
 
     /// The extraction output of `suite` for `inputs`, from the cache when its
@@ -99,6 +99,19 @@ impl Oracle {
         args: &[&str],
         inputs: &[u8],
     ) -> Result<Vec<u8>, String> {
+        self.extract_valid(suite, scripts, args, inputs, |_| true)
+    }
+
+    /// `extract`, where a cached output that `valid` rejects is produced
+    /// again: for an output that names files outside the cache entry.
+    pub(crate) fn extract_valid(
+        &self,
+        suite: &str,
+        scripts: &[&str],
+        args: &[&str],
+        inputs: &[u8],
+        valid: impl Fn(&[u8]) -> bool,
+    ) -> Result<Vec<u8>, String> {
         let mut extractor = Vec::new();
         for script in scripts {
             let path = self.extract.join(script);
@@ -110,6 +123,7 @@ impl Oracle {
         }
         let key = cache_key(&KeyInputs {
             extractor: &extractor,
+            php_flags: &PHP_FLAGS,
             args,
             php_v: &self.php_v,
             src_commit: &self.src_commit,
@@ -121,9 +135,11 @@ impl Oracle {
             return Err(format!("suite {suite} names no extractor"));
         };
         let dir = self.cache.join(suite);
-        cached(&dir.join(&key), || {
-            self.php(script, args, inputs, &dir.join("work"))
-        })
+        cached(
+            &dir.join(&key),
+            || self.php(script, args, inputs, &dir.join("work")),
+            valid,
+        )
     }
 
     /// Runs the `script` extractor with `args` after the phpstan-src path,
@@ -138,7 +154,7 @@ impl Oracle {
     ) -> Result<Vec<u8>, String> {
         let mut command = Command::new("php");
         command
-            .args(["-d", "memory_limit=-1"])
+            .args(PHP_FLAGS)
             .arg(self.extract.join(script))
             .arg(&self.src)
             .args(args)
@@ -147,15 +163,32 @@ impl Oracle {
     }
 }
 
-/// `<dir>/cases.jsonl` if it exists; otherwise `produce`'s output, stored
+fn pin(table: &toml::Table, section: &str, key: &str) -> Result<String, String> {
+    table
+        .get(section)
+        .and_then(|s| s.get(key))
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| format!("parity/pins.toml has no {section}.{key}"))
+}
+
+/// The php settings every extractor runs with. `short_open_tag` changes how
+/// `<?` lexes, and php.ini files differ on it (the image's php has the
+/// compiled default, on; a distribution's php.ini turns it off), so it is
+/// set to the default here.
+const PHP_FLAGS: [&str; 4] = ["-d", "memory_limit=-1", "-d", "short_open_tag=1"];
+
+/// `<dir>/cases.jsonl` if it exists and is `valid`; otherwise `produce`'s output, stored
 /// there first.
 fn cached(
     dir: &Path,
     produce: impl FnOnce() -> Result<Vec<u8>, String>,
+    valid: impl Fn(&[u8]) -> bool,
 ) -> Result<Vec<u8>, String> {
     let cases = dir.join("cases.jsonl");
     match fs::read(&cases) {
-        Ok(bytes) => return Ok(bytes),
+        Ok(bytes) if valid(&bytes) => return Ok(bytes),
+        Ok(_) => {}
         Err(error) if error.kind() == ErrorKind::NotFound => {}
         Err(error) => return Err(format!("{}: {error}", cases.display())),
     }
@@ -170,6 +203,7 @@ fn cached(
 /// without changing this struct.
 struct KeyInputs<'a> {
     extractor: &'a [u8],
+    php_flags: &'a [&'a str],
     args: &'a [&'a str],
     php_v: &'a str,
     src_commit: &'a str,
@@ -181,6 +215,7 @@ struct KeyInputs<'a> {
 fn cache_key(inputs: &KeyInputs<'_>) -> String {
     let KeyInputs {
         extractor,
+        php_flags,
         args,
         php_v,
         src_commit,
@@ -194,9 +229,11 @@ fn cache_key(inputs: &KeyInputs<'_>) -> String {
         hasher.update(bytes);
     };
     field(extractor);
-    field(&(args.len() as u64).to_le_bytes());
-    for arg in *args {
-        field(arg.as_bytes());
+    for list in [*php_flags, *args] {
+        field(&(list.len() as u64).to_le_bytes());
+        for item in list {
+            field(item.as_bytes());
+        }
     }
     field(php_v.as_bytes());
     field(src_commit.as_bytes());
@@ -253,7 +290,7 @@ pub(crate) fn piped(command: &mut Command, stdin: &[u8]) -> Result<Vec<u8>, Stri
 }
 
 /// The trimmed stdout of a command that must succeed.
-fn text(command: &mut Command) -> Result<String, String> {
+pub(crate) fn text(command: &mut Command) -> Result<String, String> {
     let stdout = piped(command, &[])?;
     Ok(String::from_utf8_lossy(&stdout).trim().to_owned())
 }
@@ -265,8 +302,10 @@ mod tests {
     fn key_with(change: usize) -> String {
         let base = |i: usize, value: &'static str| if i == change { "changed" } else { value };
         let args = [base(1, "arg")];
+        let flags = [base(7, "-d")];
         cache_key(&KeyInputs {
             extractor: base(0, "script").as_bytes(),
+            php_flags: &flags,
             args: &args,
             php_v: base(2, "PHP 8.5.4"),
             src_commit: base(3, "commit"),
@@ -279,7 +318,7 @@ mod tests {
     #[test]
     fn every_key_input_changes_the_key() {
         let unchanged = key_with(usize::MAX);
-        for field in 0..7 {
+        for field in 0..8 {
             assert_ne!(
                 key_with(field),
                 unchanged,
@@ -292,6 +331,7 @@ mod tests {
     fn fields_are_length_prefixed() {
         let one = cache_key(&KeyInputs {
             extractor: b"ab",
+            php_flags: &[],
             args: &[],
             php_v: "c",
             src_commit: "",
@@ -301,6 +341,7 @@ mod tests {
         });
         let two = cache_key(&KeyInputs {
             extractor: b"a",
+            php_flags: &[],
             args: &[],
             php_v: "bc",
             src_commit: "",
@@ -318,7 +359,7 @@ mod tests {
             .join("phpstan-rs/test-scratch")
             .join(format!("cached-{}", std::process::id()));
         let dir = scratch.join("key");
-        let cold = cached(&dir, || Ok(b"cases".to_vec())).unwrap();
+        let cold = cached(&dir, || Ok(b"cases".to_vec()), |_| true).unwrap();
         assert_eq!(cold, b"cases");
         let written = fs::metadata(dir.join("cases.jsonl"))
             .unwrap()
@@ -333,7 +374,7 @@ mod tests {
             names
         };
         let before = listing(&dir);
-        let warm = cached(&dir, || panic!("a warm run must not extract")).unwrap();
+        let warm = cached(&dir, || panic!("a warm run must not extract"), |_| true).unwrap();
         assert_eq!(warm, b"cases");
         assert_eq!(listing(&dir), before);
         assert_eq!(
@@ -343,6 +384,9 @@ mod tests {
                 .unwrap(),
             written
         );
+        let redone = cached(&dir, || Ok(b"again".to_vec()), |bytes| bytes != b"cases").unwrap();
+        assert_eq!(redone, b"again");
+        assert_eq!(fs::read(dir.join("cases.jsonl")).unwrap(), b"again");
         fs::remove_dir_all(&scratch).unwrap();
     }
 

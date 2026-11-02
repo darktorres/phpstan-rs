@@ -18,15 +18,15 @@
 
 ## Scoreboard
 
-`cargo xtask parity` runs the lexer, parser, types and rules suites; `parity/score.json` holds the totals, and CI checks it against a full run under the pinned `php:8.5.4-cli` image on every push. Nothing is ported yet, so every case fails.
+`cargo xtask parity` runs the lexer, parser, types and rules suites; `parity/score.json` holds the totals, and CI checks it against a full run under the pinned `php:8.5.4-cli` image on every push. Nothing is ported yet, so every case fails. The lexer and parser read phpstan-src's `tests/` and `vendor/`, nikic's parser fixtures (284 sections) and php-src 8.5.4's `.phpt` FILE sections (21,445), the last two fetched by their pins.
 
 ```
-lexer 0/39858 parser 0/13286 types 0/21299 rules 0/3609
+lexer 0/105045 parser 0/35015 types 0/21299 rules 0/3609
 ```
 
 Where the legacy binary (`legacy-final`) stood, measured once through what its command line can do:
 - **types:** 8,125 of 20,188 `assertType` cases (40.2%). It has no `assertNativeType`, `assertSuperType` or `assertVariableCertainty`, so 8,125 of 21,299 overall. An assert counts as passing when its file was checked and no mismatch was reported on its line, which overcounts what it never evaluated.
-- **parser:** it has no nikic-shaped AST, so only its parse verdicts compare. They agree on 13,278 of 13,286 files, with no false refusals; the 8 others are files PHPStan rejects and it accepts (4 `NameResolver` errors, 4 compile-time errors such as a `void` parameter).
+- **parser:** it has no nikic-shaped AST, so only its parse verdicts compare. Over phpstan-src's `tests/` and `vendor/`, they agree on 13,278 of 13,286 files, with no false refusals; the 8 others are files PHPStan rejects and it accepts (4 `NameResolver` errors, 4 compile-time errors such as a `void` parameter).
 - **lexer, rules:** its command line can print no tokens and run no single rule.
 
 ## Cost
@@ -44,7 +44,7 @@ The legacy's heap is not measurable this way (it allocates through mimalloc), an
 
 ## Next
 
-1. The parser suite's other inputs (nikic's fixtures, php-src's `.phpt` files, the operator pairs), pinned.
+1. The parser suite's generated operator-pair input (D25-2).
 2. The phpdoc suite.
 3. The level-oracle and end-to-end suites.
 4. `cargo xtask parity --diff <commit>`, classifying each changed case.

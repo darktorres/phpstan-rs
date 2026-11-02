@@ -2,6 +2,10 @@
 //! plus a count and the errors: the lexer (nikic's token stream, also with
 //! the line breaks rewritten) and the parser (nikic's AST after name
 //! resolution, as PHPStan parses a file).
+//!
+//! Both read the same inputs, one `<case id>\t<file>` line each: phpstan-src's
+//! own PHP files, nikic's parser fixtures and php-src's `.phpt` tests, the
+//! last two materialized into files by `inputs.php`.
 
 use std::path::Path;
 use std::process::Command;
@@ -10,6 +14,7 @@ use serde_json::Value;
 
 use super::jsonl::{by_id, by_id_values, parse_lines, unported};
 use super::oracle::{Oracle, piped};
+use super::pins;
 use super::score::{Case, Verdict};
 use crate::files;
 
@@ -34,29 +39,60 @@ pub(crate) const PARSER: Suite = Suite {
     fields: &["errors", "nodes", "sha256"],
 };
 
-/// The inputs: every `.php` file under phpstan-src's `tests` and `vendor`,
-/// one `/`-spelled path per line, in byte order.
+/// The inputs, one `<case id>\t<file>` line each, in byte order:
+/// - every `.php` file under phpstan-src's `tests` and `vendor`, its id its
+///   `/`-spelled path there;
+/// - the code sections of nikic's fixtures and the FILE sections of
+///   php-src's tests, from `inputs.php`'s manifest.
 fn inputs(oracle: &Oracle) -> Result<Vec<u8>, String> {
-    let mut paths = files::php_files(&oracle.src, &oracle.src.join("tests"))?;
-    paths.extend(files::php_files(&oracle.src, &oracle.src.join("vendor"))?);
-    paths.sort_unstable();
-    let mut out = Vec::new();
-    for path in paths {
-        out.extend_from_slice(path.as_bytes());
-        out.push(b'\n');
+    let mut lines = Vec::new();
+    for dir in ["tests", "vendor"] {
+        for id in files::php_files(&oracle.src, &oracle.src.join(dir))? {
+            let file = oracle.src.join(&id);
+            let file = file
+                .to_str()
+                .ok_or_else(|| format!("{} is not UTF-8", file.display()))?;
+            lines.push(format!("{id}\t{file}\n").into_bytes());
+        }
     }
-    Ok(out)
+    let manifest = materialized(oracle)?;
+    lines.extend(
+        manifest
+            .split_inclusive(|&byte| byte == b'\n')
+            .map(<[u8]>::to_vec),
+    );
+    lines.sort_unstable();
+    Ok(lines.concat())
+}
+
+/// `inputs.php`'s manifest, produced again if a file it names is gone.
+fn materialized(oracle: &Oracle) -> Result<Vec<u8>, String> {
+    let nikic = pins::nikic(oracle)?;
+    let php_src = pins::php_src(oracle)?;
+    let store = oracle.cache.join("inputs/store");
+    let path = |p: &Path| {
+        p.to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("{} is not UTF-8", p.display()))
+    };
+    let args = [path(&nikic)?, path(&php_src)?, path(&store)?];
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    oracle.extract_valid("inputs", &["inputs.php"], &args, b"", |manifest| {
+        manifest_files(manifest).all(|file| Path::new(file).is_file())
+    })
+}
+
+fn manifest_files(manifest: &[u8]) -> impl Iterator<Item = &str> {
+    std::str::from_utf8(manifest)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_once('\t').map(|(_, file)| file))
 }
 
 pub(crate) fn run(suite: &Suite, oracle: &Oracle, binary: &Path) -> Result<Vec<Case>, String> {
     let inputs = inputs(oracle)?;
     let expected = by_id(&oracle.extract(suite.name, &[suite.extractor], &[], &inputs)?)?;
-    let output = piped(
-        Command::new(binary)
-            .args(["debug", suite.name])
-            .arg(&oracle.src),
-        &inputs,
-    )?;
+    let output = piped(Command::new(binary).args(["debug", suite.name]), &inputs)?;
     let actual = parse_lines(&output)?;
     if let Some(reason) = unported(suite.name, &actual) {
         return Ok(expected
@@ -85,7 +121,7 @@ pub(crate) fn run(suite: &Suite, oracle: &Oracle, binary: &Path) -> Result<Vec<C
         .collect())
 }
 
-/// The first path component, `tests` or `vendor`.
+/// The first component of the id: `tests`, `vendor`, `nikic` or `php-src`.
 fn group(id: &str) -> String {
     id.split('/').next().unwrap_or_default().to_owned()
 }
@@ -104,14 +140,22 @@ fn compare(suite: &Suite, want: &Value, got: &Value) -> Verdict {
 }
 
 /// `--show <id>`: prints the first line where the two sides' dumps differ.
+/// A lexer id may end in `#crlf` or `#cr`, naming its rewritten variant.
 pub(crate) fn show(suite: &Suite, oracle: &Oracle, binary: &Path, id: &str) -> Result<(), String> {
+    let input = id
+        .strip_suffix("#crlf")
+        .or_else(|| id.strip_suffix("#cr"))
+        .unwrap_or(id);
+    let inputs = inputs(oracle)?;
+    let file = std::str::from_utf8(&inputs)
+        .map_err(|error| format!("the inputs are not UTF-8: {error}"))?
+        .lines()
+        .find_map(|line| line.strip_prefix(input)?.strip_prefix('\t'))
+        .ok_or_else(|| format!("no input has the id {input}"))?;
     let work = oracle.cache.join(suite.name).join("work");
-    let want = oracle.php(suite.extractor, &["--show", id], &[], &work)?;
+    let want = oracle.php(suite.extractor, &["--show", id, file], &[], &work)?;
     let got = piped(
-        Command::new(binary)
-            .args(["debug", suite.name])
-            .arg(&oracle.src)
-            .args(["--show", id]),
+        Command::new(binary).args(["debug", suite.name, "--show", id, file]),
         &[],
     )?;
     let want = String::from_utf8_lossy(&want);

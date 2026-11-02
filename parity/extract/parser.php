@@ -2,16 +2,17 @@
 
 // The parser suite's expected side (docs/design/scoreboard.md, "parser").
 //
-// Usage: php parser.php <phpstan-src> < inputs.txt > cases.jsonl
+// Usage: php parser.php <phpstan-src> < inputs.tsv > cases.jsonl
 //
-// inputs.txt holds one path per line, relative to <phpstan-src>. Each input
+// inputs.tsv holds one input per line: its id, a tab, and its file. Each input
 // is parsed as PHPStan parses a file (SimpleParser and RichParser): nikic's
 // Php8 parser over the emulative lexer with a collecting error handler, then
 // nikic's NameResolver with preserveOriginalNames. One output line per input:
 // its id, the node count, the SHA-256 of the canonical AST and the errors
 // PHPStan would report as phpstan.parse.
 //
-// With --show <id> it prints that input's canonical AST, pretty-printed.
+// With --show <id> <file> it prints that input's canonical AST,
+// pretty-printed.
 //
 // The canonical AST is nikic's JSON shape made total and stable:
 // - a node is {"nodeType": ..., <sub-nodes in nikic's declared order>...,
@@ -30,7 +31,7 @@ use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\Parser\Php8;
 
-$src = $argv[1] ?? throw new RuntimeException('usage: parser.php <phpstan-src> [--show <id>]');
+$src = $argv[1] ?? throw new RuntimeException('usage: parser.php <phpstan-src> [--show <id> <file>]');
 require_once $src . '/vendor/autoload.php';
 
 const FLAGS = JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
@@ -112,27 +113,28 @@ function canonical(mixed $value, int &$count): mixed
 }
 
 if (($argv[2] ?? null) === '--show') {
-	$id = $argv[3] ?? throw new RuntimeException('--show needs a case id');
-	[$nodes, $errors] = parse((string) file_get_contents($src . '/' . $id));
+	$file = $argv[4] ?? throw new RuntimeException('--show needs a case id and its file');
+	[$nodes, $errors] = parse((string) file_get_contents($file));
 	$count = 0;
 	echo json_encode($nodes === null ? ['errors' => $errors] : canonical($nodes, $count), FLAGS | JSON_PRETTY_PRINT, DEPTH), "\n";
 	exit(0);
 }
 
-while (($path = fgets(STDIN)) !== false) {
-	$path = rtrim($path, "\n");
-	if ($path === '') {
+while (($line = fgets(STDIN)) !== false) {
+	$line = rtrim($line, "\n");
+	if ($line === '') {
 		continue;
 	}
-	$code = file_get_contents($src . '/' . $path);
+	[$id, $file] = explode("\t", $line, 2) + [1 => ''];
+	$code = file_get_contents($file);
 	if ($code === false) {
-		throw new RuntimeException('cannot read ' . $path);
+		throw new RuntimeException("cannot read $file for $id");
 	}
 	[$nodes, $errors] = parse($code);
 	$count = 0;
 	$digest = $nodes === null ? null : hash('sha256', json_encode(canonical($nodes, $count), FLAGS, DEPTH));
 	echo json_encode([
-		'id' => $path,
+		'id' => $id,
 		'nodes' => $count,
 		'sha256' => $digest,
 		'errors' => $errors,

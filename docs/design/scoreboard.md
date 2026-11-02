@@ -22,9 +22,13 @@ Each suite has three stages:
    - Each case gets one result: `pass`, `fail` (with a short diff), `excluded` (listed in `parity/exclusions.md`) or `error` (phpstan-rs crashed or printed nothing for it).
 
 Extraction is deterministic from pinned inputs. Its output is cached under `~/.cache/phpstan-rs/parity/<suite>/<key>/`. The key hashes:
-- the extractor script;
+- every extractor script the run reads;
+- the php flags every extractor runs with, `-d memory_limit=-1 -d short_open_tag=1`. `short_open_tag` changes how `<?` lexes, and php.ini files differ on it (the image's php has the compiled default, on; a distribution's turns it off), so it is set to the default;
+- the extractor's arguments and its stdin;
 - the oracle php's `php -v`;
-- the inputs' content (the submodule commit, and the digests in `parity/pins.toml`).
+- the inputs' content (the submodule commit, phpstan-src's installed dependencies, and `parity/pins.toml`).
+
+The pinned inputs from outside the repository (nikic's repository, php-src's tarball) are fetched once into `~/.cache/phpstan-rs/parity/pins/<name>-<commit or sha256>`, checked against their pin, and renamed into place when complete.
 
 A cache hit skips stage 1. The cache is never committed.
 
@@ -47,7 +51,7 @@ A cache hit skips stage 1. The cache is never committed.
 - **Oracle:** nikic/php-parser's `Lexer::tokenize`, with a collecting error handler.
   - PHPStan lexes with nikic's lexers (`conf/parsers.neon`, `LexerFactory`): `Lexer\Emulative` for the newest version, and `Lexer` (or `Emulative` at the configured version) for analysed files.
   - nikic v5.9.0's newest supported version is 8.5, the oracle php's version, so no emulator is active and both lexers give `Lexer::tokenize`'s output. That is `PhpToken::tokenize` plus nikic's post-processing: the two `&` token kinds, the sentinel token and the bad-character and unterminated-comment errors.
-- **Inputs:** the parser suite's inputs 1 and 5 (`tests/` and `vendor/` of phpstan-src), listed by xtask in byte order of their `/`-spelled paths. Inputs 2–4 join when they are pinned.
+- **Inputs:** the parser suite's inputs.
 - **Line breaks:** each input runs as it is, and with every `\r\n`, `\r` and `\n` rewritten to `\r\n` and to a lone `\r` (CP-6). Case ids are the path, then `#crlf` or `#cr` for the rewrites.
 - **Comparison:** each case's token stream, written one token per line as `kind pos length line` (kind is the `T_*` name, the character itself, or `EOF` for the sentinel), is compared by its SHA-256 and token count, and its errors (message, byte offset) by equality. Digests keep the cases file small; `--show <id>` reruns both sides for one case and prints the first differing token.
 - **Unported:** until M1, `phpstan-rs debug lexer` answers that the lexer is not ported, and every case is `fail` with that reason.
@@ -60,16 +64,16 @@ A cache hit skips stage 1. The cache is never committed.
 
   `RichParser`'s other visitors annotate the tree for the analyser, so they belong to M5a's tests, not to this suite.
 - **Inputs:**
-  1. every `.php` file under `vendor/phpstan-src/tests` (data files included);
-  2. nikic's `test/code/parser` fixtures, including the error-recovery ones;
-  3. php-src 8.5.4's `.phpt` `--FILE--` sections (F11). `--INI--` lines become `-d` flags; the rules for `--FILE_EXTERNAL--` and `--REDIRECTTEST--` are per F11;
-  4. a generated operator-pair file (D25-2);
-  5. `vendor/phpstan-src/vendor`, as the large vendor tree.
+  1. every `.php` file under `vendor/phpstan-src/tests` (data files included); the id is the `/`-spelled path, `tests/…`;
+  2. the code sections of nikic's `test/code/parser` fixtures, including the error-recovery ones, read as its `CodeTestParser` reads them (canonicalized, `@@{expr}@@` evaluated). The id is `nikic/test/code/parser/<fixture>#<n>`, the fixture's n-th section from 0;
+  3. php-src 8.5.4's `.phpt` `--FILE--` sections (F11), read as `run-tests.php` reads them: `===DONE===` ends a section, `--FILEEOF--` drops its trailing line breaks, `--FILE_EXTERNAL--` names a file beside the test, and `--REDIRECTTEST--` tests have no input. `--INI--` sections are not applied: every input runs under the same php flags. The id is `php-src/<test path>`;
+  4. a generated operator-pair file (D25-2), not yet written;
+  5. `vendor/phpstan-src/vendor`, as the large vendor tree, ids `vendor/…`.
 
-  Inputs 1 and 5 run now. Inputs 2–4 join when their sources are pinned in `pins.toml`.
+  `inputs.php` writes inputs 2 and 3 to a content-addressed store, `~/.cache/phpstan-rs/parity/inputs/store/<sha256>.php`, and prints a manifest; a cached manifest naming a missing file is made again. Both sides read the inputs as one `<case id>\t<file>` line each on stdin, in byte order, and `--show` takes `<case id> <file>`. A case's group is its id's first component: `tests`, `nikic`, `php-src` or `vendor`.
 - **Canonical AST:** nikic's JSON shape, made total and stable. A node is `nodeType`, then its sub-nodes in nikic's declared order, then `attributes`, with keys sorted and the token positions left out. A string that is not UTF-8 is `{"bytes": "<hex>"}`, and a float is `{"float": "<var_export>"}`, which covers `INF` and `NAN`.
 - **Comparison:** the errors by equality, then the node count, then the SHA-256 of the compact canonical JSON. `--show <id>` prints both sides pretty-printed and the first differing line.
-- **Exit bar:** zero false refusals over input 5. `php -l` is recorded informationally, using F11's result classes, once inputs 3 and 4 are in.
+- **Exit bar:** zero false refusals over input 5. `php -l` is recorded informationally, using F11's result classes.
 
 ### phpdoc
 - **Oracle:** phpdoc-parser 2.4.0, run from PHP over every doc comment of the parser suite's inputs, plus phpdoc-parser's own test data.

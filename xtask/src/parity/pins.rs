@@ -1,0 +1,85 @@
+//! The pinned inputs fetched from outside the repository: nikic's parser
+//! fixtures and php-src's `.phpt` tests. Each is fetched once into
+//! `<cache>/pins/<name>-<id>`, checked against its pin, and then reused.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use sha2::{Digest, Sha256};
+
+use super::oracle::{Oracle, hex, text};
+
+/// nikic/PHP-Parser's repository at the pinned commit.
+pub(crate) fn nikic(oracle: &Oracle) -> Result<PathBuf, String> {
+    let repository = oracle.pin("nikic-php-parser", "repository")?;
+    let commit = oracle.pin("nikic-php-parser", "commit")?;
+    fetched(oracle, &format!("nikic-php-parser-{commit}"), |dir| {
+        let git = |args: &[&str]| -> Result<String, String> {
+            text(Command::new("git").arg("-C").arg(dir).args(args))
+        };
+        fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+        git(&["init", "--quiet"])?;
+        git(&["fetch", "--quiet", "--depth", "1", &repository, &commit])?;
+        git(&["checkout", "--quiet", "FETCH_HEAD"])?;
+        let head = git(&["rev-parse", "HEAD"])?;
+        if head != commit {
+            return Err(format!(
+                "{repository} fetched {head}, not the pinned {commit}"
+            ));
+        }
+        Ok(())
+    })
+}
+
+/// php-src's release tarball, unpacked.
+pub(crate) fn php_src(oracle: &Oracle) -> Result<PathBuf, String> {
+    let url = oracle.pin("php-src", "url")?;
+    let sha256 = oracle.pin("php-src", "sha256")?;
+    fetched(oracle, &format!("php-src-{sha256}"), |dir| {
+        let tarball = dir.with_extension("tar.gz");
+        text(
+            Command::new("curl")
+                .args(["-sSfL", "-o"])
+                .arg(&tarball)
+                .arg(&url),
+        )?;
+        let bytes =
+            fs::read(&tarball).map_err(|error| format!("{}: {error}", tarball.display()))?;
+        let got = hex(&Sha256::digest(&bytes));
+        if got != sha256 {
+            return Err(format!("{url} has SHA-256 {got}, not the pinned {sha256}"));
+        }
+        fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+        text(
+            Command::new("tar")
+                .args(["xzf"])
+                .arg(&tarball)
+                .args(["--strip-components=1", "-C"])
+                .arg(dir),
+        )?;
+        fs::remove_file(&tarball).map_err(|error| format!("{}: {error}", tarball.display()))
+    })
+}
+
+/// `<cache>/pins/<name>`, made by `fetch` into a temporary directory and
+/// renamed once complete, so an interrupted fetch never looks finished.
+fn fetched(
+    oracle: &Oracle,
+    name: &str,
+    fetch: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
+    let pins = oracle.cache.join("pins");
+    let done = pins.join(name);
+    if done.is_dir() {
+        return Ok(done);
+    }
+    let partial = pins.join(format!("{name}.partial"));
+    if partial.exists() {
+        fs::remove_dir_all(&partial).map_err(|error| format!("{}: {error}", partial.display()))?;
+    }
+    fs::create_dir_all(&pins).map_err(|error| format!("{}: {error}", pins.display()))?;
+    fetch(&partial)?;
+    fs::rename(&partial, &done).map_err(|error| format!("{}: {error}", done.display()))?;
+    Ok(done)
+}

@@ -2,8 +2,16 @@
   "lexer": {
     "error": 0,
     "excluded": 0,
-    "fail": 39858,
+    "fail": 105045,
     "groups": {
+      "nikic": {
+        "pass": 0,
+        "total": 852
+      },
+      "php-src": {
+        "pass": 0,
+        "total": 64335
+      },
       "tests": {
         "pass": 0,
         "total": 19419
@@ -19,8 +27,16 @@
   "parser": {
     "error": 0,
     "excluded": 0,
-    "fail": 13286,
+    "fail": 35015,
     "groups": {
+      "nikic": {
+        "pass": 0,
+        "total": 284
+      },
+      "php-src": {
+        "pass": 0,
+        "total": 21445
+      },
       "tests": {
         "pass": 0,
         "total": 6473
