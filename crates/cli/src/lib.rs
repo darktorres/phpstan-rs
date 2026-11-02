@@ -1,0 +1,50 @@
+//! The command line: a port of PHPStan's `src/Command`, configuration,
+//! levels and output formats. Filled in M7.
+
+use std::io::{self, Write};
+
+/// How a run ended, mapped to PHPStan's exit codes by the binary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// No errors: exit code 0.
+    Clean,
+    /// The command line could not be used: exit code 2.
+    Usage,
+}
+
+/// Runs the command line `args` (without the program name), writing to `out`.
+///
+/// # Errors
+///
+/// Returns the error of a failed write; a closed pipe is `BrokenPipe`.
+pub fn run(args: &[String], version: &str, out: &mut dyn Write) -> io::Result<Outcome> {
+    match args.first().map(String::as_str) {
+        Some("--version" | "-V") => {
+            writeln!(out, "phpstan-rs {version}")?;
+            Ok(Outcome::Clean)
+        }
+        _ => {
+            writeln!(out, "Usage: phpstan-rs --version")?;
+            Ok(Outcome::Usage)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_prints_the_given_version() {
+        let mut out = Vec::new();
+        let outcome = run(&["--version".to_owned()], "9.9.9", &mut out).unwrap();
+        assert_eq!(outcome, Outcome::Clean);
+        assert_eq!(out, b"phpstan-rs 9.9.9\n");
+    }
+
+    #[test]
+    fn no_arguments_is_a_usage_error() {
+        let mut out = Vec::new();
+        assert_eq!(run(&[], "1", &mut out).unwrap(), Outcome::Usage);
+    }
+}

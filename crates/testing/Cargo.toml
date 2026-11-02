@@ -1,0 +1,11 @@
+[package]
+name = "phpstan-rs-testing"
+description = "Ports of PHPStan's `RuleTestCase` and `TypeInferenceTestCase`, run through the real Session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
